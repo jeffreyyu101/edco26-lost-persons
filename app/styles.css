@@ -263,3 +263,8 @@ input::placeholder, textarea::placeholder { color: #858998; }
 .current-status > span { font-size: 13px; }
 .status-controls select { flex: 1; }
 .status-saving { align-self: center; flex: 0 0 auto; color: var(--muted); font-size: 11px; }
+/* Status colors: new inquiries need attention; completed transport outcomes are closed. */
+.record.r0 { background: #3a252a; border-left-color: #e98989; }
+.record.r4, .record.r5 { background: #292a31; border-left-color: #9398a6; }
+.s0 { background: #512d32; color: #ffc2c2; }
+.s4, .s5 { background: #363943; color: #e0e1e8; }
