@@ -258,3 +258,8 @@ input::placeholder, textarea::placeholder { color: #858998; }
 .photo-card figcaption { color: #c0c2cd; }
 .drawer select.native-select { color-scheme: dark; }
 :focus-visible { outline: 3px solid #b69aff; outline-offset: 2px; }
+.current-status { padding: 15px; border: 1px solid #443a58; border-radius: 13px; background: #211e2b; }
+.current-status .status { font-size: 19px; line-height: 1.3; padding: 10px 14px; border-radius: 10px; }
+.current-status > span { font-size: 13px; }
+.status-controls select { flex: 1; }
+.status-saving { align-self: center; flex: 0 0 auto; color: var(--muted); font-size: 11px; }
