@@ -1,6 +1,6 @@
 # Agent handoff: EDC Orlando 2026 Lost Person Coordination
 
-Updated: 2026-11-04
+Updated: 2026-11-05
 
 This is the working brief for the next coding session (Codex, Claude Code, or another agent). Read this file and `README.md` before making changes. Keep `.env.local` private. Never enter real patient data while developing or testing.
 
@@ -34,11 +34,11 @@ It is not a medical record system. Do not collect diagnoses, medication, treatme
 The profile is a journey timeline, not a collection of medical-search or requester-confirmation actions.
 
 1. **Added** — first timeline point, with the reporting location and intake time.
-2. **Checked – Not Found** — a completed check with no match; show the timestamp and “repeat later” meaning. When the current status is already this value, staff can record another check, adding another dated event without changing the status.
+2. **Checked – Not Found** — a completed check with no match; show its timestamp and “repeat later” meaning.
 3. **Found – Awaiting Reunion** — found and waiting for reunification.
 4. **Reunited – Closed**, **Found – Discharged**, **Found – Transported**, and **Cancelled** — closed outcomes.
 
-The current stage appears near the top of the profile. The status dropdown includes all statuses. Expected transitions are normal text; unusual transitions are muted but remain selectable and show an inline warning. Do not use a blocking confirmation popup for saving. Saving should append an audit event and refresh the open profile and log.
+The current stage appears near the top of the profile. The status dropdown includes all statuses and saves automatically on selection. Expected transitions are normal text; unusual transitions are muted but remain selectable and show an inline warning. Saving appends an audit event and refreshes the open profile and log.
 
 The `audit_events` relationship supplies workflow history. Intake is represented from the patient’s `created_at`; status transitions use `occurred_at`. Existing historic `medical_search` and `medical_search_found` audit entries are still interpreted for timeline continuity where possible. There is no medical-search UI/API now.
 
@@ -50,7 +50,7 @@ The `audit_events` relationship supplies workflow history. Intake is represented
 
 The prior production schema may still have nullable requester check-in columns and old search/check-in tables. The app no longer uses them. The local `supabase/schema.sql` omits them for a fresh setup. Do not run destructive SQL against the existing project without explicit approval.
 
-The `last_seen` column is new in the current local code. Existing Supabase needs `supabase/migrations/20261105_add_last_seen.sql` applied before staff submit a non-empty Last seen value. The migration is prepared but has not been run.
+The `last_seen` column migration (`supabase/migrations/20261105_add_last_seen.sql`) was applied to the existing Supabase project by the user and verified on 2026-11-05. The shared inquiry data and associated photo files, audit events, and legacy search/check-in rows were cleared at the user's request; the shared log is empty as of this date.
 
 ### Photos
 
@@ -77,7 +77,7 @@ The `last_seen` column is new in the current local code. Existing Supabase needs
 - Photo bucket configuration and the full upload/view flow still need a synthetic-data manual test.
 - Backups/restore, retention/purge, monitoring, staff training, and formal security/privacy review are not complete.
 
-The lint configuration and dependency updates made during the 2026-11-05 continuation are local changes after the handoff commit and have not been committed or pushed yet.
+The recent UI updates are committed locally but have not reached GitHub because this workspace does not have an SSH key available. The location preference and most recent profile status changes may still be uncommitted; inspect `git status` before proceeding.
 
 ## Readiness plan for 2026-11-05
 
@@ -88,8 +88,8 @@ Treat “ready” as a verified staging/demo state, not automatic approval to us
 - Confirm `.env.local` is ignored by Git before staging or committing. Never print or copy secret values.
 - Keep the repository private. Review staged files before committing; do not stage `.env.local`, `.next`, or `node_modules`.
 - Run `npm ci`, `npm test`, and `npm run build` from a clean checkout.
-- Use synthetic records to manually verify: login/sign-out/session expiry; create; search/filter; profile intake details; status transition; repeated “Checked – Not Found” event; found/reunified/closed timeline; cross-refresh state; CSV export; and edits.
-- Test on a real iPhone in Safari: sign-in, create, open profile, select a status, warning for unusual transition, save, view timeline, rotate/scroll, and refresh.
+- Use synthetic records to manually verify: login/sign-out/session expiry; create; search/filter; profile intake details; status autosave; found/reunified/closed timeline; cross-refresh state; CSV export; and edits.
+- Test on a real iPhone in Safari: sign-in, create, open profile, select a status, verify autosave and warning for unusual transition, view timeline, rotate/scroll, and refresh.
 - Test upload/view for valid image types, wrong content type, over 5 MB, fourth photo, unauthenticated access, and private bucket behavior. Do not use real photos.
 
 ### P0 — decide whether this is local demo or multi-device operation
@@ -121,7 +121,7 @@ npm test
 npm run build
 ```
 
-Use `README.md` for environment setup. Existing Supabase project and private bucket were configured previously. Do not run schema changes against production as part of pickup. No production database changes or deployment were made in this workspace.
+Use `README.md` for environment setup. Existing Supabase project and private bucket were configured previously. Do not run schema changes against production as part of pickup. The user applied the `last_seen` migration and explicitly requested clearing the existing shared inquiry data; those actions were verified. No hosting deployment has been configured.
 
 ## Handoff checklist
 

@@ -32,16 +32,16 @@ node -e "const b=require('bcryptjs'); console.log(Buffer.from(b.hashSync(process
 
 The initial database schema is in [`supabase/schema.sql`](supabase/schema.sql). It includes patients, audit events, and patient photo metadata with RLS enabled and no browser-access policies. Create a **private** Storage bucket named `patient-photos`, restricted to JPEG/PNG/WebP and 5 MB. The server checks the staff session and issues 60-second signed photo URLs.
 
-The existing Supabase project was already configured before this handoff. Do not rerun the initial schema against it. The new `Last seen` field needs the one-column migration in [`supabase/migrations/20261105_add_last_seen.sql`](supabase/migrations/20261105_add_last_seen.sql) before saving a non-empty Last seen value; apply it manually in Supabase when you’re ready. No migration has been run against production. The app no longer uses requester check-in or search-attempt flows; older columns/tables may remain in the existing project and are intentionally not dropped.
+The existing Supabase project is already configured. Do not rerun the initial schema against it. The `last_seen` migration in [`supabase/migrations/20261105_add_last_seen.sql`](supabase/migrations/20261105_add_last_seen.sql) was applied and verified on 2026-11-05. The app no longer uses requester check-in or search-attempt flows; legacy tables may remain in the project.
 
 ## Current product behavior
 
 - Shared password login, HTTP-only signed 12-hour session cookie, and staff-entered display name (not verified identity).
 - Shared patient log with search/filter, CSV export, 15-second refresh, manual refresh, and open-profile refresh.
 - Patient profile with intake location/time, current workflow stage, and a dated dot-line timeline backed by `audit_events`.
-- Seven statuses. Unusual transitions are muted but selectable and show a warning. `Checked – Not Found` supports recording another check at the same status, which adds a timestamped audit event.
+- Seven statuses. Status changes save automatically on selection. Unusual transitions are muted but selectable and show a warning.
 - Private photo upload/viewing; maximum three active photos per patient.
-- New inquiries can be queued in browser local storage while offline. Existing edits and status changes are online-only.
+- New inquiries can be queued in browser local storage while offline. Existing edits and status changes are online-only. Reporting location preference is remembered per staff name for the browser session.
 
 See [`HANDOFF.md`](HANDOFF.md) for the current PRD, known limitations, and prioritized readiness checklist.
 
