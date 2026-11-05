@@ -36,6 +36,7 @@ export async function PATCH(
     'hair',
     'identifying_features',
     'physical_description',
+    'last_seen',
     'clothing',
     'additional_notes',
     'reporting_location',

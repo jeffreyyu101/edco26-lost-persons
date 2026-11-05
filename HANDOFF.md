@@ -22,6 +22,8 @@ It is not a medical record system. Do not collect diagnoses, medication, treatme
 ### Intake and patient profile
 
 - Create an inquiry with identifying description, event location, and friend/family contact details.
+- Gender is a single-select (`Male`, `Female`, `Other`). `Last seen` is a separate multi-line field for the most recent known location or transport origin (e.g. near Kinetic Field or transported to medical from a location).
+- The intake privacy notice is: “Do not enter private patient medical records or medical information. Only enter information provided by friends or family.”
 - Show case number and patient name, with intake location and date/time prominent at the top of the profile.
 - Mobile use is a core requirement: touch-friendly controls, single-column form on narrow screens, and a usable full-height bottom-sheet profile.
 - Patient edits and status changes are shared; the log refreshes every 15 seconds and can be refreshed manually.
@@ -48,6 +50,8 @@ The `audit_events` relationship supplies workflow history. Intake is represented
 
 The prior production schema may still have nullable requester check-in columns and old search/check-in tables. The app no longer uses them. The local `supabase/schema.sql` omits them for a fresh setup. Do not run destructive SQL against the existing project without explicit approval.
 
+The `last_seen` column is new in the current local code. Existing Supabase needs `supabase/migrations/20261105_add_last_seen.sql` applied before staff submit a non-empty Last seen value. The migration is prepared but has not been run.
+
 ### Photos
 
 - Photos must remain in a **private** `patient-photos` bucket.
@@ -62,7 +66,9 @@ The prior production schema may still have nullable requester check-in columns a
 - `.env.local` is present locally. Its variable names match the code: `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SESSION_SECRET`, and `APP_SHARED_PASSWORD_HASH_B64`. Values were not included in this handoff. `.env.local` must stay untracked.
 - `.env.example` contains placeholders only.
 - `npm test` currently has four tests for Supabase URL normalization; there are no API, auth, database, or workflow component tests.
-- `npm run build` passed after the latest workflow implementation.
+- `npm run lint` is now configured with ESLint and `next/core-web-vitals`; it passes cleanly.
+- Latest local checks: `npm test`, `npm run lint`, and `npm run build` all pass.
+- `npm audit` reports 8 advisories (7 moderate, 1 high). The high advisory is in the nested PostCSS version used by Next 15.5.29; Next itself also has a moderate advisory. A dry-run of `npm audit fix` found no semver-safe automatic upgrades; npm recommends a major Next.js upgrade. Review the official advisory ranges and compatibility before changing Next major. No automatic audit fixes were applied.
 - No deployment target is configured. `npm run dev` serves this machine only; it does not make the app accessible to all staff. If event staff need to use it on separate devices, choose and configure an HTTPS host before calling it operational. No target or production credential is currently available.
 - Patient writes and audit writes are separate operations, so partial success is possible. The three-photo limit can race under simultaneous uploads.
 - Login has no rate limiter. Shared password and entered staff names are limited identity controls.
@@ -70,6 +76,8 @@ The prior production schema may still have nullable requester check-in columns a
 - UI has no complete audit-history screen; the profile timeline shows intake/status milestones.
 - Photo bucket configuration and the full upload/view flow still need a synthetic-data manual test.
 - Backups/restore, retention/purge, monitoring, staff training, and formal security/privacy review are not complete.
+
+The lint configuration and dependency updates made during the 2026-11-05 continuation are local changes after the handoff commit and have not been committed or pushed yet.
 
 ## Readiness plan for 2026-11-05
 

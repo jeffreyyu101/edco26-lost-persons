@@ -32,7 +32,7 @@ node -e "const b=require('bcryptjs'); console.log(Buffer.from(b.hashSync(process
 
 The initial database schema is in [`supabase/schema.sql`](supabase/schema.sql). It includes patients, audit events, and patient photo metadata with RLS enabled and no browser-access policies. Create a **private** Storage bucket named `patient-photos`, restricted to JPEG/PNG/WebP and 5 MB. The server checks the staff session and issues 60-second signed photo URLs.
 
-The existing Supabase project was already configured before this handoff. Do not rerun SQL or change production Supabase settings as part of local development. The app no longer uses requester check-in or search-attempt flows; older database columns/tables may remain in the existing project and are intentionally not dropped.
+The existing Supabase project was already configured before this handoff. Do not rerun the initial schema against it. The new `Last seen` field needs the one-column migration in [`supabase/migrations/20261105_add_last_seen.sql`](supabase/migrations/20261105_add_last_seen.sql) before saving a non-empty Last seen value; apply it manually in Supabase when you’re ready. No migration has been run against production. The app no longer uses requester check-in or search-attempt flows; older columns/tables may remain in the existing project and are intentionally not dropped.
 
 ## Current product behavior
 

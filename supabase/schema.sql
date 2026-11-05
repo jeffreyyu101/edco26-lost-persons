@@ -7,7 +7,7 @@ create table if not exists public.patients (
  client_mutation_id uuid unique,
  case_number bigint not null unique default nextval('public.patient_case_number_seq'),
  first_name text, last_name text, age smallint check (age is null or (age between 0 and 120)), gender text,
- height_build text, hair text, identifying_features text, physical_description text, clothing text,
+ height_build text, hair text, identifying_features text, physical_description text, last_seen text, clothing text,
  additional_notes text,
  reporting_location text not null check (reporting_location in ('FA 3 – Kinetic','FA 4 – Oasis','Other')),
  other_location text,
