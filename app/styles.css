@@ -268,3 +268,7 @@ input::placeholder, textarea::placeholder { color: #858998; }
 .record.r4, .record.r5 { background: #292a31; border-left-color: #9398a6; }
 .s0 { background: #512d32; color: #ffc2c2; }
 .s4, .s5 { background: #363943; color: #e0e1e8; }
+.intake-photo-list { display: grid; gap: 6px; }
+.intake-photo-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: #20222d; font-size: 12px; }
+.intake-photo-item span { min-width: 0; overflow-wrap: anywhere; }
+.intake-photo-item .link { flex: 0 0 auto; }
