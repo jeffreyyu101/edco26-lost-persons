@@ -51,10 +51,11 @@ export interface DeskFrameProps {
   /** The detail pane (a request), or null when none is open. */
   pane?: ReactNode;
   /**
-   * A form (new request, edit, needs attention) over the desk, or null. Drawn in place, it covers the main
-   * column and the pane, which go inert. A form that portals its own dialog (the desk side sheet / modal)
-   * leaves the layer empty: the layer then hides itself and the list stays visible behind the dialog,
-   * whose own focus trap does the rest.
+   * A form drawn in place over the desk, or null: it covers the main column and the pane, which go inert. A
+   * form that portals its own dialog leaves the layer empty: the layer then hides itself and the list stays
+   * visible behind the dialog, whose own focus trap does the rest. (The app shell puts its forms, which are
+   * dialogs on the desk, in the content instead: one place at every width, so crossing 768 px never
+   * remounts them.)
    */
   form?: ReactNode;
   /** The main column: a list or the dashboard on the desk, the whole view on the phone. */
@@ -98,7 +99,7 @@ export function DeskFrame({ desk, nav = null, brand = null, top = null, pane = n
           <div className={f.content}>{children}</div>
         </div>
         {pane ? (
-          <div className={f.pane} inert={covered}>
+          <div className={f.pane} inert={covered} data-desk-pane="">
             {pane}
           </div>
         ) : null}

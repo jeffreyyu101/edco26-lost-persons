@@ -9,7 +9,8 @@
 //   desk (≥ 768)   the same form in a small popover pointing at the card (or the location row).
 //
 // The save is optimistic (the store overlays the new value at once and toasts a failure), so the editor
-// closes on Save. Offline, Save waits: answers and edits need a connection.
+// closes on Save. Offline, Save waits: answers and edits need a connection. While it is open the Undo bar's
+// countdown is held (store holdUndo); it restarts in full when the editor closes.
 import { Popover } from '@radix-ui/themes';
 import { CloudOff } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type RefObject, type TouchEvent } from 'react';
@@ -41,7 +42,10 @@ export interface LocationEditorProps {
   desk: boolean;
   /** Desk: what the popover points at (see anchorFor). */
   anchor?: RefObject<Measurable | null>;
-  /** Desk: where the focus goes when the popover closes (the card's own button), if anywhere. */
+  /**
+   * Desk: where the focus goes when the popover closes with Esc, Skip, Cancel or Save (the chip that opened
+   * it, the next card to check), if anywhere. Not after a click or focus outside it.
+   */
   returnFocus?: () => HTMLElement | null;
   onClose: () => void;
 }
@@ -96,6 +100,9 @@ function useLocationForm(target: LocationTarget, onClose: () => void) {
   const { connection } = useConnection();
   const offline = connection === 'offline';
   const [value, setValue] = useState(target.initial);
+  // The sheet's scrim covers the Undo bar: the answer's Undo doesn't run out while this is open, and gets
+  // its full 10 s once it closes (DECISIONS: saving the location keeps the answer's Undo usable).
+  useEffect(() => actions.holdUndo(), [actions]);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (offline) return;
@@ -232,6 +239,8 @@ function DeskPopover({
   const inputRef = useRef<HTMLInputElement>(null);
   const titleId = useId();
   const fallback = useMemo(() => anchorFor('[data-none]', null), []);
+  // Closed by a click or focus elsewhere: the focus stays where the person put it.
+  const leftOutside = useRef(false);
   // A popover opened from a tap: the field takes the focus (Radix focuses the content itself first).
   useEffect(() => {
     const id = requestAnimationFrame(() => inputRef.current?.focus());
@@ -249,7 +258,11 @@ function DeskPopover({
         maxWidth="calc(100vw - 24px)"
         className={s.pop}
         updatePositionStrategy="always"
+        onInteractOutside={() => {
+          leftOutside.current = true;
+        }}
         onCloseAutoFocus={(e) => {
+          if (leftOutside.current) return;
           const el = returnFocus?.();
           if (!el) return;
           e.preventDefault();

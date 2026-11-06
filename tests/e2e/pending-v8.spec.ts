@@ -167,6 +167,29 @@ test.describe('phone', () => {
     expect(audit.map((e) => e.next)).toEqual([{ medicalLocation: 'Chair 12' }]);
   });
 
+  test('a slow location keeps the In medical Undo: held while the sheet covers it, then a full 10 s from Save', async ({ page }) => {
+    const r = await createRequest(page);
+    await page.goto('/?view=pending');
+    await expect(checkCard(page, r.id)).toBeVisible({ timeout: 15_000 });
+    await checkCard(page, r.id).getByRole('button', { name: 'In medical', exact: true }).click();
+    const sheet = page.getByRole('dialog', { name: `${nameOf(r)} is in medical` });
+    await expect(sheet).toBeVisible();
+    await expect.poll(async () => (await detail(page, r.id)).status).toBe('Found – Awaiting Reunion');
+    // Longer than the 10 s Undo before the location is typed and saved.
+    await page.waitForTimeout(11_000);
+    await sheet.getByRole('textbox', { name: 'Location' }).fill('Chair 9');
+    await sheet.getByRole('button', { name: 'Save' }).click();
+    await expect(sheet).toHaveCount(0);
+    const undo = page.getByRole('button', { name: 'Undo' });
+    await expect(undo).toBeVisible();
+    await expect.poll(async () => (await detail(page, r.id)).medicalLocation).toBe('Chair 9');
+    // Most of a full window after the sheet closed, it is still there and still one tap.
+    await page.waitForTimeout(7_000);
+    await undo.click();
+    await expect.poll(async () => (await detail(page, r.id)).status).toBe('Added');
+    expect((await detail(page, r.id)).medicalLocation).toBe('Chair 9');
+  });
+
   test('Skip, Esc and a swipe down close the sheet with nothing more saved', async ({ page }) => {
     const rows = [await createRequest(page), await createRequest(page), await createRequest(page)];
     await page.goto('/?view=pending');
@@ -319,6 +342,49 @@ test.describe('desk 1440 × 900', () => {
     await expect.poll(async () => (await detail(page, waiting.id)).medicalLocation).toBe('Next to N');
   });
 
+  test('In medical from the keyboard: the popover hands the focus to the card that took its place; J / K carry on from it', async ({ page }) => {
+    const a = await createRequest(page);
+    const b = await createRequest(page);
+    const c = await createRequest(page);
+    await page.goto('/?view=pending');
+    await expect(checkCard(page, c.id)).toBeVisible({ timeout: 15_000 });
+    const openButton = (r: RequestSummary) => checkCard(page, r.id).locator('[data-request-id]');
+    const answer = async (r: RequestSummary) => {
+      await openButton(r).focus();
+      await checkCard(page, r.id).getByRole('button', { name: 'In medical', exact: true }).focus();
+      await page.keyboard.press('Enter');
+      const pop = page.getByRole('dialog', { name: `${nameOf(r)} is in medical` });
+      await expect(pop.getByRole('textbox', { name: 'Location' })).toBeFocused();
+      return pop;
+    };
+
+    // To check is oldest first: a, b, c are its last three. Esc: the focus is on b, which took a's place.
+    let pop = await answer(a);
+    await page.keyboard.press('Escape');
+    await expect(pop).toHaveCount(0);
+    await expect(openButton(b)).toBeFocused();
+    await page.keyboard.press('j');
+    await expect(openButton(c)).toBeFocused();
+    await page.keyboard.press('k');
+    await expect(openButton(b)).toBeFocused();
+
+    // The last card answered and its location saved: the focus goes to the one before it.
+    pop = await answer(c);
+    await page.keyboard.type('Chair 2');
+    await page.keyboard.press('Enter');
+    await expect(pop).toHaveCount(0);
+    await expect(openButton(b)).toBeFocused();
+    await expect.poll(async () => (await detail(page, c.id)).medicalLocation).toBe('Chair 2');
+
+    // Skip, from the button: the same.
+    pop = await answer(b);
+    await pop.getByRole('button', { name: 'Skip' }).focus();
+    await page.keyboard.press('Enter');
+    await expect(pop).toHaveCount(0);
+    const focused = await page.evaluate(() => document.activeElement?.closest('[data-pending-card]')?.getAttribute('data-testid') ?? null);
+    expect(focused).not.toBeNull();
+  });
+
   test('a docked request narrows the board into the tabs; the pane edits the location in a popover', async ({ page }) => {
     await page.setViewportSize({ width: 1180, height: 820 });
     const waiting = await createRequest(page);
@@ -332,12 +398,12 @@ test.describe('desk 1440 × 900', () => {
     await comingCard(page, coming.id).locator('[data-request-id]').click();
     const pane = page.getByTestId('profile');
     await expect(pane.getByTestId('location-row')).toBeVisible();
-    // Docked beside a 700 px main column: one queue at a time, under the control.
+    // Docked beside a 700 px main column: one queue at a time, under the control: the one that holds the
+    // open request, so its card stays on screen.
     await expect(page.getByTestId('pending-tabs')).toBeVisible();
-    await expect(page.getByTestId('pending-column-coming')).toBeHidden();
-    await tab(page, 'Friend coming').click();
+    await expect(tab(page, 'Friend coming')).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByTestId('pending-column-check')).toBeHidden();
-    await expect(comingCard(page, coming.id)).toBeVisible();
+    await expect(comingCard(page, coming.id)).toBeInViewport();
 
     await pane.getByTestId('location-row').click();
     const pop = page.getByRole('dialog', { name: `${nameOf(coming)} is in medical` });
@@ -353,6 +419,44 @@ test.describe('desk 1440 × 900', () => {
     await pop.getByRole('button', { name: 'Save' }).click();
     await expect(pane.getByTestId('location-row')).toHaveAccessibleName('Chair 30, edit location');
     await expect(comingCard(page, coming.id).getByTestId('location-chip')).toHaveAccessibleName('Chair 30, edit location');
+  });
+});
+
+test.describe('iPad landscape 1180 × 820', () => {
+  test.use({ viewport: { width: 1180, height: 820 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
+
+  test('a Friend coming card opened beside the board: its queue shows, it stays selected on screen, J / K walk Friend coming', async ({ page }) => {
+    await createRequest(page);
+    const first = await inMedical(page, await createRequest(page));
+    const second = await inMedical(page, await createRequest(page));
+    await page.goto('/?view=pending');
+    await expect(comingCard(page, second.id)).toBeVisible({ timeout: 15_000 });
+    // Two columns while nothing is open; the remembered tab is To check.
+    await expect(page.getByTestId('pending-tabs')).toBeHidden();
+    await comingCard(page, first.id).locator('[data-request-id]').click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(first.id);
+    await expect(page.getByTestId('desk-pane')).toBeVisible();
+    // Docked: the board stacks into the tabs, on the open request's queue.
+    await expect(page.getByTestId('pending-tabs')).toBeVisible();
+    await expect(tab(page, 'Friend coming')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByTestId('pending-column-check')).toBeHidden();
+    await expect(comingCard(page, first.id)).toBeInViewport();
+    // Following the open request is not a choice the person made: the device keeps remembering To check.
+    expect(await page.evaluate(() => window.localStorage.getItem('lp-pending-tab'))).toBeNull();
+    // J opens the next Friend coming card (the answers are oldest first: `second` is after `first`); K back.
+    await page.keyboard.press('j');
+    await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(second.id);
+    await expect(comingCard(page, second.id)).toBeInViewport();
+    await expect(page.getByTestId('desk-prev')).toBeEnabled();
+    await page.keyboard.press('k');
+    await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(first.id);
+    // A tab picked by hand stays picked while the same request is open.
+    await tab(page, 'To check').click();
+    await expect(page.getByTestId('pending-column-coming')).toBeHidden();
+    await page.waitForTimeout(500);
+    await expect(tab(page, 'To check')).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('desk-pane')).toHaveCount(0);
   });
 });
 

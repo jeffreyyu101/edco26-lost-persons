@@ -33,14 +33,17 @@ function writePendingTab(tab: PendingTab): void {
   }
 }
 
-/** The tab shown, starting from the remembered one. */
-export function usePendingTab(): [PendingTab, (tab: PendingTab) => void] {
+/**
+ * The tab shown, starting from the remembered one: [tab, choose (the person picked it: remembered), show
+ * (the app moved to it, e.g. to the queue of the request opened beside the board: not remembered)].
+ */
+export function usePendingTab(): [PendingTab, (tab: PendingTab) => void, (tab: PendingTab) => void] {
   const [tab, setTab] = useState<PendingTab>(readPendingTab);
   const choose = useCallback((next: PendingTab) => {
     setTab(next);
     writePendingTab(next);
   }, []);
-  return [tab, choose];
+  return [tab, choose, setTab];
 }
 
 /** The ids tying each tab to its list (aria-controls / aria-labelledby). */

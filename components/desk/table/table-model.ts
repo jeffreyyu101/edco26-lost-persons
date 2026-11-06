@@ -3,14 +3,14 @@
 //
 //   #  ·  Friend (name, age / sex muted)  ·  Status  ·  Post  ·  Created  ·  Updated  ·  Logged by
 //
-// Post and Logged by show only from 1280 px with nothing open (the CSS decides); the row's sentence always
-// says them. Times reuse F1's log helpers (lib/format.ts), so the desk and the phone never disagree.
+// Post and Logged by show only with nothing docked beside the table, Post at every desk width and Logged by
+// on a table 1040 px or wider (the CSS decides); the row's sentence always says them. Times reuse F1's log helpers (lib/format.ts), so the desk and the phone never disagree.
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { ageGender, canonicalTeam, parseStaff, postFilterLabel, teamShort, type TeamValue } from '@/lib/domain';
 import { formatAuditTime, formatCaseNumber, formatCreatedTime, formatUpdatedAgo, updatedPhrase, wasUpdated } from '@/lib/format';
 import { displayName, outboxDisplay, outboxRowLabel, statusPhrase, updatedSince, whoPhrase } from '@/components/list/list-helpers';
 
-/** The columns, in order. `wide` ones show only from 1280 px with nothing open in the pane. */
+/** The columns, in order. `wide` ones drop out when a request docks beside the table (table.module.css). */
 export const TABLE_COLUMNS = [
   { key: 'number', label: '#', wide: false, end: false },
   { key: 'friend', label: 'Friend', wide: false, end: false },

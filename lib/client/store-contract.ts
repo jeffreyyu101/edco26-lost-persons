@@ -234,6 +234,12 @@ export interface StoreActions {
   /** Undo the snackbar's mutation (reverse transition, kind 'undo'; never retried automatically). */
   undo(snackbarId: string): Promise<MutationResult | null>;
   dismissSnackbar(): void;
+  /**
+   * (Added in desk wave 2.) Something covers the Undo bar (the location sheet or popover that follows an In
+   * medical tap): while held, the Undo on screen, or one that appears meanwhile, does not run out. The
+   * returned release (idempotent; holds nest) gives it a full UNDO_MS from then.
+   */
+  holdUndo(): () => void;
 
   /** Every create is an outbox job, persisted before sending (A13). Resolves within ~10 s. */
   create(input: CreateInput): Promise<CreateResult>;

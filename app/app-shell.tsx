@@ -7,8 +7,11 @@
 //
 // Desk (from 768 px, components/desk): the same views inside the desk frame. The main column keeps a list
 // or the dashboard; a request (?r=) opens beside it in the detail pane, and a form (?new=1, edit,
-// needs attention) opens over it. The frame is CSS-only and always rendered (no layout flash); its
-// sidebar / rail, top bar, pane header and keyboard come from the desk chunk, loaded only on the desk. All
+// needs attention) opens over it as a dialog. A form keeps one place in the tree at every width (after the
+// main column's view), so crossing 768 px (an iPad mini rotated, a window snapped to half a screen) only
+// changes how it is presented and never drops what is being typed. The frame is CSS-only and always
+// rendered (no layout flash); its sidebar / rail, top bar, pane header and keyboard come from the desk
+// chunk, loaded only on the desk. All
 // requests, My requests and Search are the desk's request table there (components/desk/table, its own
 // chunk, also desk only); Pending and the dashboard render their views as they are.
 // All requests opens with Jeffrey's brand card above the top bar; it is drawn from the server on (no data
@@ -96,6 +99,7 @@ function ViewRouter({ brand }: { brand: ReactNode }) {
   // worker's cached shell may have been drawn for another view); once hydrated, the desk only.
   const brandInHtml = useBrandInHtml(main.name === 'all');
   const showBrand = hydrated ? desk && main.name === 'all' : brandInHtml;
+  const form = isFormView(view) ? view : null;
   return (
     <>
       <DeskFrame
@@ -110,12 +114,14 @@ function ViewRouter({ brand }: { brand: ReactNode }) {
             </DeskPane>
           ) : null
         }
-        // The form picks its own presentation by width (components/request-form/presentation.ts): the side
-        // sheet at 768-1023 and the centred modal from 1024 portal a dialog, so the layer stays empty and the
-        // list (and the pane) show behind it; anything drawn in place would cover them.
-        form={desk && isFormView(view) ? viewElement(view, true) : null}
       >
-        {desk ? deskMainElement(main, paneId) : viewElement(view, false)}
+        {desk ? deskMainElement(main, paneId) : form ? null : viewElement(view, false)}
+        {/* The form, in this one place at every width: the phone's full-screen page under 768 px (here, in the
+            main content, exactly where it always was), the side sheet at 768-1023 and the centred modal from
+            1024 (components/request-form/presentation.ts), which portal a dialog over the list and the pane.
+            The form's values live in its own state: a place that changed with the width would remount it
+            and lose an unsaved edit. */}
+        {form ? viewElement(form, desk) : null}
       </DeskFrame>
       {desk ? <DeskKeys view={view} main={main} /> : null}
     </>
@@ -148,10 +154,13 @@ function viewElement(view: View, desk: boolean) {
 
 /**
  * The desk's main column: the request table for All, My requests and Search, with the request open in the
- * pane highlighted; Pending and the dashboard as their views.
+ * pane highlighted; Pending (told which request is open, so a stacked board shows its queue) and the
+ * dashboard as their views.
  */
 function deskMainElement(main: MainView, selected: string | null) {
   switch (main.name) {
+    case 'pending':
+      return <PendingView selected={selected} />;
     case 'all':
       return <DeskAllTable status={main.status} post={main.post} open={!!main.open} selected={selected} />;
     case 'mine':

@@ -325,19 +325,55 @@ function SectionHeader({ kind, label, count }: { kind: GlyphKind; label: string;
 interface Locating {
   target: LocationTarget;
   anchor: RefObject<Measurable | null>;
+  /** After an answer: the To check card that takes the answered one's place (the next, else the one before). */
+  after: string | null;
 }
 
-export function PendingView() {
+/** The open button of the card for `id` in `testId`'s queue on the desk board, if it is on screen. */
+function deskCardButton(testId: 'check-card' | 'friend-coming-card', id?: string): HTMLElement | null {
+  const card = id ? `[data-testid="${testId}"][data-pending-card="${id}"]` : `[data-testid="${testId}"]`;
+  const buttons = Array.from(document.querySelectorAll<HTMLElement>(`[data-desk-main] ${card} [data-request-id]`));
+  return buttons.find((el) => el.getClientRects().length > 0) ?? null;
+}
+
+export interface PendingViewProps {
+  /** Desk: the request open in the pane beside the board (its queue is the one shown when the board stacks). */
+  selected?: string | null;
+}
+
+export function PendingView({ selected = null }: PendingViewProps = {}) {
   const { friendComing, waiting } = usePending();
   const loading = useIsLoading();
   const now = useNow();
   const inDesk = useInDesk();
   const { offline, tap } = useStatusTap();
   const actions = useActions();
-  const [tab, chooseTab] = usePendingTab();
+  const [tab, chooseTab, showTab] = usePendingTab();
   const [locating, setLocating] = useState<Locating | null>(null);
   const idBase = useId();
   useScrollMemory('pending', !loading);
+  // The To check queue as last rendered, for the handlers (memoised cards keep their callbacks).
+  const queue = useRef(waiting);
+  useEffect(() => {
+    queue.current = waiting;
+  }, [waiting]);
+
+  // Desk: a request opened beside the board shows its own queue. A docked request narrows the main column
+  // and the board stacks into the tabs; switching to the queue that holds it (in the same render as the
+  // pane opens) keeps its card, its highlight and the focus on screen, and J / K walk that queue. Only when
+  // another request opens: a tab picked by hand afterwards stays picked. Not remembered on this device.
+  const [followed, setFollowed] = useState<string | null>(null);
+  const openQueue =
+    inDesk && selected ? (waiting.some((r) => r.id === selected) ? 'check' : friendComing.some((r) => r.id === selected) ? 'coming' : null) : null;
+  if (inDesk && selected !== followed && (selected === null || openQueue !== null)) {
+    setFollowed(selected);
+    if (openQueue && openQueue !== tab) showTab(openQueue);
+  }
+  useEffect(() => {
+    if (!inDesk || !followed) return;
+    const el = deskCardButton('check-card', followed) ?? deskCardButton('friend-coming-card', followed);
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [inDesk, followed]);
   // The other list starts at its top (the title and the control stay on screen, they are sticky).
   const setTab = useCallback(
     (next: typeof tab) => {
@@ -348,6 +384,8 @@ export function PendingView() {
   );
 
   const openLocation = useCallback((row: RequestSummary, mode: LocationTarget['mode'], card: HTMLElement | null) => {
+    const waitingNow = queue.current;
+    const at = mode === 'answer' ? waitingNow.findIndex((r) => r.id === row.id) : -1;
     setLocating({
       target: { id: row.id, name: displayName(row.name), mode, initial: (row.medicalLocation ?? '').trim() },
       // The desk popover points at what was tapped: the To check card (where it stays once the card has
@@ -356,6 +394,7 @@ export function PendingView() {
         mode === 'answer' ? `[data-desk-main] [data-testid="check-card"][data-pending-card="${row.id}"]` : `[data-desk-main] [data-location-anchor="${row.id}"]`,
         card?.getBoundingClientRect() ?? null,
       ),
+      after: at < 0 ? null : (waitingNow[at + 1] ?? waitingNow[at - 1])?.id ?? null,
     });
   }, []);
   const closeLocation = useCallback(() => setLocating(null), []);
@@ -388,12 +427,19 @@ export function PendingView() {
     [actions, offline, inDesk, openLocation],
   );
   // The desk popover hands the focus back to the chip that opened it. After an answer the tapped card has
-  // left To check, so the focus is let go (J / K carry on from the last card).
+  // left To check: the focus goes to the card that took its place (the next one, or the one before when it
+  // was the last), so Tab and J / K carry on through the queue from there; with To check empty, to the
+  // answered card in Friend coming.
   const returnFocus = useCallback(() => {
-    const target = locating?.target;
-    if (!target || target.mode !== 'edit') return null;
-    const chips = Array.from(document.querySelectorAll<HTMLElement>(`[data-desk-main] [data-location-anchor="${target.id}"]`));
-    return chips.find((el) => el.getClientRects().length > 0) ?? null;
+    if (!locating) return null;
+    const { target, after } = locating;
+    if (target.mode === 'edit') {
+      const chips = Array.from(document.querySelectorAll<HTMLElement>(`[data-desk-main] [data-location-anchor="${target.id}"]`));
+      return chips.find((el) => el.getClientRects().length > 0) ?? null;
+    }
+    return (
+      (after ? deskCardButton('check-card', after) : null) ?? deskCardButton('check-card') ?? deskCardButton('friend-coming-card', target.id)
+    );
   }, [locating]);
 
   const counts = { check: waiting.length, coming: friendComing.length };
