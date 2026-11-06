@@ -1,8 +1,9 @@
 'use client';
 // Avatar + account menu (design/screens/states.html "Avatar"): name and short team, Theme (Light / Dark /
 // Auto), Alerts (On / Off: the new-request alerts the header bell used to toggle, 2026-11-06 header
-// declutter), Dashboard, Sign out, and "Built by Jeffrey Yu". Export CSV is no longer offered to staff
-// (Jeffrey exports from Supabase at the end, docs/export.sql).
+// declutter), Show header (only on All requests while its brand row is hidden, v2.2), Dashboard, Sign out, and
+// "Built by Jeffrey Yu". Export CSV is no longer offered to staff (Jeffrey exports from Supabase at the end,
+// docs/export.sql).
 // Self-contained: reads the store. Sign out is refused by the store while unsent outbox jobs exist; the
 // menu then asks once, and only an explicit "Discard & sign out" throws them away. When the server can't
 // confirm the sign-out (no signal), the store keeps the session and the menu or dialog says so.
@@ -10,7 +11,7 @@
 // A Radix Popover rather than a DropdownMenu: the Theme segmented control must stay reachable with Tab,
 // which a menu's roving focus does not allow.
 import { AlertDialog, Avatar, Button, Popover, SegmentedControl, Text } from '@radix-ui/themes';
-import { BellOff, BellRing, ChartColumn, LogOut, Sun } from 'lucide-react';
+import { BellOff, BellRing, ChartColumn, Eye, LogOut, Sun } from 'lucide-react';
 import { useId, useState } from 'react';
 import { BellSheet, isStandalone } from '@/components/list/BellSheet';
 import { navigate } from '@/lib/client/nav';
@@ -21,6 +22,8 @@ import s from './account.module.css';
 export interface AccountMenuProps {
   /** Radix avatar size for the trigger (header uses "2"). */
   size?: '2' | '3';
+  /** Set while the brand row is hidden on this view: the menu offers "Show header", which calls it. */
+  onShowHeader?: () => void;
 }
 
 const THEMES: ReadonlyArray<[ThemePref, string]> = [
@@ -31,7 +34,7 @@ const THEMES: ReadonlyArray<[ThemePref, string]> = [
 
 const isTheme = (v: string): v is ThemePref => v === 'light' || v === 'dark' || v === 'auto';
 
-export function AccountMenu({ size = '2' }: AccountMenuProps) {
+export function AccountMenu({ size = '2', onShowHeader }: AccountMenuProps) {
   const session = useSession();
   const prefs = usePrefs();
   const actions = useActions();
@@ -154,6 +157,20 @@ export function AccountMenu({ size = '2' }: AccountMenuProps) {
               {prefs.bell ? 'On' : 'Off'}
             </span>
           </button>
+          {onShowHeader ? (
+            <button
+              type="button"
+              className={s.mitem}
+              onClick={() => {
+                setOpen(false);
+                onShowHeader();
+              }}
+              data-testid="show-header"
+            >
+              <Eye size={16} aria-hidden />
+              Show header
+            </button>
+          ) : null}
           <button
             type="button"
             className={s.mitem}

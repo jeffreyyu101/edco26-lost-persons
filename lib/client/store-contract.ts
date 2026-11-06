@@ -122,6 +122,11 @@ export interface StoreState {
   syncing: boolean;
   /** Server clock of the last successful sync. */
   lastSyncAt: IsoDateTime | null;
+  /**
+   * (Added in v2.2, the live indicator.) This phone's clock (epoch ms) when that sync landed. "Updated 6s ago"
+   * counts from it, so a phone whose clock differs from the server's still reads right.
+   */
+  lastSyncLocalAt: number | null;
   session: SessionState;
   /** Request ids created on this phone. */
   myIds: ReadonlySet<string>;
@@ -372,6 +377,7 @@ export function createServerState(eventTimezone: string): StoreState {
     connection: 'live',
     syncing: false,
     lastSyncAt: null,
+    lastSyncLocalAt: null,
     session: { status: 'unknown', staffName: null, team: null, staff: null, expiresAt: null },
     myIds: new Set(),
     prefs: { ...DEFAULT_PREFS },
@@ -467,6 +473,7 @@ const selectOutbox = (s: StoreState) => visibleOutbox(s.outbox, s.confirmed);
 const selectCounts = (s: StoreState) =>
   viewCounts(selectMerged(s), visibleOutbox(s.outbox, s.confirmed), s.myIds, s.session.staff);
 const selectConnection = (s: StoreState) => ({ connection: s.connection, syncing: s.syncing, lastSyncAt: s.lastSyncAt });
+const selectLiveSync = (s: StoreState) => ({ connection: s.connection, syncedAt: s.lastSyncLocalAt });
 const selectSession = (s: StoreState) => s.session;
 const selectPrefs = (s: StoreState) => s.prefs;
 const selectToasts = (s: StoreState) => s.toasts;
@@ -530,6 +537,14 @@ const searchEqual = (a: SearchHit[], b: SearchHit[]) =>
 
 export function useConnection(): { connection: Connection; syncing: boolean; lastSyncAt: IsoDateTime | null } {
   return useStoreSelector(selectConnection, shallowEqual);
+}
+
+/**
+ * (Added in v2.2.) The live indicator's inputs: the connection, and this phone's clock at the last successful
+ * sync (null before the first one).
+ */
+export function useLiveSync(): { connection: Connection; syncedAt: number | null } {
+  return useStoreSelector(selectLiveSync, shallowEqual);
 }
 
 export function useSession(): SessionState {
@@ -638,10 +653,17 @@ export function useDetail(id: string | null): DetailState {
   return { detail, loading: !!key && result.key !== key, error: result.key === key ? result.error : null, refresh };
 }
 
-/** Dashboard stats, polled every 15 s while `active` (A5). */
-export function useStats(active: boolean): { stats: Stats | null; error: boolean } {
+/**
+ * Dashboard stats, polled every 15 s while `active` (A5). `updatedAt` (added in v2.2, the live indicator) is
+ * this phone's clock when the last fetch succeeded.
+ */
+export function useStats(active: boolean): { stats: Stats | null; error: boolean; updatedAt: number | null } {
   const { actions } = useAppStore();
-  const [state, setState] = useState<{ stats: Stats | null; error: boolean }>({ stats: null, error: false });
+  const [state, setState] = useState<{ stats: Stats | null; error: boolean; updatedAt: number | null }>({
+    stats: null,
+    error: false,
+    updatedAt: null,
+  });
   useEffect(() => {
     if (!active) return;
     let live = true;
@@ -649,7 +671,7 @@ export function useStats(active: boolean): { stats: Stats | null; error: boolean
     const tick = async () => {
       try {
         const stats = await actions.fetchStats();
-        if (live) setState({ stats, error: false });
+        if (live) setState({ stats, error: false, updatedAt: Date.now() });
       } catch {
         if (live) setState((s) => ({ ...s, error: true }));
       }

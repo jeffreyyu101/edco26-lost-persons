@@ -91,8 +91,11 @@ test('open counts move by the deltas of this test, and tiles and bars open All f
   await page.goto('/?dashboard=1');
   await expect(page.getByTestId('open-count')).toBeVisible();
   await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
-  // Live: no pill, no chip (the chip only appears offline or while retrying).
-  await expect(page.getByTestId('dashboard-connection')).toHaveText('');
+  // Live: no pill, no chip; the live line under the title counts from the last stats fetch.
+  await expect(page.getByTestId('live-indicator')).toHaveAttribute('data-state', 'live');
+  await expect(page.getByTestId('live-text')).toHaveText(/^Updated (now|\d+s ago)$/);
+  await expect(page.getByTestId('live-indicator')).toContainText(/Dashboard updated (just now|\d+ seconds? ago)/);
+  await expect(page.getByTestId('dashboard-connection')).toHaveCount(0);
   await expect(page.getByText('Live', { exact: true })).toHaveCount(0);
   // Export CSV is gone from the dashboard.
   await expect(page.getByRole('link', { name: 'Export CSV' })).toHaveCount(0);
@@ -337,20 +340,39 @@ test.describe('with /api/stats mocked', () => {
     await expect(value(page, 'tile-closed')).toHaveText('4');
   });
 
-  test('a compact Offline chip only while offline', async ({ page, context }) => {
+  test('the live line under the title: Updated …, Offline · updated … while offline, Reconnecting while stats fail', async ({ page, context }) => {
+    test.slow();
     await page.goto('/?dashboard=1');
     await expect(page.getByTestId('open-count')).toBeVisible();
-    const chip = page.getByTestId('dashboard-connection');
-    await expect(chip).toHaveText('');
+    const line = page.getByTestId('live-indicator');
+    const text = page.getByTestId('live-text');
+    await expect(line).toHaveAttribute('data-state', 'live');
+    await expect(text).toHaveText(/^Updated (now|\d+s ago)$/);
+    // Under the title, lined up with it.
+    const title = (await page.getByRole('heading', { level: 1, name: 'Dashboard' }).boundingBox())!;
+    const box = (await line.boundingBox())!;
+    expect(box.y).toBeGreaterThanOrEqual(title.y + title.height - 1);
+    expect(Math.abs(box.x + 30 - title.x)).toBeLessThan(2);
     await context.setOffline(true);
     try {
-      await expect(chip).toHaveText('Offline', { timeout: 15_000 });
+      await expect(line).toHaveAttribute('data-state', 'offline', { timeout: 15_000 });
+      await expect(text).toHaveText(/^Offline · updated (now|\d+s ago)$/);
+      await expect(page.getByTestId('live-announcement')).toHaveText('Offline');
       // The numbers stay on screen.
       await expect(page.getByTestId('open-count')).toBeVisible();
     } finally {
       await context.setOffline(false);
     }
-    await expect(chip).toHaveText('', { timeout: 20_000 });
+    // Back online: live again once the list syncs and the next stats poll (every 15 s) lands.
+    await expect(line).toHaveAttribute('data-state', 'live', { timeout: 35_000 });
+    // Stats that fail (the next 15 s poll): Reconnecting, with the last good time.
+    await page.route('**/api/stats', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":{"code":"unavailable","message":"Try again"}}' }));
+    await expect(line).toHaveAttribute('data-state', 'reconnecting', { timeout: 25_000 });
+    await expect(text).toHaveText(/^Reconnecting · updated \d+s ago$/);
+    await expect(page.getByTestId('open-count')).toBeVisible();
+    await page.unroute('**/api/stats');
+    await expect(line).toHaveAttribute('data-state', 'live', { timeout: 25_000 });
+    await expect(page.getByTestId('live-announcement')).toHaveText('Dashboard is live');
   });
 
   test('phone: two tiles per row, Open and Closed on one baseline, sections stacked; nothing but names cut', async ({ page }) => {

@@ -3,11 +3,13 @@
 // header declutter of 2026-11-06, design/screens/polish-v7.html + v7-log.png). The page loads each export
 // with next/dynamic. Every action goes through the store contract; every view change through lib/client/nav.
 //
-// All, Pending and My requests open with the brand card (Jeffrey, 2026-11-06 10:31: logos, event details and
-// the big "Is my friend in medical?"), which scrolls away. Under it, each view owns its sticky bar (the large
-// title that is the view menu, search, and the avatar with its offline / reconnecting badge), the offline /
-// error banner under it, the filter chips, and the New request button. Skeletons show only while there is no
-// cached data yet.
+// All requests opens with the brand row (Jeffrey, 2026-11-06 10:31: logos, event details and "Is my friend in
+// medical?"; made one compact row with an X by Brian, 2026-11-06 afternoon), which scrolls away. Its X hides
+// it on this device, and the avatar menu's "Show header" brings it back. Pending and My requests start at
+// their title. Each view owns its sticky bar (the large title that is the view menu, search, and the avatar
+// with its offline / reconnecting badge), the live indicator under the title ("Updated 6s ago"), the offline /
+// error banner, the filter chips, and the New request button. Skeletons show only while there is no cached
+// data yet.
 //
 // All requests (option B): queued requests on top, then open requests (newest first), then every closed
 // request folded into one "Archived N" row (Brian, 2026-11-06) that opens in place (remembered for the
@@ -20,6 +22,7 @@ import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type Rea
 import { AccountMenu } from '@/components/account/AccountMenu';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { LiveIndicator } from '@/components/ui/LiveIndicator';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { RequestSummary } from '@/lib/api-types';
 import { goBack, navigate } from '@/lib/client/nav';
@@ -31,6 +34,7 @@ import {
   useCounts,
   useEventTimezone,
   useIsLoading,
+  useLiveSync,
   useMine,
   useNow,
   useOutbox,
@@ -82,11 +86,15 @@ interface ChromeProps {
 function Chrome({ view, chips, filtered = false, skeleton, children }: ChromeProps) {
   const actions = useActions();
   const { connection, syncing } = useConnection();
+  const { syncedAt } = useLiveSync();
   const counts = useCounts();
   const loading = useIsLoading();
   const hydrated = useStoreSelector(selectHydrated);
   const snackbar = useSnackbar();
+  const prefs = usePrefs();
   const { rootRef, stickyRef } = useStickyHeight();
+  // The brand row is on All only, unless its X hid it on this device.
+  const brand = view === 'all' && !prefs.brandHidden;
   // The reconnecting arrow turns only for a retry that takes a moment (no flicker on fast attempts).
   const slowSync = useDelayedFlag(syncing, SLOW_SYNC_MS);
 
@@ -112,9 +120,23 @@ function Chrome({ view, chips, filtered = false, skeleton, children }: ChromePro
     children
   );
 
+  const hideBrand = () => {
+    // The X is about to go: keyboard focus moves on to the view title instead of falling back to the page.
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && rootRef.current?.contains(focused) && !stickyRef.current?.contains(focused)) {
+      stickyRef.current?.querySelector<HTMLElement>('h1 button')?.focus();
+    }
+    actions.setPref('brandHidden', true);
+  };
+  // "Show header" in the avatar menu (All only, while hidden): back at the top of the page, where it is.
+  const showBrand = () => {
+    actions.setPref('brandHidden', false);
+    window.scrollTo(0, 0);
+  };
+
   return (
     <div className={s.root} data-view={view} ref={rootRef}>
-      <BrandCard />
+      {brand ? <BrandCard onHide={hideBrand} /> : null}
       <div className={s.sticky} ref={stickyRef}>
         <AppHeader
           view={view}
@@ -126,8 +148,9 @@ function Chrome({ view, chips, filtered = false, skeleton, children }: ChromePro
             primeKeyboard();
             navigate({ q: '' });
           }}
-          account={<AccountMenu />}
+          account={<AccountMenu onShowHeader={view === 'all' && prefs.brandHidden ? showBrand : undefined} />}
         />
+        <LiveIndicator className={s.live} syncedAt={syncedAt} connection={connection} />
         {loading ? null : <ConnectionBanner />}
         {chips}
       </div>

@@ -11,8 +11,9 @@ import { syncRows } from './helpers/sync';
 // sees it in Pending … taps In medical", "Friend coming → Reunited", "undo", "search", "a tile filtering
 // All"), with log option B and the header declutter (2026-11-06): the large title is the view menu, the
 // number column, Created with AM/PM, Updated "—" until something changes, every closed request folded
-// into "Archived N" (Brian, 2026-11-06), Alerts in the avatar menu, and no live dot unless the connection is
-// down; and Jeffrey's brand card (2026-11-06 10:31) over All, Pending and My requests. Runs against
+// into "Archived N" (Brian, 2026-11-06), Alerts in the avatar menu, and no badge on the avatar unless the
+// connection is down; Jeffrey's brand row (2026-11-06 10:31, made compact with an X that hides it on this
+// device, 2026-11-06 afternoon) over All requests only; and the live indicator under the title. Runs against
 // the real store and API on the local stack. Every row is synthetic and unique to this run (TEST-L-<tag>);
 // nothing is truncated or reset, and the requests a test opened are closed after it.
 
@@ -126,22 +127,23 @@ test('All: the large title is the view menu; a new request is the top row and op
 
 const brand = (page: Page) => page.getByTestId('brand-card');
 
-/** The brand card as it is drawn now: box, background, radius, every text colour, the logos. */
+/** The brand row as it is drawn now: box, background, every text colour, the logos. */
 async function brandLook(page: Page) {
   return brand(page).evaluate((el) => {
     const cs = getComputedStyle(el);
-    const title = el.querySelector<HTMLElement>('[class*="title"]')!;
+    const title = el.querySelector<HTMLElement>('p[class*="title"]')!;
     return {
       box: el.getBoundingClientRect().toJSON() as { x: number; y: number; width: number; height: number },
       background: cs.backgroundImage,
-      border: cs.borderTopColor,
-      radius: cs.borderTopLeftRadius,
+      shadow: cs.boxShadow,
       colors: [...el.querySelectorAll('p, p *')].map((n) => getComputedStyle(n).color),
       titleSize: Number.parseFloat(getComputedStyle(title).fontSize),
       titleHeight: title.getBoundingClientRect().height,
       edcFilter: getComputedStyle(el.querySelector('img[alt="EDC Orlando"]')!).filter,
       logos: [...el.querySelectorAll('img')].map((img) => ({ alt: img.alt, loaded: img.complete && img.naturalWidth > 0, height: img.getBoundingClientRect().height })),
-      // The page around the card: the sticky bar's background (the theme's page colour).
+      // Shown text lines only (one of the two date lines is display: none at any width).
+      shown: [...el.querySelectorAll<HTMLElement>('p')].filter((p) => p.offsetParent !== null).map((p) => p.innerText),
+      // The page around the row: the sticky bar's background (the theme's page colour).
       page: getComputedStyle(document.querySelector('[data-testid="view-switcher"]')!.closest('header')!.parentElement!).backgroundColor,
     };
   });
@@ -154,107 +156,180 @@ async function setTheme(page: Page, theme: 'light' | 'dark') {
   await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 10_000 });
 }
 
-test('brand card over All, Pending and My requests: logos, event, the big title, the credit; dark in both themes; not on Search', async ({ page }) => {
+test('brand row on All only: one compact row with the logos, the title and the dates; dark in both themes', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 10_000 });
   const card = brand(page);
   await expect(card).toBeVisible();
   await expect(card.getByRole('img', { name: 'EDC Orlando' })).toBeVisible();
   await expect(card.getByRole('img', { name: 'Ground Control' })).toBeVisible();
-  await expect(card.locator('[class*="kicker"]')).toHaveText('EVENT OPERATIONS · NOVEMBER 6–8, 2026', { useInnerText: true });
-  await expect(card.locator('[class*="title"]')).toHaveText('Is my friend in medical?');
+  await expect(card.locator('p[class*="title"]')).toHaveText('Is my friend in medical?');
   await expect(card.locator('[class*="accent"]')).toHaveText('in medical?');
   await expect(card.locator('[class*="accent"]')).toHaveCSS('color', 'rgb(142, 240, 231)');
-  await expect(card.locator('p[class*="credit"]')).toHaveText('Built by Jeffrey & Brian for Ground Control / Headliner Experience');
-  // The card adds no heading: the view menu title is still the page's one h1.
+  await expect(card.locator('[class*="accent"]')).toHaveCSS('font-weight', '500');
+  await expect(card.locator('p[class*="title"]')).toHaveCSS('font-size', '16px');
+  await expect(card.locator('p[class*="title"]')).toHaveCSS('font-weight', '700');
+  await expect(card.locator('[class*="datesShort"]')).toHaveText('NOV 6–8', { useInnerText: true });
+  await expect(card.locator('[class*="datesShort"]')).toHaveCSS('color', 'rgb(205, 185, 240)');
+  await expect(card.locator('[class*="datesShort"]')).toHaveCSS('font-size', '10px');
+  // No "event operations" / "event ops" anywhere, and no credit line or rings.
+  await expect(card).not.toContainText(/event op/i);
+  await expect(page.getByText(/event op/i)).toHaveCount(0);
+  await expect(card).not.toContainText('Built by');
+  await expect(card.locator('[class*="orbit"]')).toHaveCount(0);
+  // The X, named for what it does; the row adds no heading (the view menu title is still the one h1).
+  await expect(card.getByRole('button', { name: 'Hide header' })).toBeVisible();
   await expect(card.getByRole('heading')).toHaveCount(0);
   await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
 
-  // iPhone 14 (390 px): 12 px margin, 18 px radius, the title about 30 px on two lines, the logos at their
-  // size, EDC made white.
+  // iPhone 14 (390 px): one row about 56 px tall with a 12 px margin, the title on one line, the logos at
+  // their size, EDC made white, no glow around it.
   await expect.poll(async () => (await brandLook(page)).logos.every((l) => l.loaded)).toBe(true);
   const light = await brandLook(page);
   expect(light.box.x).toBe(12);
   expect(light.box.y).toBe(12);
   expect(light.box.width).toBe(390 - 24);
-  expect(light.radius).toBe('18px');
-  expect(light.titleSize).toBeGreaterThanOrEqual(29.5);
-  expect(light.titleSize).toBeLessThanOrEqual(31.5);
-  expect(light.titleHeight).toBeGreaterThan(light.titleSize * 2 - 1);
+  expect(light.box.height).toBeGreaterThanOrEqual(52);
+  expect(light.box.height).toBeLessThanOrEqual(64);
+  expect(light.titleHeight).toBeLessThan(light.titleSize * 1.5);
+  expect(light.shown).toEqual(['Is my friend in medical?', 'NOV 6–8']);
   expect(light.logos.map((l) => [l.alt, l.height])).toEqual([
-    ['EDC Orlando', 34],
-    ['Ground Control', 28],
+    ['EDC Orlando', 19],
+    ['Ground Control', 16],
   ]);
   expect(light.edcFilter).toContain('invert(1)');
   expect(light.background).toContain('linear-gradient');
+  expect(light.shadow).toBe('none');
+  // The X: 30 px, inside the row's right edge, its middle on the row's middle.
+  const x = (await card.getByRole('button', { name: 'Hide header' }).boundingBox())!;
+  expect(x.width).toBe(30);
+  expect(x.x + x.width).toBeLessThanOrEqual(light.box.x + light.box.width);
+  expect(Math.abs(x.y + x.height / 2 - (light.box.y + light.box.height / 2))).toBeLessThan(1);
 
-  // The sticky bar follows the card: the view menu title, search and the avatar on one row under it.
+  // The sticky bar follows the row: the view menu title, search and the avatar on one row under it.
   const title = (await page.getByTestId('view-switcher').boundingBox())!;
   const search = (await page.getByRole('button', { name: 'Search' }).boundingBox())!;
   const avatar = (await page.getByTestId('account-trigger').boundingBox())!;
   expect(title.y).toBeGreaterThan(light.box.y + light.box.height);
   expect(Math.abs(search.y + search.height / 2 - (avatar.y + avatar.height / 2))).toBeLessThan(2);
-  expect(search.y).toBeLessThan(title.y + title.height);
 
-  // Always dark: the same card in the dark and the light theme (only the page around it changes).
+  // Always dark: the same row in the dark and the light theme (only the page around it changes).
   await setTheme(page, 'dark');
   const dark = await brandLook(page);
   await setTheme(page, 'light');
   const lightAgain = await brandLook(page);
   expect(dark.page).not.toBe(lightAgain.page);
   for (const look of [dark, lightAgain]) {
-    expect({ background: look.background, border: look.border, colors: look.colors, box: look.box }).toEqual({
+    expect({ background: look.background, colors: look.colors, box: look.box }).toEqual({
       background: light.background,
-      border: light.border,
       colors: light.colors,
       box: light.box,
     });
   }
 
-  // It scrolls away with the page; the sticky bar stays at the top with the title, search and avatar.
+  // It scrolls away with the page; the sticky bar stays at the top.
   await page.evaluate(() => {
     document.querySelector<HTMLElement>('main')!.style.paddingBottom = '2400px';
     window.scrollTo(0, 700);
   });
-  await expect.poll(async () => {
-    const box = (await card.boundingBox())!;
-    return box.y + box.height;
-  }).toBeLessThan(0);
+  await expect
+    .poll(async () => {
+      const box = (await card.boundingBox())!;
+      return box.y + box.height;
+    })
+    .toBeLessThan(0);
   const stuck = (await page.getByTestId('view-switcher').boundingBox())!;
   expect(stuck.y).toBeGreaterThanOrEqual(0);
   expect(stuck.y).toBeLessThan(60);
-  await expect(page.getByRole('button', { name: 'Search' })).toBeInViewport();
-  await expect(page.getByTestId('account-trigger')).toBeInViewport();
 
-  // Pending and My requests open with it too, above their title.
+  // All with a filter is still All requests: the row is there.
+  await page.goto(`/?status=${encodeURIComponent('Added')}`);
+  await expect(page.getByTestId('status-chip')).toBeVisible();
+  await expect(brand(page)).toBeVisible();
+
+  // Pending and My requests start at their title (at the top of the page); Search keeps its own bar.
   for (const url of ['/?view=pending', '/?view=mine']) {
     await page.goto(url);
     await expect(page.getByTestId('view-switcher')).toBeVisible();
-    await expect(brand(page), url).toBeVisible();
-    const box = (await brand(page).boundingBox())!;
-    expect((await page.getByTestId('view-switcher').boundingBox())!.y, url).toBeGreaterThan(box.y + box.height);
+    await expect(brand(page), url).toHaveCount(0);
+    expect((await page.getByTestId('view-switcher').boundingBox())!.y, url).toBeLessThan(40);
   }
-
-  // Search keeps its own bar, with no card.
   await page.goto('/?q=');
   await expect(page.getByRole('searchbox', { name: 'Search requests' })).toBeVisible();
   await expect(brand(page)).toHaveCount(0);
 
-  // Wider screens: the title grows and fits on one line.
-  await page.setViewportSize({ width: 820, height: 1180 });
+  // Desktop: the same single row, wider, with "NOVEMBER 6–8, 2026" beside the title.
+  await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('/');
   await expect(brand(page)).toBeVisible();
+  await expect.poll(async () => (await brandLook(page)).logos.every((l) => l.loaded)).toBe(true);
   const wide = await brandLook(page);
-  expect(wide.titleSize).toBeGreaterThan(38);
-  expect(wide.titleHeight).toBeLessThan(wide.titleSize * 1.5);
-  expect(wide.box.width).toBe(820 - 24);
+  expect(wide.box.width).toBe(1280 - 24);
+  expect(wide.box.height).toBeLessThanOrEqual(64);
+  expect(wide.shown).toEqual(['Is my friend in medical?', 'NOVEMBER 6–8, 2026']);
+  const t = (await brand(page).locator('p[class*="title"]').boundingBox())!;
+  const d = (await brand(page).locator('[class*="datesLong"]').boundingBox())!;
+  expect(d.x).toBeGreaterThan(t.x + t.width);
+  expect(Math.abs(d.y + d.height - (t.y + t.height))).toBeLessThan(6);
 });
 
-test.describe('brand card on a cold load', () => {
+test('the X hides the brand row on this device: it stays hidden after a reload (never drawn), and Show header brings it back', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 10_000 });
+  const before = (await page.getByTestId('view-switcher').boundingBox())!;
+  // While it shows, the avatar menu has no Show header.
+  await page.getByTestId('account-trigger').click();
+  const menu = page.getByRole('dialog', { name: 'Account' });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('button', { name: 'Show header' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+
+  await brand(page).getByRole('button', { name: 'Hide header' }).click();
+  await expect(brand(page)).toHaveCount(0);
+  // The view starts at its title now.
+  const after = (await page.getByTestId('view-switcher').boundingBox())!;
+  expect(after.y).toBeLessThan(before.y);
+  expect(after.y).toBeLessThan(40);
+  expect(await page.evaluate(() => localStorage.getItem('lp-brand-hidden'))).toBe('1');
+
+  // After a reload it is never drawn, not even for a frame before the prefs are read.
+  await page.addInitScript(() => {
+    const w = window as unknown as { __brandSeen?: boolean };
+    w.__brandSeen = false;
+    new MutationObserver(() => {
+      if (document.querySelector('[data-testid="brand-card"]')) w.__brandSeen = true;
+    }).observe(document, { childList: true, subtree: true });
+  });
+  await page.reload();
+  await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 10_000 });
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => (window as unknown as { __brandSeen?: boolean }).__brandSeen)).toBe(false);
+  await expect(brand(page)).toHaveCount(0);
+
+  // Pending's menu doesn't offer it (the row lives on All); All's does, and it brings the row back.
+  await page.goto('/?view=pending');
+  await expect(page.getByTestId('view-switcher')).toBeVisible();
+  await page.getByTestId('account-trigger').click();
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('button', { name: 'Show header' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await showAll(page);
+  await page.getByTestId('account-trigger').click();
+  await menu.getByRole('button', { name: 'Show header' }).click();
+  await expect(menu).toHaveCount(0);
+  await expect(brand(page)).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('lp-brand-hidden'))).toBeNull();
+  await page.reload();
+  await expect(brand(page)).toBeVisible();
+});
+
+test.describe('brand row on a cold load', () => {
   // The logos and the first sync come from the network here (no service worker cache), slowed down.
   test.use({ serviceWorkers: 'block' });
 
-  test('nothing moves: the card and the bar under it keep their place while the logos and the rows load', async ({ page }) => {
+  test('nothing moves: the row, the title and the live line keep their place while the logos and the rows load', async ({ page }) => {
     await page.route('**/logos/*', async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 1_500));
       await route.continue();
@@ -263,7 +338,7 @@ test.describe('brand card on a cold load', () => {
       await new Promise((resolve) => setTimeout(resolve, 1_000));
       await route.continue();
     });
-    // The card and the view menu title, measured the moment they first appear.
+    // The row and the view menu title, measured the moment they first appear.
     await page.addInitScript(() => {
       const w = window as unknown as { __firstSeen?: unknown };
       const observer = new MutationObserver(() => {
@@ -275,6 +350,7 @@ test.describe('brand card on a cold load', () => {
           title: title.getBoundingClientRect().toJSON(),
           logosLoaded: [...card.querySelectorAll('img')].map((img) => img.complete && img.naturalWidth > 0),
           skeleton: !!document.querySelector('[data-testid="list-skeleton"]'),
+          live: document.querySelector('[data-testid="live-indicator"]')?.getAttribute('data-state') ?? null,
         };
         observer.disconnect();
       });
@@ -283,6 +359,7 @@ test.describe('brand card on a cold load', () => {
 
     await page.goto('/');
     await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('live-text')).toHaveText(/^Updated (now|\d+s ago)$/);
     await expect
       .poll(() => brand(page).evaluate((el) => [...el.querySelectorAll('img')].every((img) => img.complete && img.naturalWidth > 0)))
       .toBe(true);
@@ -291,10 +368,12 @@ test.describe('brand card on a cold load', () => {
       title: DOMRect;
       logosLoaded: boolean[];
       skeleton: boolean;
+      live: string | null;
     };
-    // It was measured before the logos and the rows were there…
+    // It was measured before the logos, the rows and the first sync were there…
     expect(first.logosLoaded).toEqual([false, false]);
     expect(first.skeleton).toBe(true);
+    expect(first.live).toBe('none');
     // …and nothing has moved since.
     const card = (await brand(page).boundingBox())!;
     const title = (await page.getByTestId('view-switcher').boundingBox())!;
@@ -305,6 +384,60 @@ test.describe('brand card on a cold load', () => {
       expect(now.y).toBeCloseTo(then.y, 0);
       expect(now.height).toBeCloseTo(then.height, 0);
       expect(now.x).toBeCloseTo(then.x, 0);
+    }
+  });
+});
+
+const live = (page: Page) => page.getByTestId('live-indicator');
+const liveText = (page: Page) => page.getByTestId('live-text');
+
+test.describe('live indicator', () => {
+  // page.route() never sees a request a service worker passes on in WebKit, so this runs without one.
+  test.use({ serviceWorkers: 'block' });
+
+  test('"Updated …" under the title after the first sync, Reconnecting when every sync is aborted, live again after', async ({ page }) => {
+    test.slow();
+    await page.goto('/');
+    await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 10_000 });
+    await expect(live(page)).toHaveAttribute('data-state', 'live');
+    await expect(liveText(page)).toHaveText(/^Updated (now|\d+s ago)$/);
+    // One line right under the title, lined up with it, before the list; tabular figures, a plain dot.
+    const title = (await page.getByTestId('view-switcher').boundingBox())!;
+    const line = (await live(page).boundingBox())!;
+    expect(line.y).toBeGreaterThanOrEqual(title.y + title.height - 1);
+    expect(line.y).toBeLessThan(title.y + title.height + 8);
+    expect(Math.abs(line.x + 16 - title.x)).toBeLessThan(2);
+    await expect(live(page)).toHaveCSS('font-variant-numeric', 'tabular-nums');
+    const dot = live(page).locator('[class*="liveDot"]');
+    await expect(dot).toHaveCSS('width', '7px');
+    await expect(dot).toHaveCSS('box-shadow', 'none');
+    // The whole line as one sentence for screen readers.
+    await expect(live(page)).toContainText(/List updated (just now|\d+ seconds? ago)/);
+    // It ticks (at most once a second) and resets on each sync (every 6 s ± 1 s).
+    await expect(liveText(page)).toHaveText(/^Updated [2-9]s ago$/, { timeout: 9_000 });
+    await expect(liveText(page)).toHaveText('Updated now', { timeout: 9_000 });
+
+    // The log can't be reached (every sync aborted): Reconnecting, amber, with the last good time.
+    await page.route('**/api/sync*', (route) => route.abort());
+    try {
+      await expect(live(page)).toHaveAttribute('data-state', 'reconnecting', { timeout: 40_000 });
+      await expect(liveText(page)).toHaveText(/^Reconnecting · updated \d+s ago$/);
+      await expect(live(page).locator('[class*="liveLead"]')).toHaveText('Reconnecting');
+      await expect(page.getByTestId('live-announcement')).toHaveText('Reconnecting');
+      await expect(live(page)).toContainText(/Reconnecting\. List updated \d+ seconds ago/);
+    } finally {
+      await page.unroute('**/api/sync*');
+    }
+    // Back: the next sync makes it live again (the 'online' event syncs at once instead of after the backoff).
+    await page.evaluate(() => window.dispatchEvent(new Event('online')));
+    await expect(live(page)).toHaveAttribute('data-state', 'live', { timeout: 30_000 });
+    await expect(liveText(page)).toHaveText(/^Updated (now|\d+s ago)$/);
+    await expect(page.getByTestId('live-announcement')).toHaveText('List is live');
+
+    // Pending and My requests have it too.
+    for (const url of ['/?view=pending', '/?view=mine']) {
+      await page.goto(url);
+      await expect(liveText(page), url).toHaveText(/^Updated (now|\d+s ago)$/, { timeout: 10_000 });
     }
   });
 });
@@ -698,11 +831,17 @@ test('offline: a badge on the avatar, the banner under the header, answers need 
   await expect(checkCard(page, r.id)).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId('connection-indicator')).toHaveCount(0);
 
+  await expect(page.getByTestId('live-text')).toHaveText(/^Updated (now|\d+s ago)$/);
+
   await context.setOffline(true);
   try {
     const badge = page.getByTestId('connection-indicator');
     await expect(badge).toHaveAttribute('data-state', 'offline');
     await expect(badge).toHaveAccessibleName('Offline');
+    // The live line: a grey dot, "Offline · updated …", announced once.
+    await expect(page.getByTestId('live-indicator')).toHaveAttribute('data-state', 'offline');
+    await expect(page.getByTestId('live-text')).toHaveText(/^Offline · updated (now|\d+s ago)$/);
+    await expect(page.getByTestId('live-announcement')).toHaveText('Offline');
     // The badge sits on the avatar, inside the header row.
     const avatar = await page.getByTestId('account-trigger').boundingBox();
     const badgeBox = await badge.boundingBox();
@@ -730,6 +869,7 @@ test('offline: a badge on the avatar, the banner under the header, answers need 
   } finally {
     await context.setOffline(false);
   }
-  // Live again: the badge goes away.
+  // Live again: the badge goes away and the line is live.
   await expect(page.getByTestId('connection-indicator')).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByTestId('live-indicator')).toHaveAttribute('data-state', 'live', { timeout: 15_000 });
 });

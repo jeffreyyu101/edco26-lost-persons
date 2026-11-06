@@ -37,10 +37,18 @@ screenshots.
 - **The app no longer exports a CSV** (the button and its API route are gone). At the end of the event
   Jeffrey runs [`docs/export.sql`](docs/export.sql) in the Supabase SQL editor and downloads the results.
 - **Header:** the view switcher is the large page title, the bell moved into the avatar menu, the live dot
-  shows only when offline or reconnecting, and "Newest first" is gone.
+  shows only when offline or reconnecting, and "Newest first" is gone. (Superseded in the afternoon: see below.)
 - **New request is fully open** in Jeffrey's order (post, missing person, more details, then friend or family
   last and optional). **Age and gender are free text** ("mid-20s", "Non-binary"; Male / Female / Other are
   quick-fill chips), and search matches the age text. This needs the migration re-run below.
+
+### 2026-11-06 afternoon (v2.2 afternoon, Brian)
+
+- **The brand card is one compact row on All requests only**, with an X that hides it on that phone ("Show
+  header" in the avatar menu brings it back).
+- **A live line under the title** on All requests, Pending, My requests and the dashboard: "Updated 6s ago",
+  "Reconnecting · updated 2m ago" or "Offline · updated 5m ago". The dashboard's Offline / Retrying chip is gone.
+- Client only: no migration, no new environment variable.
 
 ## The production migration
 

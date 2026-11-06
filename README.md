@@ -120,8 +120,11 @@ Pending.
   (Not in medical, Reunited, Discharged, Cancelled) folds into one "Archived N" row. Each row shows the LP
   number, the name, the status, when it was logged ("11:02 PM", or "Thu 11:02 PM" for an earlier day) and
   when it last changed ("now", "2m", "1h", "3d", or "—").
-- **Live.** The list syncs every 6 s while the app is open (60 s in the background). A dot by the title shows
-  only while the app is offline or reconnecting. Offline and "can't reach the log" show as banners.
+- **Live.** The list syncs every 6 s while the app is open (60 s in the background). A line under the title
+  says when it last synced ("Updated 6s ago"), or "Reconnecting" / "Offline" with the last good time.
+  Offline and "can't reach the log" still show as banners.
+- **Brand row.** All requests opens with one compact row (logos, "Is my friend in medical?", the dates). Its X
+  hides it on that phone; "Show header" in the avatar menu brings it back.
 - **Answers.** Not in medical, In medical, Reunited and Change answer each offer Undo for 10 s. Change answer
   is a menu: the other answer, or Back to Waiting for check. Two people giving the same answer is harmless.
   A change made by someone else shows as "Updated by someone else".

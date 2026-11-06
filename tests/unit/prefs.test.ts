@@ -7,6 +7,7 @@ import {
   readPrefs,
   setBell,
   setBellIntroSeen,
+  setBrandHidden,
   setClosedExpanded,
   setLastPost,
   setThemePref,
@@ -161,6 +162,34 @@ describe('prefs (remembered on this phone)', () => {
       store.actions.setPref('closedExpanded', true);
       expect(store.getState().prefs.closedExpanded).toBe(true);
       expect(readPrefs()).toEqual({ ...store.getState().prefs });
+    });
+
+    it('the brand row over All requests: hidden with its X on this device (localStorage), until Show header', () => {
+      expect(DEFAULT_PREFS.brandHidden).toBe(false);
+      expect(readPrefs().brandHidden).toBe(false);
+      setBrandHidden(true);
+      expect(browser.data.get(PREF_STORAGE_KEYS.brandHidden)).toBe('1');
+      expect(PREF_STORAGE_KEYS.brandHidden).toBe('lp-brand-hidden');
+      expect(readPrefs().brandHidden).toBe(true);
+      writePref('brandHidden', false);
+      expect(browser.data.has(PREF_STORAGE_KEYS.brandHidden)).toBe(false);
+      expect(readPrefs().brandHidden).toBe(false);
+      // Anything but '1' reads as shown.
+      browser.data.set(PREF_STORAGE_KEYS.brandHidden, 'yes');
+      expect(readPrefs().brandHidden).toBe(false);
+      browser.data.delete(PREF_STORAGE_KEYS.brandHidden);
+
+      // Through the store: setPref writes through, and another tab's change arrives through the storage event.
+      const store = createStubStore({ eventTimezone: 'America/New_York' });
+      store.actions.setPref('brandHidden', true);
+      expect(store.getState().prefs.brandHidden).toBe(true);
+      expect(readPrefs()).toEqual({ ...store.getState().prefs });
+      const seen: boolean[] = [];
+      const off = subscribePrefs((p) => seen.push(p.brandHidden));
+      browser.data.delete(PREF_STORAGE_KEYS.brandHidden);
+      browser.fire(PREF_STORAGE_KEYS.brandHidden);
+      off();
+      expect(seen).toEqual([false]);
     });
 
     it('a browser without sessionStorage folds Closed and never throws', () => {
