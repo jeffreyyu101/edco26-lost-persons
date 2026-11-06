@@ -69,6 +69,7 @@ import {
 import { readPrefs, subscribePrefs, writePref } from './prefs';
 import { SESSION_CHANNEL, clearLogoutPending, readLogoutPending, writeLogoutPending, type LogoutPending } from './session-signals';
 import { startServiceWorker, type SwController } from './sw-client';
+import type { AlertNotifier, AlertPlan } from './system-notify';
 import {
   createServerState,
   type AlertEvent,
@@ -122,6 +123,11 @@ export interface StoreEnv {
   /** pathname + search of the current page. */
   location(): string;
   serviceWorker(hooks: { onUpdateReady(): void; onOfflineReady(): void }): SwController | null;
+  /**
+   * System notifications for alerts while the app is in the background (v2.5 A52). Absent or null: every
+   * alert is a toast (tests, unsupported browsers).
+   */
+  notifier?(): AlertNotifier | null;
 }
 
 function safeStorage(get: () => Storage): Storage | null {
@@ -151,8 +157,38 @@ export function browserEnv(): StoreEnv {
     redirect: (url) => window.location.replace(url),
     location: () => `${window.location.pathname}${window.location.search}`,
     serviceWorker: (hooks) => startServiceWorker(hooks),
+    notifier: () => lazyNotifier(),
   };
 }
+
+/**
+ * System notifications (v2.5 A52), loaded with import() so they cost nothing on the first load (A25).
+ * Until the module is in, every alert is a toast, as on a device without them.
+ */
+function lazyNotifier(): AlertNotifier {
+  let real: AlertNotifier | null = null;
+  let active = false;
+  import('./system-notify').then(
+    (m) => {
+      real = m.startNotify();
+      if (active) real.setActive(true);
+    },
+    () => undefined,
+  );
+  return {
+    plan: (keys) => real?.plan(keys) ?? TOAST_PLAN,
+    show: (alert, rowOf, sources) => real?.show(alert, rowOf, sources) ?? Promise.resolve(false),
+    close: (tag, key) => real?.close(tag, key),
+    closeAll: () => real?.closeAll(),
+    setActive: (on) => {
+      active = on;
+      real?.setActive(on);
+    },
+  };
+}
+
+/** Every alert a toast (no notifier, or system-notify not loaded yet). Kept here: a type import costs nothing on the first load. */
+const TOAST_PLAN: AlertPlan = { route: 'toast', skip: new Set<string>() };
 
 export interface CreateAppStoreOptions {
   eventTimezone: string;
@@ -266,6 +302,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const offs: Array<() => void> = [];
   let channel: ChannelLike | null = null;
   let sw: SwController | null = null;
+  let notifier: AlertNotifier | null = null;
   let kv: Kv | null = null;
   let kvQueue: Promise<unknown> = Promise.resolve();
   const tabId = uuid();
@@ -286,6 +323,12 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   let failures = 0;
   /** The first successful sync after load is the alert baseline. */
   let armed = false;
+  /** Armed (past the baseline sync) and alerting: the notifier may then claim the front for this tab. */
+  const setArmed = (on: boolean) => {
+    if (armed === on) return;
+    armed = on;
+    notifier?.setActive(on);
+  };
   /**
    * Alerts of synced rows that are applied but not shown yet. A sync shows them when it ends, whether it
    * succeeded or a later request of it failed, and they survive a stop: an applied row never re-alerts
@@ -308,6 +351,12 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const toastTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Alert toasts on screen, by toast id. */
   const alertToasts = new Map<string, AlertToastMeta>();
+  /**
+   * Status alerts shown as system notifications (v2.5 A52), by request id: closed like their toasts once
+   * the row is in another status. `key` is the (id, rowVersion) the notification carries, so closing an
+   * old one never closes a newer notification of the same request.
+   */
+  const systemAlerts = new Map<string, AlertToastMeta & { key: string | null }>();
 
   // outbox
   let workerRunning = false;
@@ -498,9 +547,24 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     for (const [toastId, meta] of [...alertToasts]) if (meta.requestId === requestId) dismissToast(toastId);
   };
 
+  /** Closes the system notification of one request's status alert. */
+  const closeSystemAlert = (requestId: string) => {
+    const meta = systemAlerts.get(requestId);
+    if (!meta) return;
+    systemAlerts.delete(requestId);
+    notifier?.close(requestId, meta.key);
+  };
+
+  /** Every system notification of this app goes (sign-out, another staff): they name the previous staff's requests. */
+  const closeSystemAlerts = () => {
+    systemAlerts.clear();
+    notifier?.closeAll();
+  };
+
   /**
-   * Closes every alert toast that no longer matches its request's synced status: "is in medical" after
-   * the answer was changed or undone (by anyone, this phone included) must never stay on screen.
+   * Closes every alert toast (and status notification) that no longer matches its request's synced status:
+   * "is in medical" after the answer was changed or undone (by anyone, this phone included) must never stay
+   * on screen.
    */
   const pruneAlertToasts = () => {
     for (const [toastId, meta] of [...alertToasts]) {
@@ -510,6 +574,43 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       }
       if (!alertStillCurrent(meta.kind, meta.status, state.confirmed.get(meta.requestId))) dismissToast(toastId);
     }
+    for (const [requestId, meta] of [...systemAlerts]) {
+      if (!alertStillCurrent(meta.kind, meta.status, state.confirmed.get(requestId))) closeSystemAlert(requestId);
+    }
+  };
+
+  /** The in-app alert: its toast, and the listeners' chime and vibration. */
+  const showAlertToast = (alert: AlertEvent, status: string | null) => {
+    const toastId = showToast(alertToast(alert, (id) => navigate({ r: id })));
+    if (alert.requestId) alertToasts.set(toastId, { requestId: alert.requestId, kind: alert.kind, status });
+    for (const l of [...alertListeners]) {
+      try {
+        l(alert);
+      } catch {
+        // A host's failure never stops the others.
+      }
+    }
+  };
+
+  /**
+   * The app is in the background (v2.5 A52): the alert is a system notification instead of the toast,
+   * never both. If it can't be shown after all (permission withdrawn), the toast carries it.
+   */
+  const showSystemAlert = (n: AlertNotifier, alert: AlertEvent, status: string | null, sources: readonly AlertEvent[]) => {
+    // The rows as they are now: the notifier builds the notification from them before it awaits anything.
+    const rows = state.confirmed;
+    const row = alert.requestId ? rows.get(alert.requestId) : undefined;
+    // The (id, rowVersion) the notification carries (systemNotice), so only this change is ever closed.
+    const key = row ? alertKey(row) : null;
+    const tracked = alert.requestId && alert.kind !== 'new_request' ? alert.requestId : null;
+    if (tracked) systemAlerts.set(tracked, { requestId: tracked, kind: alert.kind, status, key });
+    const gen = state.generation;
+    void n.show(alert, (id) => rows.get(id), sources).then((shown) => {
+      if (shown || !running || gen !== state.generation) return;
+      if (tracked && systemAlerts.get(tracked)?.key === key) systemAlerts.delete(tracked);
+      if (alert.requestId && !alertStillCurrent(alert.kind, status, state.confirmed.get(alert.requestId))) return;
+      showAlertToast(alert, status);
+    });
   };
 
   const emitAlerts = (raised: readonly RaisedAlert[]) => {
@@ -517,21 +618,29 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     const current = latestPerRequest(raised).filter((r) =>
       r.alert.requestId ? alertStillCurrent(r.alert.kind, r.status, state.confirmed.get(r.alert.requestId)) : true,
     );
+    // Decided once per batch: a system notification while the app is in the background, else the toast;
+    // nothing while another app tab of this browser is in front (it toasts these alerts from its own sync),
+    // and nothing for an alert another tab already delivered (v2.5 A52: never both, across tabs too).
+    const n = notifier;
+    const plan = n?.plan(current.map((r) => r.key)) ?? TOAST_PLAN;
+    const route = plan.route;
     // Only a current alert replaces the toast of its request. A dropped one (the row changed again since,
     // and that change may have its own toast up already) closes nothing: pruneAlertToasts below still
-    // closes any toast that no longer matches its row.
-    for (const r of current) if (r.alert.requestId) dismissAlertToastsFor(r.alert.requestId);
-    const statusOf = new Map(current.map((r) => [r.alert, r.status]));
-    for (const alert of coalesceAlerts(current.map((r) => r.alert))) {
-      const toastId = showToast(alertToast(alert, (id) => navigate({ r: id })));
-      if (alert.requestId) alertToasts.set(toastId, { requestId: alert.requestId, kind: alert.kind, status: statusOf.get(alert) ?? null });
-      for (const l of [...alertListeners]) {
-        try {
-          l(alert);
-        } catch {
-          // A host's failure never stops the others.
-        }
-      }
+    // closes any toast that no longer matches its row. A new notification replaces the old one by its tag;
+    // an alert not shown as one here closes it.
+    for (const r of current) {
+      if (!r.alert.requestId) continue;
+      dismissAlertToastsFor(r.alert.requestId);
+      if (route !== 'system') closeSystemAlert(r.alert.requestId);
+    }
+    // Combined ("3 new requests") only counts what this tab shows.
+    const shown = route === 'none' ? [] : current.filter((r) => !plan.skip.has(r.key));
+    const statusOf = new Map(shown.map((r) => [r.alert, r.status]));
+    const sources = shown.map((r) => r.alert);
+    for (const alert of coalesceAlerts(sources)) {
+      const status = statusOf.get(alert) ?? null;
+      if (route === 'system' && n) showSystemAlert(n, alert, status, alert.kind === 'combined' ? sources : [alert]);
+      else showAlertToast(alert, status);
     }
     pruneAlertToasts();
   };
@@ -685,9 +794,10 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     set({ confirmed: new Map(), pending: new Map(), hasData: false });
     cursor = null;
     cursorAt = 0;
-    armed = false;
+    setArmed(false);
     alertBacklog = [];
     for (const toastId of [...alertToasts.keys()]) dismissToast(toastId);
+    closeSystemAlerts();
     clearSnackbar();
     approved.clear();
     touchedDuringPoll.clear();
@@ -991,7 +1101,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       set({ lastSyncAt: firstServerTime, hasData: true });
     }
     // The first sync after load is the baseline: it alerts nothing (runSync shows what later ones raise).
-    armed = true;
+    setArmed(true);
     if (state.outbox.length) kickOutbox();
     return 'ok';
   };
@@ -1798,11 +1908,12 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     for (const t of toastTimers.values()) clearTimeout(t);
     toastTimers.clear();
     alertToasts.clear();
+    closeSystemAlerts();
     clearSnackbar();
     cursor = null;
     cursorAt = 0;
     cacheStaff = null;
-    armed = false;
+    setArmed(false);
     alertBacklog = [];
     rowsDirty = false;
     if (rowsTimer) clearTimeout(rowsTimer);
@@ -2353,6 +2464,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     );
     channel = e.channel(SESSION_CHANNEL);
     channel?.addEventListener('message', onChannelMessage);
+    notifier = e.notifier?.() ?? null;
+    if (armed) notifier?.setActive(true);
     sw = e.serviceWorker({
       onUpdateReady: () => {
         if (!state.updateReady) set({ updateReady: true });
@@ -2378,6 +2491,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     channel = null;
     sw?.stop();
     sw = null;
+    notifier?.setActive(false);
+    notifier = null;
     pollInFlight = false;
     if (state.syncing) set({ syncing: false });
     void draftApi.flush();

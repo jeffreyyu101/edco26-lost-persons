@@ -41,6 +41,12 @@ screenshots.
 - **New request is fully open** in Jeffrey's order (post, missing person, more details, then friend or family
   last and optional). **Age and gender are free text** ("mid-20s", "Non-binary"; Male / Female / Other are
   quick-fill chips), and search matches the age text. This needs the migration re-run below.
+- **Alerts depend on the device** (Brian; `design/DECISIONS.md` v2.2 row 10, spec §17 A52). With the app in
+  the background (another tab, a minimised window), an alert is a system notification instead of the toast
+  and chime, on desktop Chrome, Edge, Firefox and Safari, Android Chrome and the iPhone Home Screen app. The
+  browser asks only when someone turns Alerts on or taps "Allow notifications" in the avatar menu; refused
+  shows "Blocked in browser". A notification shows the LP number, the status, initials and the post (no
+  phone numbers), and a click opens the request. No server change: no push, no keys to set on Vercel.
 
 ## The production migration
 
@@ -109,6 +115,16 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 - [ ] Keychain fills the password on sign-in step 2.
 - [ ] A Home Screen app signs in on its own and keeps its own saved requests, separate from the Safari tab.
 - [ ] With the mute switch on, an alert still shows its toast (silently).
+- [ ] Desktop Chrome: on a laptop that used the app before this deploy, tap "Update ready · Reload" first
+      (until the new build's worker is active, alerts stay toasts, because the old worker can't open a
+      clicked notification). Tap "Allow notifications" in the avatar menu (or turn Alerts on) and allow it,
+      then minimise the window. When someone answers one of your requests (or logs one, with Alerts on), a
+      system notification appears within about a minute, with no phone number in it, and clicking it opens
+      that request in the app window.
+- [ ] Desktop Chrome with the app in two windows (say the list and the dashboard): an alert is one toast in
+      the focused window and nothing in the other; with both minimised it is one notification.
+- [ ] iPhone Home Screen app: turning Alerts on asks to allow notifications, and the app then appears in
+      Settings → Notifications. In a Safari tab on iPhone nothing is asked and alerts stay toasts.
 - [ ] At the end, run `docs/export.sql` in the SQL editor and download the results (Query 1, then Query 2;
       the steps are at the top of the file).
 - [ ] Redeploy on Vercel with an old tab open: "Update ready · Reload" appears. It shows only once the phone
@@ -124,8 +140,14 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 
 - **Answers, edits and adding photos to an existing request need a connection.** Only new requests (with
   their photos) queue offline. Those buttons show "Needs a connection" offline.
-- **Alerts show only while the app is open.** There are no push or lock-screen notifications. The chime is
-  silent under the mute switch.
+- **Alerts need the app open.** There is no push. With the app in the background, desktop browsers,
+  Android and the iPhone Home Screen app show a system notification (once allowed); a Safari tab on iPhone
+  shows only the toast. A background tab checks once a minute, so a notification can be up to a minute late.
+  Phones pause background pages (an iPhone almost at once, Android Chrome after a few minutes), so phone
+  notifications are best effort; a desktop window keeps them coming. Notifications start only once the
+  device runs this build's service worker ("Update ready · Reload"). A tab still open from before this
+  deploy keeps its toast and chime and doesn't coordinate with newer tabs, so it can toast an alert another
+  window shows as a notification until it is reloaded. The chime is silent under the mute switch.
 - **Identity is self-declared.** Everyone shares one event password, and the name and team are only for
   attribution. Cancelling a request, and reopening a cancelled one, are limited to the staff member who
   logged it, matched by name and team.

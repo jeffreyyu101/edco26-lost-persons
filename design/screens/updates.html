@@ -1,0 +1,310 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Updates + On my way</title>
+<!-- v7 (Brian): iMessage-style thread + composer — solid bubbles, "Delivered" / "Read 4:14 PM" in words under my latest
+     message (no tick icons), a rounded field with the send arrow inside, softer suggestion pills. Build with Radix
+     TextArea (autosize) + IconButton. v6 (Brian): all anyone needs is "Friend en route" — no names or teams; the action is "En route".
+     v5 (Brian): the On the way pill says what is happening in words, nicely formatted: "Dana K. is on the way" + "~4 min".
+     v4 (Fable re-judge): pill = avatar + walk + countdown ("4 min", amber "late"), state-driven chips, WhatsApp tick
+     colours (blue ✓✓ = seen), one small time under the latest message, glyph-only empty state, desktop parity.
+     v3 (Brian): messages only — no system lines, no timestamps; empty state; cards use graphics (avatar + time for On the way,
+     a message button with an unread count) instead of sentences. v2 after the Fable UX review: On my way is a state (On the way → Arrived → cleared by Reunited), shown as system lines
+     and a status row, absolute ETA, unread dots everywhere, delivery ticks, chips 40 px. 2026-11-06 ~16:40. Brian: staff still relay "this pt is being worked up, only bring one" / "ok on my way with them" in
+     WhatsApp. Give each request a dispatch-style narrative (CAD call notes: one timestamped line per entry, who + team),
+     one-tap optional quick lines, an OPTIONAL "On my way" with optional ETA (Active911 "Responding"), and seen-by receipts
+     (hospital "acknowledged"). Everything optional; free text allowed. Synthetic data. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@radix-ui/themes@3.3.0/styles.css">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+body{margin:0;background:#0c0c0d}
+.radix-themes{--default-font-family:InterVariable,Inter,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;font-feature-settings:"cv11";-webkit-font-smoothing:antialiased}
+.radix-themes[data-is-root-theme]{min-height:0!important;height:100%;position:relative}
+.board{display:flex;flex-wrap:wrap;justify-content:center;gap:28px 20px;padding:24px;max-width:1320px}
+.board figure{margin:0}.frame{width:390px;height:844px;border-radius:30px;overflow:hidden;border:1px solid #2b2b30}
+.frame.desk{width:1240px;height:680px;border-radius:12px}
+figcaption{margin-top:10px;text-align:center;font:500 15px/1.3 system-ui;color:#e4e4e7}
+figcaption span{display:block;font-weight:400;font-size:13px;color:#8e8e96;margin-top:2px}
+.app{height:100%;display:flex;flex-direction:column;background:var(--color-background);position:relative;overflow:hidden}
+.sp{flex:1}.tab{font-variant-numeric:tabular-nums}
+.nav{display:flex;align-items:center;justify-content:space-between;padding:14px 14px 4px}
+.cb{width:40px;height:40px;border-radius:50%;background:var(--gray-a3);display:grid;place-items:center;color:var(--gray-11)}
+.hero{display:flex;gap:12px;align-items:center;padding:6px 16px 12px}
+.photo{width:52px;height:64px;border-radius:9px;background:linear-gradient(160deg,#5b4a7a,#2c2638);display:grid;place-items:end center;overflow:hidden;color:#c9bde0;flex:none}
+.nm{font-size:20px;font-weight:600;color:var(--gray-12)}.as{font-size:14px;color:var(--gray-11);margin-top:2px}
+.status{margin:0 14px;border-radius:14px;background:var(--green-a3)}
+.status .top{display:flex;align-items:center;gap:10px;padding:11px 14px}
+.status .t1{font-size:16px;font-weight:600;color:var(--green-11)}.status .t2{font-size:12.5px;color:var(--gray-11);margin-top:1px}
+.status .lr{display:flex;align-items:center;gap:8px;padding:9px 14px;border-top:1px solid var(--green-a4);font-size:16px;font-weight:650;color:var(--gray-12)}
+.status .lr svg{color:var(--green-11)}
+.pin{margin:10px 14px 0;border-radius:12px;padding:10px 12px;background:var(--amber-a3);box-shadow:inset 0 0 0 1px var(--amber-a5);display:flex;gap:10px;align-items:flex-start}
+.pin .ic{color:var(--amber-11);display:flex;margin-top:2px}
+.pin .tx{font-size:15px;font-weight:600;color:var(--gray-12)}.pin .by{font-size:12px;color:var(--gray-11);margin-top:2px}
+.sec{display:flex;align-items:center;gap:8px;padding:16px 18px 6px;font-size:14px;font-weight:600;color:var(--gray-12)}
+.sec .n{font-weight:400;color:var(--gray-10)}
+.tl{list-style:none;margin:0;padding:0 16px}
+.tl li{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--gray-a3)}
+.tl .time{width:58px;flex:none;font-size:12.5px;color:var(--gray-10);padding-top:1px;font-variant-numeric:tabular-nums}
+.tl .body{flex:1;min-width:0}
+.tl .who{font-size:12.5px;color:var(--gray-11)}.tl .who b{color:var(--gray-12);font-weight:600}
+.tl .msg{font-size:15px;color:var(--gray-12);margin-top:1px;line-height:1.35}
+.tl .msg.sys{color:var(--gray-11);font-size:14px}
+.tl .seen{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--gray-10);margin-top:3px}
+.tag{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:6px;font-size:12px;font-weight:600}
+.tag.go{background:var(--blue-a4);color:var(--blue-11)}.tag.in{background:var(--amber-a4);color:var(--amber-11)}
+.composer{position:absolute;left:0;right:0;bottom:0;background:var(--color-background);border-top:1px solid var(--gray-a4);padding:8px 12px 28px;display:flex;flex-direction:column;gap:8px}
+.chips{display:flex;gap:6px;overflow:hidden}
+.chip{flex:none;height:30px;padding:0 11px;border-radius:999px;box-shadow:inset 0 0 0 1px var(--gray-a6);display:flex;align-items:center;gap:6px;font-size:13.5px;color:var(--gray-12);white-space:nowrap}
+.chip.go{box-shadow:inset 0 0 0 1px var(--blue-a7);color:var(--blue-11)}
+.inp{display:flex;align-items:center;gap:8px}
+.field{flex:1;height:40px;border-radius:20px;background:var(--gray-a3);display:flex;align-items:center;padding:0 14px;font-size:15px;color:var(--gray-9)}
+.send{width:40px;height:40px;border-radius:50%;background:var(--gray-a4);display:grid;place-items:center;color:var(--gray-9)}
+/* cards */
+.lt{display:flex;align-items:center;gap:6px;padding:20px 12px 8px 16px}
+.lt .tx{font-size:28px;font-weight:700;letter-spacing:-.022em;color:var(--gray-12)}.lt .tc{font-size:28px;color:var(--gray-9)}
+.seg{display:grid;grid-template-columns:1fr 1fr;margin:2px 16px 12px;padding:3px;border-radius:10px;background:var(--gray-a3)}
+.seg span{height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500;color:var(--gray-11)}
+.seg span.on{background:var(--color-panel-solid);color:var(--gray-12)}
+.list{display:flex;flex-direction:column;gap:10px;padding:0 12px}
+.card{border-radius:14px;background:var(--gray-a2);box-shadow:inset 0 0 0 1px var(--gray-a4);padding:14px;display:flex;flex-direction:column;gap:10px}
+.l1{display:flex;align-items:baseline;gap:8px}.l1 .nm{font-size:18px}
+.wait{margin-left:auto;font-size:13px;font-weight:600;color:var(--gray-11)}
+.loc{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:8px;background:var(--green-a4);color:var(--green-12);font-size:14px;font-weight:600}
+.note{display:flex;gap:8px;align-items:flex-start;font-size:14px;color:var(--gray-12);padding:8px 10px;border-radius:10px;background:var(--amber-a3)}
+.note .ic{color:var(--amber-11);display:flex;margin-top:2px}
+.note small{display:block;color:var(--gray-11);font-size:12px;margin-top:1px}
+.otw{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;background:var(--blue-a3);font-size:14px;color:var(--gray-12)}
+.otw svg{color:var(--blue-11)}.otw b{font-weight:600}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.btn{height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;gap:8px;font-size:15px;font-weight:600}
+.btn.solid{background:var(--gray-12);color:var(--gray-1)}.btn.outline{box-shadow:inset 0 0 0 1px var(--gray-a7);color:var(--gray-12);font-weight:500}
+.btn.go{box-shadow:inset 0 0 0 1px var(--blue-a7);color:var(--blue-11);font-weight:500}
+.sub{font-size:14px;color:var(--gray-11)}
+/* sheet */
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.55);z-index:5}
+.enr svg:last-child{opacity:.7;margin-left:2px}.enr.pr{background:var(--blue-a5)}
+.toast2{position:absolute;left:12px;right:12px;bottom:34px;height:48px;border-radius:12px;background:var(--gray-12);color:var(--gray-1);display:flex;align-items:center;padding:0 6px 0 16px;font-size:15px;font-weight:500;z-index:9}
+.toast2 .u2{margin-left:auto;height:36px;padding:0 12px;display:grid;place-items:center;font-weight:600}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:6;background:var(--color-panel-solid);border-radius:22px 22px 0 0;padding:8px 16px 32px;display:flex;flex-direction:column;gap:14px}
+.handle{width:36px;height:5px;border-radius:3px;background:var(--gray-a6);margin:0 auto 2px}
+.sh{font-size:18px;font-weight:600;color:var(--gray-12)}
+.etas{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.eta{height:44px;border-radius:10px;box-shadow:inset 0 0 0 1px var(--gray-a6);display:grid;place-items:center;font-size:15px;color:var(--gray-12)}
+.eta.on{box-shadow:inset 0 0 0 2px var(--blue-9);color:var(--blue-11);font-weight:600}
+.lab{font-size:13px;color:var(--gray-11)}
+/* desktop */
+.dwin{height:100%;display:grid;grid-template-columns:232px minmax(0,1fr) 440px;background:var(--color-background)}
+.side{background:var(--gray-2);border-right:1px solid var(--gray-a4)}
+.pane{border-left:1px solid var(--gray-a4);position:relative;display:flex;flex-direction:column;overflow:hidden}
+.dtop{display:flex;align-items:center;gap:8px;height:56px;padding:0 24px;border-bottom:1px solid var(--gray-a4);font-size:17px;font-weight:600;color:var(--gray-12)}
+.dt{column-gap:0;display:grid;grid-template-columns:48px minmax(70px,1fr) 140px 192px 66px;padding:0 16px;height:46px;align-items:center;border-bottom:1px solid var(--gray-a3);font-size:14px;color:var(--gray-12)}
+.dt.sel{background:var(--gray-a3);box-shadow:inset 2px 0 0 var(--gray-12)}
+
+.chat{display:flex;flex-direction:column;gap:6px;padding:4px 14px 150px}
+.sysl{align-self:center;font-size:12px;color:var(--gray-10);padding:4px 0;text-align:center}
+.from{font-size:12px;color:var(--gray-11);margin:6px 0 2px 4px}.from b{color:var(--gray-12);font-weight:600}
+.bub{max-width:78%;padding:9px 12px;border-radius:18px;font-size:15.5px;line-height:1.35;color:var(--gray-12)}
+.bub.them{align-self:flex-start;background:var(--gray-a3);border-top-left-radius:6px}
+.bub.me{align-self:flex-end;background:var(--blue-a5);border-top-right-radius:6px}
+.bub .go{display:inline-flex;vertical-align:-3px;margin-right:4px;color:var(--blue-11)}
+.meta{font-size:11.5px;color:var(--gray-10);display:flex;gap:4px;align-items:center}
+.meta.r{align-self:flex-end;margin-right:4px}.meta.l{margin-left:4px}
+.prev{display:flex;align-items:flex-start;gap:8px;padding:9px 10px;border-radius:12px;background:var(--gray-a3);font-size:14.5px;color:var(--gray-12)}
+.prev .dot{width:8px;height:8px;border-radius:50%;background:var(--blue-9);margin-top:6px;flex:none}
+.prev small{display:block;font-size:12px;color:var(--gray-11);margin-bottom:1px}
+
+.chip{height:40px!important;font-size:14.5px!important;padding:0 14px!important}
+.tick{display:inline-flex;color:var(--gray-10)}
+.state{display:flex;align-items:center;gap:8px;padding:9px 14px;border-top:1px solid var(--green-a4);font-size:14.5px;color:var(--blue-11);font-weight:600}
+.pillgo{display:flex;align-items:center;gap:8px;height:44px;padding:0 12px;border-radius:10px;background:var(--blue-a4);color:var(--blue-11);font-size:14.5px;font-weight:600}
+.udot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--blue-9);margin-left:6px;vertical-align:2px}
+.to{font-size:14px;color:var(--gray-11)}
+
+.av2{width:22px;height:22px;border-radius:50%;background:var(--blue-9);color:#fff;display:grid;place-items:center;font-size:10px;font-weight:700;flex:none}
+.otw2{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 10px 0 6px;border-radius:999px;background:var(--blue-a4);color:var(--blue-11);font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+.otw2.late{background:var(--amber-a4);color:var(--amber-11)}
+.mbtn{position:relative}
+.badge{position:absolute;top:-6px;right:-6px;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--blue-9);color:#fff;font-size:12px;font-weight:700;display:grid;place-items:center}
+.row2{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:34px 0 0;color:var(--gray-9);font-size:14px}
+.chat .seen{align-self:flex-end;color:var(--gray-10);display:flex;margin:-2px 4px 0 0}
+.stat2{display:flex;align-items:center;gap:8px;padding:9px 14px;border-top:1px solid var(--green-a4)}
+.seg span.udot{width:7px;height:7px;border-radius:50%;background:var(--blue-9);flex:none;padding:0;margin-left:6px}
+.chat .seen.blue{color:var(--blue-11)}
+.ts{align-self:flex-end;font-size:11.5px;color:var(--gray-10);margin:-2px 4px 0 0}
+.rowbadge{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--blue-9);color:#fff;font-size:11px;font-weight:700;margin-left:8px}
+.otwrow{display:flex;align-items:center;gap:10px;padding:8px 10px 8px 8px;border-radius:12px;background:var(--blue-a3)}
+.otwrow .av2{width:28px;height:28px;font-size:11px}
+.otwrow .tx{display:flex;flex-direction:column;min-width:0;flex:1}
+.otwrow .a{font-size:14.5px;color:var(--gray-12)}.otwrow .a b{font-weight:600}
+.otwrow .b{font-size:12.5px;color:var(--gray-11)}
+.otwrow .eta{display:flex;align-items:center;gap:5px;height:28px;padding:0 10px;border-radius:999px;background:var(--blue-a4);color:var(--blue-11);font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.status .otwrow{margin:8px 10px 10px;background:var(--blue-a3)}
+.enr{display:flex;align-items:center;gap:10px;padding:0 12px;height:44px;border-radius:12px;background:var(--blue-a3);color:var(--blue-11);font-size:15px;font-weight:600}
+.enr .m{margin-left:auto;font-variant-numeric:tabular-nums;font-weight:600}
+.status .enr{margin:8px 10px 10px}
+.otw2{white-space:nowrap}
+.pane .chips{flex-wrap:wrap}
+.dth{height:34px!important;font-size:12px;color:var(--gray-10)}
+main{min-width:0;overflow:hidden}
+
+/* v7 iMessage-style */
+.chat{gap:2px!important;padding:6px 12px 170px!important}
+.bub{max-width:76%;padding:8px 13px!important;border-radius:19px!important;font-size:16px!important;line-height:1.3!important}
+.bub.them{background:var(--gray-4)!important;color:var(--gray-12)}
+.bub.me{background:var(--blue-9)!important;color:#fff!important}
+.bub.them+.bub.them{border-top-left-radius:6px!important}
+.from{font-size:12px!important;color:var(--gray-10)!important;margin:10px 0 3px 12px!important}
+.from b{font-weight:500!important;color:var(--gray-11)!important}
+.rcpt{align-self:flex-end;font-size:11.5px;color:var(--gray-10);margin:3px 6px 0 0}
+.rcpt b{font-weight:600;color:var(--gray-11)}
+.gap{height:8px}
+.composer{padding:8px 10px 26px!important;gap:8px!important;border-top:0!important;background:linear-gradient(to top,var(--color-background) 70%,transparent)!important}
+.chips{gap:6px!important;padding:0 2px;overflow-x:auto!important;flex-wrap:nowrap!important}
+.chip{height:34px!important;padding:0 13px!important;border-radius:17px!important;box-shadow:none!important;background:var(--gray-a3)!important;color:var(--gray-12)!important;font-size:14px!important}
+.pane .chips{flex-wrap:wrap!important;overflow:visible!important}
+.field2{flex:1;display:flex;align-items:center;min-height:38px;border-radius:19px;box-shadow:inset 0 0 0 1px var(--gray-a6);padding:0 4px 0 14px;font-size:16px;color:var(--gray-12)}
+.field2 .ph{color:var(--gray-9)}
+.field2 .sendb{margin-left:auto;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--blue-9);color:#fff}
+.field2 .sendb.off{background:var(--gray-a4);color:var(--gray-9)}
+.field2 .cur{width:1.5px;height:20px;background:var(--blue-9);margin-left:1px}
+</style>
+<script type="importmap">{"imports":{
+"react":"https://esm.sh/react@18.3.1","react-dom":"https://esm.sh/react-dom@18.3.1","react-dom/client":"https://esm.sh/react-dom@18.3.1/client",
+"@radix-ui/themes":"https://esm.sh/@radix-ui/themes@3.3.0?deps=react@18.3.1,react-dom@18.3.1","htm":"https://esm.sh/htm@3.1.1"}}</script>
+</head><body><div id="b"></div>
+<script type="module">
+import React from 'react';
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
+import htm from 'htm';
+import { Theme } from '@radix-ui/themes';
+const h = htm.bind(React.createElement);
+const svg = (p, s = 16, w = 1.75) => h`<svg width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth=${w} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style=${{ flex: 'none' }} dangerouslySetInnerHTML=${{ __html: p }} />`;
+const P = {
+  x: '<path d="M18 6 6 18M6 6l12 12"/>', dots: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  pin: '<path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>',
+  flag: '<path d="M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.333 2q2 0 3.067-.8A1 1 0 0 1 20 4v10a1 1 0 0 1-.4.8A6 6 0 0 1 16 16c-3 0-5-2-8-2a6 6 0 0 0-4 1.528"/>',
+  walk: '<circle cx="13" cy="4" r="2"/><path d="m7 21 2-6 3 3v3"/><path d="m9 12 2-4 3 2 3 1"/><path d="M11 8 8 9 6 12"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>', checks: '<path d="M18 6 7 17l-5-5"/><path d="m22 10-7.5 7.5L13 16"/>', send: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
+  bust: '<circle cx="12" cy="10" r="5"/><path d="M2 26a10 9 0 0 1 20 0"/>', chev: '<path d="m6 9 6 6 6-6"/>',
+};
+const pie = (f) => { const a = f * 2 * Math.PI, x = 7 + 3.25 * Math.sin(a), y = 7 - 3.25 * Math.cos(a); return `M7 7L7 3.75A3.25 3.25 0 ${f > 0.5 ? 1 : 0} 1 ${x.toFixed(2)} ${y.toFixed(2)}Z`; };
+const gIn = (s = 14) => h`<svg width=${s} height=${s} viewBox="0 0 14 14" style=${{ flex: 'none' }}><circle cx="7" cy="7" r="5.75" fill="none" stroke="var(--green-9)" strokeWidth="1.5"/><path d=${pie(0.75)} fill="var(--green-9)"/></svg>`;
+const Shell = ({ children }) => h`<${Theme} appearance="dark" accentColor="gray" grayColor="gray" radius="medium"><div className="app">${children}</div><//>`;
+
+// Messages: a chat thread that belongs to the request. Events are small centred lines; people are bubbles.
+const Thread = ({ me = 'Dana', empty }) => empty ? h`<div className="chat"><div className="empty" aria-label="No messages yet">${svg('<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>', 30, 1.5)}</div></div>` : me === 'Dana' ? h`<div className="chat">
+  <span className="from"><b>Rae C.</b> · Medical</span>
+  <div className="bub them">Being worked up</div>
+  <div className="bub them">Bring 1 person only</div>
+  <div className="gap"></div>
+  <div className="bub me">Got it, just me and the friend</div>
+  <span className="rcpt"><b>Read</b> 4:14 PM</span>
+</div>` : h`<div className="chat">
+  <div className="bub me">Being worked up</div>
+  <div className="bub me">Bring 1 person only</div>
+  <span className="rcpt">Delivered</span>
+  <span className="from"><b>Dana K.</b> · Transpo</span>
+  <div className="bub them">Got it, just me and the friend</div>
+</div>`;
+const Composer = ({ side = 'med', state = 'on', typing }) => h`<div className="composer">
+  <div className="chips">${(side === 'med' ? ['Bring 1 person only', 'Being worked up — wait', 'Ready for them'] : state === 'on' ? ['Arrived', "Can't find them"] : ['En route', "Can't find them"]).map((c) => h`<span key=${c} className="chip">${c === 'Arrived' ? svg(P.check, 15, 2) : c === 'En route' ? svg(P.walk, 15, 2) : null}${c}</span>`)}</div>
+  <div className="field2">${typing ? h`<span>On our way now</span><span className="cur"></span>` : h`<span className="ph">Message</span>`}<span className=${'sendb' + (typing ? '' : ' off')}>${svg('<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>', 17, 2.5)}</span></div>
+</div>`;
+
+const Request = () => h`<${Shell}>
+  <div className="nav"><span className="cb">${svg(P.x, 18)}</span><span style=${{ color: 'var(--gray-11)', fontSize: 16 }}>LP-0004</span><span className="cb">${svg(P.dots, 18)}</span></div>
+  <div className="hero"><div className="photo">${svg(P.bust, 44)}</div><div><div className="nm">A.L.</div><div className="as">21 · Female · FA 4 – Oasis</div></div></div>
+  <div className="status"><div className="top">${gIn(18)}<div><div className="t1">In medical · friend coming</div><div className="t2">Rae C. · 4:09 PM</div></div></div><div className="lr">${svg(P.pin, 16, 2)}Chair 14</div><div className="enr">${svg(P.walk, 18, 2)}Friend en route<span className="m">~4 min</span></div></div>
+  <div className="sec">Messages</div>
+  <${Thread} me="Dana"/>
+  <${Composer} side="foh" typing/>
+<//>`;
+
+const Mine = ({ cancelled, pressed }) => h`<${Shell}>
+  <div className="lt"><span className="tx">My requests</span><span className="tc">3</span></div>
+  <div className="list">
+    <div className="card"><div className="l1"><span className="nm">A.L.</span><span className="as">21 F</span><span className="wait">${gIn()}</span></div>
+      <div className="row2"><span className="loc">${svg(P.pin, 14, 2)}Chair 14</span></div>
+      ${cancelled ? null : h`<div className=${'enr' + (pressed ? ' pr' : '')}>${svg(P.walk, 18, 2)}Friend en route<span className="m">~4 min</span>${svg('<path d="m9 18 6-6-6-6"/>', 16, 2.25)}</div>`}
+      <div className="two">${cancelled ? h`<span className="btn outline">${svg(P.walk, 16, 2)}En route</span>` : h`<span className="btn outline">${svg(P.check, 16, 2)}Arrived</span>`}<span className="btn outline mbtn">${svg('<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>', 16)}Message<span className="badge">1</span></span></div>
+    </div>
+    <div className="card"><div className="l1"><span className="nm">R.P.</span><span className="as">30 M</span><span className="wait">${gIn()}</span></div>
+      <div className="row2"><span className="loc">${svg(P.pin, 14, 2)}Bed 3</span></div>
+      <div className="two"><span className="btn outline">${svg(P.walk, 16, 2)}En route</span><span className="btn outline">${svg('<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>', 16)}Message</span></div>
+    </div>
+  </div>
+<//>`;
+
+const OnMyWay = () => h`<${Shell}><${Mine}/>
+  <div className="scrim"></div>
+  <div className="sheet"><div className="handle"></div>
+    <div className="sh">Friend en route</div>
+    <div className="etas" aria-label="ETA, optional">${['Now', '~5 min', '~10 min', '~15 min'].map((e) => h`<span key=${e} className="eta">${e}</span>`)}</div>
+    <div className="two"><span className="btn outline">Cancel</span><span className="btn solid">${svg(P.walk, 16, 2)}Send</span></div>
+  </div>
+<//>`;
+
+const Coming = () => h`<${Shell}>
+  <div className="lt"><span className="tx">Pending</span><span className="tc">5</span></div>
+  <div className="seg"><span>To check 3</span><span className="on">Friend coming 2<span className="udot"></span></span></div>
+  <div className="list">
+    <div className="card"><div className="l1"><span className="nm">A.L.</span><span className="as">21 F</span><span className="wait">7m</span></div>
+      <div className="row2"><span className="loc">${svg(P.pin, 14, 2)}Chair 14</span><span className="to">→ Chris P. · boyfriend</span></div>
+      <div className="enr">${svg(P.walk, 18, 2)}Friend en route<span className="m">~4 min</span></div>
+      <div className="two"><span className="btn outline mbtn">${svg('<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>', 16)}Message<span className="badge">1</span></span><span className="btn solid">${svg(P.check, 16, 2.25)}Reunited</span></div></div>
+    <div className="card"><div className="l1"><span className="nm">R.P.</span><span className="as">30 M</span><span className="wait">2m</span></div>
+      <div className="row2"><span className="loc" style=${{ background: 'none', boxShadow: 'inset 0 0 0 1px var(--gray-a6)', color: 'var(--gray-11)', fontWeight: 500 }}>+ Location</span></div>
+      <div className="to">→ Alex M. · partner</div>
+      <div className="two"><span className="btn outline">${svg('<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>', 16)}Message</span><span className="btn solid">${svg(P.check, 16, 2.25)}Reunited</span></div></div>
+  </div>
+<//>`;
+
+const Empty = () => h`<${Shell}>
+  <div className="nav"><span className="cb">${svg(P.x, 18)}</span><span style=${{ color: 'var(--gray-11)', fontSize: 16 }}>LP-0007</span><span className="cb">${svg(P.dots, 18)}</span></div>
+  <div className="hero"><div><div className="nm">R.P.</div><div className="as">30 · Male · Base</div></div></div>
+  <div className="status"><div className="top">${gIn(18)}<div><div className="t1">In medical · friend coming</div><div className="t2">Rae C. · 4:21 PM</div></div></div><div className="lr">${svg(P.pin, 16, 2)}Bed 3</div></div>
+  <div className="sec">Messages</div><${Thread} empty/>
+  <${Composer} side="foh" state="none"/>
+<//>`;
+
+const Desk = () => h`<${Theme} appearance="dark" accentColor="gray" grayColor="gray" radius="medium"><div className="dwin">
+  <aside className="side"></aside>
+  <main><div className="dtop">Pending<span style=${{ color: 'var(--gray-9)', fontWeight: 400 }}>5</span></div>
+    <div className="dt dth"><span>#</span><span>Friend</span><span>Status</span><span></span><span style=${{ textAlign: 'right' }}>Created</span></div>
+    ${[['0004', 'A.L.', 'In medical · Chair 14', '4:02 PM', true], ['0007', 'R.P.', 'In medical · Bed 3', '3:55 PM'], ['0012', 'J.D.', 'Waiting for check', '4:11 PM']].map(([n, nm, s, t, sel]) => h`<div key=${n} className=${'dt' + (sel ? ' sel' : '')}><span style=${{ color: 'var(--gray-10)', fontSize: 13 }}>${n}</span><span style=${{ display: 'flex', alignItems: 'center', minWidth: 0 }}>${nm}${sel ? h`<span className="rowbadge">1</span>` : null}</span><span style=${{ color: s.startsWith('In') ? 'var(--green-11)' : 'var(--blue-11)', fontSize: 13, whiteSpace: 'nowrap' }}>${s}</span><span>${sel ? h`<span className="otw2" style=${{ height: 26, fontSize: 13, paddingLeft: 9 }}>${svg(P.walk, 13, 2)}Friend en route · ~4 min</span>` : null}</span><span style=${{ textAlign: 'right', color: 'var(--gray-11)', fontSize: 13 }}>${t}</span></div>`)}
+  </main>
+  <section className="pane"><div className="app" style=${{ background: 'none' }}>
+    <div className="hero" style=${{ paddingTop: 16 }}><div className="photo">${svg(P.bust, 44)}</div><div><div className="nm">A.L.</div><div className="as">21 · Female · FA 4 – Oasis</div></div></div>
+    <div className="status"><div className="top">${gIn(18)}<div><div className="t1">In medical · friend coming</div><div className="t2">Rae C. · 4:09 PM</div></div></div><div className="lr">${svg(P.pin, 16, 2)}Chair 14</div><div className="enr">${svg(P.walk, 18, 2)}Friend en route<span className="m">~4 min</span></div></div>
+    <div className="sec">Messages</div><${Thread} me="Rae"/>
+    <${Composer} side="med"/>
+  </div></section>
+</div><//>`;
+
+const EnrouteEdit = () => h`<${Shell}><${Mine} pressed/>
+  <div className="scrim"></div>
+  <div className="sheet"><div className="handle"></div>
+    <div className="sh">Friend en route</div>
+    <div className="etas" aria-label="ETA, optional">${['Now', '~5 min', '~10 min', '~15 min'].map((e) => h`<span key=${e} className=${'eta' + (e === '~5 min' ? ' on' : '')}>${e}</span>`)}</div>
+    <div className="two"><span className="btn outline" style=${{ color: 'var(--red-11)', boxShadow: 'inset 0 0 0 1px var(--red-a7)' }}>Cancel en route</span><span className="btn solid">Update</span></div>
+  </div>
+<//>`;
+const EnrouteCancelled = () => h`<${Shell}><${Mine} cancelled/>
+  <div className="toast2">En route cancelled<span className="u2">Undo</span></div>
+<//>`;
+const EditBoard = () => h`<div className="board">
+  <${Fig} cap="1 · Tap the blue bar" sub="Only on your own request; medical sees it read-only"><${Mine}/><//>
+  <${Fig} cap="2 · Same sheet you started it from" sub="Current ETA selected; change it or cancel"><${EnrouteEdit}/><//>
+  <${Fig} cap="3 · Cancelled" sub="Back to En route; Undo for 5 s"><${EnrouteCancelled}/><//>
+</div>`;
+const Fig = ({ cap, sub, desk, children }) => h`<figure><div className=${'frame' + (desk ? ' desk' : '')}>${children}</div><figcaption>${cap}<span>${sub}</span></figcaption></figure>`;
+const Board = () => h`<div className="board">
+  <${Fig} cap="1 · Messages on the request" sub="iMessage-style; Read / Delivered in words"><${Request}/><//>
+  <${Fig} cap="2 · My requests" sub="On the way = who + minutes away; unread count on Message"><${Mine}/><//>
+  <${Fig} cap="2b · No messages yet" sub="Just the input and quick lines"><${Empty}/><//>
+  <${Fig} cap="3 · En route" sub="ETA optional; nothing preselected"><${OnMyWay}/><//>
+  <${Fig} cap="4 · Pending (medical)" sub="Same graphics, no sentences"><${Coming}/><//>
+  <${Fig} desk cap="5 · Desktop (medical)" sub="Same thread, their side; Seen receipts on their messages"><${Desk}/><//>
+</div>`;
+flushSync(() => createRoot(document.getElementById('b')).render(location.hash === '#edit' ? h`<${EditBoard}/>` : h`<${Board}/>`));
+</script></body></html>

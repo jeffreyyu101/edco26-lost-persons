@@ -1,0 +1,235 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>F3/F4 states</title>
+<!-- 2026-11-06 ~17:40. Every new state for F3 (Messages, En route) + F4 (Web Push, Alerts) + the Activity inbox (Brian: a bell
+     at the top showing everything relevant to me so nothing is missed). Same visual language as updates.html v7. Synthetic data.
+     ~17:45 Brian: the separate En route menu had no clear entry point and duplicated Arrived. Replaced by updates.html#edit: tap the blue
+     bar on your own request -> the same ETA sheet you started it from (current ETA selected, Cancel en route + Update), Undo toast. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@radix-ui/themes@3.3.0/styles.css">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+body{margin:0;background:#0c0c0d}
+.radix-themes{--default-font-family:InterVariable,Inter,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;font-feature-settings:"cv11";-webkit-font-smoothing:antialiased}
+.radix-themes[data-is-root-theme]{min-height:0!important;height:100%;position:relative}
+.board{display:flex;flex-wrap:wrap;justify-content:center;gap:28px 20px;padding:24px;max-width:1320px}
+.board figure{margin:0}.frame{width:390px;height:844px;border-radius:30px;overflow:hidden;border:1px solid #2b2b30}
+.frame.short{height:560px}.frame.desk{width:1240px;height:620px;border-radius:12px}
+figcaption{margin-top:10px;text-align:center;font:500 15px/1.3 system-ui;color:#e4e4e7}
+figcaption span{display:block;font-weight:400;font-size:13px;color:#8e8e96;margin-top:2px}
+.app{height:100%;display:flex;flex-direction:column;background:var(--color-background);position:relative;overflow:hidden}
+.sp{flex:1}.tab{font-variant-numeric:tabular-nums}
+.grad{color:#fff;background:radial-gradient(ellipse at 12% 140%,#e83f91 0,transparent 45%),radial-gradient(ellipse at 88% -40%,#25c7d7 0,transparent 42%),linear-gradient(112deg,#181329 4%,#36205a 55%,#211835 100%)}
+.brand{margin:12px 12px 2px;border-radius:14px;padding:10px 10px 10px 14px;display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px}
+.brand em{font-style:normal;color:#8ef0e7;font-weight:500}
+.x{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.12);margin-left:auto}
+.lt{display:flex;align-items:center;gap:4px;padding:14px 10px 2px 16px}
+.lt .tx{font-size:28px;font-weight:700;letter-spacing:-.022em;color:var(--gray-12)}.lt .tc{font-size:28px;color:var(--gray-9);margin-left:4px}
+.ib{position:relative;width:40px;height:40px;display:grid;place-items:center;color:var(--gray-11)}
+.badge{position:absolute;top:3px;right:-2px;min-width:16px;height:16px;padding:0 4px;font-size:10.5px!important;border-radius:999px;background:var(--gray-12);color:var(--gray-1);font-size:11px;font-weight:700;display:grid;place-items:center}
+.av{width:32px;height:32px;border-radius:50%;background:var(--gray-12);color:var(--gray-1);display:grid;place-items:center;font-size:12px;font-weight:600;margin-left:4px}
+.live{display:flex;align-items:center;gap:7px;padding:0 16px 10px;font-size:12.5px;color:var(--gray-11)}.dot{width:7px;height:7px;border-radius:50%;background:var(--green-9)}
+.row{display:grid;grid-template-columns:40px 1fr 110px 62px;padding:0 16px;height:48px;align-items:center;border-bottom:1px solid var(--gray-a3);font-size:15px;color:var(--gray-12)}
+.row .n{font-size:13px;color:var(--gray-10)}.row .s{font-size:12.5px}.row .t{text-align:right;font-size:13px;color:var(--gray-11)}
+/* sheets */
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.55);z-index:5}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:6;background:var(--color-panel-solid);border-radius:22px 22px 0 0;padding:8px 0 30px;display:flex;flex-direction:column}
+.sheet.tall{top:56px}
+.handle{width:36px;height:5px;border-radius:3px;background:var(--gray-a6);margin:0 auto 8px}
+.sh{display:flex;align-items:center;padding:4px 16px 10px;font-size:20px;font-weight:700;color:var(--gray-12)}
+.sh .act{margin-left:auto;font-size:15px;font-weight:500;color:var(--blue-11)}
+/* activity */
+.act-row{display:flex;gap:12px;padding:0 16px 0 22px;min-height:64px;align-items:center;position:relative}
+.act-row+.act-row{border-top:1px solid var(--gray-a3)}
+.act-row .g{width:20px;display:grid;place-items:center;flex:none;color:var(--gray-11);align-self:flex-start;margin-top:13px}
+.act-row .g.blue{color:var(--blue-11)}.act-row .g.green{color:var(--green-11)}
+.act-row .tx{flex:1;min-width:0}
+.act-row .t1{font-size:15px;color:var(--gray-12);display:flex;gap:6px;align-items:baseline}
+.act-row .t1 b{font-weight:600}.act-row.read .t1 b{font-weight:400}
+.act-row .t2{font-size:14.5px;color:var(--gray-11);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.act-row .when{font-size:12px;color:var(--gray-10);flex:none;align-self:flex-start;margin-top:13px}
+.act-row .u{position:absolute;left:8px;top:19px;width:7px;height:7px;border-radius:50%;background:var(--gray-12)}
+.act-row.read .t1{color:var(--gray-11)}.act-row.read .t2{color:var(--gray-10)}
+.ibtn{margin-left:auto;width:34px;height:34px;border-radius:9px;display:grid;place-items:center;color:var(--gray-11)}
+.ibtn.off{color:var(--gray-7)}
+.empty .w{display:flex;flex-direction:column;align-items:center;gap:10px;font-size:15px;color:var(--gray-10)}
+.toast{position:absolute;left:12px;right:12px;bottom:34px;height:48px;border-radius:12px;background:var(--gray-12);color:var(--gray-1);display:flex;align-items:center;padding:0 6px 0 16px;font-size:15px;font-weight:500;z-index:9}
+.toast .u2{margin-left:auto;height:36px;padding:0 12px;display:grid;place-items:center;font-weight:600}
+.act-day{padding:12px 16px 4px;font-size:12.5px;font-weight:600;color:var(--gray-10)}
+.empty{display:grid;place-items:center;flex:1;color:var(--gray-8)}
+/* en route */
+.enr{display:flex;align-items:center;gap:10px;padding:0 12px;height:44px;border-radius:12px;background:var(--blue-a3);color:var(--blue-11);font-size:15px;font-weight:600;white-space:nowrap}
+.enr .m{margin-left:auto;font-variant-numeric:tabular-nums}
+.enr.late{background:var(--amber-a3);color:var(--amber-11)}.enr.arr{background:var(--green-a3);color:var(--green-11)}
+.cnt{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--blue-a5);font-size:12px}
+.card{margin:0 12px 10px;border-radius:14px;background:var(--gray-a2);box-shadow:inset 0 0 0 1px var(--gray-a4);padding:14px;display:flex;flex-direction:column;gap:10px}
+.lbl{padding:12px 16px 6px;font-size:13px;font-weight:600;color:var(--gray-10)}
+.menuitem{display:flex;align-items:center;gap:12px;height:52px;padding:0 16px;font-size:16px;color:var(--gray-12)}
+.menuitem+.menuitem{border-top:1px solid var(--gray-a3)}.menuitem svg{color:var(--gray-11)}
+.menuitem.red,.menuitem.red svg{color:var(--red-11)}
+.who{display:flex;align-items:center;gap:10px;padding:8px 16px;font-size:15px;color:var(--gray-12)}
+.who .av2{width:28px;height:28px;border-radius:50%;background:var(--blue-9);color:#fff;display:grid;place-items:center;font-size:11px;font-weight:700}
+.who small{color:var(--gray-10);font-size:13px;margin-left:auto}
+/* thread */
+.chat{display:flex;flex-direction:column;gap:2px;padding:6px 12px}
+.bub{max-width:76%;padding:8px 13px;border-radius:19px;font-size:16px;line-height:1.3}
+.bub.them{align-self:flex-start;background:var(--gray-4);color:var(--gray-12)}
+.bub.me{align-self:flex-end;background:var(--blue-9);color:#fff}
+.bub.dim{opacity:.55}
+.rcpt{align-self:flex-end;font-size:11.5px;color:var(--gray-10);margin:3px 6px 0 0}.rcpt b{color:var(--gray-11)}
+.rcpt.err{color:var(--red-11)}.rcpt.err b{color:var(--red-11)}
+.from{font-size:12px;color:var(--gray-10);margin:10px 0 3px 12px}.from b{font-weight:500;color:var(--gray-11)}
+.ctx{position:absolute;right:16px;z-index:7;width:200px;border-radius:14px;background:var(--color-panel-solid);box-shadow:var(--shadow-5);overflow:hidden}
+.ctx .mi{display:flex;align-items:center;justify-content:space-between;height:44px;padding:0 14px;font-size:16px;color:var(--gray-12)}
+.ctx .mi+.mi{border-top:1px solid var(--gray-a4)}.ctx .mi.red{color:var(--red-11)}
+.newpill{position:absolute;left:50%;transform:translateX(-50%);bottom:150px;height:34px;padding:0 14px;border-radius:999px;background:var(--blue-9);color:#fff;font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px;box-shadow:var(--shadow-4)}
+.field2{display:flex;align-items:center;min-height:38px;border-radius:19px;box-shadow:inset 0 0 0 1px var(--gray-a6);padding:0 4px 0 14px;font-size:16px;color:var(--gray-9);margin:8px 10px 26px}
+.sendb{margin-left:auto;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--gray-a4);color:var(--gray-9)}
+.composer{position:absolute;left:0;right:0;bottom:0}
+/* alerts sheet */
+.devst{display:flex;align-items:center;gap:12px;margin:0 16px;padding:14px;border-radius:14px;background:var(--green-a3)}
+.devst .t{font-size:16px;font-weight:600;color:var(--green-11)}.devst .s{font-size:13px;color:var(--gray-11)}
+.btn{height:46px;border-radius:12px;display:flex;align-items:center;justify-content:center;gap:8px;font-size:15.5px;font-weight:600;margin:12px 16px 4px}
+.btn.outline{box-shadow:inset 0 0 0 1px var(--gray-a7);color:var(--gray-12)}
+.sw{display:flex;align-items:center;gap:12px;min-height:56px;padding:0 16px;font-size:16px;color:var(--gray-12)}
+.sw+.sw{border-top:1px solid var(--gray-a3)}
+.sw .tg{margin-left:auto;width:51px;height:31px;border-radius:16px;background:var(--green-9);position:relative}
+.sw .tg::after{content:"";position:absolute;right:2px;top:2px;width:27px;height:27px;border-radius:50%;background:#fff}
+.sw small{display:block;font-size:13px;color:var(--gray-10)}
+/* lock screen */
+.lock{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',InterVariable,Inter,system-ui,sans-serif;height:100%;background:linear-gradient(180deg,#1d2a44,#0b0f1a 70%);display:flex;flex-direction:column;align-items:center;padding-top:60px;color:#fff}
+.clock{font-size:84px;font-weight:200;letter-spacing:-2px}
+.date{font-size:18px;opacity:.85;margin-bottom:28px}
+.noti{width:360px;border-radius:20px;background:rgba(40,40,48,.72);backdrop-filter:blur(20px);padding:11px 13px;display:flex;gap:10px;margin-bottom:8px}
+.noti{align-items:center}.noti .ic{width:38px;height:38px;border-radius:9px;flex:none;display:block}
+.noti .h{display:flex;align-items:baseline;gap:8px}.noti .h .w{margin-left:auto;font-size:13px;opacity:.65}
+.noti .tt{font-size:15px;font-weight:600}.noti .bd{font-size:15px;opacity:.95}
+/* desktop */
+.dwin{height:100%;display:grid;grid-template-columns:232px minmax(0,1fr);background:var(--color-background);position:relative}
+.side{background:var(--gray-2);border-right:1px solid var(--gray-a4);padding:14px 10px;display:flex;flex-direction:column;gap:2px}
+.ni{display:flex;align-items:center;gap:10px;height:32px;padding:0 8px;border-radius:7px;font-size:14px;color:var(--gray-11)}
+.ni .c{margin-left:auto;font-size:12px}.ni .bb{margin-left:auto;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--gray-12);color:var(--gray-1);font-size:11px;font-weight:700;display:grid;place-items:center}
+.ni.on{background:var(--gray-a4);color:var(--gray-12)}
+.dtop{display:flex;align-items:center;gap:10px;height:56px;padding:0 20px 0 24px;border-bottom:1px solid var(--gray-a4)}
+.dtop .h{font-size:17px;font-weight:600;color:var(--gray-12)}
+.pop{position:absolute;top:58px;right:14px;width:380px;max-height:480px;overflow:hidden;border-radius:14px;background:var(--color-panel-solid);box-shadow:var(--shadow-6);z-index:8;padding:8px 0 6px}
+.dtop .ib .badge{top:3px;right:-2px}
+</style>
+<script type="importmap">{"imports":{
+"react":"https://esm.sh/react@18.3.1","react-dom":"https://esm.sh/react-dom@18.3.1","react-dom/client":"https://esm.sh/react-dom@18.3.1/client",
+"@radix-ui/themes":"https://esm.sh/@radix-ui/themes@3.3.0?deps=react@18.3.1,react-dom@18.3.1","htm":"https://esm.sh/htm@3.1.1"}}</script>
+</head><body><img id="appicon" src="../../public/icons/icon-192.png" hidden alt=""><div id="b"></div>
+<script type="module">
+import React from 'react';
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
+import htm from 'htm';
+import { Theme } from '@radix-ui/themes';
+const h = htm.bind(React.createElement);
+const svg = (p, s = 16, w = 1.75) => h`<svg width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth=${w} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style=${{ flex: 'none' }} dangerouslySetInnerHTML=${{ __html: p }} />`;
+const P = {
+  bell: '<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>',
+  search: '<circle cx="11" cy="11" r="7.5"/><path d="m20.5 20.5-4.2-4.2"/>', x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  chat: '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>', walk: '<circle cx="13" cy="4" r="2"/><path d="m7 21 2-6 3 3v3"/><path d="m9 12 2-4 3 2 3 1"/><path d="M11 8 8 9 6 12"/>',
+  pin: '<path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', plus: '<path d="M5 12h14M12 5v14"/>',
+  copy: '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>', undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11"/>',
+  down: '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>', send: '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>', list: '<path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/>',
+  msg: '<path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/>',
+  cross: '<path d="M4 9a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h4a1 1 0 0 1 1 1v4a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2v-4a1 1 0 0 1 1-1h4a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2h-4a1 1 0 0 1-1-1V4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4a1 1 0 0 1-1 1z"/>',
+  checks: '<path d="M18 6 7 17l-5-5"/><path d="m22 10-7.5 7.5L13 16"/>',
+  inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>', user: '<circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/>',
+};
+const Shell = ({ children }) => h`<${Theme} appearance="dark" accentColor="gray" grayColor="gray" radius="medium"><div className="app">${children}</div><//>`;
+
+const Header = ({ n = 3 }) => h`<div className="grad brand">Is my friend <em>in medical?</em><span className="x">${svg(P.x, 14, 2.25)}</span></div>
+  <div className="lt"><span className="tx">All requests</span><span className="tc tab">12</span><span className="sp"></span>
+    <span className="ib">${svg(P.search, 20)}</span><span className="ib">${svg(P.bell, 20)}${n ? h`<span className="badge tab">${n}</span>` : null}</span><span className="av">DK</span></div>
+  <div className="live"><span className="dot"></span>Updated just now</div>`;
+const Rows = () => h`${[['0012', 'J.D.', 'Waiting', 'var(--blue-11)', '4:51 PM'], ['0011', 'K.M.', 'In medical', 'var(--green-11)', '4:40 PM'], ['0010', 'B.W.', 'Waiting', 'var(--blue-11)', '4:33 PM'], ['0004', 'A.L.', 'In medical', 'var(--green-11)', '4:02 PM']].map(([a, b, c, col, d]) => h`<div key=${a} className="row"><span className="n">${a}</span><span>${b}</span><span className="s" style=${{ color: col }}>${c}</span><span className="t">${d}</span></div>`)}`;
+
+const ACT = [
+  { g: '', ic: P.msg, who: 'A.L.', t2: 'Rae C.: Bring 1 person only', when: '2m', u: true, aria: 'A.L.: Rae C. wrote, Bring 1 person only. 2 minutes ago. Unread.' },
+  { g: 'green', ic: P.cross, who: 'J.D.', t2: 'In medical · Chair 9', when: '5m', u: true, aria: 'J.D. is in medical, chair 9. 5 minutes ago. Unread.' },
+  { g: 'blue', ic: P.walk, who: 'B.W.', t2: 'Friend en route · ~4 min', when: '6m', u: true, aria: "B.W.'s friend is en route, about 4 minutes. 6 minutes ago. Unread." },
+  { g: '', ic: P.pin, who: 'R.P.', t2: 'Chair 9 → Bed 3', when: '12m', aria: 'R.P. moved from chair 9 to bed 3. 12 minutes ago.' },
+  { g: '', ic: P.x, who: 'K.T.', t2: 'Not in medical', when: '20m', aria: 'K.T. is not in medical. 20 minutes ago.' },
+  { g: 'blue', ic: P.plus, who: 'T.R.', t2: 'New request · 24 M · FA 4', when: '25m', aria: 'New request for T.R., 24, male, from First Aid 4. 25 minutes ago.' },
+  { g: '', ic: P.check, who: 'M.P.', t2: 'Reunited', when: '41m', aria: 'M.P. reunited. 41 minutes ago.' },
+];
+const ActRow = ({ a, read }) => { const r = read || !a.u; return h`<div className=${'act-row' + (r ? ' read' : '')} aria-label=${a.aria}>${r ? null : h`<span className="u"></span>`}
+  <span className=${'g ' + a.g}>${svg(a.ic, 17, 1.9)}</span>
+  <div className="tx"><div className="t1"><b>${a.who}</b></div><div className="t2">${a.t2}</div></div>
+  <span className="when tab">${a.when}</span></div>`; };
+const MarkAll = ({ off }) => h`<span className=${'ibtn' + (off ? ' off' : '')} aria-label="Mark all read">${svg(P.checks, 20, 2)}</span>`;
+const Activity = ({ empty, allRead }) => h`<${Shell}><${Header} n=${empty || allRead ? 0 : 3}/><${Rows}/><div className="scrim"></div>
+  <div className="sheet tall"><div className="handle"></div><div className="sh">Activity${empty ? null : h`<${MarkAll} off=${allRead}/>`}</div>
+  ${empty ? h`<div className="empty"><div className="w">${svg(P.bell, 30, 1.5)}Nothing new</div></div>` : ACT.map((a, i) => h`<${ActRow} key=${i} a=${a} read=${allRead}/>`)}
+  ${allRead ? h`<div className="toast">3 marked read<span className="u2">Undo</span></div>` : null}</div><//>`;
+
+const EnrouteStates = () => h`<${Shell}><div className="lbl" style=${{ paddingTop: 20 }}>Friend en route</div>
+  <div className="card"><div className="enr">${svg(P.walk, 18, 2)}Friend en route<span className="m">~4 min</span></div></div>
+  <div className="lbl">No ETA given</div><div className="card"><div className="enr">${svg(P.walk, 18, 2)}Friend en route</div></div>
+  <div className="lbl">Past the ETA</div><div className="card"><div className="enr late">${svg(P.walk, 18, 2)}Friend en route<span className="m">late</span></div></div>
+  <div className="lbl">Two staff on the way</div><div className="card"><div className="enr">${svg(P.walk, 18, 2)}Friend en route <span className="cnt">2</span><span className="m">~2 min</span></div></div>
+  <div className="lbl">Arrived</div><div className="card"><div className="enr arr">${svg(P.check, 18, 2.25)}Friend arrived</div></div>
+<//>`;
+
+const EnrouteMenu = () => h`<${Shell}><${Header} n=${0}/><${Rows}/><div className="scrim"></div>
+  <div className="sheet"><div className="handle"></div><div className="sh">Friend en route</div>
+    <div className="who"><span className="av2">DK</span>You · Transpo<small>ETA 4:18 PM</small></div>
+    <div className="who"><span className="av2" style=${{ background: 'var(--gray-8)' }}>SO</span>Sam O. · Base<small>ETA 4:25 PM</small></div>
+    <div style=${{ height: 10 }}></div>
+    <div className="menuitem">${svg(P.check, 20, 2)}Arrived</div>
+    <div className="menuitem">${svg(P.clock, 20)}Change ETA</div>
+    <div className="menuitem red">${svg(P.x, 20, 2)}Cancel en route</div>
+  </div><//>`;
+
+const ThreadStates = () => h`<${Shell}><div style=${{ padding: '16px 16px 4px', fontSize: 14, fontWeight: 600, color: 'var(--gray-12)' }}>Messages</div>
+  <div className="chat">
+    <span className="from"><b>Rae C.</b> · Medical</span>
+    <div className="bub them">Being worked up</div><div className="bub them">Bring 1 person only</div>
+    <div style=${{ height: 8 }}></div>
+    <div className="bub me">Got it, just me and the friend</div><span className="rcpt"><b>Read</b> 4:14 PM</span>
+    <div style=${{ height: 8 }}></div>
+    <div className="bub me dim">On our way now</div><span className="rcpt">Sending…</span>
+    <div style=${{ height: 8 }}></div>
+    <div className="bub me">Gate 3 side</div><span className="rcpt err"><b>Not delivered</b> · Retry</span>
+  </div>
+  <div className="ctx" style=${{ top: 372 }}><div className="mi">Copy${svg(P.copy, 17)}</div><div className="mi red">Unsend${svg(P.undo, 17)}</div></div>
+  <div className="newpill">${svg(P.down, 15, 2.25)}New messages</div>
+  <div className="composer"><div className="field2">Message<span className="sendb">${svg(P.send, 17, 2.5)}</span></div></div>
+<//>`;
+
+const AlertsSheet = () => h`<${Shell}><${Header} n=${0}/><${Rows}/><div className="scrim"></div>
+  <div className="sheet"><div className="handle"></div><div className="sh">Alerts</div>
+    <div className="devst">${svg(P.bell, 20)}<div><div className="t">On for this phone</div><div className="s">Lock screen + sound</div></div></div>
+    <div className="btn outline">${svg(P.bell, 17)}Send a test alert</div>
+    <div style=${{ height: 6 }}></div>
+    <div className="sw"><div>New requests<small>Every new request logged</small></div><span className="tg"></span></div>
+    <div className="sw"><div>Updates on my requests<small>Answers, messages, en route</small></div><span className="tg"></span></div>
+  </div><//>`;
+
+const ICON = document.getElementById('appicon').src;
+const Lock = () => h`<div className="lock"><div className="clock">4:15</div><div className="date">Friday, November 6</div>
+  ${[['A.L.', 'Rae C.: Bring 1 person only', 'now'], ['K.T.', 'Not in medical', '2m'], ['New request', 'T.R. · 24 M · FA 4', '5m']].map(([t, b, w]) => h`<div key=${t} className="noti"><img className="ic" src=${ICON} alt=""/><div style=${{ flex: 1, minWidth: 0 }}><div className="h"><span className="tt">${t}</span><span className="w">${w}</span></div><div className="bd">${b}</div></div></div>`)}
+</div>`;
+
+const Desk = () => h`<${Theme} appearance="dark" accentColor="gray" grayColor="gray" radius="medium"><div className="dwin">
+  <aside className="side"><div className="ni on">${svg(P.list)}All requests<span className="c">12</span></div><div className="ni">${svg(P.inbox)}Pending<span className="c">5</span></div><div className="ni">${svg(P.user)}My requests<span className="c">3</span></div><div className="ni">${svg(P.bell)}Activity<span className="bb">3</span></div></aside>
+  <main><div className="dtop"><span className="h">All requests</span><span style=${{ color: 'var(--gray-9)', fontSize: 17 }}>12</span><span className="live" style=${{ padding: '0 0 0 8px' }}><span className="dot"></span>Updated just now</span><span className="sp"></span><span className="ib">${svg(P.bell, 20)}<span className="badge">3</span></span></div><${Rows}/></main>
+  <div className="pop"><div className="sh" style=${{ fontSize: 17, paddingBottom: 4 }}>Activity<${MarkAll}/></div>${ACT.slice(0, 6).map((a, i) => h`<${ActRow} key=${i} a=${a}/>`)}</div>
+</div><//>`;
+
+const Fig = ({ cap, sub, cls, children }) => h`<figure><div className=${'frame ' + (cls ?? '')}>${children}</div><figcaption>${cap}<span>${sub}</span></figcaption></figure>`;
+const Board = () => h`<div className="board">
+  <${Fig} cap="1 · Bell with unread count" sub="Next to search, on every main view"><${Shell}><${Header}/><${Rows}/><//><//>
+  <${Fig} cap="2 · Activity" sub="One row per request, latest event; opening it clears the dot"><${Activity}/><//>
+  <${Fig} cap="2b · Mark all read" sub="Undo for 5 s; rows stay, just read"><${Activity} allRead/><//>
+  <${Fig} cap="3 · Activity, nothing new" sub="Glyph + two words"><${Activity} empty/><//>
+  <${Fig} cap="5 · En route states" sub="ETA, no ETA, late, two on the way, arrived"><${EnrouteStates}/><//>
+  <${Fig} cap="6 · Message states" sub="Read, sending, not delivered, Copy / Unsend, New messages"><${ThreadStates}/><//>
+  <${Fig} cap="7 · Alerts sheet" sub="Device status, test alert, two switches"><${AlertsSheet}/><//>
+  <${Fig} cap="8 · Lock screen (Web Push)" sub="Message, answer change, new request"><${Lock}/><//>
+  <${Fig} cls="desk" cap="9 · Desktop" sub="Activity in the sidebar + bell popover"><${Desk}/><//>
+</div>`;
+flushSync(() => createRoot(document.getElementById('b')).render(h`<${Board}/>`));
+</script></body></html>

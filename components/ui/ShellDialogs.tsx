@@ -4,11 +4,14 @@
 //   * OutboxPromptDialog: "Send 2 requests saved by Dana Kim?" when the signed-in staff differs from the
 //     saver (the server attributes requests to whoever is signed in when they send, A13).
 //   * BellIntroSheet: "Alerts are on", the first time the bell is turned on. Alerts show while the app is
-//     open; the Home Screen tip notes that a Home Screen app signs in and keeps its requests separately.
-//     Never promises lock-screen alerts.
+//     open. Where the device has system notifications (v2.5 A52), "Allow notifications" or its answer;
+//     otherwise the Home Screen tip notes that a Home Screen app signs in and keeps its requests separately.
+//     Never promises lock-screen alerts on an iPhone Safari tab.
 import { AlertDialog, Button, Heading, Text } from '@radix-ui/themes';
 import { BellRing, LogIn, Share, SquarePlus } from 'lucide-react';
 import type { OutboxPrompt } from '@/lib/client/store-contract';
+import { useNotifyState } from '@/lib/client/system-notify';
+import { NotifySheetRow } from './NotifyStatus';
 import { Sheet } from './Sheet';
 import styles from './ui.module.css';
 
@@ -58,7 +61,8 @@ function isStandalone(): boolean {
 }
 
 export function BellIntroSheet({ open, onOpenChange }: BellIntroSheetProps) {
-  const tip = !isStandalone();
+  const notify = useNotifyState();
+  const tip = !isStandalone() && !notify.supported;
   return (
     <Sheet open={open} onOpenChange={onOpenChange} title="Alerts are on" hideTitle>
       <div className={styles.sheetHead} aria-hidden>
@@ -72,6 +76,7 @@ export function BellIntroSheet({ open, onOpenChange }: BellIntroSheetProps) {
       <Text as="p" size="2" color="gray" mt="3">
         They show while this app is open.
       </Text>
+      <NotifySheetRow state={notify} />
       {tip ? (
         <div className={styles.steps}>
           <div className={styles.step}>
