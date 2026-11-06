@@ -1,0 +1,239 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>v7 · Polish pass (log B + dashboard)</title>
+<!-- v7 2026-11-06. Polish pass on log option B (Brian + Jeffrey) and dashboard v2 (Jeffrey: Lgtm on the metrics), from
+     the Mobbin references in design/references/mobbin-lists-dashboards.{png,txt}:
+     - Large title is the view menu: 28/700 + count in tertiary grey + small chevron (Shopify Orders, Amie).
+     - Fixed leading number column so every name starts on one edge (Things Logbook, Linear). Tabular figures for all
+       numbers; created in secondary grey, updated in tertiary; no "ago" (GitHub).
+     - No full-width row rules: a hairline inset to the name column (Linear).
+     - "Closed" is a plain row with a count capsule and a right chevron, not a card (GitHub Done group, Attio, Amie).
+     - Tiles are filled, borderless, 12 radius, 8 gutter; label on top led by the glyph; big digits (Substack, Shopify).
+     - Open's split bar is 4 px with a 2 px gap (Asana). Posts: label over a 6 px bar on a faint track, count in a
+       fixed right column, sorted busiest first (Shopify breakdowns).
+     - Section header is the link ("Recently updated ›", Mercury). Performance is rows, not tiles, digits large and
+       unit small (Jobber, Mercury).
+     Jeffrey's asks still hold: LP # leftmost, created + updated, Not in medical closed and grey, Waiting for check blue.
+     Real @radix-ui/themes 3.3.0 from CDN. Synthetic data only. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@radix-ui/themes@3.3.0/styles.css">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+body{margin:0}
+.radix-themes{--default-font-family:InterVariable,Inter,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;font-feature-settings:"cv11";-webkit-font-smoothing:antialiased}
+.radix-themes[data-is-root-theme]{min-height:0!important;height:100%;position:relative}
+.board{display:grid;grid-template-columns:repeat(2,390px);gap:26px 18px;justify-content:center;zoom:.89}
+.board figure{margin:0}.board .wide{grid-column:1/-1}
+.frame{height:780px;border-radius:30px;overflow:hidden;border:1px solid var(--border,#2b2b30)}
+.frame.tall{height:1250px}
+.frame.lap{width:1100px;height:690px;border-radius:14px;zoom:.7255}
+figcaption{margin-top:9px;text-align:center;font:500 14px/1.3 var(--font-sans,system-ui);color:var(--foreground,#e4e4e7)}
+figcaption span{display:block;font-weight:400;font-size:13px;color:var(--muted-foreground,#8e8e96);margin-top:2px}
+.app{height:100%;display:flex;flex-direction:column;position:relative;overflow:hidden;background:var(--color-background)}
+.sp{flex:1}
+.tab{font-variant-numeric:tabular-nums}
+
+/* ---- large title ---- */
+.lt{display:flex;align-items:center;gap:4px;padding:22px 12px 14px 16px}
+.lt .ttl{display:inline-flex;align-items:baseline;gap:8px;border:0;background:none;padding:0;font:inherit;cursor:pointer;color:var(--gray-12)}
+.lt .tx{font-size:28px;line-height:34px;font-weight:700;letter-spacing:-.022em}
+.lt .tc{font-size:28px;line-height:34px;font-weight:400;letter-spacing:-.02em;color:var(--gray-9)}
+.lt .ch{align-self:center;display:flex;color:var(--gray-10);margin-left:-2px}
+.lt .back{display:flex;color:var(--gray-11);margin-right:2px}
+.ib{width:36px;height:36px;display:grid;place-items:center;border-radius:50%;color:var(--gray-11)}
+.av{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:var(--gray-12);color:var(--gray-1);font-size:12px;font-weight:600;margin-left:6px}
+
+/* ---- log ---- */
+.cols{display:grid;grid-template-columns:36px minmax(0,1fr) 122px 44px 46px;column-gap:5px;align-items:center;padding:0 16px}
+.colh{height:24px;font-size:11px;font-weight:500;color:var(--gray-9);letter-spacing:.01em}
+.colh span{white-space:nowrap}.colh .r{justify-self:end}
+.row{height:48px;position:relative}
+.row::after{content:"";position:absolute;left:57px;right:0;bottom:0;border-bottom:1px solid var(--gray-a3)}
+.num{font-size:13px;font-weight:500;color:var(--gray-10);white-space:nowrap}
+.nm{font-size:15px;color:var(--gray-12);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st{display:flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap;overflow:hidden;color:var(--gray-10)}
+.st.blue{color:var(--blue-11)}.st.green{color:var(--green-11)}
+.cr,.up{font-size:13px;text-align:right;white-space:nowrap}
+.cr{color:var(--gray-11)}.up{color:var(--gray-9)}
+.row.closed .nm,.row.closed .st{color:var(--gray-10)}
+.row.closed .num,.row.closed .cr{color:var(--gray-9)}
+.fold{display:flex;align-items:center;gap:8px;height:52px;padding:0 16px;margin-top:6px;border:0;background:none;width:100%;font:inherit;cursor:pointer;text-align:left}
+.fold .lb{font-size:15px;font-weight:500;color:var(--gray-11)}
+.cap{min-width:22px;height:20px;padding:0 7px;border-radius:999px;background:var(--gray-a3);color:var(--gray-11);font-size:12px;font-weight:500;display:inline-grid;place-items:center}
+.fold .chv{color:var(--gray-10);display:flex}
+.fab{position:absolute;right:16px;bottom:26px;height:50px;padding:0 20px 0 16px;border-radius:999px;border:0;display:flex;align-items:center;gap:8px;background:var(--gray-12);color:var(--gray-1);font:inherit;font-size:15px;font-weight:600;box-shadow:0 8px 24px -6px rgba(0,0,0,.45),0 2px 6px rgba(0,0,0,.2)}
+
+/* ---- dashboard ---- */
+.dbody{padding:2px 16px 28px;display:flex;flex-direction:column}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tile{border-radius:12px;background:var(--gray-a3);padding:12px 12px 13px;display:flex;flex-direction:column;justify-content:space-between;gap:10px;min-width:0}
+.tile .lb{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:500;color:var(--gray-11);white-space:nowrap;overflow:hidden}
+.tile .v{font-size:22px;line-height:26px;font-weight:600;letter-spacing:-.015em;color:var(--gray-12)}
+.tile.big{min-height:104px}.tile.big .v{font-size:34px;line-height:38px;letter-spacing:-.025em}
+.tile.cl .v{color:var(--gray-11)}
+.tile .sub{font-size:12px;color:var(--gray-10);margin-top:-6px}
+.split{display:flex;gap:2px;height:4px}.split span{border-radius:2px}
+.sh{display:flex;align-items:center;gap:2px;margin:30px 0 10px;font-size:17px;font-weight:600;letter-spacing:-.01em;color:var(--gray-12)}
+.sh .chv{display:flex;color:var(--gray-10)}
+.posts{display:flex;flex-direction:column;gap:14px}
+.post{display:grid;grid-template-columns:1fr 28px;column-gap:10px;row-gap:6px;align-items:center}
+.post .pl{grid-column:1/-1;font-size:13px;color:var(--gray-11)}
+.trk{height:6px;border-radius:3px;background:var(--gray-a3);overflow:hidden}
+.trk span{display:block;height:100%;border-radius:3px;background:var(--gray-12)}
+.post .pc{font-size:13px;font-weight:500;text-align:right;color:var(--gray-12)}
+.post.zero .pc{color:var(--gray-9)}
+.recent{margin:0 -16px}
+.recent .cols{grid-template-columns:36px minmax(0,1fr) auto 34px}
+.perf .pr{display:flex;align-items:baseline;height:48px;position:relative;padding-top:13px;box-sizing:border-box}
+.perf .pr+.pr::before{content:"";position:absolute;left:0;right:0;top:0;border-top:1px solid var(--gray-a3)}
+.perf .k{font-size:15px;color:var(--gray-11);display:flex;align-items:center;gap:8px}
+.perf .k svg{color:var(--gray-9)}
+.perf .m{font-size:12px;color:var(--gray-9);margin-left:6px}
+.perf .val{font-size:17px;font-weight:600;color:var(--gray-12);letter-spacing:-.01em}
+.perf .u{font-size:13px;font-weight:500;color:var(--gray-10);margin-left:1px}
+
+/* laptop */
+.lap .dbody{padding:4px 28px 28px}
+.lap .tiles{grid-template-columns:1.3fr 1fr 1fr 1fr 1fr 1fr}
+.lap .tile.big{min-height:0}
+.lap .grid2{display:grid;grid-template-columns:1fr 1.4fr;column-gap:40px}
+.lap .perf .rows2{display:grid;grid-template-columns:1fr 1fr;column-gap:40px}
+.lap .perf .pr+.pr::before{display:none}
+.lap .perf .pr{border-top:1px solid var(--gray-a3)}
+</style>
+<script type="importmap">{"imports":{
+"react":"https://esm.sh/react@18.3.1",
+"react-dom":"https://esm.sh/react-dom@18.3.1",
+"react-dom/client":"https://esm.sh/react-dom@18.3.1/client",
+"@radix-ui/themes":"https://esm.sh/@radix-ui/themes@3.3.0?deps=react@18.3.1,react-dom@18.3.1",
+"htm":"https://esm.sh/htm@3.1.1"}}</script>
+</head><body><div id="b"></div>
+<script type="module">
+import React from 'react';
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
+import htm from 'htm';
+import { Theme } from '@radix-ui/themes';
+const h = htm.bind(React.createElement);
+const svg = (p, s = 16, w = 1.75) => h`<svg width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth=${w} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style=${{ flex: 'none' }} dangerouslySetInnerHTML=${{ __html: p }} />`;
+const P = {
+  search: '<circle cx="11" cy="11" r="7.5"/><path d="m20.5 20.5-4.2-4.2"/>',
+  plus: '<path d="M5 12h14M12 5v14"/>',
+  chev: '<path d="m6 9 6 6 6-6"/>',
+  chevR: '<path d="m9 18 6-6-6-6"/>',
+  back: '<path d="m15 18-6-6 6-6"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  timer: '<path d="M10 2h4"/><path d="M12 14l3-3"/><circle cx="12" cy="14" r="8"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+};
+const pie = (f) => { const a = f * 2 * Math.PI, x = 7 + 3.25 * Math.sin(a), y = 7 - 3.25 * Math.cos(a); return `M7 7L7 3.75A3.25 3.25 0 ${f > 0.5 ? 1 : 0} 1 ${x.toFixed(2)} ${y.toFixed(2)}Z`; };
+const S = {
+  new: { label: 'Waiting for check', color: 'blue', c: 'var(--blue-9)', ring: 0 },
+  found: { label: 'In medical', color: 'green', c: 'var(--green-9)', ring: 0.75 },
+  notfound: { label: 'Not in medical', mark: 'x' },
+  reunited: { label: 'Reunited', mark: 'check' },
+  discharged: { label: 'Discharged', mark: 'check' },
+  cancelled: { label: 'Cancelled', mark: 'dash' },
+  closed: { label: 'Closed', mark: 'check' },
+};
+const isOpen = (k) => k === 'new' || k === 'found';
+const glyph = (k, s = 14) => {
+  const t = S[k];
+  if (t.ring !== undefined) return h`<svg width=${s} height=${s} viewBox="0 0 14 14" aria-hidden="true" style=${{ flex: 'none' }}><circle cx="7" cy="7" r="5.75" fill="none" stroke=${t.c} strokeWidth="1.5"/>${t.ring ? h`<path d=${pie(t.ring)} fill=${t.c}/>` : null}</svg>`;
+  const mk = t.mark === 'x' ? h`<path d="M5 5l4 4M9 5l-4 4" stroke="var(--color-background)" strokeWidth="1.6" strokeLinecap="round"/>`
+    : t.mark === 'dash' ? h`<path d="M4.5 7h5" stroke="var(--color-background)" strokeWidth="1.6" strokeLinecap="round"/>`
+    : h`<path d="M4.4 7.2l1.8 1.8 3.5-3.6" fill="none" stroke="var(--color-background)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>`;
+  return h`<svg width=${s} height=${s} viewBox="0 0 14 14" aria-hidden="true" style=${{ flex: 'none' }}><circle cx="7" cy="7" r="6.25" fill="var(--gray-8)"/>${mk}</svg>`;
+};
+
+// ---- synthetic night (same as v6). now = 11:04 ----
+const D = [
+  { n: 1013, nm: 'T.R.', k: 'new', at: '11:02', upd: null, post: 'FA 4' },
+  { n: 1012, nm: 'Kayla Martinez', k: 'new', at: '10:58', upd: null, post: 'FA 3' },
+  { n: 1011, nm: 'D.F.', k: 'new', at: '10:51', upd: null, post: 'Command' },
+  { n: 1010, nm: 'B.W.', k: 'new', at: '10:47', upd: 9, post: 'FA 4' },
+  { n: 1009, nm: 'A.N.', k: 'notfound', at: '10:44', upd: 6, post: 'FA 3' },
+  { n: 1008, nm: 'N.G.', k: 'notfound', at: '10:36', upd: 12, post: 'FA 4' },
+  { n: 1007, nm: 'Jordan Diaz', k: 'found', at: '10:31', upd: 2, post: 'FA 4' },
+  { n: 1006, nm: 'L.W.', k: 'reunited', at: '10:24', upd: 9, post: 'Command' },
+  { n: 1005, nm: 'M.P.', k: 'found', at: '10:20', upd: 21, post: 'FA 3' },
+  { n: 1004, nm: 'S.L.', k: 'found', at: '10:12', upd: 25, post: 'FA 3' },
+  { n: 1003, nm: 'C.H.', k: 'reunited', at: '9:58', upd: 34, post: 'FA 4' },
+  { n: 1002, nm: 'Dani V.', k: 'discharged', at: '9:41', upd: 61, post: 'FA 3' },
+  { n: 1001, nm: 'R.K.', k: 'cancelled', at: '9:30', upd: 75, post: 'Base' },
+];
+const OPEN = D.filter((r) => isOpen(r.k)), CLOSED = D.filter((r) => !isOpen(r.k));
+const rel = (m) => (m == null ? '—' : m < 1 ? 'now' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h`);
+const byUpd = [...D].filter((r) => r.upd != null).sort((a, b) => a.upd - b.upd).slice(0, 5);
+
+const Shell = ({ dark, children }) => h`<${Theme} appearance=${dark ? 'dark' : 'light'} accentColor="gray" grayColor="gray" radius="medium"><div className="app">${children}</div><//>`;
+
+// ---- log (B, polished) ----
+const LogTitle = () => h`<div className="lt">
+  <button className="ttl" aria-haspopup="menu"><span className="tx">All requests</span><span className="tc tab">${D.length}</span><span className="ch">${svg(P.chev, 18, 2.25)}</span></button>
+  <span className="sp"></span><span className="ib">${svg(P.search, 20)}</span><span className="av">DK</span>
+</div>`;
+const ColH = () => h`<div className="cols colh" aria-hidden="true"><span>#</span><span>Friend</span><span>Status</span><span className="r">Created</span><span className="r">Updated</span></div>`;
+const Row = ({ r, recent }) => {
+  const t = S[r.k];
+  return h`<div className=${'cols row' + (isOpen(r.k) ? '' : ' closed')}>
+    <span className="num tab">${r.n}</span><span className="nm">${r.nm}</span>
+    <span className=${'st ' + (t.color ?? '')}>${glyph(r.k)}${t.label}</span>
+    ${recent ? null : h`<span className="cr tab">${r.at}</span>`}<span className="up tab">${rel(r.upd)}</span>
+  </div>`;
+};
+const Log = ({ dark }) => h`<${Shell} dark=${dark}>
+  <${LogTitle}/><${ColH}/>
+  ${OPEN.map((r) => h`<${Row} key=${r.n} r=${r}/>`)}
+  <button className="fold" aria-expanded="false"><span className="lb">Closed</span><span className="cap tab">${CLOSED.length}</span><span className="sp"></span><span className="chv">${svg(P.chev, 16, 2.25)}</span></button>
+  <button className="fab">${svg(P.plus, 18, 2.25)}New request</button>
+<//>`;
+
+// ---- dashboard (v3, polished) ----
+const ST = { waiting: 4, inMedical: 3, notIn: 2, reunited: 2, discharged: 1, cancelled: 1 };
+const OPENN = ST.waiting + ST.inMedical, CLOSEDN = ST.notIn + ST.reunited + ST.discharged + ST.cancelled;
+const POSTS = [['FA 3 – Kinetic', 3], ['FA 4 – Oasis', 3], ['Command', 1], ['Base', 0]];
+const maxP = Math.max(...POSTS.map((p) => p[1]));
+const Tile = ({ k, label, v, sub, big, cl, children }) => h`<div className=${'tile' + (big ? ' big' : '') + (cl ? ' cl' : '')}>
+  <span className="lb">${k ? glyph(k) : null}${label}</span>
+  <div><span className="v tab">${v}</span>${children}</div>${sub ? h`<span className="sub">${sub}</span>` : null}
+</div>`;
+const Split = () => h`<div className="split" aria-hidden="true" style=${{ marginTop: 10 }}><span style=${{ flex: ST.waiting, background: 'var(--blue-9)' }}></span><span style=${{ flex: ST.inMedical, background: 'var(--green-9)' }}></span></div>`;
+const Tiles = ({ wide }) => h`<div className="tiles">
+  <${Tile} big label="Open" v=${OPENN}><${Split}/><//>
+  ${wide ? null : h`<${Tile} big cl k="closed" label="Closed" v=${CLOSEDN}><div className="split" aria-hidden="true" style=${{ marginTop: 10, visibility: 'hidden' }}><span style=${{ flex: 1 }}></span></div><//>`}
+  <${Tile} k="new" label="Waiting for check" v=${ST.waiting}/>
+  <${Tile} k="found" label="In medical" v=${ST.inMedical}/>
+  ${wide ? h`<${Tile} cl k="closed" label="Closed" v=${CLOSEDN}/>` : null}
+  <${Tile} cl k="notfound" label="Not in medical" v=${ST.notIn}/>
+  <${Tile} cl k="reunited" label="Reunited" v=${ST.reunited}/>
+</div>`;
+const Posts = () => h`<section><div className="sh">Open by post</div><div className="posts">
+  ${POSTS.map(([l, c]) => h`<div key=${l} className=${'post' + (c ? '' : ' zero')}><span className="pl">${l}</span><span className="trk">${c ? h`<span style=${{ width: `${(c / maxP) * 100}%` }}></span>` : null}</span><span className="pc tab">${c}</span></div>`)}
+</div></section>`;
+const Recent = () => h`<section><div className="sh">Recently updated<span className="chv">${svg(P.chevR, 18, 2.25)}</span></div><div className="recent">
+  ${byUpd.map((r) => h`<${Row} key=${r.n} r=${r} recent/>`)}
+</div></section>`;
+const PR = ({ icon, k, v, u, m }) => h`<div className="pr"><span className="k">${svg(icon, 16)}${k}${m ? h`<span className="m">${m}</span>` : null}</span><span className="sp"></span><span className="val tab">${v}</span>${u ? h`<span className="u">${u}</span>` : null}</div>`;
+const Perf = ({ wide }) => {
+  const rows = [
+    h`<${PR} icon=${P.clock} k="Longest wait" m="1010 · FA 4" v="24" u="m"/>`,
+    h`<${PR} icon=${P.timer} k="Time to answer" m="avg, 2 h" v="9" u="m"/>`,
+    h`<${PR} icon=${P.users} k="Time to reunite" m="avg" v="18" u="m"/>`,
+    h`<${PR} icon=${P.inbox} k="Logged" m="last hour" v="6"/>`,
+  ];
+  return h`<section className="perf"><div className="sh">Performance</div>${wide ? h`<div className="rows2">${rows}</div>` : rows}</section>`;
+};
+const DashTitle = () => h`<div className="lt"><span className="back">${svg(P.back, 24, 2)}</span><span className="tx" style=${{ color: 'var(--gray-12)' }}>Dashboard</span></div>`;
+const Dash = ({ dark }) => h`<${Shell} dark=${dark}><${DashTitle}/><div className="dbody"><${Tiles}/><${Posts}/><${Recent}/><${Perf}/></div><//>`;
+const Laptop = () => h`<${Shell} dark><div className="lap"><${DashTitle}/><div className="dbody"><${Tiles} wide/><div className="grid2"><${Posts}/><${Recent}/></div><${Perf} wide/></div></div><//>`;
+
+const Fig = ({ cap, sub, cls, children }) => h`<figure className=${cls === 'lap' ? 'wide' : ''}><div className=${'frame ' + (cls ?? '')}>${children}</div><figcaption>${cap}<span>${sub}</span></figcaption></figure>`;
+const Board = () => h`<div className="board">
+  <${Fig} cap="Log · B, polished" sub="Dark"><${Log} dark/><//>
+  <${Fig} cap="Log · B, polished" sub="Light"><${Log}/><//>
+  <${Fig} cls="tall" cap="Dashboard, polished" sub="Dark"><${Dash} dark/><//>
+  <${Fig} cls="tall" cap="Dashboard, polished" sub="Light"><${Dash}/><//>
+  <${Fig} cls="lap" cap="Dashboard on a laptop or iPad" sub="Command"><${Laptop}/><//>
+</div>`;
+flushSync(() => createRoot(document.getElementById('b')).render(h`<${Board}/>`));
+</script></body></html>
