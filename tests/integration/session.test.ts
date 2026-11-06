@@ -13,10 +13,10 @@ import {
   pii,
   setCookies,
   uniq,
-  useServer,
+  withTestServer,
 } from './harness';
 
-useServer();
+withTestServer();
 
 const ips: string[] = [];
 afterEach(async () => {

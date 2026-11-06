@@ -34,16 +34,28 @@ export function db(): SupabaseClient {
 }
 
 /**
+ * dbCode of an error PostgREST could not render: HTTP 500 with a plain-text "Something went wrong" body
+ * and no SQLSTATE. PostgREST 14 does this whenever a raised error's HINT or DETAIL contains a non-ASCII
+ * character — and lp_set_status / lp_update_fields / lp_cancel put the current status (e.g.
+ * "Checked – Not Found", with an en dash) in the HINT of P0409 and of P0422 illegal_transition. The
+ * mutation routes reclassify it from the row (lib/server/reclassify.ts).
+ */
+export const OPAQUE_DB_ERROR = 'pgrst_opaque';
+
+/**
  * Calls an lp_* function and returns its data, or throws the mapped ApiFailure. A thrown fetch error
  * (timeout, network) becomes 503.
  */
 export async function rpc<T>(fn: string, args: Record<string, unknown>, context: DbContext = 'default'): Promise<T> {
-  let result: { data: unknown; error: DbError | null };
+  let result: { data: unknown; error: DbError | null; status?: number };
   try {
     result = await db().rpc(fn, args);
   } catch {
     throw new ApiFailure('unavailable', undefined, { dbCode: 'fetch' });
   }
-  if (result.error) throw mapDbError(result.error, context);
+  if (result.error) {
+    if (!result.error.code && result.status === 500) throw new ApiFailure('unavailable', undefined, { dbCode: OPAQUE_DB_ERROR });
+    throw mapDbError(result.error, context);
+  }
   return result.data as T;
 }

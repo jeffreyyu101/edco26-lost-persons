@@ -2,7 +2,7 @@
 // .env.test into process.env and refused non-local Supabase URLs.
 //
 //   * The server under test is a production build (`npm run build:test`) on http://127.0.0.1:$PORT
-//     (PORT from the environment, else .env.test). If nothing listens there, useServer() starts
+//     (PORT from the environment, else .env.test). If nothing listens there, withTestServer() starts
 //     `node scripts/with-test-env.mjs next start` for the file, captures its output, checks it for the
 //     synthetic PII the file used (spec §9.6 "no PII in logs") and stops it afterwards. A server you started
 //     yourself is reused (its logs are checked only when LP_SERVER_LOG names its log file).
@@ -15,6 +15,7 @@ import { existsSync, openSync, readFileSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, expect } from 'vitest';
+import type { RequestSummary } from '@/lib/api-types';
 import { SESSION_COOKIE, signSessionToken } from '@/lib/server/session-token';
 import { ROOT, assertLocalUrl } from '../../scripts/test-env.mjs';
 
@@ -99,7 +100,7 @@ export function assertNoPiiInLogs(): boolean {
 }
 
 /** Call at the top of a test file: reuse or start the server, and check its log for PII at the end. */
-export function useServer(): void {
+export function withTestServer(): void {
   beforeAll(async () => {
     if (!(await serverUp())) await startServer();
   }, 90_000);
@@ -290,7 +291,7 @@ export function createBody(extra: Record<string, unknown> = {}): Record<string, 
 export async function createRequest(staff: Staff, extra: Record<string, unknown> = {}) {
   const res = await api('/api/requests', { json: createBody(extra), cookie: await cookieFor(staff) });
   expect(res.status, JSON.stringify(res.body)).toBe(201);
-  return res.body.request as import('@/lib/api-types').RequestSummary;
+  return res.body.request as RequestSummary;
 }
 
 /** Sets a request's status directly in the database (test setup only); returns the new row_version. */

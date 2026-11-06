@@ -2,9 +2,9 @@
 // name + IP, or ≥ 100 per IP, in 15 minutes → 429 with Retry-After. Every test uses its own fake IP and
 // deletes its own attempts; nobody truncates the table.
 import { afterEach, describe, expect, it } from 'vitest';
-import { PASSWORD, admin, api, clearAttempts, freshIp, pii, uniq, useServer } from './harness';
+import { PASSWORD, admin, api, clearAttempts, freshIp, pii, uniq, withTestServer } from './harness';
 
-useServer();
+withTestServer();
 
 const ips: string[] = [];
 afterEach(async () => {
