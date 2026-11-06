@@ -7,6 +7,7 @@
 import dynamic from 'next/dynamic';
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { ConnectionBanner } from '@/components/ui/Banner';
+import { TestDataBanner } from '@/components/ui/TestDataBanner';
 import { ProfileSkeleton, RowSkeletons } from '@/components/ui/Skeleton';
 import { Snackbar, Toaster } from '@/components/ui/Toast';
 import { installAudioUnlock, playChime, vibrate } from '@/lib/client/chime';
@@ -43,6 +44,7 @@ export interface AppShellProps {
 export function AppShell({ eventTimezone }: AppShellProps) {
   return (
     <StoreProvider eventTimezone={eventTimezone}>
+      <TestDataBanner />
       <Suspense fallback={<RowSkeletons />}>
         <ShellBanners />
         <ViewRouter />
