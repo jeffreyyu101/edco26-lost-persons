@@ -56,7 +56,7 @@ async function timedFetch(kind, path, init = {}) {
     record(kind, started, res, text.length);
     return { res, text };
   } catch (error) {
-    record(kind, started, null, 0, error?.name === 'TimeoutError' ? 'timeout' : 'network');
+    record(kind, started, null, 0, error?.name === 'TimeoutError' ? 'timeout' : `network:${error?.cause?.code ?? error?.name ?? 'unknown'}`);
     return null;
   }
 }
