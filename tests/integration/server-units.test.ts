@@ -1,67 +1,13 @@
-// Pure server helpers (no HTTP server needed): CSV escaping with every injection prefix, the allowlist
-// mappers and legacy audit normalisation, error mapping, Origin / IP / body helpers, magic bytes, logging.
+// Pure server helpers (no HTTP server needed): the allowlist mappers and legacy audit normalisation, error
+// mapping, Origin / IP / body helpers, magic bytes, logging. (The CSV export left the app in v2.5, A50.)
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { buildCsv, csvCell, csvFilename, needsFormulaGuard } from '@/lib/server/csv';
 import { ApiFailure, fieldFromDetail, isDefinitiveRejection, mapDbError, snakeToCamel } from '@/lib/server/errors';
 import { assertSameOrigin, clientIp, expectedOrigins, readBodyLimited } from '@/lib/server/http';
 import { logRequest, newErrorId } from '@/lib/server/log';
 import { REQUEST_SUMMARY_KEYS, createPayload, editChanges, mapAudit, mapPhoto, mapRow, mapSync, patchPayload } from '@/lib/server/mappers';
 import { contentHash, isObjectAlreadyExists, photoPaths, sniffImage } from '@/lib/server/photos';
 import { createRequestSchema, requestPatchSchema } from '@/lib/validation';
-
-describe('CSV injection guard', () => {
-  it.each([
-    ['=1+1', true],
-    ['+1', true],
-    ['-1', true],
-    ['@SUM(A1)', true],
-    ['＝1', true],
-    ['＋1', true],
-    ['－1', true],
-    ['＠x', true],
-    [' =1', true],
-    [' 　=1', true],
-    ['\u0007=1', true],
-    ['\u200b@x', true],
-    ['\ufeff=1', true],
-    ['\t=1', true],
-    ['\tplain', true],
-    ['\rplain', true],
-    ['\nplain', true],
-    ['plain', false],
-    ['a=b', false],
-    ['Blue - red', false],
-    ['', false],
-    ['(407) 555-0100', false],
-    ['  plain', false],
-  ])('%j → guarded %s', (value, guarded) => {
-    expect(needsFormulaGuard(value)).toBe(guarded);
-    expect(csvCell(value)).toBe(`"${guarded ? "'" : ''}${value.replace(/"/g, '""')}"`);
-  });
-
-  it('quotes everything and doubles quotes; null / numbers', () => {
-    expect(csvCell('He said "hi"')).toBe('"He said ""hi"""');
-    expect(csvCell(null)).toBe('""');
-    expect(csvCell(undefined)).toBe('""');
-    expect(csvCell(22)).toBe('"22"');
-    expect(csvCell('=x"y')).toBe('"\'=x""y"');
-  });
-
-  it('builds BOM + header + rows newest first with CRLF, times in the event timezone', () => {
-    const base = mapRow({ id: 'a', case_number: 1, reporting_location: 'FA 4 – Oasis', status: 'Found – Awaiting Reunion', created_at: '2026-11-07T03:10:00+00:00', updated_at: '2026-11-07T03:10:00+00:00' });
-    const older = { ...base, id: 'b', caseNumber: 2, createdAt: '2026-11-06T03:10:00+00:00' };
-    const csv = buildCsv([older, base], 'America/New_York');
-    expect(csv.startsWith('\ufeff"Case number","Name"')).toBe(true);
-    const lines = csv.slice(1).split('\r\n');
-    expect(lines).toHaveLength(4); // header, 2 rows, trailing empty
-    expect(lines[1]).toContain('"LP-0001"');
-    expect(lines[1]).toContain('"In medical · friend coming"');
-    expect(lines[1]).toContain('"2026-11-06 22:10"');
-    expect(lines[2]).toContain('"LP-0002"');
-    expect(csvFilename(new Date('2026-11-07T03:30:00Z'), 'America/New_York')).toBe('lost-persons-2026-11-06.csv');
-  });
-});
 
 describe('mappers', () => {
   it('mapRow: exactly the RequestSummary keys; legacy columns dropped; derived fields', () => {
