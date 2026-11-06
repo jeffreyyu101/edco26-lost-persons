@@ -3,13 +3,17 @@
 // header declutter of 2026-11-06, design/screens/polish-v7.html + v7-log.png). The page loads each export
 // with next/dynamic. Every action goes through the store contract; every view change through lib/client/nav.
 //
-// The list views own their header (the large title that is the view menu, search, and the avatar with its
-// offline / reconnecting badge), the offline / error banner under it, the filter chips, and the New request
-// button. Skeletons show only while there is no cached data yet.
+// All, Pending and My requests open with the brand card (Jeffrey, 2026-11-06 10:31: logos, event details and
+// the big "Is my friend in medical?"), which scrolls away. Under it, each view owns its sticky bar (the large
+// title that is the view menu, search, and the avatar with its offline / reconnecting badge), the offline /
+// error banner under it, the filter chips, and the New request button. Skeletons show only while there is no
+// cached data yet.
 //
 // All requests (option B): queued requests on top, then open requests (newest first), then every closed
-// request folded into one "Closed N" row that opens in place (remembered for the session). With a search or
-// a status / post filter, the matching rows are one list, closed ones greyed in place, with no fold.
+// request folded into one "Archived N" row (Brian, 2026-11-06) that opens in place (remembered for the
+// session). With a search or a status / post filter, the matching rows are one list, closed ones greyed in
+// place, with no fold. Only All archives: Pending never lists closed requests, and My requests keeps showing
+// the reporter theirs (Not in medical included), so they can tell the friend.
 import { Button, Text } from '@radix-ui/themes';
 import { MapPin, Plus, Search as SearchIcon, X } from 'lucide-react';
 import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -41,11 +45,12 @@ import {
 import { parsePostFilterKey, postFilterLabel, statusMeta, type GlyphKind } from '@/lib/domain';
 import { formatCreatedTime, formatUpdatedAgo, updatedPhrase } from '@/lib/format';
 import { AppHeader } from './AppHeader';
+import { BrandCard } from './BrandCard';
 import { CheckCard, ComingCard, MineCard, OutboxCard } from './cards';
 import { primeKeyboard, useDelayedFlag, useScrollMemory, useStatusTap, useStickyHeight } from './hooks';
 import { mineFreshTone, resultCount, searchDisplay, updatedSince } from './list-helpers';
 import { AllSkeleton, MineSkeleton, PendingSkeleton } from './ListSkeletons';
-import { ClosedFold, ClosedRows, ColumnHeader, LogGrid, LogRow, OutboxLogRow, SearchLogRow } from './rows';
+import { ArchivedFold, ArchivedRows, ColumnHeader, LogGrid, LogRow, OutboxLogRow, SearchLogRow } from './rows';
 import type { ListViewName } from './ViewSwitcher';
 import s from './list.module.css';
 
@@ -109,6 +114,7 @@ function Chrome({ view, chips, filtered = false, skeleton, children }: ChromePro
 
   return (
     <div className={s.root} data-view={view} ref={rootRef}>
+      <BrandCard />
       <div className={s.sticky} ref={stickyRef}>
         <AppHeader
           view={view}
@@ -232,12 +238,14 @@ export function AllView({ status, post, open = false }: AllViewProps) {
   const now = useNow();
   const prefs = usePrefs();
   const actions = useActions();
-  const closedId = useId();
+  const archivedId = useId();
   const filtered = !!(status || post);
   // Requests saved on this phone sit on top of the unfiltered log (they have no status or LP number yet).
   const queued = filtered ? [] : outbox;
-  // Unfiltered: open first, closed folded (rows are already newest first). Filtered: one list, no fold.
+  // Unfiltered: open first, closed folded under Archived (rows are already newest first). Filtered: one list,
+  // closed rows greyed in place, no fold.
   const sections = useMemo(() => (filtered ? null : splitOpenClosed(rows)), [filtered, rows]);
+  // The Archived fold's open state lasts for this browser session (prefs.closedExpanded, sessionStorage).
   const expanded = prefs.closedExpanded;
   useScrollMemory(`all|${status ?? ''}|${post ?? ''}|${openOnly ? 'open' : ''}`, !loading);
 
@@ -260,17 +268,17 @@ export function AllView({ status, post, open = false }: AllViewProps) {
             <>
               <Rows rows={sections.open} now={now} tz={tz} />
               {sections.closed.length > 0 ? (
-                <ClosedFold
+                <ArchivedFold
                   count={sections.closed.length}
                   open={expanded}
-                  controls={closedId}
+                  controls={archivedId}
                   onToggle={() => actions.setPref('closedExpanded', !expanded)}
                 />
               ) : null}
               {expanded && sections.closed.length > 0 ? (
-                <ClosedRows id={closedId}>
+                <ArchivedRows id={archivedId}>
                   <Rows rows={sections.closed} now={now} tz={tz} />
-                </ClosedRows>
+                </ArchivedRows>
               ) : null}
             </>
           ) : (
