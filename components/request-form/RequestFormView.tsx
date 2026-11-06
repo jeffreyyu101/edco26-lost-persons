@@ -11,7 +11,13 @@
 //                                    conflict review (latest data, the user's edits kept, nothing resent).
 //   ?outbox=<mutationId>           → mode 'outbox': fix and resend a needs-attention job with the same
 //                                    mutationId; photos read-only; the rejected field is pointed at.
-import { AlertDialog, Button, Flex, Heading } from '@radix-ui/themes';
+// Presentation (desktop-new-tablet.html frame 1): the phone page under 768 px, a 480 px side sheet at
+// 768–1023 and a centred 760 px two-column modal from 1024, chosen by viewport width unless the caller
+// forces one (`presentation`). Sheet and modal are dialogs over whatever page the shell keeps behind them:
+// Esc, × or a click outside close without discarding (a new request keeps its draft, exactly as leaving
+// does on the phone; edit and the needs-attention editor ask before dropping changes, as Cancel does),
+// and ⌘↵ / Ctrl+↵ sends.
+import { AlertDialog, Button, Flex } from '@radix-ui/themes';
 import { CircleAlert } from 'lucide-react';
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Banner } from '@/components/ui/Banner';
@@ -54,15 +60,42 @@ import {
   type DuplicateRef,
   type TheirChange,
 } from './form-logic';
+import { FormSurface } from './FormSurface';
+import {
+  PresentationContext,
+  isOverlay,
+  useFormPresentation,
+  usePresentation,
+  type FormPresentationChoice,
+} from './presentation';
 import { RequestForm } from './RequestForm';
 import './request-form.css';
 
-export type RequestFormViewProps =
+export type RequestFormViewProps = (
   | { mode: 'new' }
   | { mode: 'edit'; id: string; section: EditSection }
-  | { mode: 'outbox'; mutationId: string };
+  | { mode: 'outbox'; mutationId: string }
+) & {
+  /**
+   * 'auto' (default): the phone page under 768 px, the side sheet at 768–1023, the modal from 1024.
+   * 'page' | 'sheet' | 'modal' force one. Sheet and modal render as a dialog (portalled, with its own
+   * scrim) over whatever the shell keeps on screen behind them.
+   */
+  presentation?: FormPresentationChoice;
+};
 
 export function RequestFormView(props: RequestFormViewProps) {
+  const presentation = useFormPresentation(props.presentation);
+  return <PresentationContext.Provider value={presentation}>{modeView(props)}</PresentationContext.Provider>;
+}
+
+/**
+ * The same component under the name the desktop shell asks for: render it for ?new=1, ?r=…&edit= and
+ * ?outbox= over the list (and the docked request) from 768 px. Under 768 px it is the phone page.
+ */
+export const RequestFormOverlay = RequestFormView;
+
+function modeView(props: RequestFormViewProps) {
   switch (props.mode) {
     case 'new':
       return <NewRequest />;
@@ -127,23 +160,16 @@ function Confirm({ open, onOpenChange, title, keepLabel, confirmLabel, onConfirm
   );
 }
 
-/** The full-screen frame without a form: while loading, or when the request / job is gone. */
-function FormFrame({ title, children }: { title: string; children?: ReactNode }) {
+/** The frame without a form: while loading, or when the request / job is gone. */
+function FormFrame({ title, columns = 2, children }: { title: string; columns?: 1 | 2; children?: ReactNode }) {
+  const presentation = usePresentation();
+  const close = () => goBack({});
   return (
-    <div className="lp-rf" data-testid="request-form">
-      <header className="lp-rf-nav">
-        <Button type="button" variant="ghost" color="gray" size="2" className="lp-hit" onClick={() => goBack({})}>
-          Cancel
-        </Button>
-        <Heading as="h1" size="3" weight="medium" className="lp-rf-title">
-          {title}
-        </Heading>
-        <span aria-hidden />
-      </header>
-      <div className="lp-rf-scroll" style={{ display: 'flex', flexDirection: 'column' }}>
+    <FormSurface presentation={presentation} title={title} onCancel={close} onDismiss={close} columns={columns}>
+      <div className="lp-rf-scroll lp-rf-frame" style={{ display: 'flex', flexDirection: 'column' }}>
         {children}
       </div>
-    </div>
+    </FormSurface>
   );
 }
 
@@ -161,6 +187,7 @@ interface NewState {
 function NewRequest() {
   const store = useAppStore();
   const { actions } = store;
+  const overlay = isOverlay(usePresentation());
   const offline = useStoreSelector(selectOffline);
   const durable = useStoreSelector(selectDurable);
   const [form, setForm] = useState<NewState | null>(null);
@@ -248,7 +275,9 @@ function NewRequest() {
 
   const duplicateOf = useDuplicate(form?.values.name ?? '', { clientMutationId: form?.clientMutationId ?? null });
 
-  if (!form) return <FormFrame title="New request" />;
+  // The draft loads from IndexedDB in a few ms: an empty dialog would open and then grow, so the
+  // overlay waits for it (the phone keeps its full-screen frame).
+  if (!form) return overlay ? null : <FormFrame title="New request" />;
 
   const update = (patch: Partial<NewState>) => setForm((f) => (f ? { ...f, ...patch } : f));
 
@@ -329,6 +358,8 @@ function NewRequest() {
         submitDisabled={!canSend(form.values, form.photos.length) || noStorageOffline}
         onSubmit={() => void submit()}
         onCancel={cancel}
+        // Leaving keeps the draft (flushed on unmount), as the phone's back button does.
+        onDismiss={() => goBack({})}
         onPostPicked={(choice) => actions.setPref('lastPost', { reportingLocation: choice.reportingLocation, otherLocation: choice.otherLocation })}
       />
       <Confirm
@@ -378,12 +409,12 @@ function EditRequest({ id, section }: { id: string; section: EditSection }) {
   const ready = useReadyToEdit();
   if (!row) {
     return (
-      <FormFrame title="Edit details">
+      <FormFrame title="Edit details" columns={section === 'all' ? 2 : 1}>
         {loading ? null : <EmptyState icon="search" title="Request not found" action={{ label: 'Back', onClick: () => goBack({}) }} />}
       </FormFrame>
     );
   }
-  if (!ready) return <FormFrame title={`Edit ${formatCaseNumber(row.caseNumber)}`} />;
+  if (!ready) return <FormFrame title={`Edit ${formatCaseNumber(row.caseNumber)}`} columns={section === 'all' ? 2 : 1} />;
   return <EditForm id={id} section={section} row={row} />;
 }
 

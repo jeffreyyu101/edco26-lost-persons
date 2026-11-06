@@ -3,7 +3,11 @@
 // (photo slot, Name, Age, Gender), Wearing, Last seen (+ stage chips while focus is within the row), Friend
 // or family, More details, and the sticky Send button. Controlled: RequestFormView owns the values, the
 // draft and the store calls. Full-screen and scrolls whenever the content doesn't fit.
-import { Button, Heading, SegmentedControl, Text } from '@radix-ui/themes';
+// Tablet and desktop (desktop-new-tablet.html frame 1, `presentation` sheet / modal): the same fields in a
+// dialog. The post is a chip in the header, the groups become boxed fields labelled by their placeholders
+// (screen readers keep the real labels), the modal puts Missing person left and Friend or family + More
+// details right, the place chips stay visible, and the footer is Cancel + Send with its ⌘↵ key cap.
+import { Button, SegmentedControl, Text } from '@radix-ui/themes';
 import { ArrowUpRight, Check, ChevronDown, ChevronUp, CloudOff, MapPin, UserRoundSearch } from 'lucide-react';
 import {
   useEffect,
@@ -32,9 +36,11 @@ import {
   type PhotoTiming,
 } from '@/lib/domain';
 import { formatCaseNumber } from '@/lib/format';
+import { FormSurface } from './FormSurface';
 import { lastSeenWithChip, moreFieldsFor, moreStartsOpen, sanitizeAge, type MoreField } from './form-logic';
 import { PhotoSlot } from './PhotoSlot';
-import { PostPicker, type PostChoice } from './PostPicker';
+import { PostPicker, PostPickerPopover, type PostChoice } from './PostPicker';
+import { isApplePlatform, isOverlay, sendShortcut, usePresentation, type FormPresentation } from './presentation';
 import './request-form.css';
 
 export type RequestFormMode = 'create' | 'edit' | 'outbox';
@@ -85,6 +91,15 @@ export interface RequestFormProps {
   legacyPost?: string | null;
   /** Show the values without letting them change (an outbox job that is still waiting or sending). */
   readOnly?: boolean;
+
+  // Added for tablet and desktop (all optional).
+  /** page (phone, default), sheet (768–1023) or modal (1024+). Defaults to RequestFormView's context. */
+  presentation?: FormPresentation;
+  /**
+   * sheet / modal: ×, Esc or a click outside. Closes without discarding (a new request keeps its draft,
+   * as leaving does on the phone). Defaults to onCancel.
+   */
+  onDismiss?: () => void;
 }
 
 const DEFAULT_TITLE: Readonly<Record<RequestFormMode, string>> = {
@@ -92,6 +107,19 @@ const DEFAULT_TITLE: Readonly<Record<RequestFormMode, string>> = {
   edit: 'Edit details',
   outbox: 'Not sent',
 };
+
+/**
+ * Tablet / desktop placeholders: the boxed fields have no visible label (the mockup's "Last seen · where,
+ * roughly when"), so the placeholder names the field. The <label> stays for screen readers.
+ */
+const DESK_PLACEHOLDER = {
+  clothing: 'Wearing · clothing, colors, accessories',
+  lastSeen: 'Last seen · where, roughly when',
+  contactName: 'Name · who’s looking',
+  contactPhone: 'Phone',
+  contactRelationship: 'Relation · friend, partner, sibling…',
+  contactNotes: 'Notes',
+} as const;
 
 const MORE_ROWS: Readonly<Record<MoreField, { label: string; placeholder: string; multiline: boolean; max: number }>> = {
   hair: { label: 'Hair', placeholder: '', multiline: false, max: LIMITS.hair },
@@ -109,6 +137,9 @@ const TAP_SLOP_PX = 10;
 
 export function RequestForm(props: RequestFormProps) {
   const { mode, section, values, errors = {}, busy } = props;
+  const contextPresentation = usePresentation();
+  const presentation = props.presentation ?? contextPresentation;
+  const desk = isOverlay(presentation);
   // Nothing changes while a send is in flight: whatever is typed then would be lost when the draft clears.
   const readOnly = !!props.readOnly || busy;
   const locked = readOnly;
@@ -122,6 +153,7 @@ export function RequestForm(props: RequestFormProps) {
   const [lastSeenFocus, setLastSeenFocus] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastSeenRef = useRef<HTMLInputElement>(null);
   const scrollToMore = useRef(false);
   const chipDown = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const outboxCount = useStoreSelector(selectOutboxCount);
@@ -156,7 +188,12 @@ export function RequestForm(props: RequestFormProps) {
 
   // ---- Stage chips: pointerdown + preventDefault keeps focus in Last seen (so the chips stay and the tap
   // isn't lost); the chip applies on pointerup within the tap slop; a keyboard click (detail 0) also works.
-  const appendStage = (chip: string) => set('lastSeen', lastSeenWithChip(values.lastSeen, chip, LIMITS.lastSeen));
+  // On tablet / desktop the chips are always there, so a click may come from elsewhere in the form: the
+  // caret then follows the text into Last seen (a keyboard press leaves focus on the chip).
+  const appendStage = (chip: string, focusField = false) => {
+    set('lastSeen', lastSeenWithChip(values.lastSeen, chip, LIMITS.lastSeen));
+    if (focusField && desk) lastSeenRef.current?.focus({ preventScroll: true });
+  };
   const chipHandlers = (chip: string) => ({
     onPointerDown: (e: PointerEvent<HTMLButtonElement>) => {
       e.preventDefault();
@@ -167,7 +204,7 @@ export function RequestForm(props: RequestFormProps) {
       chipDown.current = null;
       if (!down || down.pointerId !== e.pointerId) return;
       if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > TAP_SLOP_PX) return;
-      appendStage(chip);
+      appendStage(chip, true);
     },
     onPointerCancel: () => {
       chipDown.current = null;
@@ -180,7 +217,8 @@ export function RequestForm(props: RequestFormProps) {
 
   // ---- Enter moves to the next field (never submits: Send is the only way to send).
   const onFormKeyDown = (e: KeyboardEvent<HTMLFormElement>) => {
-    if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+    // ⌘↵ / Ctrl+↵ is the send shortcut (FormSurface), not "next field".
+    if (e.key !== 'Enter' || e.nativeEvent.isComposing || e.metaKey || e.ctrlKey) return;
     const target = e.target as HTMLElement;
     if (target.tagName !== 'INPUT' || !target.classList.contains('lp-rf-in')) return;
     e.preventDefault();
@@ -217,19 +255,55 @@ export function RequestForm(props: RequestFormProps) {
   const labelled = photoSlot === null;
   const phoneValid = isValidPhone(values.contactPhone);
   const title = props.title ?? DEFAULT_TITLE[mode];
+  const onPostChange = (choice: PostChoice) => {
+    onChange({ ...values, reportingLocation: choice.reportingLocation, otherLocation: choice.otherLocation ?? '' });
+    props.onPostPicked?.(choice);
+  };
+  const postAria = postMissing ? 'Reporting from: choose post' : `Reporting from ${postLabel}. Change`;
+  const postErrorLine = postError ? (
+    <span id={errId('post')} className="lp-rf-err" role="alert" style={{ padding: '6px 4px 0', margin: 0 }}>
+      {postError}
+    </span>
+  ) : null;
+
+  // Tablet / desktop: the post is a chip in the dialog header that drops the same picker.
+  const headerChip =
+    desk && section === 'all' ? (
+      <PostPickerPopover open={pickerOpen} onOpenChange={setPickerOpen} value={postValue} onChange={onPostChange}>
+        <button
+          type="button"
+          className="lp-rf-pchip lp-hit"
+          data-empty={postMissing ? '' : undefined}
+          data-invalid={postError ? '' : undefined}
+          aria-label={postAria}
+          aria-describedby={postError ? errId('post') : undefined}
+          disabled={locked}
+        >
+          <MapPin size={15} strokeWidth={1.75} aria-hidden />
+          <span className="lp-rf-pchip-t">{postMissing ? 'Choose post' : postLabel}</span>
+          <ChevronDown size={14} strokeWidth={1.75} aria-hidden />
+        </button>
+      </PostPickerPopover>
+    ) : null;
+
+  const shortcut = desk ? sendShortcut(isApplePlatform(typeof navigator === 'undefined' ? undefined : navigator)) : null;
+  const sendFromShortcut = () => {
+    if (!props.submitDisabled && !busy) props.onSubmit();
+  };
 
   return (
-    <div className="lp-rf" data-mode={mode} data-testid="request-form">
-      <header className="lp-rf-nav">
-        <Button type="button" variant="ghost" color="gray" size="2" className="lp-hit" onClick={props.onCancel} disabled={busy}>
-          Cancel
-        </Button>
-        <Heading as="h1" size="3" weight="medium" className="lp-rf-title">
-          {title}
-        </Heading>
-        <span aria-hidden />
-      </header>
-
+    <FormSurface
+      presentation={presentation}
+      title={title}
+      mode={mode}
+      onCancel={props.onCancel}
+      cancelDisabled={busy}
+      onDismiss={props.onDismiss ?? props.onCancel}
+      dismissDisabled={busy}
+      headerExtra={headerChip}
+      onSubmitShortcut={sendFromShortcut}
+      columns={section === 'all' ? 2 : 1}
+    >
       {props.offline ? (
         <div className="lp-rf-bar">
           <div className="lp-rf-off" role="status">
@@ -243,7 +317,8 @@ export function RequestForm(props: RequestFormProps) {
         <form className="lp-rf-body" noValidate onSubmit={(e) => e.preventDefault()} onKeyDown={onFormKeyDown} aria-label={title}>
           {props.notice ? <div className="lp-rf-notice">{props.notice}</div> : null}
 
-          {section === 'all' ? (
+          {section === 'all' && desk ? postErrorLine : null}
+          {section === 'all' && !desk ? (
             <>
               <button
                 type="button"
@@ -251,7 +326,7 @@ export function RequestForm(props: RequestFormProps) {
                 data-empty={postMissing ? '' : undefined}
                 data-invalid={postError ? '' : undefined}
                 aria-haspopup="dialog"
-                aria-label={postMissing ? 'Reporting from: choose post' : `Reporting from ${postLabel}. Change`}
+                aria-label={postAria}
                 aria-describedby={postError ? errId('post') : undefined}
                 onClick={() => setPickerOpen(true)}
                 disabled={locked}
@@ -273,16 +348,12 @@ export function RequestForm(props: RequestFormProps) {
                   <ChevronDown size={18} strokeWidth={1.75} aria-hidden />
                 </span>
               </button>
-              {postError ? (
-                <span id={errId('post')} className="lp-rf-err" role="alert" style={{ padding: '6px 4px 0', margin: 0 }}>
-                  {postError}
-                </span>
-              ) : null}
+              {postErrorLine}
             </>
           ) : null}
 
           {section !== 'friend' ? (
-            <>
+            <div className="lp-rf-col" data-col="person">
               <Text as="div" size="2" weight="medium" color="gray" className="lp-rf-lbl" id={id('person')}>
                 Missing person
               </Text>
@@ -327,7 +398,7 @@ export function RequestForm(props: RequestFormProps) {
                           id={id('age')}
                           className="lp-rf-in"
                           aria-label={labelled ? undefined : 'Age'}
-                          placeholder={labelled ? '' : 'Age'}
+                          placeholder={labelled && !desk ? '' : 'Age'}
                           type="text"
                           inputMode="numeric"
                           pattern="[0-9]*"
@@ -342,7 +413,7 @@ export function RequestForm(props: RequestFormProps) {
                       </div>
                       {errLine('age', labelled)}
                     </div>
-                    <div className="lp-rf-r">
+                    <div className="lp-rf-r" data-seg="">
                       {labelled ? (
                         <span className="lp-rf-k" aria-hidden>
                           Gender
@@ -350,7 +421,7 @@ export function RequestForm(props: RequestFormProps) {
                       ) : null}
                       <SegmentedControl.Root
                         className="lp-rf-seg"
-                        size="1"
+                        size={desk ? '2' : '1'}
                         value={values.gender}
                         onValueChange={(v) => set('gender', v as Gender)}
                         aria-label="Gender"
@@ -382,7 +453,7 @@ export function RequestForm(props: RequestFormProps) {
                       id={id('clothing')}
                       className="lp-rf-in"
                       rows={2}
-                      placeholder="Clothing, colors, accessories"
+                      placeholder={desk ? DESK_PLACEHOLDER.clothing : 'Clothing, colors, accessories'}
                       maxLength={LIMITS.clothing}
                       readOnly={readOnly}
                       value={values.clothing}
@@ -394,7 +465,7 @@ export function RequestForm(props: RequestFormProps) {
                 </div>
                 <div
                   className="lp-rf-ls"
-                  data-focus={lastSeenFocus ? '' : undefined}
+                  data-focus={lastSeenFocus && !desk ? '' : undefined}
                   onFocus={() => setLastSeenFocus(true)}
                   onBlur={(e) => {
                     if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setLastSeenFocus(false);
@@ -405,9 +476,10 @@ export function RequestForm(props: RequestFormProps) {
                       Last seen
                     </label>
                     <input
+                      ref={lastSeenRef}
                       id={id('lastSeen')}
                       className="lp-rf-in"
-                      placeholder="Where, roughly when"
+                      placeholder={desk ? DESK_PLACEHOLDER.lastSeen : 'Where, roughly when'}
                       autoComplete="off"
                       enterKeyHint="next"
                       maxLength={LIMITS.lastSeen}
@@ -418,7 +490,7 @@ export function RequestForm(props: RequestFormProps) {
                     />
                   </div>
                   {errLine('lastSeen')}
-                  {lastSeenFocus && !readOnly ? (
+                  {(lastSeenFocus || desk) && !readOnly ? (
                     <div className="lp-rf-sugg" role="group" aria-label="Add a place to Last seen">
                       {STAGE_CHIPS.map((chip) => (
                         <Button
@@ -454,159 +526,186 @@ export function RequestForm(props: RequestFormProps) {
                   <ArrowUpRight size={13} strokeWidth={1.75} aria-hidden />
                 </Button>
               ) : null}
-            </>
+            </div>
           ) : null}
 
-          {section !== 'person' ? (
-            <>
-              <Text as="div" size="2" weight="medium" color="gray" className="lp-rf-lbl" id={id('friend')}>
-                Friend or family
-              </Text>
-              <div className="lp-rf-grp" role="group" aria-labelledby={id('friend')}>
-                <TextRow
-                  inputId={id('contactName')}
-                  label="Name"
-                  placeholder="Who's looking"
-                  max={LIMITS.contactName}
-                  value={values.contactName}
-                  onChange={(v) => set('contactName', v)}
-                  readOnly={readOnly}
-                  error={err('contactName')}
-                  errorId={errId('contactName')}
-                />
-                <TextRow
-                  inputId={id('contactPhone')}
-                  label="Phone"
-                  placeholder="Phone number"
-                  type="tel"
-                  inputMode="tel"
-                  max={LIMITS.contactPhone}
-                  value={values.contactPhone}
-                  onChange={(v) => set('contactPhone', v)}
-                  readOnly={readOnly}
-                  error={err('contactPhone')}
-                  errorId={errId('contactPhone')}
-                  trailing={
-                    phoneValid ? (
-                      <span className="lp-rf-ok" role="img" aria-label="Valid number">
-                        <Check size={16} strokeWidth={1.75} aria-hidden />
-                      </span>
-                    ) : null
-                  }
-                />
-                <TextRow
-                  inputId={id('contactRelationship')}
-                  label="Relation"
-                  placeholder="Friend, partner, sibling…"
-                  max={LIMITS.contactRelationship}
-                  value={values.contactRelationship}
-                  onChange={(v) => set('contactRelationship', v)}
-                  readOnly={readOnly}
-                  error={err('contactRelationship')}
-                  errorId={errId('contactRelationship')}
-                />
-                {section === 'friend' ? (
-                  <TextRow
-                    inputId={id('contactNotes')}
-                    label="Notes"
-                    placeholder=""
-                    multiline
-                    max={LIMITS.contactNotes}
-                    value={values.contactNotes}
-                    onChange={(v) => set('contactNotes', v)}
-                    readOnly={readOnly}
-                    error={err('contactNotes')}
-                    errorId={errId('contactNotes')}
-                  />
-                ) : null}
-              </div>
-            </>
-          ) : null}
-
-          {moreFields.length > 0 ? (
-            <>
-              <button
-                type="button"
-                className="lp-rf-more lp-hit"
-                aria-expanded={showMore}
-                aria-controls={id('more')}
-                onClick={() => {
-                  scrollToMore.current = !showMore;
-                  setMoreOpen(!showMore);
-                }}
-              >
-                <span>More details</span>
-                <span className="lp-rf-sp" />
-                {showMore ? (
-                  <ChevronUp size={16} strokeWidth={1.75} aria-hidden />
-                ) : (
-                  <ChevronDown size={16} strokeWidth={1.75} aria-hidden />
-                )}
-              </button>
-              {showMore ? (
-                <div className="lp-rf-grp" id={id('more')} ref={moreRef} role="group" aria-label="More details">
-                  {moreFields.map((key) => {
-                    const row = MORE_ROWS[key];
-                    return (
+          {section !== 'person' || moreFields.length > 0 ? (
+            <div className="lp-rf-col" data-col="friend">
+              {section !== 'person' ? (
+                <>
+                  <Text as="div" size="2" weight="medium" color="gray" className="lp-rf-lbl" id={id('friend')}>
+                    Friend or family
+                  </Text>
+                  <div className="lp-rf-grp" role="group" aria-labelledby={id('friend')}>
+                    <TextRow
+                      inputId={id('contactName')}
+                      label="Name"
+                      placeholder={desk ? DESK_PLACEHOLDER.contactName : "Who's looking"}
+                      max={LIMITS.contactName}
+                      value={values.contactName}
+                      onChange={(v) => set('contactName', v)}
+                      readOnly={readOnly}
+                      error={err('contactName')}
+                      errorId={errId('contactName')}
+                    />
+                    <TextRow
+                      inputId={id('contactPhone')}
+                      label="Phone"
+                      placeholder={desk ? DESK_PLACEHOLDER.contactPhone : 'Phone number'}
+                      type="tel"
+                      inputMode="tel"
+                      max={LIMITS.contactPhone}
+                      value={values.contactPhone}
+                      onChange={(v) => set('contactPhone', v)}
+                      readOnly={readOnly}
+                      error={err('contactPhone')}
+                      errorId={errId('contactPhone')}
+                      trailing={
+                        phoneValid ? (
+                          <span className="lp-rf-ok" role="img" aria-label="Valid number">
+                            <Check size={16} strokeWidth={1.75} aria-hidden />
+                          </span>
+                        ) : null
+                      }
+                    />
+                    <TextRow
+                      inputId={id('contactRelationship')}
+                      label="Relation"
+                      placeholder={desk ? DESK_PLACEHOLDER.contactRelationship : 'Friend, partner, sibling…'}
+                      max={LIMITS.contactRelationship}
+                      value={values.contactRelationship}
+                      onChange={(v) => set('contactRelationship', v)}
+                      readOnly={readOnly}
+                      error={err('contactRelationship')}
+                      errorId={errId('contactRelationship')}
+                    />
+                    {section === 'friend' ? (
                       <TextRow
-                        key={key}
-                        inputId={id(key)}
-                        label={row.label}
-                        wide
-                        placeholder={row.placeholder}
-                        multiline={row.multiline}
-                        max={row.max}
-                        value={values[key]}
-                        onChange={(v) => set(key, v)}
+                        inputId={id('contactNotes')}
+                        label="Notes"
+                        placeholder={desk ? DESK_PLACEHOLDER.contactNotes : ''}
+                        multiline
+                        max={LIMITS.contactNotes}
+                        value={values.contactNotes}
+                        onChange={(v) => set('contactNotes', v)}
                         readOnly={readOnly}
-                        error={err(key)}
-                        errorId={errId(key)}
+                        error={err('contactNotes')}
+                        errorId={errId('contactNotes')}
                       />
-                    );
-                  })}
-                </div>
+                    ) : null}
+                  </div>
+                </>
               ) : null}
-            </>
+
+              {moreFields.length > 0 ? (
+                <>
+                  <button
+                    type="button"
+                    className="lp-rf-more lp-hit"
+                    aria-expanded={showMore}
+                    aria-controls={id('more')}
+                    onClick={() => {
+                      scrollToMore.current = !showMore;
+                      setMoreOpen(!showMore);
+                    }}
+                  >
+                    <span>More details</span>
+                    <span className="lp-rf-sp" />
+                    {showMore ? (
+                      <ChevronUp size={16} strokeWidth={1.75} aria-hidden />
+                    ) : (
+                      <ChevronDown size={16} strokeWidth={1.75} aria-hidden />
+                    )}
+                  </button>
+                  {showMore ? (
+                    <div className="lp-rf-grp" id={id('more')} ref={moreRef} role="group" aria-label="More details" data-more="">
+                      {moreFields.map((key) => {
+                        const row = MORE_ROWS[key];
+                        return (
+                          <TextRow
+                            key={key}
+                            inputId={id(key)}
+                            label={row.label}
+                            wide
+                            placeholder={row.placeholder}
+                            multiline={row.multiline}
+                            max={row.max}
+                            value={values[key]}
+                            onChange={(v) => set(key, v)}
+                            readOnly={readOnly}
+                            error={err(key)}
+                            errorId={errId(key)}
+                          />
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
           ) : null}
         </form>
       </div>
 
       <footer className="lp-rf-foot">
-        <div className="lp-rf-foot-in">
-          {props.onDiscard ? (
-            <Button type="button" size="3" variant="soft" color="red" className="lp-hit" onClick={props.onDiscard} disabled={busy}>
-              Discard
+        {desk ? (
+          <div className="lp-rf-foot-in">
+            {props.onDiscard ? (
+              <Button type="button" size="2" variant="soft" color="red" className="lp-hit" onClick={props.onDiscard} disabled={busy}>
+                Discard
+              </Button>
+            ) : null}
+            <span className="lp-rf-sp" />
+            <Button type="button" size="2" variant="ghost" color="gray" className="lp-hit lp-rf-ghost" onClick={props.onCancel} disabled={busy}>
+              Cancel
             </Button>
-          ) : null}
-          <Button
-            type="button"
-            size="3"
-            highContrast
-            disabled={props.submitDisabled || busy}
-            loading={busy}
-            onClick={props.onSubmit}
-            className="lp-hit"
-            style={{ width: '100%' }}
-            data-testid="request-form-submit"
-          >
-            {props.offline ? <CloudOff size={16} strokeWidth={1.75} aria-hidden /> : null}
-            {props.submitLabel}
-          </Button>
-        </div>
+            <Button
+              type="button"
+              size="2"
+              highContrast
+              disabled={props.submitDisabled || busy}
+              loading={busy}
+              onClick={props.onSubmit}
+              className="lp-hit lp-rf-send"
+              data-testid="request-form-submit"
+              aria-keyshortcuts={shortcut?.aria}
+            >
+              {props.offline ? <CloudOff size={15} strokeWidth={1.75} aria-hidden /> : null}
+              {props.submitLabel}
+              {shortcut ? (
+                <kbd className="lp-rf-kbd" aria-hidden>
+                  {shortcut.cap}
+                </kbd>
+              ) : null}
+            </Button>
+          </div>
+        ) : (
+          <div className="lp-rf-foot-in">
+            {props.onDiscard ? (
+              <Button type="button" size="3" variant="soft" color="red" className="lp-hit" onClick={props.onDiscard} disabled={busy}>
+                Discard
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              size="3"
+              highContrast
+              disabled={props.submitDisabled || busy}
+              loading={busy}
+              onClick={props.onSubmit}
+              className="lp-hit"
+              style={{ width: '100%' }}
+              data-testid="request-form-submit"
+            >
+              {props.offline ? <CloudOff size={16} strokeWidth={1.75} aria-hidden /> : null}
+              {props.submitLabel}
+            </Button>
+          </div>
+        )}
       </footer>
 
-      {section === 'all' ? (
-        <PostPicker
-          open={pickerOpen}
-          onOpenChange={setPickerOpen}
-          value={postValue}
-          onChange={(choice) => {
-            onChange({ ...values, reportingLocation: choice.reportingLocation, otherLocation: choice.otherLocation ?? '' });
-            props.onPostPicked?.(choice);
-          }}
-        />
-      ) : null}
-    </div>
+      {section === 'all' && !desk ? <PostPicker open={pickerOpen} onOpenChange={setPickerOpen} value={postValue} onChange={onPostChange} /> : null}
+    </FormSurface>
   );
 }
 

@@ -2,10 +2,11 @@
 // "Reporting from" picker sheet (states.html PostPicker): FA 3 – Kinetic, FA 4 – Oasis, Command, Base and
 // Other; Other shows a "Where?" field (other_location, 1–80 characters). The last pick is remembered by
 // the caller (store prefs.lastPost). Real radio inputs (visually hidden) give arrow-key navigation and
-// correct semantics; each option row is its label.
-import { Button } from '@radix-ui/themes';
+// correct semantics; each option row is its label. On the phone it is a bottom sheet; on tablet and
+// desktop (PostPickerPopover) the same body drops from the Reporting-from chip in the form's header.
+import { Button, Popover } from '@radix-ui/themes';
 import { Check, MapPin } from 'lucide-react';
-import { useId, useState } from 'react';
+import { useId, useRef, useState, type ReactElement } from 'react';
 import { Sheet } from '@/components/ui/Sheet';
 import { LIMITS, OTHER_POST, POSTS, type PostValue } from '@/lib/domain';
 import './request-form.css';
@@ -39,6 +40,46 @@ export function PostPicker({ open, onOpenChange, value, onChange }: PostPickerPr
         />
       ) : null}
     </Sheet>
+  );
+}
+
+export interface PostPickerPopoverProps extends PostPickerProps {
+  /** The control the picker drops from (the Reporting-from chip); it toggles the picker. */
+  children: ReactElement;
+}
+
+/** The same picker as a popover under its chip (tablet and desktop). Esc closes only the popover. */
+export function PostPickerPopover({ open, onOpenChange, value, onChange, children }: PostPickerPopoverProps) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  return (
+    <Popover.Root open={open} onOpenChange={onOpenChange}>
+      <Popover.Trigger>{children}</Popover.Trigger>
+      <Popover.Content
+        ref={contentRef}
+        className="lp-rf-pop"
+        size="2"
+        width="300px"
+        align="end"
+        sideOffset={6}
+        aria-label="Reporting from"
+        onOpenAutoFocus={(e) => {
+          // Arrow keys move between posts from the one already picked, as in a radio group.
+          e.preventDefault();
+          const root = contentRef.current;
+          (root?.querySelector<HTMLElement>('.lp-rf-radio:checked') ?? root?.querySelector<HTMLElement>('.lp-rf-radio'))?.focus();
+        }}
+      >
+        {open ? (
+          <PostPickerBody
+            value={value}
+            onDone={(choice) => {
+              onChange(choice);
+              onOpenChange(false);
+            }}
+          />
+        ) : null}
+      </Popover.Content>
+    </Popover.Root>
   );
 }
 

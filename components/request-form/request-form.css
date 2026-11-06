@@ -574,3 +574,475 @@ textarea.lp-rf-in {
   place-items: center;
   color: var(--gray-11);
 }
+
+/* Column wrappers (person | friend + More details). On the phone they are plain columns, so the page lays
+   out exactly as before; the modal sets them side by side. */
+.lp-rf-col {
+  display: flex;
+  flex-direction: column;
+}
+.lp-rf-col > * {
+  flex-shrink: 0;
+}
+
+/* ===================================================================================================
+   Tablet and desktop (design/screens/desktop-new-tablet.html, frame 1). FormSurface renders the form as
+   a Radix dialog: .lp-rf-dlg[data-present="sheet"] at 768–1023 (480 px, over the right side, footer
+   pinned) and [data-present="modal"] from 1024 (centred, 760 px, two columns; 520 px for a one-section
+   edit). Doubled selectors win over Radix Themes' dialog styles. Fields are boxes labelled by their
+   placeholders (the <label>s stay for screen readers). Touch screens (iPad) keep 44 px fields and
+   16 px text (no iOS zoom); a mouse gets the mockup's 34 px fields.
+   =================================================================================================== */
+
+.lp-rf-dlg.lp-rf-dlg {
+  --rf-field-h: 34px;
+  --rf-font: 14px;
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--color-panel-solid);
+  color: var(--gray-12);
+  box-shadow:
+    0 0 0 1px var(--gray-a4),
+    0 24px 64px -16px rgba(0, 0, 0, 0.55);
+  outline: none;
+}
+@media (pointer: coarse) {
+  .lp-rf-dlg.lp-rf-dlg {
+    --rf-field-h: 44px;
+    --rf-font: 16px;
+  }
+}
+
+.lp-rf-dlg.lp-rf-dlg[data-present='modal'] {
+  top: clamp(24px, 9.4vh, 84px);
+  right: 0;
+  bottom: auto;
+  left: 0;
+  margin-inline: auto;
+  width: min(760px, calc(100vw - 48px));
+  max-height: calc(100dvh - clamp(24px, 9.4vh, 84px) - 24px);
+  border-radius: 14px;
+}
+.lp-rf-dlg.lp-rf-dlg[data-present='modal'][data-cols='1'] {
+  width: min(520px, calc(100vw - 48px));
+}
+
+.lp-rf-dlg.lp-rf-dlg[data-present='sheet'] {
+  top: 10px;
+  right: 10px;
+  bottom: 10px;
+  left: auto;
+  width: min(480px, calc(100vw - 20px));
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 1px var(--gray-a4),
+    0 24px 64px -12px rgba(0, 0, 0, 0.45);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .lp-rf-dlg.lp-rf-dlg[data-present='sheet'][data-state='open'] {
+    animation: lp-rf-sheet-in 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
+@keyframes lp-rf-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Header: title · Reporting-from chip · × */
+.lp-rf-dh {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 56px;
+  box-sizing: border-box;
+  padding: 0 14px 0 22px;
+  border-bottom: 1px solid var(--gray-a4);
+}
+.lp-rf-dh .lp-rf-dtitle.lp-rf-dtitle {
+  min-width: 0;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 22px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lp-rf-x.lp-rf-x {
+  flex: none;
+  margin: 0;
+  width: 30px;
+  height: 30px;
+  color: var(--gray-11);
+}
+.lp-rf-pchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 300px;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--gray-a3);
+  color: var(--gray-12);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.lp-rf-pchip > svg {
+  flex: none;
+  color: var(--gray-11);
+}
+.lp-rf-pchip-t {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lp-rf-pchip:hover:not(:disabled) {
+  background: var(--gray-a4);
+}
+.lp-rf-pchip:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+.lp-rf-pchip:disabled {
+  cursor: default;
+}
+/* No post yet: the phone's amber highlight, step-12 text on the tint (spec §7). */
+.lp-rf-pchip[data-empty] {
+  background: var(--amber-a3);
+  color: var(--amber-12);
+  box-shadow: inset 0 0 0 1.5px var(--amber-a7);
+}
+.lp-rf-pchip[data-empty] > svg {
+  color: var(--amber-11);
+}
+.lp-rf-pchip[data-invalid] {
+  box-shadow: inset 0 0 0 1.5px var(--red-a8);
+}
+
+/* Offline banner under the header */
+.lp-rf-dlg .lp-rf-bar {
+  max-width: none;
+  margin: 0;
+  padding: 12px 22px 0;
+}
+.lp-rf-dlg .lp-rf-off {
+  margin: 0;
+}
+
+/* Body: one scroller between the pinned header and footer */
+.lp-rf-dlg .lp-rf-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.lp-rf-dlg .lp-rf-frame {
+  min-height: 240px;
+}
+.lp-rf-dlg .lp-rf-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 20px;
+  max-width: none;
+  margin: 0;
+  padding: 18px 20px 20px;
+}
+.lp-rf-dlg[data-present='modal'] .lp-rf-body {
+  padding: 20px 22px;
+}
+.lp-rf-dlg[data-present='modal'][data-cols='2'] .lp-rf-body {
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 14px 22px;
+}
+.lp-rf-dlg .lp-rf-body > .lp-rf-notice,
+.lp-rf-dlg .lp-rf-body > .lp-rf-err {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.lp-rf-dlg .lp-rf-col {
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Section labels ("Missing person", "Friend or family") */
+.lp-rf-dlg .lp-rf-lbl.lp-rf-lbl {
+  padding: 0 2px;
+  font-size: 12.5px;
+  line-height: 16px;
+}
+
+/* Groups lose the phone's card; their rows become separate boxes */
+.lp-rf-dlg .lp-rf-grp {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: visible;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.lp-rf-dlg .lp-rf-grp > * + *,
+.lp-rf-dlg .lp-rf-pc > * + * {
+  border-top: 0;
+}
+.lp-rf-dlg .lp-rf-pcard {
+  gap: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px var(--gray-a4);
+}
+.lp-rf-dlg .lp-rf-pc {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+}
+.lp-rf-dlg .lp-rf-slotw {
+  width: 92px;
+  height: 116px;
+  margin: 0;
+  align-self: center;
+}
+.lp-rf-dlg .lp-rf-when {
+  height: 44px;
+}
+
+.lp-rf-dlg .lp-rf-r {
+  gap: 8px;
+  min-height: var(--rf-field-h);
+  padding: 0 10px;
+  border-radius: 7px;
+  box-shadow: inset 0 0 0 1px var(--gray-a5);
+}
+.lp-rf-dlg .lp-rf-r:focus-within {
+  box-shadow: inset 0 0 0 1.5px var(--gray-a9);
+}
+.lp-rf-dlg .lp-rf-r[data-seg] {
+  min-height: 0;
+  padding: 0;
+  box-shadow: none;
+}
+/* The phone's row focus ring belongs to the row; here the box itself shows focus. */
+.lp-rf-dlg .lp-rf-field:focus-within,
+.lp-rf-dlg .lp-rf-ls[data-focus] {
+  box-shadow: none;
+}
+/* Visually hidden: the placeholder names the box, the label still names the field. */
+.lp-rf-dlg .lp-rf-k {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.lp-rf-dlg .lp-rf-in {
+  padding: 7px 0;
+  font-size: var(--rf-font);
+  line-height: 20px;
+}
+.lp-rf-dlg textarea.lp-rf-in {
+  min-height: 56px;
+  padding: 8px 0;
+  line-height: 1.35;
+}
+.lp-rf-dlg .lp-rf-err,
+.lp-rf-dlg .lp-rf-err[data-indent] {
+  margin: 0;
+  /* !important: a More details row sets its phone indent inline. */
+  padding: 4px 2px 0 !important;
+}
+
+/* Last seen: the place chips stay on screen (the phone shows them only while typing) */
+.lp-rf-dlg .lp-rf-ls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lp-rf-dlg .lp-rf-sugg {
+  gap: 6px;
+  padding: 0;
+}
+.lp-rf-dlg .lp-rf-chip.lp-rf-chip {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12.5px;
+}
+@media (pointer: coarse) {
+  /* Rows 44 px apart, as on the phone, so each chip's 44 px tap area stays its own. */
+  .lp-rf-dlg .lp-rf-sugg {
+    gap: 18px 6px;
+    padding-top: 9px;
+  }
+}
+.lp-rf-dlg .lp-rf-dup {
+  margin-top: 2px;
+}
+
+/* More details: a bordered row; opened, a section label over labelled boxes */
+.lp-rf-dlg .lp-rf-more {
+  min-height: 38px;
+  margin: 10px 0 0;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.lp-rf-dlg .lp-rf-more[aria-expanded='true'] {
+  min-height: 0;
+  margin: 10px 0 0;
+  padding: 0 2px;
+  font-size: 12.5px;
+  line-height: 16px;
+}
+.lp-rf-dlg [data-more] {
+  gap: 10px;
+}
+.lp-rf-dlg [data-more] .lp-rf-r {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-height: 0;
+  padding: 0;
+  box-shadow: none;
+}
+.lp-rf-dlg [data-more] .lp-rf-r:focus-within {
+  box-shadow: none;
+}
+.lp-rf-dlg [data-more] .lp-rf-k,
+.lp-rf-dlg [data-more] .lp-rf-r[data-top] .lp-rf-k {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0 2px;
+  overflow: visible;
+  clip-path: none;
+  white-space: normal;
+  font-size: 12.5px;
+  line-height: 16px;
+}
+.lp-rf-dlg [data-more] .lp-rf-in {
+  min-height: var(--rf-field-h);
+  padding: 7px 10px;
+  border-radius: 7px;
+  box-shadow: inset 0 0 0 1px var(--gray-a5);
+}
+.lp-rf-dlg [data-more] textarea.lp-rf-in {
+  min-height: 56px;
+  padding: 8px 10px;
+}
+.lp-rf-dlg [data-more] .lp-rf-in:focus {
+  box-shadow: inset 0 0 0 1.5px var(--gray-a9);
+}
+
+/* Footer: Cancel · Send request ⌘↵, pinned */
+.lp-rf-dlg .lp-rf-foot {
+  background: transparent;
+  box-shadow: none;
+  border-top: 1px solid var(--gray-a4);
+}
+.lp-rf-dlg .lp-rf-foot-in {
+  align-items: center;
+  gap: 10px;
+  max-width: none;
+  height: 60px;
+  margin: 0;
+  padding: 0 16px 0 22px;
+}
+.lp-rf-dlg .lp-rf-foot-in > .rt-Button:last-child {
+  flex: none;
+}
+.lp-rf-ghost.lp-rf-ghost {
+  height: 34px;
+  margin: 0;
+  padding: 0 12px;
+  font-size: 14px;
+  color: var(--gray-11);
+}
+.lp-rf-send.lp-rf-send {
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px 0 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.lp-rf-kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  padding: 0 5px;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 35%, transparent);
+}
+@media (pointer: coarse) {
+  /* A touch screen has no ⌘ key in reach: no key cap. */
+  .lp-rf-kbd {
+    display: none;
+  }
+}
+
+/* The post picker dropping from the header chip */
+.lp-rf-pop.lp-rf-pop {
+  padding: 6px 6px 10px;
+}
+.lp-rf-pop .lp-rf-opts {
+  margin-top: 0;
+  background: none;
+  box-shadow: none;
+}
+.lp-rf-pop .lp-rf-grp > * + * {
+  border-top: 0;
+}
+.lp-rf-pop .lp-rf-opt {
+  min-height: 38px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 14px;
+}
+.lp-rf-pop .lp-rf-opt:hover {
+  background: var(--gray-a3);
+}
+.lp-rf-pop form > .rt-Button {
+  width: calc(100% - 8px) !important;
+  margin: 8px 4px 0;
+}
+@media (pointer: coarse) {
+  .lp-rf-pop .lp-rf-opt {
+    min-height: 44px;
+  }
+}
+
+/* A mouse needs no enlarged hit areas: the mockup's tight chip rows would otherwise overlap theirs. */
+@media (pointer: fine) {
+  .lp-rf-dlg .lp-hit::before,
+  .lp-rf-pop .lp-hit::before {
+    content: none;
+  }
+}
