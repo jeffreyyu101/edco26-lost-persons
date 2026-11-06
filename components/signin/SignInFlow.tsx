@@ -1,5 +1,7 @@
 'use client';
 // Sign-in (spec §8 Sign-in, design/screens/sign-in.html): step 1 name + team, step 2 the event password.
+// From 768 px it is layout A of design/screens/desktop-sign-in.html: the same steps in a bordered card on the
+// page canvas, with key caps and keyboard shortcuts (desktop.ts). The credit stays the last child of <main>.
 // Remembered name and team skip to step 2 (so a session-expired redirect to /signin?next=… lands on step 2,
 // prefilled). On success, go to `next` (already validated same-origin) or "/".
 // Remembered identity and theme: lib/client/prefs.ts (this route has no StoreProvider). readPrefs() gives
@@ -11,8 +13,9 @@
 // server would flash it (or accept typing that hydration then drops) for everyone who is remembered.
 import { useState, useSyncExternalStore } from 'react';
 import { clearRememberedIdentity, readPrefs } from '@/lib/client/prefs';
+import { isWide } from './desktop';
 import { draftFromIdentity, rememberedIdentity, type Identity, type WhoDraft } from './logic';
-import { ThemeToggle } from './parts';
+import { Credit, ThemeToggle } from './parts';
 import { PasswordStep } from './PasswordStep';
 import { WhoStep } from './WhoStep';
 import styles from './signin.module.css';
@@ -34,7 +37,7 @@ export function SignInFlow({ next }: SignInFlowProps) {
       <span className={styles.growTop} />
       <div className={styles.column}>{mounted ? <Steps next={next} /> : null}</div>
       <span className={styles.grow} />
-      <p className={styles.credit}>Built by Jeffrey &amp; Brian for Ground Control / Headliner Experience</p>
+      <Credit />
     </main>
   );
 }
@@ -45,7 +48,9 @@ type StepState =
 
 function initialState(): StepState {
   const remembered = rememberedIdentity(readPrefs());
-  return remembered ? { step: 2, identity: remembered, focus: false } : { step: 1, draft: draftFromIdentity(null), focus: false };
+  // From 768 px the step's first field is focused on load (desktop-sign-in.html); the phone waits for a tap.
+  const focus = isWide();
+  return remembered ? { step: 2, identity: remembered, focus } : { step: 1, draft: draftFromIdentity(null), focus };
 }
 
 function Steps({ next }: SignInFlowProps) {

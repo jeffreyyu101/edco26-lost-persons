@@ -3,6 +3,8 @@
 // filled identity row with Change, the password with show/hide, a hidden username for Keychain, Sign in.
 // Wrong password → red field + "Incorrect password". 429 → "Too many attempts. Try again in N min" and Sign
 // in stays disabled until then.
+// From 768 px (desktop-sign-in.html): ↵ on Sign in, an esc cap on Change, and Esc goes back to step 1 (as
+// Change does) from anywhere on the step, the password field included.
 import { Avatar, Button, Flex, IconButton, Text, TextField } from '@radix-ui/themes';
 import { Eye, EyeOff } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
@@ -10,8 +12,9 @@ import { writeRememberedIdentity } from '@/lib/client/prefs';
 import { announceSignIn } from '@/lib/client/session-signals';
 import { avatarInitials, teamShort } from '@/lib/domain';
 import { safeNextPath } from '@/lib/safe-next';
+import { isEnterControl, isTextEntry, useStepKeys, useWide } from './desktop';
 import { MESSAGES, retryMinutes, signInBody, type Identity } from './logic';
-import { Brand, ErrorLine } from './parts';
+import { ErrorLine, Kbd, StepCard } from './parts';
 import { postSession } from './session-api';
 import styles from './signin.module.css';
 
@@ -38,9 +41,27 @@ export function PasswordStep({ identity, onChange, next, autoFocus }: PasswordSt
   const [lockedUntil, setLockedUntil] = useState<number | null>(null);
   const [now, setNow] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   const busy = useRef(false);
   const alive = useRef(true);
   const errorId = useId();
+  const wide = useWide();
+
+  useStepKeys(wide, (event) => {
+    if (event.key === 'Escape') {
+      // Never mid-request (Change is disabled then), and not when something else already used this Esc.
+      if (event.defaultPrevented || busy.current) return;
+      event.preventDefault();
+      onChange();
+      return;
+    }
+    // Enter from the page (not a field or a button): sign in, or go to the empty password.
+    if (event.key === 'Enter' && !event.defaultPrevented && !isTextEntry(event.target) && !isEnterControl(event.target)) {
+      event.preventDefault();
+      if (inputRef.current && !inputRef.current.value) inputRef.current.focus();
+      else formRef.current?.requestSubmit();
+    }
+  });
 
   useEffect(() => {
     alive.current = true;
@@ -123,9 +144,8 @@ export function PasswordStep({ identity, onChange, next, autoFocus }: PasswordSt
   const invalid = error?.kind === 'password';
 
   return (
-    <>
-      <Brand title="Enter the event password" appLine={false} />
-      <form method="post" noValidate onSubmit={submit}>
+    <StepCard title="Enter the event password" appLine={false}>
+      <form ref={formRef} method="post" noValidate onSubmit={submit}>
         <Flex direction="column" gap="3">
           {/* Keychain saves and fills the password against this username (not readOnly: Safari skips those). */}
           <input
@@ -155,10 +175,12 @@ export function PasswordStep({ identity, onChange, next, autoFocus }: PasswordSt
               highContrast
               className={styles.hitSmall}
               aria-label="Change name or team"
+              aria-keyshortcuts={wide ? 'Escape' : undefined}
               disabled={submitting}
               onClick={onChange}
             >
               Change
+              <Kbd k="esc" variant="small" />
             </Button>
           </div>
 
@@ -211,11 +233,14 @@ export function PasswordStep({ identity, onChange, next, autoFocus }: PasswordSt
             loading={submitting}
             // Radix only defaults `disabled` to `loading` when no disabled prop is given: say both.
             disabled={submitting || !password || lockedUntil !== null}
+            className={styles.submit}
+            aria-keyshortcuts={wide ? 'Enter' : undefined}
           >
             Sign in
+            <Kbd k="↵" />
           </Button>
         </Flex>
       </form>
-    </>
+    </StepCard>
   );
 }
