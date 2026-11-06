@@ -1,0 +1,71 @@
+# Local Supabase stack for development and tests only. Never link this directory to production.
+# Ports use the 544xx range so this stack can run next to other local Supabase projects.
+# Reference: https://supabase.com/docs/guides/local-development/cli/config
+project_id = "lp-local"
+
+[api]
+enabled = true
+port = 54421
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54422
+shadow_port = 54420
+major_version = 17
+
+[db.pooler]
+enabled = false
+
+[db.migrations]
+enabled = true
+
+[db.seed]
+# scripts/db-reset.sh loads supabase/seed.sql itself, after the local host guard.
+enabled = false
+
+[realtime]
+enabled = false
+
+[studio]
+enabled = false
+port = 54423
+
+[inbucket]
+enabled = false
+port = 54424
+
+[storage]
+enabled = true
+file_size_limit = "6MiB"
+
+# Private bucket for patient photos. The server signs short-lived URLs; nothing is public.
+[storage.buckets.patient-photos]
+public = false
+file_size_limit = "6MiB"
+allowed_mime_types = ["image/jpeg", "image/png", "image/webp"]
+
+[storage.s3_protocol]
+enabled = false
+
+[storage.analytics]
+enabled = false
+
+[storage.vector]
+enabled = false
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:3100"
+enable_signup = false
+
+[auth.email]
+enable_signup = false
+
+[edge_runtime]
+enabled = false
+
+[analytics]
+enabled = false
+port = 54427

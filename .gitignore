@@ -4,10 +4,28 @@ out/
 dist/
 coverage/
 .vercel/
+
+# Env files: never commit real values. .env.test holds local-only defaults and is committed on purpose.
 .env*
 !.env.example
 !.env.*.example
+!.env.test
+
+# Generated
+next-env.d.ts
 *.tsbuildinfo
+
+# Test artifacts
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+tests/.artifacts/
+
+# Supabase CLI local state
+supabase/.temp/
+supabase/.branches/
+
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
