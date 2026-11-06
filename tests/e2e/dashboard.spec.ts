@@ -196,11 +196,15 @@ test('an Other location named like a fixed post gets its own bar and filter', as
 
   // Each bar lists exactly its own rows, the open ones it counts: every listed row is open, and there are
   // as many as the bar says.
+  // A log row (option B) is named by its content, one screen-reader sentence with no aria-label:
+  // "LP-1013, T.R., Waiting for check, created 11:02 PM, not updated yet".
   const openListed = async () => {
     await expect(page.getByTestId('request-list')).toBeVisible();
-    const labels = await page.locator('[data-testid="request-list"] [data-request-id]').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label') ?? ''));
-    const open = labels.filter((l) => /\. (Waiting for check|In medical)/.test(l)).length;
-    expect(open, labels.join('\n')).toBe(labels.length);
+    const rows = page.getByTestId('request-list').locator('[data-request-id]');
+    const openRows = rows.and(page.getByRole('button', { name: /, (Waiting for check|In medical)\b/ }));
+    const listed = await rows.count();
+    const open = await openRows.count();
+    expect(open, (await rows.allTextContents()).join('\n')).toBe(listed);
     return open;
   };
   const otherCount = await count(otherBar);
