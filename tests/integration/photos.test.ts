@@ -1,6 +1,8 @@
-// Photos (spec §6): multipart upload with magic-byte sniffing, the 3.9 MB cap, stable object paths and
-// upsert, idempotent retries, exactly 3 under concurrency, object cleanup only on definitive rejections,
-// the rowVersion bump that makes the photo sync, and the signed-URL redirect (thumb fallback, private bucket).
+// Photos (spec §6, A44): multipart upload with magic-byte sniffing, the 3.9 MB cap, content-addressed
+// object paths, immutable objects (never overwritten), idempotent retries, exactly 3 under concurrency,
+// object cleanup only on definitive rejections, the rowVersion bump that makes the photo sync, and the
+// signed-URL redirect (thumb fallback, private bucket).
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -8,7 +10,7 @@ import type { ApiError, PhotoResponse, RequestDetail, SyncResponse } from '@/lib
 import { syncPath } from '@/lib/client/api-paths';
 import { ROOT } from '../../scripts/test-env.mjs';
 import { TINY_WEBP, syntheticPng } from '../helpers/images';
-import { admin, api, cookieFor, createRequest, newStaff, randomUUID, staffOf, withTestServer } from './harness';
+import { admin, api, cookieFor, createRequest, newStaff, psql, psqlAsync, randomUUID, rowVersion, staffOf, withTestServer } from './harness';
 
 withTestServer();
 
@@ -52,8 +54,49 @@ async function activePhotoRows(requestId: string): Promise<number> {
   return data.length;
 }
 
+const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+
+/** The object names (under the request's folder) the server derives from a photo's bytes (A44). */
+const fullName = (photoId: string, bytes: Buffer) => `${photoId}-${sha256(bytes)}.jpg`;
+const thumbName = (photoId: string, bytes: Buffer) => `${photoId}-${sha256(bytes)}_thumb.jpg`;
+
+/** The stored bytes of an object in the photo bucket. */
+async function objectBytes(path: string): Promise<Buffer> {
+  const { data, error } = await admin().storage.from(BUCKET).download(path);
+  if (error || !data) throw new Error(`download failed: ${error?.message ?? 'no data'}`);
+  return Buffer.from(await data.arrayBuffer());
+}
+
+/** The bytes behind a recorded photo row: what the app serves for it. */
+async function recordedBytes(photoId: string): Promise<{ full: Buffer; thumb: Buffer | null }> {
+  const { data, error } = await admin().from('patient_photos').select('storage_path, thumb_path').eq('id', photoId).single();
+  if (error) throw new Error(`photo row: ${error.code}`);
+  const row = data as { storage_path: string; thumb_path: string | null };
+  return { full: await objectBytes(row.storage_path), thumb: row.thumb_path ? await objectBytes(row.thumb_path) : null };
+}
+
+async function photoAudits(requestId: string): Promise<number> {
+  const { data, error } = await admin().from('audit_events').select('id').eq('patient_id', requestId).eq('action_type', 'photo_uploaded');
+  if (error) throw new Error(error.code);
+  return data.length;
+}
+
+/** Holds the request's row lock (FOR UPDATE) for `seconds` on another connection; resolves once it is held. */
+async function holdRowLock(requestId: string, seconds: number) {
+  const holder = psqlAsync(`begin; select 1 from public.patients where id = '${requestId}' for update; select pg_sleep(${seconds}); commit;`);
+  const started = Date.now();
+  while (Date.now() - started < 5_000) {
+    const held = psql(
+      `select count(*) from pg_stat_activity where pid <> pg_backend_pid() and wait_event = 'PgSleep' and query like '%${requestId}%'`,
+    );
+    if (held === '1') return holder;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error('the row lock was not taken within 5 s');
+}
+
 describe('POST /api/requests/:id/photos', () => {
-  it('uploads to the stable paths, records the photo and returns {created, photo, request} (201)', async () => {
+  it('uploads to the content-addressed paths, records the photo and returns {created, photo, request} (201)', async () => {
     const staff = newStaff();
     const cookie = await cookieFor(staff);
     const r = await createRequest(staff);
@@ -64,7 +107,10 @@ describe('POST /api/requests/:id/photos', () => {
     expect(res.body.created).toBe(true);
     expect(res.body.photo).toMatchObject({ id: photoId, timing: 'older', uploadedBy: staffOf(staff), hasThumb: true });
     expect(res.body.request).toMatchObject({ id: r.id, photoCount: 1, firstPhotoId: photoId, rowVersion: r.rowVersion + 1 });
-    expect(await objectsUnder(r.id)).toEqual([`${photoId}.jpg`, `${photoId}_thumb.jpg`]);
+    expect(await objectsUnder(r.id)).toEqual([fullName(photoId, JPEG), thumbName(photoId, JPEG_THUMB)].sort());
+    const recorded = await recordedBytes(photoId);
+    expect(recorded.full.equals(JPEG)).toBe(true);
+    expect(recorded.thumb?.equals(JPEG_THUMB)).toBe(true);
 
     const detail = (await api(`/api/requests/${r.id}`, { cookie })).body as RequestDetail;
     expect(detail.photos).toHaveLength(1);
@@ -95,6 +141,131 @@ describe('POST /api/requests/:id/photos', () => {
     expect(retry.body.photo.id).toBe(photoId);
     expect(await activePhotoRows(r.id)).toBe(1);
     expect(await objectsUnder(r.id)).toHaveLength(2);
+  });
+
+  it('a replay of a recorded photoId with different images → 200 {created: false}; stored bytes, attribution, rowVersion and audit unchanged, nothing new stored', async () => {
+    const staff = newStaff();
+    const cookie = await cookieFor(staff);
+    const r = await createRequest(staff);
+    const photoId = randomUUID();
+    const first = await upload(cookie, r.id, { photoId });
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    const version = first.body.request.rowVersion;
+    const objects = await objectsUnder(r.id);
+
+    // Another signed-in staff member sends other bytes under the same request and photoId.
+    const replay = await upload(await cookieFor(newStaff()), r.id, { photoId, photo: PNG, photoType: 'image/png', thumb: WEBP, timing: 'older' });
+    expect(replay.status, JSON.stringify(replay.body)).toBe(200);
+    expect(replay.body.created).toBe(false);
+    expect(replay.body.photo).toMatchObject({ id: photoId, timing: 'today', uploadedBy: staffOf(staff), hasThumb: true });
+    expect(replay.body.request.rowVersion).toBe(version);
+
+    const recorded = await recordedBytes(photoId);
+    expect(recorded.full.equals(JPEG)).toBe(true);
+    expect(recorded.thumb?.equals(JPEG_THUMB)).toBe(true);
+    expect(await objectsUnder(r.id)).toEqual(objects);
+    expect(await rowVersion(r.id)).toBe(version);
+    expect(await activePhotoRows(r.id)).toBe(1);
+    expect(await photoAudits(r.id)).toBe(1);
+
+    // A photo recorded without a thumb gains no thumb object from a replay that carries one.
+    const bare = randomUUID();
+    expect((await upload(cookie, r.id, { photoId: bare, photo: PNG, photoType: 'image/png', thumb: null })).status).toBe(201);
+    const withBare = await objectsUnder(r.id);
+    const bareReplay = await upload(cookie, r.id, { photoId: bare, photo: JPEG, thumb: JPEG_THUMB });
+    expect(bareReplay.status).toBe(200);
+    expect(bareReplay.body.photo.hasThumb).toBe(false);
+    expect((await recordedBytes(bare)).full.equals(PNG)).toBe(true);
+    expect(await objectsUnder(r.id)).toEqual(withBare);
+  });
+
+  it('a retry after a failed record (503) reuses the stored objects and succeeds', async () => {
+    const staff = newStaff();
+    const cookie = await cookieFor(staff);
+    const r = await createRequest(staff);
+    const photoId = randomUUID();
+
+    // lp_add_photo cannot take the row lock (lock_timeout 2 s) → 503; the objects stay for the retry.
+    const holder = await holdRowLock(r.id, 4);
+    const failed = await upload(cookie, r.id, { photoId });
+    expect(failed.status, JSON.stringify(failed.body)).toBe(503);
+    expect(failed.body.error.code).toBe('unavailable');
+    const done = await holder.done;
+    expect(done.code, done.out).toBe(0);
+    const stored = await objectsUnder(r.id);
+    expect(stored).toHaveLength(2);
+    expect(await activePhotoRows(r.id)).toBe(0);
+
+    const retry = await upload(cookie, r.id, { photoId });
+    expect(retry.status, JSON.stringify(retry.body)).toBe(201);
+    expect(retry.body.created).toBe(true);
+    expect(retry.body.request).toMatchObject({ photoCount: 1, firstPhotoId: photoId, rowVersion: r.rowVersion + 1 });
+    expect(await objectsUnder(r.id)).toEqual(stored);
+    const recorded = await recordedBytes(photoId);
+    expect(recorded.full.equals(JPEG)).toBe(true);
+    expect(recorded.thumb?.equals(JPEG_THUMB)).toBe(true);
+    expect(await activePhotoRows(r.id)).toBe(1);
+    expect(await photoAudits(r.id)).toBe(1);
+  }, 20_000);
+
+  it('other bytes under an unrecorded photoId (after a failed record) never overwrite the stored objects', async () => {
+    const staff = newStaff();
+    const cookie = await cookieFor(staff);
+    const r = await createRequest(staff);
+    const photoId = randomUUID();
+
+    const holder = await holdRowLock(r.id, 4);
+    expect((await upload(cookie, r.id, { photoId })).status).toBe(503);
+    const done = await holder.done;
+    expect(done.code, done.out).toBe(0);
+    const [firstFull, firstThumb] = (await objectsUnder(r.id)).sort((a, b) => Number(a.endsWith('_thumb.jpg')) - Number(b.endsWith('_thumb.jpg')));
+
+    // Recorded as sent and attributed to its sender; the earlier objects keep their bytes.
+    const other = newStaff();
+    const res = await upload(await cookieFor(other), r.id, { photoId, photo: PNG, photoType: 'image/png', thumb: WEBP });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.photo).toMatchObject({ id: photoId, uploadedBy: staffOf(other) });
+    const recorded = await recordedBytes(photoId);
+    expect(recorded.full.equals(PNG)).toBe(true);
+    expect(recorded.thumb?.equals(WEBP)).toBe(true);
+    expect((await objectBytes(`${r.id}/${firstFull}`)).equals(JPEG)).toBe(true);
+    expect((await objectBytes(`${r.id}/${firstThumb}`)).equals(JPEG_THUMB)).toBe(true);
+    expect(await photoAudits(r.id)).toBe(1);
+  }, 20_000);
+
+  it('a retry after a partial upload (only the thumb stored) completes it', async () => {
+    const staff = newStaff();
+    const cookie = await cookieFor(staff);
+    const r = await createRequest(staff);
+    const photoId = randomUUID();
+    const { error } = await admin().storage.from(BUCKET).upload(`${r.id}/${thumbName(photoId, JPEG_THUMB)}`, JPEG_THUMB, { contentType: 'image/jpeg' });
+    expect(error).toBeNull();
+    const res = await upload(cookie, r.id, { photoId });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(await objectsUnder(r.id)).toEqual([fullName(photoId, JPEG), thumbName(photoId, JPEG_THUMB)].sort());
+    const recorded = await recordedBytes(photoId);
+    expect(recorded.full.equals(JPEG)).toBe(true);
+    expect(recorded.thumb?.equals(JPEG_THUMB)).toBe(true);
+  });
+
+  it('concurrent uploads of one new photoId with different images: one is recorded, with its own bytes', async () => {
+    const staff = newStaff();
+    const cookie = await cookieFor(staff);
+    // Storage lets concurrent writers of one path all succeed (last one wins), so repeat the race.
+    for (let round = 0; round < 5; round += 1) {
+      const r = await createRequest(staff);
+      const photoId = randomUUID();
+      const [jpeg, png] = await Promise.all([
+        upload(cookie, r.id, { photoId }),
+        upload(cookie, r.id, { photoId, photo: PNG, photoType: 'image/png' }),
+      ]);
+      expect([jpeg.status, png.status].sort(), JSON.stringify([jpeg.body, png.body])).toEqual([200, 201]);
+      const recorded = await recordedBytes(photoId);
+      expect(recorded.full.equals(jpeg.status === 201 ? JPEG : PNG), `round ${round}`).toBe(true);
+      expect(recorded.thumb?.equals(JPEG_THUMB)).toBe(true);
+      expect(await activePhotoRows(r.id)).toBe(1);
+      expect(await photoAudits(r.id)).toBe(1);
+    }
   });
 
   it('the 4th photo → 422 photo_limit, and its objects are deleted', async () => {
@@ -230,14 +401,14 @@ describe('GET /api/photos/:id', () => {
     expect(full.status).toBe(302);
     expect(full.headers.get('cache-control')).toBe('private, max-age=60');
     const fullUrl = full.headers.get('location') as string;
-    expect(fullUrl).toContain(`/storage/v1/object/sign/${BUCKET}/${r.id}/${id}.jpg?token=`);
+    expect(fullUrl).toContain(`/storage/v1/object/sign/${BUCKET}/${r.id}/${fullName(id, JPEG)}?token=`);
     const fullBytes = Buffer.from(await (await fetch(fullUrl)).arrayBuffer());
     expect(fullBytes.equals(JPEG)).toBe(true);
 
     const thumb = await api(`/api/photos/${id}?size=thumb`, { cookie });
     expect(thumb.status).toBe(302);
     const thumbUrl = thumb.headers.get('location') as string;
-    expect(thumbUrl).toContain(`/${id}_thumb.jpg?token=`);
+    expect(thumbUrl).toContain(`/${r.id}/${thumbName(id, JPEG_THUMB)}?token=`);
     expect(Buffer.from(await (await fetch(thumbUrl)).arrayBuffer()).equals(JPEG_THUMB)).toBe(true);
   });
 

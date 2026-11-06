@@ -1,18 +1,24 @@
-// POST /api/requests/:id/photos (spec §6). Multipart: photoId (client UUID), timing (today | older),
+// POST /api/requests/:id/photos (spec §6, A44). Multipart: photoId (client UUID), timing (today | older),
 // photo and thumb (JPEG / PNG / WebP, sniffed by magic bytes). The whole request must be ≤ 3,900,000
 // bytes (Vercel caps bodies at 4.5 MB).
 //
-// Objects go to the private bucket at stable paths ({id}/{photoId}.jpg, {id}/{photoId}_thumb.jpg) with
-// upsert, so a retry with the same photoId is idempotent; then lp_add_photo records them (idempotent on
-// photoId, ≤ 3 active photos, bumps the request's rowVersion so the change syncs). The objects are deleted
-// ONLY after a definitive rejection (photo limit, invalid, creator-only, no such request). On timeouts and
-// unknown errors they are kept and the response is 503, so the client retries with the same photoId.
+// Stored photos are immutable (A44): an object's bytes never change once written.
+//   1. If a photo row with this photoId already exists, answer from it (lp_add_photo: created: false, or
+//      photo_id_in_use when it belongs to another request). Storage is not touched.
+//   2. Otherwise store the objects in the private bucket at content-addressed paths
+//      ({id}/{photoId}-{sha256}.jpg and …_thumb.jpg, lib/server/photos.ts) with upsert: false. An object
+//      that already exists at such a path holds these exact bytes (a retry after a failed record or a
+//      partial upload), so it is kept and counts as stored. Different bytes always get a different path.
+//   3. lp_add_photo records them (≤ 3 active photos, bumps the request's rowVersion so the change syncs,
+//      audits photo_uploaded). The objects are deleted ONLY after a definitive rejection (photo limit,
+//      invalid, creator-only, no such request). On timeouts and unknown errors they are kept and the
+//      response is 503, so the client retries with the same photoId.
 import type { PhotoResponse } from '@/lib/api-types';
 import { PHOTO_UPLOAD_MAX_BYTES } from '@/lib/domain';
 import { ApiFailure, isDefinitiveRejection } from '@/lib/server/errors';
 import { idParam, invalidFromZod, json, readBodyLimited } from '@/lib/server/http';
 import { mapPhoto, mapRow } from '@/lib/server/mappers';
-import { photoPaths, sniffImage, type ImageType } from '@/lib/server/photos';
+import { isObjectAlreadyExists, photoPaths, sniffImage, type ImageType, type StorageErrorLike } from '@/lib/server/photos';
 import { authedRoute } from '@/lib/server/route';
 import { PHOTO_BUCKET, db, rpc } from '@/lib/server/supabase';
 import { photoFieldsSchema } from '@/lib/validation';
@@ -24,6 +30,12 @@ interface Upload {
   path: string;
   bytes: Uint8Array;
   type: ImageType;
+}
+
+interface AddPhotoResult {
+  created?: unknown;
+  photo?: unknown;
+  row?: unknown;
 }
 
 function isFile(value: FormDataEntryValue | null): value is File {
@@ -43,17 +55,36 @@ async function readImage(form: FormData, field: 'photo' | 'thumb', required: boo
   return { bytes, type };
 }
 
-async function upload(item: Upload): Promise<void> {
-  let error: { statusCode?: string; status?: number } | null = null;
+/** True when a photo row with this id exists (for any request). A failed lookup is a 503 (retry). */
+async function photoRowExists(photoId: string): Promise<boolean> {
+  let found: { data: { id: string } | null; error: { code?: string } | null };
   try {
-    ({ error } = await db().storage.from(PHOTO_BUCKET).upload(item.path, item.bytes, { contentType: item.type, upsert: true }));
+    found = await db().from('patient_photos').select('id').eq('id', photoId).maybeSingle();
+  } catch {
+    throw new ApiFailure('unavailable', undefined, { dbCode: 'fetch' });
+  }
+  if (found.error) throw new ApiFailure('unavailable', undefined, { dbCode: found.error.code || 'db' });
+  return found.data !== null;
+}
+
+/**
+ * Stores one object without ever replacing an existing one (upsert: false). "Already exists" counts as
+ * stored: the path is content-addressed, so the object there holds these exact bytes.
+ */
+async function store(item: Upload): Promise<void> {
+  let error: StorageErrorLike | null = null;
+  try {
+    ({ error } = await db().storage.from(PHOTO_BUCKET).upload(item.path, item.bytes, { contentType: item.type, upsert: false }));
   } catch {
     throw new ApiFailure('unavailable', undefined, { dbCode: 'storage_fetch' });
   }
-  if (error) throw new ApiFailure('unavailable', undefined, { dbCode: `storage_${error.statusCode ?? error.status ?? 'error'}` });
+  if (error && !isObjectAlreadyExists(error)) {
+    throw new ApiFailure('unavailable', undefined, { dbCode: `storage_${error.statusCode ?? error.status ?? 'error'}` });
+  }
 }
 
 async function removeObjects(paths: string[]): Promise<void> {
+  if (paths.length === 0) return;
   try {
     await db().storage.from(PHOTO_BUCKET).remove(paths);
   } catch {
@@ -82,27 +113,37 @@ export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/photos'
   const thumb = await readImage(form, 'thumb', false);
   if (!photo) throw new ApiFailure('invalid', 'Choose a photo', { extra: { field: 'photo' } });
 
-  const paths = photoPaths(id, photoId);
+  const paths = photoPaths(id, photoId, photo.bytes, thumb?.bytes ?? null);
   const uploads: Upload[] = [{ path: paths.full, ...photo }];
-  if (thumb) uploads.push({ path: paths.thumb, ...thumb });
-  await Promise.all(uploads.map(upload));
+  if (thumb && paths.thumb) uploads.push({ path: paths.thumb, ...thumb });
 
-  let data: { created?: unknown; photo?: unknown; row?: unknown };
-  try {
-    data = await rpc('lp_add_photo', {
-      p_id: id,
-      p_photo_id: photoId,
-      p_path: paths.full,
-      p_thumb: thumb ? paths.thumb : null,
-      p_timing: fields.data.timing,
-      p_staff: session.staff,
-    }, 'photo');
-  } catch (error) {
-    // field:path means the path belongs to another photo row: never delete objects in that case.
-    if (error instanceof ApiFailure && isDefinitiveRejection(error) && error.extra.field !== 'path') {
-      await removeObjects(uploads.map((u) => u.path));
+  /** lp_add_photo. `stored` = the objects to delete after a definitive rejection. */
+  const record = async (stored: Upload[]): Promise<AddPhotoResult> => {
+    try {
+      return await rpc<AddPhotoResult>('lp_add_photo', {
+        p_id: id,
+        p_photo_id: photoId,
+        p_path: paths.full,
+        p_thumb: paths.thumb,
+        p_timing: fields.data.timing,
+        p_staff: session.staff,
+      }, 'photo');
+    } catch (error) {
+      // field:path means the path belongs to another photo row: never delete objects in that case.
+      if (error instanceof ApiFailure && isDefinitiveRejection(error) && error.extra.field !== 'path') {
+        await removeObjects(stored.map((u) => u.path));
+      }
+      throw error;
     }
-    throw error;
+  };
+
+  let data: AddPhotoResult;
+  if (await photoRowExists(photoId)) {
+    // Already recorded: the idempotent answer. Its objects stay exactly as they are and nothing new is stored.
+    data = await record([]);
+  } else {
+    await Promise.all(uploads.map(store));
+    data = await record(uploads);
   }
 
   const out: PhotoResponse = { created: data.created === true, photo: mapPhoto(data.photo), request: mapRow(data.row) };
