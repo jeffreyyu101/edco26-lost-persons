@@ -83,10 +83,14 @@ function localSupabaseKeys(expectedUrl) {
   return keys;
 }
 
-/** Reads .env.test plus the local stack's keys (never .env.local) and checks every URL is local. */
-export function loadTestEnv() {
+/**
+ * Reads .env.test plus the local stack's keys (never .env.local) and checks every URL is local.
+ * `{ keys: false }` skips the keys, for checks that never touch the database (unit tests in CI, where no local
+ * stack runs).
+ */
+export function loadTestEnv({ keys = true } = {}) {
   const env = parseEnv(readFileSync(join(ROOT, '.env.test'), 'utf8'));
-  if (!env.SUPABASE_SECRET_KEY) Object.assign(env, localSupabaseKeys(env.NEXT_PUBLIC_SUPABASE_URL));
+  if (keys && !env.SUPABASE_SECRET_KEY) Object.assign(env, localSupabaseKeys(env.NEXT_PUBLIC_SUPABASE_URL));
   assertLocalUrl('.env.test NEXT_PUBLIC_SUPABASE_URL', env.NEXT_PUBLIC_SUPABASE_URL);
   for (const [key, value] of Object.entries(env)) {
     if (/_URL$/.test(key) && value) assertLocalUrl(`.env.test ${key}`, value);
@@ -103,13 +107,13 @@ export const NO_DOTENV_PRELOAD = join(ROOT, 'scripts', 'test-env-preload.cjs');
  * NO_DOTENV_PRELOAD into it and every process it starts, so Next.js never reads .env.local, .env or any
  * other dotenv file, not even on a dev-server reload. __NEXT_PROCESSED_ENV=true stays as a second guard.
  */
-export function childTestEnv(extra = {}) {
+export function childTestEnv(extra = {}, { keys = true } = {}) {
   const keep = ['PATH', 'HOME', 'SHELL', 'LANG', 'TMPDIR', 'USER', 'TERM', 'CI', 'PLAYWRIGHT_BROWSERS_PATH'];
   const base = {};
   for (const key of keep) if (process.env[key] !== undefined) base[key] = process.env[key];
   const env = {
     ...base,
-    ...loadTestEnv(),
+    ...loadTestEnv({ keys }),
     ...extra,
     NODE_OPTIONS: `--require=${JSON.stringify(NO_DOTENV_PRELOAD)}`,
     __NEXT_PROCESSED_ENV: 'true',
