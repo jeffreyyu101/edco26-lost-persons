@@ -742,3 +742,193 @@ Remembered name and team skip to step 2. `?next=` is honoured, and only same-ori
 | Cancel | Creator only (Brian). Server-checked through canonical `created_by`. "My requests" also includes ids created on this phone. |
 | Reopen | Added to the ⋯ menu for closed requests (the transitions already allowed it) |
 | Discharged | Confirmed by Jeffrey. Only from the ⋯ menu while In medical. |
+
+## 13. v2.1 amendments (OVERRIDE anything above; from the Codex + Fable re-reviews)
+
+**A1 · DTOs (frozen in `lib/api-types.ts`).**
+
+- **Shape rule.** RPC payloads use snake_case. The server mapper converts them to camelCase through an **explicit allowlist**; legacy columns never leak through.
+- **`RequestSummary`** contains every known `patients` column, camelCased:
+
+  | Group | Fields |
+  |---|---|
+  | Identity | `id`, `clientMutationId`, `caseNumber`, `firstName`, `lastName` |
+  | Person | `age`, `gender`, `heightBuild`, `hair`, `identifyingFeatures`, `physicalDescription`, `lastSeen`, `clothing`, `additionalNotes` |
+  | Post | `reportingLocation`, `otherLocation` |
+  | Contact | `contactName`, `contactPhone`, `contactRelationship`, `contactNotes` |
+  | Status and audit | `status`, `createdBy`, `updatedBy`, `createdAt`, `updatedAt`, `foundAt`, `reunionStartedAt`, `closedAt` |
+  | Added fields | `rowVersion`, `firstPhotoId`, `photoCount` |
+  | Derived | `name`, `postShort` |
+
+- **`RequestDetail`** = `RequestSummary` + `photos` + `audit`.
+  - `photos: {id, timing: 'today'|'older'|'unsure', createdAt, uploadedBy, hasThumb}[]`
+  - `audit: {id, action, at, staff, previous, next, notes}[]`, where `action` is the normalized union `created | status | edit | photo | cancelled | legacy_search_not_found | legacy_search_found | legacy_check`.
+- **Mutation envelopes:**
+
+  | Mutation | Response |
+  |---|---|
+  | create | `{created, request}` |
+  | status / patch / cancel | `{changed, request}` |
+  | photo | `{created, photo, request}` |
+
+  `request` is always the **full** `RequestSummary`.
+
+**A2 · `lp_row`.** One SQL function, `lp_row(p patients) returns jsonb`, builds the row JSON, including `first_photo_id` and `photo_count`. `lp_sync` and every mutating function return rows built by it. `lp_add_photo` returns `{created, photo, row}`.
+
+**A3 · Status buckets** (in `domain.ts`).
+
+| Bucket | Statuses |
+|---|---|
+| `open` | `Added`, `Found – Awaiting Reunion`, legacy `Bring friend to medical` |
+| `answered` | `Checked – Not Found` |
+| `closed` | `Reunited – Closed`, `Found – Discharged`, `Cancelled` |
+
+Dimming and the Reopen action apply to `closed` **only**. Stats count legacy Bring-friend as In medical.
+
+**A4 · Domain helpers.**
+
+- `initials(name)`: the first letters of the first and last word, uppercased, with periods ("Kayla Martinez" → "K.M.", "T.R." → "T.R."). A single word keeps its first 2 letters.
+- `genderShort`: Male → M, Female → F, Other → "".
+- `parseStaff("Name · Team")` → `{name, team, teamShort}`.
+- The legacy team alias map, identical in TypeScript and SQL `lp_canon_staff`:
+
+  | Alias (case-insensitive) | Canonical |
+  |---|---|
+  | dispatch, gchx dispatch | `GC/HX - Dispatch` |
+  | base, gchx base | `GC/HX - Base` |
+  | med transpo, gchx med transpo, transport, special operations | `GC/HX - Special Operations/Med Transpo` |
+  | medical | `Medical` |
+  | prevent | `Prevent` |
+
+  `canon` lowercases, trims, collapses whitespace, normalizes `•` and `·` variants to " · ", then alias-maps the team part.
+
+**A5 · Store contract additions** (frozen in `lib/client/store-contract.ts`):
+
+- `useDetail(id)`, which fetches and refetches automatically when the synced `rowVersion` changes
+- `useStats(active)`, which polls every 15 s while true
+- `signOut()`
+- `prefs`: theme, bell, remembered name and team, last post, and get/set
+- `subscribeAlerts`
+- outbox: `list`, `retry(id)`, `discard(id)`, `update(id, payload)`, `resend(id)`
+- `navigate(params)` and `useView()` (A22)
+- `lastSyncAt` and `connection`
+- `syncNow()`
+
+**A6 · Outbox dedupe.** The list hides any outbox item whose `clientMutationId` matches a confirmed row. The worker then continues that item's photo uploads against the confirmed row's id.
+
+**A7 · Sync bounds and paging.**
+
+- **Bounding the transaction.** Mutating functions carry function-level `SET statement_timeout = '4s'` and `SET lock_timeout = '2s'` attributes in `CREATE FUNCTION`, which PostgREST hoists to the transaction. **Do not** rely on `SET LOCAL` inside the function body: it does not bound the running call (verified).
+- **Overlap.** The overlap becomes **30 s**.
+- **Cursor.** `serverTime` = `clock_timestamp()` captured as the first statement, before the select.
+- **Backstop.** Reconcile every 10th poll guarantees delivery.
+- **Signature.** `lp_sync(p_since timestamptz, p_ids uuid[], p_reconcile boolean, p_after_at timestamptz, p_after_id uuid, p_limit int default 500)`. Keyset paging on `(updated_at, id)` returns `{serverTime, rows, hasMore, next: {at, id}, versions?}`. The client loops through the pages and advances its cursor **only after every page is applied**.
+
+**A8 · Triggers.** `lp_touch` uses `create or replace function`, never drop. The trigger uses `create or replace trigger`. `lp_canon_staff` is immutable and carries **no** SET attributes. `drop function if exists` applies only to RPC functions that no trigger depends on.
+
+**A9 · Production coverage.**
+
+- Add `alter table patients add column if not exists last_seen text`.
+- **Only** replace the location or status CHECK when the current constraint definition (from `pg_get_constraintdef`) lacks a needed value. When re-adding it, use NOT VALID, and raise a NOTICE with counts of existing rows that would violate it.
+- Test against a real pre-migration fixture: Jeffrey's original schema, with `last_seen` missing and the old constraint.
+
+**A10 · Edit concurrency.**
+
+- When editing starts, capture `{baseRow, baseVersion}`. `updateFields(id, patch, baseVersion)` sends **that** version.
+- On a 409, show a conflict review: the latest data, with the user's edits kept for them to reapply. There is no automatic rebase.
+
+**A11 · Monotonic responses and Undo.**
+
+- Every mutation response is applied only if its `rowVersion` is at least the confirmed one.
+- The Undo snackbar appears **only** when `changed === true`.
+
+**A12 · Status-tap 409.** For non-undo taps:
+
+1. On a 409, fetch the row.
+2. If its status still equals the status the tap started from, which means only fields or photos changed, resend once with the new version.
+3. Otherwise drop the overlay and show "Updated by someone else".
+
+Never retry an undo automatically.
+
+**A13 · Durable creates.**
+
+- **Every create is an outbox job, online too, persisted before sending.** A job holds `{mutationId, payload, photos: [{photoId, blob, thumbBlob, timing, acked}], serverId?, state, attempts, operator}`.
+- Checkpoint `serverId` and each photo acknowledgement. Remove the job only once it's complete.
+- **Retry backoff:** 5 s, 15 s, 60 s, then every 2 min.
+- **Definitive 4xx on the create:** the job becomes "Needs attention". It can be edited and resent with the **same** `mutationId`, since nothing was created.
+- **Definitive rejection of a photo:** the job finishes, with a toast.
+- Needs-attention items never block the queue.
+- **Scope:** the outbox and drafts are **per phone**; the data cache is per staff.
+- **Operator prompt:** "Send as Sam Lee?", because the server attributes requests to the current session.
+
+**A14 · Logout boundary.**
+
+- `BroadcastChannel('lp')` sends `logout`.
+- A session `generation` counter increments on logout.
+- Workers stop, and responses from an older generation are ignored.
+- Memory and the IndexedDB cache are cleared in every tab.
+
+**A15 · SW precache.**
+
+- After first load, and after an idle prefetch of every view chunk, the client posts every `/_next/static/*` URL it has seen (from `performance.getEntriesByType('resource')` plus document scripts and links) to the SW, which caches them.
+- The store exposes `offlineReady` once that's done.
+- The cached `/` HTML response is stored **whole**, headers included, so its CSP nonce matches.
+
+**A16 · Cookie `Secure`.** Set it when the request protocol (`x-forwarded-proto` or the URL) is `https`. Tests over http still work.
+
+**A17 · Login limits and test isolation.**
+
+- **Limits:** reject at `>= 10` for name+IP, and `>= 100` for an IP alone.
+- **Locally,** the server also reads `x-vercel-forwarded-for` and `x-real-ip`. Integration tests send a **unique** fake IP per test and clean their own attempts. Nobody truncates globally.
+- **Harness:** reads `PORT`.
+- **Playwright:**
+  - signs in once per file with `storageState`
+  - takes a cross-process lock in globalSetup: `mkdir /tmp/lp-e2e.lock`, waiting up to 20 min, released in teardown
+  - dashboard specs assert **deltas**, not seed totals
+- **Offline and SW specs** run only in Merge 2 or QA, against a production build.
+
+**A18 · Cancel visibility.** Show Cancel only on a canonical `created_by` match, not on the phone-created set alone.
+
+**A19 · `lp_create_request`.** Select by mutation id first, then insert with `on conflict do nothing`. This keeps LP numbers from jumping on retries.
+
+**A20 · Draft persistence.** Flush immediately when a photo is added and on `pagehide`, in addition to the debounce.
+
+**A21 · Stats definitions.**
+
+- `byPost`: the 4 fixed posts are always present, plus any other location with open rows.
+- `recent`: `{id, caseNumber, name, status, postShort, updatedAt}`.
+- **Answer events** are matched by the status in previous and new values, so Jeffrey's full-row events and legacy `medical_search*` events count.
+
+**A22 · Navigation parameters** (`lib/client/nav.ts`: `navigate(params, {replace?})` and `useView()`).
+
+| Params | View |
+|---|---|
+| none | All |
+| `view=pending` | Pending |
+| `view=mine` | My requests |
+| `status=<db value>` | All, filtered by status (shown as a chip) |
+| `post=<value>` | All, filtered by post (shown as a chip) |
+| `q=<text>` | Search |
+| `new=1` | New request |
+| `r=<id>` | Profile |
+| `r=<id>&edit=person\|friend\|all` | Edit |
+| `dashboard=1` | Dashboard |
+| `outbox=<mutationId>` | The needs-attention editor, rendered by `RequestForm` |
+
+Unknown params are ignored.
+
+**A23 · Final view entry points.** Phase 1a creates these with their final props. The page imports them through `next/dynamic`. Phase 2 agents edit **only** inside their own directory.
+
+| File | Owner |
+|---|---|
+| `components/list/ListViews.tsx` (All, Pending, Mine, Search), `components/list/AppHeader.tsx`, `components/list/ViewSwitcher.tsx` | L |
+| `components/request-form/RequestFormView.tsx` (new, edit, outbox), `RequestForm.tsx`, `PostPicker.tsx` | F |
+| `components/profile/ProfileView.tsx` | P |
+| `components/dashboard/DashboardView.tsx` | P |
+| `components/account/AccountMenu.tsx` | P |
+| `components/signin/SignInFlow.tsx` | B |
+
+- **C (1b)** owns `app/page.tsx` (the shell, and the banner, toast and alert hosts), `components/ui/*` (only Sheet, Toast/Snackbar, Banner, StatusGlyph, Skeleton blocks and EmptyState) and `lib/client/*`.
+- **1a** ships a placeholder `ListViews` that renders store rows, so Merge 1 can run its smoke test.
+
+**A24 · Edit from the profile.** `?r=<id>&edit=person|friend|all` opens the full-screen `RequestFormView` with `mode="edit"` and a `section` prop showing only that group, prefilled.
