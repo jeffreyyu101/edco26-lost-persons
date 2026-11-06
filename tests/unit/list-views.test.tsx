@@ -5,12 +5,13 @@ import { Theme } from '@radix-ui/themes';
 import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { BRAND_CREDIT_FOR, BRAND_CREDIT_NAMES, BRAND_KICKER } from '@/components/list/BrandCard';
 import { AllView, MineView, PendingView, SearchView } from '@/components/list/ListViews';
 import { switcherLabel } from '@/components/list/ViewSwitcher';
 import {
   NO_NAME,
+  archivedFoldLabel,
   cardDescription,
-  closedFoldLabel,
   highlightParts,
   isClosed,
   isFresh,
@@ -189,7 +190,7 @@ describe('list helpers', () => {
     expect(startsWith(outboxRowLabel(d, '11:02 PM'), `${d.name} ${d.ageGender} 11:02 PM`)).toBe(true);
     expect(switcherLabel('Pending', 4)).toBe('Pending 4, change view');
     expect(switcherLabel('All requests', null)).toBe('All requests, change view');
-    expect(startsWith(closedFoldLabel(6), 'Closed 6')).toBe(true);
+    expect(startsWith(archivedFoldLabel(6), 'Archived 6')).toBe(true);
   });
 
   it('updatedSince: the logger\'s own photos are part of logging; any other write is an update', () => {
@@ -206,7 +207,7 @@ describe('list helpers', () => {
     expect(updatedSince({ ...base, status: STATUS.inMedical, rowVersion: 1, photoCount: 1 })).toBe(base.updatedAt);
   });
 
-  it('log rows: a full sentence per row, the bare number, the Closed fold name', () => {
+  it('log rows: a full sentence per row, the bare number, the Archived fold name', () => {
     expect(logRowLabel(byCase(1013), '11:02 PM', 'updated 2 minutes ago')).toBe('LP-1013, T.R., Waiting for check, created 11:02 PM, updated 2 minutes ago');
     expect(logRowLabel(byCase(1004), 'Thu 9:58 PM', 'not updated yet')).toBe('LP-1004, S.L., In medical, friend coming, created Thu 9:58 PM, not updated yet');
     expect(logRowLabel({ ...byCase(1009), name: '' }, '10:44 PM', 'updated 6 minutes ago')).toBe('LP-1009, No name, Not in medical, created 10:44 PM, updated 6 minutes ago');
@@ -218,8 +219,8 @@ describe('list helpers', () => {
     expect(logNumberRanges(1012, [[3, 5]])).toEqual([[0, 2]]);
     expect(logNumberRanges(998, [[4, 7]])).toEqual([[0, 3]]);
     expect(logNumberRanges(998, [[0, 2]])).toEqual([]);
-    expect(closedFoldLabel(1)).toBe('Closed 1 request');
-    expect(closedFoldLabel(6)).toBe('Closed 6 requests');
+    expect(archivedFoldLabel(1)).toBe('Archived 1 request');
+    expect(archivedFoldLabel(6)).toBe('Archived 6 requests');
     // On a narrow phone only the long open label gets shorter, so the name keeps its room (review fix).
     expect(narrowStatusLabel(STATUS.waiting)).toBe('Waiting');
     for (const st of [STATUS.inMedical, STATUS.legacyBringFriend, STATUS.notInMedical, STATUS.reunited, STATUS.discharged, STATUS.cancelled, 'Some legacy value']) {
@@ -394,7 +395,7 @@ describe('list views render', () => {
     return m[1];
   };
 
-  it('All (option B): queued on top, open rows newest first, every closed one folded into "Closed N"', () => {
+  it('All (option B): queued on top, open rows newest first, every closed one folded into "Archived N"', () => {
     const store = storeWith((s) => ({ ...s, outbox: [outboxItem(), outboxItem({ mutationId: '1b5a3c2e-8d4f-4a1b-9c7e-2f6d8a1b3c4d', state: 'needs_attention', createdAt: NOW - 120_000 })] }));
     const html = render(store, <AllView status={null} post={null} />);
     expect(html).toContain('data-testid="request-list"');
@@ -429,18 +430,20 @@ describe('list views render', () => {
     for (const r of closed) expect(html).not.toContain(`data-request-id="${r.id}"`);
     const fold = html.slice(html.indexOf('data-testid="closed-fold"') - 300, html.indexOf('data-testid="closed-fold"') + 600);
     expect(fold).toContain('aria-expanded="false"');
-    expect(fold).toContain(`aria-label="Closed ${closed.length} requests"`);
-    expect(fold).toContain(`>${closed.length}</span>`);
+    expect(fold).toContain(`aria-label="Archived ${closed.length} requests"`);
+    expect(fold).toMatch(new RegExp(`>Archived</span> <span[^>]*>${closed.length}</span>`));
+    expect(fold).not.toContain('>Closed<');
     expect(html.indexOf('data-testid="closed-fold"')).toBeGreaterThan(at.at(-1)!);
   });
 
-  it('All: the Closed fold opens in place (from prefs), greyed rows newest first in the same grid', () => {
+  it('All: the Archived fold opens in place (from prefs), greyed rows newest first in the same grid', () => {
     const store = storeWith((s) => ({ ...s, prefs: { ...s.prefs, closedExpanded: true } }));
     const html = render(store, <AllView status={null} post={null} />);
     const fold = html.indexOf('data-testid="closed-fold"');
     const group = html.indexOf('data-testid="closed-rows"');
     expect(html.slice(fold - 300, fold)).toContain('aria-expanded="true"');
     expect(group).toBeGreaterThan(fold);
+    expect(html.slice(html.lastIndexOf('<div', group), group)).toContain('aria-label="Archived requests"');
     // Newest created first: 38, 45, 65, 70, 82 and 93 minutes ago, then yesterday's.
     const closed = [1009, 1008, 1003, 1006, 1002, 1001, 1000];
     const at = closed.map((n) => html.indexOf(`data-request-id="${idOf(n)}"`));
@@ -450,6 +453,73 @@ describe('list views render', () => {
     expect(rowTag(html, 1009)).toContain('data-closed');
     expect(rowTag(html, 1003)).toContain('data-closed');
     expect(rowTag(html, 1013)).not.toContain('data-closed');
+  });
+
+  it('All, Pending and My requests open with the brand card, above the sticky bar; Search does not', () => {
+    const store = storeWith((s) => ({ ...s, myIds: new Set([...s.confirmed.keys()]) }));
+    const views = [
+      ['All', <AllView key="all" status={null} post={null} />],
+      ['Pending', <PendingView key="pending" />],
+      ['My requests', <MineView key="mine" />],
+    ] as const;
+    for (const [name, node] of views) {
+      const html = render(store, node);
+      const card = html.indexOf('data-testid="brand-card"');
+      const title = html.indexOf('data-testid="view-switcher"');
+      expect(card, name).toBeGreaterThan(0);
+      // The first thing in the view: before the view's root has anything else in it, and before the title.
+      expect(html.slice(0, card), name).not.toContain('data-testid="view-switcher"');
+      expect(html.indexOf('data-testid="brand-card"', card + 1), name).toBe(-1);
+      expect(card, name).toBeLessThan(title);
+      // The card's own markup: up to the sticky bar's <header>, which follows it directly.
+      const header = html.indexOf('<header', card);
+      expect(header, name).toBeLessThan(title);
+      const brand = html.slice(html.lastIndexOf('<div', card), header).replace(/<!-- -->/g, '');
+      expect(brand, name).toMatch(/<\/p><\/div><div class="[^"]*sticky[^"]*">$/);
+      // The real logos, sized up front (no shift when they load), EDC first, a divider, Ground Control.
+      expect(brand, name).toMatch(/<img [^>]*src="\/logos\/edc-orlando.png" alt="EDC Orlando" width="194" height="132"/);
+      expect(brand, name).toMatch(/<img [^>]*src="\/logos\/ground-control.png" alt="Ground Control" width="313" height="120"/);
+      expect(brand.indexOf('edc-orlando.png'), name).toBeLessThan(brand.indexOf('ground-control.png'));
+      // Event kicker (capitals come from CSS), the big title with "in medical?" in its own span, the credit.
+      expect(brand, name).toContain(`>${BRAND_KICKER}</p>`);
+      expect(BRAND_KICKER).toBe('Event operations · November 6–8, 2026');
+      expect(brand, name).toMatch(/>Is my friend <span class="[^"]*accent[^"]*">in medical\?<\/span><\/p>/);
+      expect(`${BRAND_CREDIT_NAMES} for ${BRAND_CREDIT_FOR}`).toBe('Jeffrey & Brian for Ground Control / Headliner Experience');
+      // On a phone the credit breaks before "for" (CSS), so the card's height never depends on the font.
+      expect(brand, name).toMatch(/>Built by <b>Jeffrey &amp; Brian<\/b> <span class="[^"]*creditFor[^"]*">for Ground Control \/ Headliner Experience<\/span><\/p>/);
+      // Decoration is hidden from screen readers; the card adds no heading (the view menu title stays the h1).
+      expect(brand, name).toMatch(/class="[^"]*orbit[^"]*" aria-hidden="true"/);
+      expect(brand, name).not.toMatch(/<h[1-6][\s>]/);
+      expect(html.match(/<h1[\s>]/g)?.length, name).toBe(1);
+    }
+    // Search keeps its own bar (the field takes over the header), with no brand card.
+    expect(render(store, <SearchView q="" />)).not.toContain('brand-card');
+    expect(render(store, <SearchView q="pink" />)).not.toContain('brand-card');
+  });
+
+  it('the brand card is there before any data (skeletons and the error state), so nothing moves when rows load', () => {
+    const loading = render(storeWith((s) => ({ ...s, hasData: false, hydrated: false })), <AllView status={null} post={null} />);
+    expect(loading).toContain('list-skeleton');
+    expect(loading.indexOf('data-testid="brand-card"')).toBeGreaterThan(0);
+    expect(loading.indexOf('data-testid="brand-card"')).toBeLessThan(loading.indexOf('list-skeleton'));
+    const failed = render(storeWith((s) => ({ ...s, hasData: false, hydrated: true, connection: 'error' })), <PendingView />);
+    expect(failed).toContain('Can&#x27;t reach the log');
+    expect(failed).toContain('data-testid="brand-card"');
+  });
+
+  it('only All archives: Pending lists no closed request; My requests shows the reporter theirs, unfolded', () => {
+    const store = storeWith((s) => ({ ...s, myIds: new Set([...s.confirmed.keys()]), prefs: { ...s.prefs, closedExpanded: false } }));
+    const pending = render(store, <PendingView />);
+    expect(pending).not.toContain('data-testid="closed-fold"');
+    for (const r of store.getState().confirmed.values()) {
+      if (statusMeta(r.status).bucket === 'closed') expect(pending).not.toContain(`data-request-id="${r.id}"`);
+    }
+    // My requests: no Archived fold, and Not in medical (LP-1009) and Reunited (LP-1003) are on the page.
+    const mine = render(store, <MineView />);
+    expect(mine).not.toContain('data-testid="closed-fold"');
+    expect(mine).not.toContain('Archived');
+    expect(mine).toContain(`data-request-id="${idOf(1009)}"`);
+    expect(mine).toContain(`data-request-id="${idOf(1003)}"`);
   });
 
   it('All rows: number, name, status, created with AM/PM, updated as "—" or a compact age; full-sentence names', () => {
