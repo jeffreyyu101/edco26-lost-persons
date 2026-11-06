@@ -33,9 +33,24 @@ describe('mappers', () => {
 
   it('create / patch payloads: name split at the last space, camel → snake, omitted keys omitted', () => {
     const create = createRequestSchema.parse({ clientMutationId: '5eed0000-0000-4000-8000-000000000001', reportingLocation: 'Base', name: ' Mary  Ann Lee ', age: 3, hair: '' });
-    expect(createPayload(create)).toEqual({ client_mutation_id: '5eed0000-0000-4000-8000-000000000001', reporting_location: 'Base', other_location: null, first_name: 'Mary Ann', last_name: 'Lee', age: 3, hair: null });
+    expect(createPayload(create)).toEqual({ client_mutation_id: '5eed0000-0000-4000-8000-000000000001', reporting_location: 'Base', other_location: null, first_name: 'Mary Ann', last_name: 'Lee', age: '3', hair: null });
     const patch = requestPatchSchema.parse({ name: 'Dana', contactPhone: null });
     expect(patchPayload(patch)).toEqual({ first_name: 'Dana', last_name: null, contact_phone: null });
+  });
+
+  it('free-text age and gender (2026-11-06): payloads carry text; mapRow reads an age stored as a number as text', () => {
+    const create = createRequestSchema.parse({ clientMutationId: '5eed0000-0000-4000-8000-000000000001', reportingLocation: 'Base', age: ' mid-20s ', gender: ' Non-binary ' });
+    expect(createPayload(create)).toMatchObject({ age: 'mid-20s', gender: 'Non-binary' });
+    expect(patchPayload(requestPatchSchema.parse({ age: 24, gender: '' }))).toEqual({ age: '24', gender: null });
+    expect(mapRow({ age: 'mid-20s', gender: 'woman' })).toMatchObject({ age: 'mid-20s', gender: 'woman' });
+    expect(mapRow({ age: '24' }).age).toBe('24');
+    expect(mapRow({ age: 24 }).age).toBe('24');
+    expect(mapRow({ age: 0 }).age).toBe('0');
+    expect(mapRow({ age: null }).age).toBeNull();
+    expect(mapRow({ age: { x: 1 } }).age).toBeNull();
+    // Jeffrey's blobs hold age as a number, new ones as text: equal values are not a change.
+    expect(editChanges({ age: 24, hair: null }, { age: '24', hair: 'Red' })).toEqual({ previous: { hair: null }, next: { hair: 'Red' } });
+    expect(editChanges({ age: 24 }, { age: 'mid-20s' })).toEqual({ previous: { age: 24 }, next: { age: 'mid-20s' } });
   });
 });
 

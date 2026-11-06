@@ -436,25 +436,33 @@ export const LIMITS = {
   contactRelationship: 120,
   contactPhone: 40,
   otherLocation: OTHER_LOCATION_MAX,
+  /** Free text since 2026-11-06 (Jeffrey): "24", "mid-20s". */
+  age: 40,
+  /** Free text since 2026-11-06 (Jeffrey); GENDERS are quick-fill options. */
+  gender: 40,
 } as const;
 
+/** The old numeric age range. The server no longer enforces it: age is free text (LIMITS.age). */
 export const AGE_MIN = 0;
 export const AGE_MAX = 120;
 
+/** Quick-fill options for the free-text gender field (any text up to LIMITS.gender is accepted). */
 export const GENDERS = ['Male', 'Female', 'Other'] as const;
 export type Gender = (typeof GENDERS)[number];
 
-/** Male → "M", Female → "F", anything else → "". */
+/** Male → "M", Female → "F" (also typed as male / m / man, female / f / woman, any case), anything else → "". */
 export function genderShort(gender: string | null | undefined): '' | 'M' | 'F' {
-  if (gender === 'Male') return 'M';
-  if (gender === 'Female') return 'F';
+  const g = gender?.trim().toLowerCase();
+  if (g === 'male' || g === 'm' || g === 'man') return 'M';
+  if (g === 'female' || g === 'f' || g === 'woman') return 'F';
   return '';
 }
 
-/** "19 F" / "24 M" / "19" / "F" / "" for the list rows and cards. */
-export function ageGender(age: number | null | undefined, gender: string | null | undefined): string {
+/** "19 F" / "24 M" / "mid-20s F" / "19" / "F" / "" for the list rows and cards. Age is free text. */
+export function ageGender(age: string | number | null | undefined, gender: string | null | undefined): string {
   const parts: string[] = [];
-  if (age !== null && age !== undefined) parts.push(String(age));
+  const a = age === null || age === undefined ? '' : String(age).trim();
+  if (a) parts.push(a);
   const g = genderShort(gender);
   if (g) parts.push(g);
   return parts.join(' ');

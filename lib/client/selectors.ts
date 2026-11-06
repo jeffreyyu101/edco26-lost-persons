@@ -128,7 +128,8 @@ export function viewCounts(
 
 // ---------------------------------------------------------------------------------------------------
 // Search (spec §8): case-insensitive over name, clothing, last seen, physical description, identifying
-// features, hair, post and the LP number ("1012" or "LP-1012").
+// features, hair, post and the LP number ("1012" or "LP-1012"), and the free-text age ("mid-20s"; not for
+// a query that reads as an LP number, so typing digits never lists everyone of that age).
 // ---------------------------------------------------------------------------------------------------
 
 export type SearchField =
@@ -139,7 +140,8 @@ export type SearchField =
   | 'physicalDescription'
   | 'identifyingFeatures'
   | 'hair'
-  | 'post';
+  | 'post'
+  | 'age';
 
 export interface SearchHit {
   row: RequestSummary;
@@ -185,6 +187,8 @@ export function searchRequests(rows: readonly RequestSummary[], query: string): 
       ['identifyingFeatures', row.identifyingFeatures],
       ['hair', row.hair],
       ['post', `${row.postShort} · ${postFull(row.reportingLocation, row.otherLocation)}`],
+      // String(): a row cached before age became text can still hold a number (24) in memory.
+      ['age', caseNumber === null && row.age !== null && row.age !== undefined ? String(row.age) : null],
     ];
     for (const [field, text] of fields) {
       if (!text) continue;

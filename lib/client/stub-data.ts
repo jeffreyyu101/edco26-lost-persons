@@ -76,7 +76,7 @@ export function stubRows(now: number = Date.now()): RequestSummary[] {
     caseNumber: s.n,
     firstName: s.first,
     lastName: s.last ?? null,
-    age: s.age,
+    age: String(s.age),
     gender: s.gender,
     heightBuild: null,
     hair: s.hair ?? null,

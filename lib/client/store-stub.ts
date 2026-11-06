@@ -182,7 +182,7 @@ export function createStubStore(options: StubOptions): AppStore {
         caseNumber,
         firstName,
         lastName,
-        age: body.age ?? null,
+        age: body.age === undefined || body.age === null ? null : String(body.age),
         gender: body.gender ?? null,
         heightBuild: body.heightBuild ?? null,
         hair: body.hair ?? null,

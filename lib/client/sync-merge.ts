@@ -11,6 +11,17 @@ export function sameRow(a: RequestSummary, b: RequestSummary): boolean {
 }
 
 /**
+ * Age is free text since 2026-11-06. Rows cached on a phone before then (IndexedDB) or answered by a server
+ * still on the old build hold a number (24); the column change did not bump row_version, so sync never
+ * resends them. Every row is texted here on its way into `confirmed` ("24"). Same object when already text.
+ */
+export function normalizeRow(row: RequestSummary): RequestSummary {
+  const age: unknown = row.age;
+  if (typeof age === 'string' || age === null) return row;
+  return { ...row, age: typeof age === 'number' && Number.isFinite(age) ? String(age) : null };
+}
+
+/**
  * Monotonic merge: a row replaces the stored one only when its rowVersion is greater than or equal to it.
  * Returns null when nothing changed, so the confirmed map (and every selector memo) keeps its identity.
  */
@@ -19,7 +30,8 @@ export function mergeRows(
   rows: readonly RequestSummary[],
 ): Map<string, RequestSummary> | null {
   let next: Map<string, RequestSummary> | null = null;
-  for (const row of rows) {
+  for (const raw of rows) {
+    const row = normalizeRow(raw);
     const current = (next ?? confirmed).get(row.id);
     if (current) {
       if (row.rowVersion < current.rowVersion) continue;
@@ -42,7 +54,8 @@ export function replaceAll(
   keep: ReadonlySet<string>,
 ): Map<string, RequestSummary> {
   const next = new Map<string, RequestSummary>();
-  for (const row of rows) {
+  for (const raw of rows) {
+    const row = normalizeRow(raw);
     const current = confirmed.get(row.id);
     if (current && current.rowVersion > row.rowVersion) next.set(row.id, current);
     else if (current && current.rowVersion === row.rowVersion && sameRow(current, row)) next.set(row.id, current);
@@ -92,6 +105,9 @@ export function overlayForPatch(row: RequestSummary, patch: RequestPatch): Parti
       out['lastName'] = lastName;
     } else if (typeof value === 'string' || value === null) {
       out[key] = key === 'reportingLocation' ? value : cleanText(value);
+    } else if (key === 'age' && typeof value === 'number') {
+      // The form still sends a number (24); the row's age is text, as the server will answer ("24").
+      out[key] = String(value);
     } else {
       out[key] = value;
     }

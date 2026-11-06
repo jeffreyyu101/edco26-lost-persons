@@ -44,7 +44,7 @@ describe('POST /api/requests', () => {
       reportingLocation: 'Other',
       otherLocation: 'Info booth',
       postShort: 'Info booth',
-      age: 22,
+      age: '22',
       gender: 'Female',
       rowVersion: 0,
       photoCount: 0,
@@ -102,10 +102,10 @@ describe('POST /api/requests', () => {
     ['missing post', { reportingLocation: undefined }, 'reportingLocation'],
     ['unknown post', { reportingLocation: 'FA 9' }, 'reportingLocation'],
     ['Other without where', { reportingLocation: 'Other', otherLocation: null }, 'otherLocation'],
-    ['age 121', { age: 121 }, 'age'],
-    ['age 2.5', { age: 2.5 }, 'age'],
-    ['age as text', { age: '22' }, 'age'],
-    ['bad gender', { gender: 'M' }, 'gender'],
+    ['age over 40', { age: 'x'.repeat(41) }, 'age'],
+    ['age as a boolean', { age: true }, 'age'],
+    ['gender over 40', { gender: 'x'.repeat(41) }, 'gender'],
+    ['gender as a number', { gender: 1 }, 'gender'],
     ['name over 120', { name: 'x'.repeat(121) }, 'name'],
     ['clothing over 300', { clothing: 'x'.repeat(301) }, 'clothing'],
     ['phone over 40', { contactPhone: '1'.repeat(41) }, 'contactPhone'],
@@ -362,5 +362,77 @@ describe('POST /api/requests/:id/cancel', () => {
     expect((await api(`/api/requests/${randomUUID()}/cancel`, { json: { expectedVersion: 0 }, cookie })).status).toBe(404);
     expect((await api(`/api/requests/${r.id}/cancel`, { json: { expectedVersion: 0 } })).status).toBe(401);
     expect((await api(`/api/requests/${r.id}/cancel`, { json: { expectedVersion: 0 }, cookie, origin: 'https://evil.example' })).status).toBe(403);
+  });
+});
+
+describe('free-text age and gender (Jeffrey, 2026-11-06 10:31)', () => {
+  it('creates with age "mid-20s" or "24" and any gender; create, detail and sync return them as typed', async () => {
+    const staff = newStaff();
+    const cookie = await cookieFor(staff);
+    const a = await createRequest(staff, { age: ' mid-20s ', gender: ' Non-binary ' });
+    expect(a).toMatchObject({ age: 'mid-20s', gender: 'Non-binary' });
+    const b = await createRequest(staff, { age: '24', gender: 'male' });
+    expect(b).toMatchObject({ age: '24', gender: 'male' });
+    // The old values still work, and a request queued by an older client (age as a number) is stored as text.
+    const c = await createRequest(staff, { age: 24, gender: 'Male' });
+    expect(c).toMatchObject({ age: '24', gender: 'Male' });
+    const blank = await createRequest(staff, { age: '   ', gender: '' });
+    expect(blank).toMatchObject({ age: null, gender: null });
+    const longest = await createRequest(staff, { age: 'x'.repeat(40), gender: 'y'.repeat(40) });
+    expect(longest).toMatchObject({ age: 'x'.repeat(40), gender: 'y'.repeat(40) });
+
+    const detail = (await api(`/api/requests/${a.id}`, { cookie })).body as RequestDetail;
+    expect(detail).toMatchObject({ age: 'mid-20s', gender: 'Non-binary' });
+    const sync = await api(`/api/sync?ids=${[a.id, b.id, c.id].join(',')}`, { cookie });
+    expect(sync.status).toBe(200);
+    const byId = new Map((sync.body.rows as RequestSummary[]).map((row) => [row.id, row]));
+    expect([a.id, b.id, c.id].map((id) => byId.get(id)?.age)).toEqual(['mid-20s', '24', '24']);
+    const { data, error } = await admin().from('patients').select('id, age').in('id', [a.id, c.id]);
+    expect(error).toBeNull();
+    expect(new Map((data as Array<{ id: string; age: string }>).map((row) => [row.id, row.age]))).toEqual(
+      new Map([[a.id, 'mid-20s'], [c.id, '24']]),
+    );
+  });
+
+  it('edits age between "mid-20s" and "24" and gender to free text, audited; the same age as a number is no change', async () => {
+    const staff = newStaff();
+    const cookie = await cookieFor(staff);
+    const r = await createRequest(staff, { age: 'mid-20s', gender: 'Female' });
+    const patch = (p: Record<string, unknown>, expectedVersion: number) =>
+      api(`/api/requests/${r.id}`, { method: 'PATCH', json: { patch: p, expectedVersion }, cookie });
+
+    const first = await patch({ age: '24', gender: 'woman' }, r.rowVersion);
+    expect(first.status).toBe(200);
+    expect(first.body).toMatchObject({ changed: true, request: { age: '24', gender: 'woman' } });
+    const v1 = first.body.request.rowVersion as number;
+    const same = await patch({ age: 24 }, v1);
+    expect(same.status).toBe(200);
+    expect(same.body).toMatchObject({ changed: false, request: { age: '24', rowVersion: v1 } });
+    const back = await patch({ age: ' mid-20s ' }, v1);
+    expect(back.body).toMatchObject({ changed: true, request: { age: 'mid-20s', gender: 'woman' } });
+    const cleared = await patch({ age: null, gender: '' }, back.body.request.rowVersion);
+    expect(cleared.body).toMatchObject({ changed: true, request: { age: null, gender: null } });
+    const tooLong = await patch({ age: 'x'.repeat(41) }, cleared.body.request.rowVersion);
+    expect(tooLong.status).toBe(422);
+    expect(tooLong.body.error.field).toBe('age');
+
+    const detail = (await api(`/api/requests/${r.id}`, { cookie })).body as RequestDetail;
+    const edits = detail.audit.filter((e): e is Extract<AuditEvent, { action: 'edit' }> => e.action === 'edit');
+    expect(edits.map((e) => [e.previous, e.next])).toEqual([
+      [{ age: 'mid-20s', gender: 'Female' }, { age: '24', gender: 'woman' }],
+      [{ age: '24' }, { age: 'mid-20s' }],
+      [{ age: 'mid-20s', gender: 'woman' }, { age: null, gender: null }],
+    ]);
+  });
+
+  it('a row saved with a numeric age before the change reads back as text (seed LP-1013, age 24)', async () => {
+    const cookie = await cookieFor(newStaff());
+    const res = await api('/api/requests/5eed0000-0000-4000-8000-000000001013', { cookie });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ caseNumber: 1013, age: '24', gender: 'Male' });
+    // Jeffrey's audit blobs hold age as a number; they never show a phantom age change.
+    const lp997 = (await api('/api/requests/5eed0000-0000-4000-8000-000000000997', { cookie })).body as RequestDetail;
+    expect(lp997.age).toBe('30');
+    for (const e of lp997.audit) if (e.action === 'edit') expect('age' in e.next, JSON.stringify(e.next)).toBe(false);
   });
 });

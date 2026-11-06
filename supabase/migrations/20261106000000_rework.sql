@@ -10,9 +10,12 @@
 --   It is safe to run twice: every step is idempotent and the whole file is one transaction, so a
 --   failure part-way leaves the database exactly as it was.
 --
--- What it does (no existing column or constraint is altered, except the NOT VALID re-add in step 2):
+-- What it does (no existing column or constraint is altered, except the NOT VALID re-add in step 2 and
+-- the age conversion in step 1b):
 --   0. Preflight: the production tables and the client_mutation_id unique key must exist.
 --   1. patients.row_version (optimistic concurrency and sync) and patients.last_seen (if missing).
+--   1b. patients.age becomes free text ("mid-20s"), only while it is not text yet: its CHECK is dropped and
+--      every value is kept as its text (24 → '24').
 --   2. Replaces the reporting_location / status CHECK only when it lacks a needed value (or a value rows
 --      already hold), NOT VALID. Values already in the table stay allowed, so legacy rows stay editable.
 --   3. lp_touch() BEFORE UPDATE trigger: updated_at = clock_timestamp(), row_version + 1.
@@ -102,6 +105,51 @@ $preflight$;
 -- -----------------------------------------------------------------------------------------------------
 alter table public.patients add column if not exists row_version bigint not null default 0;
 alter table public.patients add column if not exists last_seen text;
+
+-- -----------------------------------------------------------------------------------------------------
+-- 1b. Age is free text (Jeffrey, 2026-11-06 10:31: "for age, they can put mid-20s, not just numbers").
+--     Runs only while patients.age is not text (Jeffrey's baseline: smallint with a 0–120 CHECK), so a
+--     re-run changes nothing. Every CHECK that reads age is dropped first (`age between 0 and 120` cannot
+--     apply to text), then USING age::text keeps every value (24 → '24', null stays null). The rewrite
+--     holds an ACCESS EXCLUSIVE lock only while it runs (bounded by the timeouts above). The app's schema
+--     has no index, view or default on age; if one existed, the ALTER would fail and the whole file roll
+--     back (the dry run shows it). The lp_* functions are recreated against the new row type in step 6.
+--     Paste this BEFORE deploying an app that sends text ages: the previous lp_clean_fields refuses them,
+--     while the previous app keeps working on this one (it sends numbers, stored as text).
+-- -----------------------------------------------------------------------------------------------------
+do $age$
+declare
+  v_type text;
+  v_con name;
+  v_dropped text[] := '{}';
+begin
+  select pg_catalog.format_type(a.atttypid, a.atttypmod) into v_type
+  from pg_catalog.pg_attribute a
+  where a.attrelid = 'public.patients'::regclass and a.attname = 'age' and not a.attisdropped;
+
+  if v_type = 'text' then
+    raise notice 'patients.age: already text, unchanged.';
+    return;
+  end if;
+
+  for v_con in
+    select c.conname
+    from pg_catalog.pg_constraint c
+    join pg_catalog.pg_attribute a
+      on a.attrelid = c.conrelid and a.attname = 'age' and not a.attisdropped
+    where c.conrelid = 'public.patients'::regclass and c.contype = 'c' and a.attnum = any (c.conkey)
+    order by c.conname
+  loop
+    execute pg_catalog.format('alter table public.patients drop constraint %I', v_con);
+    v_dropped := v_dropped || v_con::text;
+  end loop;
+
+  alter table public.patients alter column age type text using age::text;
+
+  raise notice 'patients.age: % → text, every value kept. CHECKs dropped: %',
+    v_type, coalesce(nullif(pg_catalog.array_to_string(v_dropped, ', '), ''), 'none');
+end
+$age$;
 
 -- -----------------------------------------------------------------------------------------------------
 -- 2. Locations and statuses (in case 20261105_update_locations_and_statuses never ran in production).
@@ -424,7 +472,9 @@ $fn$;
 -- lp_clean_fields: validate and normalise editable request fields from JSON. Internal helper.
 --   * Only whitelisted keys (spec §4 editable fields + reporting_location, other_location). Others → P0422.
 --   * Text values must be JSON strings or null; blank strings become null.
---   * age: a JSON integer 0–120, or null. gender: Male / Female / Other, or null.
+--   * age and gender are free text (Jeffrey, 2026-11-06 10:31): "mid-20s", "24", "Non-binary", ≤40
+--     characters each. age also takes a JSON number (a request queued by an older client), stored as its
+--     text (24 → '24').
 --   * Length limits per spec §4. reporting_location, when present, must be a valid post (never null).
 -- Returns the cleaned object with exactly the keys given (create requires reporting_location).
 create function public.lp_clean_fields(p jsonb, p_partial boolean)
@@ -439,7 +489,6 @@ declare
   v_key text;
   v_val jsonb;
   v_text text;
-  v_num numeric;
   v_limit integer;
 begin
   if p is null or pg_catalog.jsonb_typeof(p) <> 'object' then
@@ -462,30 +511,15 @@ begin
       when 'contact_relationship' then 120
       when 'contact_phone' then 40
       when 'other_location' then 80
-      when 'gender' then 10
+      when 'age' then 40
+      when 'gender' then 40
       when 'reporting_location' then 40
-      when 'age' then 0
       else null
     end;
 
     if v_limit is null then
       raise exception using errcode = 'P0422', message = 'unknown_field',
         detail = pg_catalog.format('field:%s', pg_catalog.left(v_key, 60));
-    end if;
-
-    if v_key = 'age' then
-      if pg_catalog.jsonb_typeof(v_val) = 'null' then
-        v_out := v_out || pg_catalog.jsonb_build_object('age', null);
-      elsif pg_catalog.jsonb_typeof(v_val) = 'number' then
-        v_num := (v_val #>> '{}')::numeric;
-        if v_num <> pg_catalog.trunc(v_num) or v_num < 0 or v_num > 120 then
-          raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:age';
-        end if;
-        v_out := v_out || pg_catalog.jsonb_build_object('age', v_num::integer);
-      else
-        raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:age';
-      end if;
-      continue;
     end if;
 
     if pg_catalog.jsonb_typeof(v_val) = 'null' then
@@ -495,16 +529,14 @@ begin
       if pg_catalog.btrim(v_text, E' \t\r\n') = '' then
         v_text := null;
       end if;
+    elsif v_key = 'age' and pg_catalog.jsonb_typeof(v_val) = 'number' then
+      v_text := v_val #>> '{}';
     else
       raise exception using errcode = 'P0422', message = 'invalid_field', detail = pg_catalog.format('field:%s', v_key);
     end if;
 
     if v_text is not null and pg_catalog.char_length(v_text) > v_limit then
       raise exception using errcode = 'P0422', message = 'field_too_long', detail = pg_catalog.format('field:%s', v_key);
-    end if;
-
-    if v_key = 'gender' and v_text is not null and v_text not in ('Male', 'Female', 'Other') then
-      raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:gender';
     end if;
 
     if v_key = 'reporting_location'

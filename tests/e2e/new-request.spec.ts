@@ -205,7 +205,7 @@ test('creates a request with a photo; it shows in All and My requests', async ({
   const [created] = await rowsNamed(page.request, name);
   expect(created).toMatchObject({
     reportingLocation: 'FA 4 – Oasis',
-    age: 19,
+    age: '19',
     gender: 'Female',
     clothing: 'Pink cowboy hat, silver fringe top',
     lastSeen: 'rail, ~10:30, kineticFIELD',

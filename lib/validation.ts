@@ -3,11 +3,9 @@
 //
 // Text rules (spec §4): strings are trimmed; empty strings become null. In a PATCH an omitted key means
 // "unchanged" and an explicit null means "clear". Lengths count Unicode code points, like SQL char_length.
+// Age and gender are free text (Jeffrey, 2026-11-06 10:31; design/DECISIONS.md "New request: free text").
 import { z } from 'zod';
 import {
-  AGE_MAX,
-  AGE_MIN,
-  GENDERS,
   LIMITS,
   OTHER_LOCATION_MIN,
   OTHER_POST,
@@ -51,11 +49,18 @@ const nameField = z
   .refine((v) => v === null || codePoints(v) <= LIMITS.name, { message: `Must be ${LIMITS.name} characters or fewer` })
   .refine((v) => v === null || storable(v), { message: UNSTORABLE });
 
-const ageField = z.union([z.number().int().min(AGE_MIN).max(AGE_MAX), z.null()]);
+/**
+ * Age as people say it: free text ("24", "mid-20s"), trimmed, '' → null, at most LIMITS.age (Jeffrey,
+ * 2026-11-06). A number is still accepted and kept as its text (24 → "24"), so a request queued on a phone
+ * by an older client still sends.
+ */
+const ageField = z
+  .union([z.string(), z.number(), z.null()])
+  .transform((v) => (typeof v === 'number' ? String(v) : v))
+  .pipe(optionalText(LIMITS.age));
 
-const genderField = z
-  .union([z.enum(GENDERS), z.literal(''), z.null()])
-  .transform((v) => (v === '' ? null : v));
+/** Free text (trimmed, '' → null, at most LIMITS.gender); Male / Female / Other are quick-fill options. */
+const genderField = optionalText(LIMITS.gender);
 
 const postField = z.enum(POST_VALUES);
 const otherLocationField = optionalText(LIMITS.otherLocation);
