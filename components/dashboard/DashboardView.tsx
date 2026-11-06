@@ -1,21 +1,39 @@
 'use client';
-// Dashboard (?dashboard=1, spec §8 Dashboard; design/screens/dashboard.html): GET /api/stats every 15 s
-// while open via useStats(true). One hero number; a thin segmented bar (blue Waiting, green In medical,
-// 2 px gap) with a legend of glyph + label + count; 4 tiles; Open by post as single-hue grey bars with the
-// value at the tip; Recently updated; Export CSV. Legend rows, tiles and bars open All filtered (A22);
-// Longest wait and Recently updated rows open that request.
-import { Button, Heading, IconButton, Skeleton, Text } from '@radix-ui/themes';
-import { ChevronLeft, Clock, Download, Timer } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+// Dashboard (?dashboard=1, spec §8 Dashboard): Jeffrey's global view, built from design/screens/polish-v7.html
+// (Dash, Tiles, Posts, Recent, Perf, Laptop; renders v7-dash.png and v7-laptop.png). GET /api/stats every 15 s
+// while open via useStats(true).
+//   title    ‹ Dashboard, large. A compact Offline / Retrying chip only while not live.
+//   tiles    Open (blue/green split bar) and Closed, big; Waiting for check, In medical, Not in medical, Reunited
+//            (+ discharged · cancelled when either is non-zero). Status tiles open All filtered (A22); Open opens
+//            Pending, which lists exactly the open requests.
+//   posts    Open by post, busiest first: label over a 6 px bar, count in a fixed column. Opens ?post=&open=1 (A42).
+//   recent   "Recently updated ›" opens All. Rows: number, name, status, updated; a row opens the profile.
+//   perf     Longest wait (opens that request), Time to answer, Time to reunite, Logged. "—" when a value is null
+//            or missing (avgReuniteMinutes / loggedLastHour come from the v2.2 lp_stats).
+// ≥ 768 px: six tiles in one row, posts and recent side by side, performance rows in two columns.
+import { Skeleton, VisuallyHidden } from '@radix-ui/themes';
+import { ChevronLeft, ChevronRight, Clock, CloudOff, Inbox, RefreshCw, Timer, Users, type LucideIcon } from 'lucide-react';
+import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
-import { EXPORT_CSV_PATH, handleExportClick } from '@/components/account/export-csv';
 import type { Stats } from '@/lib/api-types';
 import { goBack, navigate } from '@/lib/client/nav';
-import { useConnection, useEventTimezone, useNow, useStats } from '@/lib/client/store-contract';
+import { useConnection, useNow, useStats } from '@/lib/client/store-contract';
 import { STATUS, postFilterKey, postFilterLabel, statusMeta, toneColorVar } from '@/lib/domain';
-import { formatCaseNumber } from '@/lib/format';
-import { barPercent, closedSubline, formatAgo, formatMinutes } from './dashboard-model';
+import {
+  NO_VALUE,
+  agoPhrase,
+  barPercent,
+  closedSubline,
+  closedSublinePhrase,
+  closedTotal,
+  countParts,
+  durationParts,
+  durationPhrase,
+  formatAgo,
+  postsBusiestFirst,
+  type ValuePart,
+} from './dashboard-model';
 import s from './dashboard.module.css';
 
 export type DashboardViewProps = Record<string, never>;
@@ -33,27 +51,33 @@ function Dashboard({ onRetry }: { onRetry: () => void }) {
   const { stats, error } = useStats(true);
   const { connection } = useConnection();
   const offline = connection === 'offline';
-  const live = !offline && connection !== 'error' && !error;
-  const pill = live ? 'Live' : offline ? 'Offline' : 'Retrying';
+  const state = offline ? 'offline' : connection === 'error' || error ? 'retrying' : 'live';
 
   return (
     <div className={s.app} data-testid="dashboard">
-      <div className={s.nav}>
-        <IconButton variant="ghost" color="gray" aria-label="Back to requests" className={s.back} onClick={() => goBack({})}>
-          <ChevronLeft size={20} aria-hidden />
-        </IconButton>
-        <Heading as="h1" size="4" weight="medium">
-          Dashboard
-        </Heading>
-        <span className={s.sp} />
-        <span className={s.livepill} role="status" data-testid="dashboard-live">
-          <span className={s.live} data-state={live ? 'on' : 'off'} aria-hidden />
-          {pill}
+      <header className={s.nav}>
+        <button type="button" className={s.back} aria-label="Back to requests" onClick={() => goBack({})}>
+          <ChevronLeft size={24} strokeWidth={2} aria-hidden />
+        </button>
+        <h1 className={s.title}>Dashboard</h1>
+        {/* Always in the tree so the change is announced; empty (and invisible) while live. */}
+        <span className={s.conn} role="status" data-state={state} data-testid="dashboard-connection">
+          {state === 'offline' ? (
+            <>
+              <CloudOff size={14} aria-hidden />
+              Offline
+            </>
+          ) : state === 'retrying' ? (
+            <>
+              <RefreshCw size={14} aria-hidden />
+              Retrying
+            </>
+          ) : null}
         </span>
-      </div>
+      </header>
       <main className={s.body}>
         {stats ? (
-          <Content stats={stats} offline={offline} />
+          <DashboardContent stats={stats} />
         ) : error ? (
           <EmptyState icon="plug" title="Can't reach the log" action={{ label: 'Try again', onClick: onRetry, icon: 'refresh' }} />
         ) : (
@@ -64,233 +88,390 @@ function Dashboard({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-const showAll = (params: { status?: string; post?: string; open?: true }) => navigate(params);
+const show = (params: Parameters<typeof navigate>[0]) => navigate(params);
 
-function Content({ stats, offline }: { stats: Stats; offline: boolean }) {
-  const timeZone = useEventTimezone();
+/** Everything under the title, for a loaded Stats (exported for the server-render unit tests). */
+export function DashboardContent({ stats }: { stats: Stats }) {
   const now = useNow();
-  const { waiting, inMedical } = stats.open;
-  const open = waiting + inMedical;
-  const segments: Array<{ status: string; count: number }> = [
-    { status: STATUS.waiting, count: waiting },
-    { status: STATUS.inMedical, count: inMedical },
-  ];
-  const maxPost = Math.max(1, ...stats.byPost.map((p) => p.count));
-  const closedSub = closedSubline(stats);
-  const longest = stats.longestWait;
-
   return (
     <>
-      <section aria-label="Open requests">
-        <Text size="2" color="gray">
-          Open requests
-        </Text>
-        <div className={s.num} data-testid="open-count">
-          {open}
-        </div>
-        <div
-          className={s.seg}
-          role="img"
-          aria-label={segments.map((g) => `${statusMeta(g.status).label} ${g.count}`).join(', ')}
-        >
-          {open === 0 ? <span className={s.empty} /> : null}
-          {segments.map((g) =>
-            g.count > 0 ? (
-              <span key={g.status} style={{ flex: g.count, background: toneColorVar(statusMeta(g.status).tone) }} />
-            ) : null,
-          )}
-        </div>
-        <div className={s.legend}>
-          {segments.map((g) => (
-            <button
-              key={g.status}
-              type="button"
-              className={`${s.tap} ${s.lg}`}
-              onClick={() => showAll({ status: g.status })}
-              data-testid={`legend-${g.status === STATUS.waiting ? 'waiting' : 'in-medical'}`}
-            >
-              <StatusGlyph status={g.status} />
-              <Text size="2">{statusMeta(g.status).label}</Text>
-              <span className={s.sp} />
-              <Text size="2" className={s.v}>
-                {g.count}
-              </Text>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className={s.tiles} aria-label="Totals">
-        <Tile
-          testId="tile-not-in-medical"
-          label={
-            <>
-              <StatusGlyph status={STATUS.notInMedical} size={12} />
-              Not in medical
-            </>
-          }
-          value={String(stats.notInMedical)}
-          onClick={() => showAll({ status: STATUS.notInMedical })}
-        />
-        <Tile
-          testId="tile-reunited"
-          label={
-            <>
-              <StatusGlyph status={STATUS.reunited} size={12} />
-              Reunited
-            </>
-          }
-          value={String(stats.reunited)}
-          sub={closedSub}
-          onClick={() => showAll({ status: STATUS.reunited })}
-        />
-        <Tile
-          testId="tile-longest-wait"
-          label={
-            <>
-              <Clock size={13} aria-hidden />
-              Longest wait
-            </>
-          }
-          value={formatMinutes(longest?.minutes)}
-          sub={longest ? [formatCaseNumber(longest.caseNumber), longest.postShort].filter(Boolean).join(' · ') : null}
-          onClick={longest ? () => navigate({ r: longest.id }) : undefined}
-        />
-        <Tile
-          testId="tile-avg-answer"
-          label={
-            <>
-              <Timer size={13} aria-hidden />
-              Avg answer time
-            </>
-          }
-          value={formatMinutes(stats.avgAnswerMinutes)}
-          sub="Last 2 hours"
-        />
-      </section>
-
-      <section aria-labelledby="lp-dash-posts">
-        <div className={s.sh}>
-          <Heading as="h2" size="2" weight="medium" id="lp-dash-posts">
-            Open by post
-          </Heading>
-        </div>
-        <div className={s.bars}>
-          {stats.byPost.map((p) => {
-            // One filter key per bar: an Other location named like a fixed post ("Base"), or a legacy
-            // 'FA 3' row, gets its own bar, label and filter (postFilterKey).
-            const key = postFilterKey(p.reportingLocation, p.otherLocation);
-            const label = postFilterLabel(p.reportingLocation, p.otherLocation) || p.postShort;
-            return (
-              <button
-                key={key}
-                type="button"
-                className={`${s.tap} ${s.bar}`}
-                // The bar counts open requests, so it opens exactly those (closed rows at the post stay out).
-                onClick={() => showAll({ post: key, open: true })}
-                // Starts with what the bar shows, "FA 3 – Kinetic 24" (WCAG 2.5.3).
-                aria-label={`${label} ${p.count} open`}
-              >
-                <Text size="2" color="gray">
-                  {label}
-                </Text>{' '}
-                <span className={s.track} aria-hidden>
-                  {p.count > 0 ? <span className={s.fill} style={{ width: `${barPercent(p.count, maxPost)}%` }} /> : null}
-                  <span className={s.bv}>{p.count}</span>
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      {stats.recent.length > 0 ? (
-        <section className={s.recent} aria-labelledby="lp-dash-recent">
-          <div className={s.sh}>
-            <Heading as="h2" size="2" weight="medium" id="lp-dash-recent">
-              Recently updated
-            </Heading>
-          </div>
-          {stats.recent.map((r) => {
-            const meta = statusMeta(r.status);
-            return (
-              <button key={r.id} type="button" className={`${s.tap} ${s.row}`} onClick={() => navigate({ r: r.id })}>
-                <StatusGlyph status={r.status} />
-                <span className={s.rm}>
-                  <Text size="2" weight="medium">
-                    {r.name?.trim() || formatCaseNumber(r.caseNumber)}
-                  </Text>
-                  <Text size="1" weight="medium" color={meta.tone === 'gray' ? undefined : meta.tone}>
-                    {meta.label}
-                  </Text>
-                </span>
-                <span className={s.t}>{formatAgo(r.updatedAt, now, timeZone)}</span>
-              </button>
-            );
-          })}
-        </section>
-      ) : null}
-
-      {offline ? (
-        <Button size="2" variant="soft" color="gray" disabled style={{ width: '100%' }}>
-          <Download size={15} aria-hidden />
-          Export CSV
-        </Button>
-      ) : (
-        <Button asChild size="2" variant="soft" color="gray" className="lp-hit" style={{ width: '100%' }}>
-          <a href={EXPORT_CSV_PATH} download onClick={handleExportClick}>
-            <Download size={15} aria-hidden />
-            Export CSV
-          </a>
-        </Button>
-      )}
+      <Tiles stats={stats} />
+      <div className={s.grid2}>
+        <Posts stats={stats} />
+        <Recent stats={stats} now={now} />
+      </div>
+      <Performance stats={stats} />
     </>
   );
 }
 
-function Tile({ label, value, sub, onClick, testId }: { label: ReactNode; value: string; sub?: string | null; onClick?: () => void; testId: string }) {
+// ---------------------------------------------------------------------------------------------------
+// Tiles
+// ---------------------------------------------------------------------------------------------------
+
+function Tiles({ stats }: { stats: Stats }) {
+  const { waiting, inMedical } = stats.open;
+  // Wraps only after the "·" when the tile is narrow: "+1 discharged ·" / "1 cancelled".
+  const sub = closedSubline(stats)?.replace(/ /g, '\u00a0').replace('·\u00a0', '· ') ?? null;
+  const subPhrase = closedSublinePhrase(stats);
+  return (
+    <section className={s.tiles} aria-label="Totals">
+      <Tile
+        big
+        testId="tile-open"
+        label="Open"
+        value={waiting + inMedical}
+        valueTestId="open-count"
+        extra={<Split waiting={waiting} inMedical={inMedical} />}
+        onClick={() => show({ view: 'pending' })}
+      />
+      <Tile
+        big
+        closed
+        className={s.tileClosed}
+        testId="tile-closed"
+        glyph={<StatusGlyph kind="closed" />}
+        label="Closed"
+        value={closedTotal(stats)}
+        // Keeps the two big numbers on one baseline (the Open tile has its split bar there).
+        extra={<span className={`${s.split} ${s.ghost}`} aria-hidden />}
+      />
+      <Tile
+        testId="tile-waiting"
+        glyph={<StatusGlyph status={STATUS.waiting} />}
+        label="Waiting for check"
+        value={waiting}
+        onClick={() => show({ status: STATUS.waiting })}
+      />
+      <Tile
+        testId="tile-in-medical"
+        glyph={<StatusGlyph status={STATUS.inMedical} />}
+        label="In medical"
+        value={inMedical}
+        onClick={() => show({ status: STATUS.inMedical })}
+      />
+      <Tile
+        closed
+        className={s.tileLate}
+        testId="tile-not-in-medical"
+        glyph={<StatusGlyph status={STATUS.notInMedical} />}
+        label="Not in medical"
+        value={stats.notInMedical}
+        // Same height as the Reunited tile beside it when that one has its second line.
+        sub={sub ? <span className={`${s.sub} ${s.ghost}`} aria-hidden>{sub}</span> : null}
+        onClick={() => show({ status: STATUS.notInMedical })}
+      />
+      <Tile
+        closed
+        className={s.tileLate}
+        testId="tile-reunited"
+        glyph={<StatusGlyph status={STATUS.reunited} />}
+        label="Reunited"
+        value={stats.reunited}
+        sub={
+          sub ? (
+            <span className={s.sub} data-testid="reunited-sub">
+              <span aria-hidden>{sub}</span>
+              <VisuallyHidden>{subPhrase}</VisuallyHidden>
+            </span>
+          ) : null
+        }
+        onClick={() => show({ status: STATUS.reunited })}
+      />
+    </section>
+  );
+}
+
+interface TileProps {
+  testId: string;
+  label: string;
+  value: number;
+  glyph?: ReactNode;
+  valueTestId?: string;
+  big?: boolean;
+  closed?: boolean;
+  className?: string;
+  /** Under the value: the Open split bar (or its invisible twin). */
+  extra?: ReactNode;
+  /** A small grey line under the value. */
+  sub?: ReactNode;
+  onClick?: () => void;
+}
+
+function Tile({ testId, label, value, glyph, valueTestId, big, closed, className, extra, sub, onClick }: TileProps) {
+  const cls = [s.tile, big ? s.big : '', closed ? s.cl : '', className ?? ''].filter(Boolean).join(' ');
   const body = (
     <>
-      <span className={s.lb}>{label}</span>
-      <span className={s.val}>{value}</span>
-      {sub ? <span className={s.sub}>{sub}</span> : null}
+      <span className={s.lb}>
+        {glyph}
+        <span>{label}</span>
+      </span>{' '}
+      <span className={s.vw}>
+        <span className={s.v} data-testid={valueTestId ?? `${testId}-value`}>
+          {value}
+        </span>
+        {extra}
+        {sub}
+      </span>
     </>
   );
   if (!onClick) {
     return (
-      <div className={s.tile} data-testid={testId}>
+      <div className={cls} data-testid={testId}>
         {body}
       </div>
     );
   }
   return (
-    <button type="button" className={`${s.tap} ${s.tile}`} onClick={onClick} data-testid={testId}>
+    <button type="button" className={`${s.tap} ${cls}`} onClick={onClick} data-testid={testId}>
       {body}
     </button>
   );
 }
 
+/** Open's 4 px bar: blue Waiting, then green In medical, 2 px apart (the tiles below carry the counts). */
+function Split({ waiting, inMedical }: { waiting: number; inMedical: number }) {
+  const segments = [
+    { status: STATUS.waiting, count: waiting },
+    { status: STATUS.inMedical, count: inMedical },
+  ].filter((g) => g.count > 0);
+  return (
+    <span className={s.split} aria-hidden data-testid="open-split">
+      {segments.length === 0 ? <span className={s.splitEmpty} /> : null}
+      {segments.map((g) => (
+        <span key={g.status} data-status={g.status} style={{ flex: g.count, background: toneColorVar(statusMeta(g.status).tone) }} />
+      ))}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Open by post
+// ---------------------------------------------------------------------------------------------------
+
+function Posts({ stats }: { stats: Stats }) {
+  const posts = postsBusiestFirst(stats.byPost);
+  const max = Math.max(0, ...posts.map((p) => p.count));
+  return (
+    <section aria-labelledby="lp-dash-posts">
+      <h2 className={s.sh} id="lp-dash-posts">
+        Open by post
+      </h2>
+      <div className={s.posts}>
+        {posts.map((p) => {
+          // One filter key per bar: an Other location named like a fixed post ("Base"), or a legacy 'FA 3' row,
+          // gets its own bar, label and filter (postFilterKey).
+          const key = postFilterKey(p.reportingLocation, p.otherLocation);
+          const label = postFilterLabel(p.reportingLocation, p.otherLocation) || p.postShort;
+          return (
+            <button
+              key={key}
+              type="button"
+              className={`${s.tap} ${s.post}`}
+              data-zero={p.count === 0 ? '' : undefined}
+              // The bar counts open requests, so it opens exactly those (closed rows at the post stay out, A42).
+              onClick={() => show({ post: key, open: true })}
+              // Starts with what the row shows, "FA 3 – Kinetic 3" (WCAG 2.5.3).
+              aria-label={`${label} ${p.count} open`}
+            >
+              <span className={s.pl}>{label}</span>{' '}
+              <span className={s.trk} aria-hidden>
+                {p.count > 0 ? <span style={{ width: `${barPercent(p.count, max)}%` }} /> : null}
+              </span>{' '}
+              <span className={s.pc}>{p.count}</span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Recently updated
+// ---------------------------------------------------------------------------------------------------
+
+const NO_NAME = 'No name';
+
+function Recent({ stats, now }: { stats: Stats; now: number }) {
+  if (stats.recent.length === 0) return null;
+  return (
+    <section aria-label="Recently updated" className={s.recent}>
+      <h2 className={s.sh}>
+        <button type="button" className={s.shLink} onClick={() => show({})} aria-label="Recently updated. Show all requests">
+          Recently updated
+          <ChevronRight size={18} strokeWidth={2.25} aria-hidden />
+        </button>
+      </h2>
+      <div className={s.rlist}>
+        {stats.recent.map((r) => {
+          const meta = statusMeta(r.status);
+          const closed = meta.bucket === 'closed';
+          const name = r.name?.trim() || '';
+          const ago = formatAgo(r.updatedAt, now);
+          const shown = `${r.caseNumber} ${name || NO_NAME} ${meta.shortLabel} ${ago}`;
+          return (
+            <button
+              key={r.id}
+              type="button"
+              className={`${s.tap} ${s.rrow}`}
+              data-closed={closed ? '' : undefined}
+              data-request-id={r.id}
+              onClick={() => show({ r: r.id })}
+              aria-label={`${shown}. ${meta.label}, ${r.postShort}, updated ${agoPhrase(r.updatedAt, now)}.`}
+            >
+              <span className={s.num}>{r.caseNumber}</span>{' '}
+              <span className={s.nm} data-empty={name ? undefined : ''}>
+                {name || NO_NAME}
+              </span>{' '}
+              <span className={s.st} data-tone={meta.tone}>
+                <StatusGlyph status={r.status} />
+                {meta.shortLabel}
+              </span>{' '}
+              <span className={s.up}>{ago}</span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Performance
+// ---------------------------------------------------------------------------------------------------
+
+function Performance({ stats }: { stats: Stats }) {
+  const longest = stats.longestWait;
+  const longestContext = longest ? [String(longest.caseNumber), longest.postShort].filter(Boolean).join(' · ') : null;
+  const answer = durationPhrase(stats.avgAnswerMinutes);
+  const reunite = durationPhrase(stats.avgReuniteMinutes);
+  const logged = countParts(stats.loggedLastHour);
+  return (
+    <section aria-labelledby="lp-dash-perf" className={s.perf}>
+      <h2 className={s.sh} id="lp-dash-perf">
+        Performance
+      </h2>
+      <div className={s.prows}>
+        <PerfRow
+          testId="perf-longest-wait"
+          icon={Clock}
+          label="Longest wait"
+          context={longestContext}
+          parts={longest ? durationParts(longest.minutes) : null}
+          phrase={
+            longest
+              ? `Request ${longest.caseNumber} at ${longest.postShort} has been waiting ${durationPhrase(longest.minutes) ?? 'an unknown time'}. Opens the request.`
+              : 'Longest wait: nobody is waiting for a check.'
+          }
+          onClick={longest ? () => show({ r: longest.id }) : undefined}
+        />
+        <PerfRow
+          testId="perf-answer"
+          icon={Timer}
+          label="Time to answer"
+          context="avg, 2 h"
+          parts={durationParts(stats.avgAnswerMinutes)}
+          phrase={`Average time to answer over the last 2 hours: ${answer ?? 'no answers yet'}.`}
+        />
+        <PerfRow
+          testId="perf-reunite"
+          icon={Users}
+          label="Time to reunite"
+          context="avg"
+          parts={durationParts(stats.avgReuniteMinutes)}
+          phrase={`Average time to reunite: ${reunite ?? 'not available'}.`}
+        />
+        <PerfRow
+          testId="perf-logged"
+          icon={Inbox}
+          label="Logged"
+          context="last hour"
+          parts={logged}
+          phrase={
+            logged ? `Logged in the last hour: ${stats.loggedLastHour} ${stats.loggedLastHour === 1 ? 'request' : 'requests'}.` : 'Logged in the last hour: not available.'
+          }
+        />
+      </div>
+    </section>
+  );
+}
+
+interface PerfRowProps {
+  testId: string;
+  icon: LucideIcon;
+  label: string;
+  context: string | null;
+  parts: ValuePart[] | null;
+  /** The row as a sentence, for screen readers (after the visible text when the row is a button). */
+  phrase: string;
+  onClick?: () => void;
+}
+
+function PerfRow({ testId, icon: Icon, label, context, parts, phrase, onClick }: PerfRowProps) {
+  // What the row shows, as text: "Longest wait 1010 · FA 4 24m" (a button's name starts with it, WCAG 2.5.3).
+  const shown = [label, context, parts ? parts.map((p) => `${p.value}${p.unit}`).join(' ') : NO_VALUE].filter(Boolean).join(' ');
+  const visual = (
+    <>
+      <Icon size={16} className={s.ki} aria-hidden />
+      <span className={s.kv} aria-hidden>
+        <span className={s.k}>{label}</span>{' '}
+        {context ? (
+          <>
+            <span className={s.m}>{context}</span>{' '}
+          </>
+        ) : null}
+        <span className={s.sp} />
+        <span className={s.pv} data-testid={`${testId}-value`}>
+          {parts ? (
+            parts.map((p, i) => (
+              <Fragment key={i}>
+                {i > 0 ? ' ' : null}
+                <span className={s.val}>{p.value}</span>
+                {p.unit ? <span className={s.u}>{p.unit}</span> : null}
+              </Fragment>
+            ))
+          ) : (
+            <span className={`${s.val} ${s.none}`}>{NO_VALUE}</span>
+          )}
+        </span>
+      </span>
+    </>
+  );
+  if (onClick) {
+    return (
+      <button type="button" className={`${s.tap} ${s.pr}`} onClick={onClick} aria-label={`${shown}. ${phrase}`} data-testid={testId}>
+        {visual}
+      </button>
+    );
+  }
+  return (
+    <div className={s.pr} data-testid={testId}>
+      {visual}
+      <VisuallyHidden>{phrase}</VisuallyHidden>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Loading
+// ---------------------------------------------------------------------------------------------------
+
 function Loading() {
   return (
-    <div aria-busy="true" aria-label="Loading dashboard" style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
-      <div>
-        <Skeleton height="14px" width="110px" />
-        <Skeleton height="56px" width="48px" style={{ margin: '8px 0 14px' }} />
-        <Skeleton height="8px" width="100%" />
-        <div style={{ display: 'grid', gap: 18, marginTop: 20 }}>
-          <Skeleton height="14px" width="70%" />
-          <Skeleton height="14px" width="80%" />
-        </div>
-      </div>
+    <div aria-busy="true" aria-label="Loading dashboard" className={s.loading}>
       <div className={s.tiles}>
-        {[0, 1, 2, 3].map((i) => (
-          <Skeleton key={i} height="88px" style={{ borderRadius: 'var(--radius-4)' }} />
+        {[104, 104, 74, 74, 74, 74].map((h, i) => (
+          <Skeleton key={i} height={`${h}px`} style={{ borderRadius: 12 }} />
         ))}
       </div>
-      <div style={{ display: 'grid', gap: 22 }}>
-        <Skeleton height="14px" width="100px" />
-        {[80, 45, 25, 10].map((w) => (
-          <Skeleton key={w} height="12px" width={`${w}%`} />
+      <div className={s.loadingRows}>
+        <Skeleton height="18px" width="120px" />
+        {[100, 100, 40, 0].map((w, i) => (
+          <div key={i} className={s.loadingPost}>
+            <Skeleton height="12px" width="30%" />
+            <Skeleton height="6px" width={`${Math.max(w, 4)}%`} />
+          </div>
         ))}
       </div>
     </div>
