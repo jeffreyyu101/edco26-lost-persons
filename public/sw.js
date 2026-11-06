@@ -4,10 +4,26 @@
  * scripts (lib/client/sw-client.ts). A new deploy means a new URL, so a new worker installs, waits, and
  * the page shows "Update ready · Reload" (it posts {type: 'skip-waiting'} when the user taps Reload).
  *
+ * Updates never cost offline access:
+ *   * Complete before "Update ready". A worker installing over an active one caches the WHOLE build: `/`,
+ *     `/signin`, CORE, everything the two pages reference, and every file in /sw-manifest.json, which
+ *     `next build` writes with every /_next/static file, the next/dynamic view chunks included
+ *     (scripts/sw-manifest.mjs). /_next/static names are content-hashed, so files the older caches already
+ *     hold are copied, not downloaded. If anything is missing (no signal, no manifest, or a deploy landing
+ *     mid-install so the pages and the manifest disagree), the install fails: the old worker and its cache
+ *     keep serving, and the page registers the update again later. Retries keep what was already cached.
+ *   * The very first install has nothing to replace: best effort, it takes over at once, and the page tops
+ *     it up with every chunk it loaded (A15).
+ *   * Activation deletes no cache a page may still use. Each older `lp-` cache is retired with the ids of
+ *     the pages open at that moment, and deleted once none of them is left (checked on activation,
+ *     navigations and precache messages). Until then static requests fall back to it, so a tab still
+ *     running the older build keeps loading its own chunks offline.
+ *
  * Strategies:
  *   /api/*                                   never cached, never touched (passthrough)
  *   navigations (/ and /signin)              network first, 4 s timeout, then the cached page
- *   /_next/static/*, /icons, /logos, /fonts  cache first
+ *   /_next/static/*                          cache first: this worker's cache, then older caches
+ *   /icons, /logos, /fonts                   cache first: this worker's cache, then network, then older caches
  *   /manifest.webmanifest                    network first, cached fallback
  *   anything else                            passthrough
  * Only 200 same-origin "basic" responses are cached: never redirects or opaque responses. The cached `/`
@@ -17,8 +33,15 @@
 'use strict';
 
 const VERSION = new URL(self.location.href).searchParams.get('v') || 'dev';
-const CACHE = 'lp-' + VERSION;
+const PREFIX = 'lp-';
+const CACHE = PREFIX + VERSION;
+// Retired caches ({cacheName: [client ids]}), kept outside the `lp-` namespace.
+const META = 'lp:meta';
+const RETIRED_KEY = '/__lp/retired';
+const MANIFEST_URL = '/sw-manifest.json';
+const HASHED_PREFIX = '/_next/static/';
 const NAV_TIMEOUT_MS = 4000;
+// Most URLs a page may post in one precache message (A15).
 const MAX_PRECACHE = 400;
 const CORE = [
   '/manifest.webmanifest',
@@ -29,7 +52,7 @@ const CORE = [
   '/logos/edc-orlando.png',
   '/logos/ground-control.png',
 ];
-const STATIC_PREFIXES = ['/_next/static/', '/icons/', '/logos/', '/fonts/'];
+const STATIC_PREFIXES = [HASHED_PREFIX, '/icons/', '/logos/', '/fonts/'];
 const PAGES = ['/', '/signin'];
 
 function isStatic(pathname) {
@@ -40,6 +63,117 @@ function cacheable(res) {
   return !!res && res.status === 200 && res.type === 'basic' && !res.redirected;
 }
 
+function pathOf(url) {
+  return new URL(url, self.location.origin).pathname;
+}
+
+// ---- Caches -------------------------------------------------------------------------------------------
+
+function cacheNameOf(worker) {
+  if (!worker || !worker.scriptURL) return null;
+  try {
+    return PREFIX + (new URL(worker.scriptURL).searchParams.get('v') || 'dev');
+  } catch (e) {
+    return null;
+  }
+}
+
+/** This worker's cache and those of every worker in the registration (installing, waiting, active). */
+function liveCaches() {
+  const r = self.registration;
+  return new Set([CACHE, cacheNameOf(r.installing), cacheNameOf(r.waiting), cacheNameOf(r.active)].filter(Boolean));
+}
+
+/** The other `lp-` caches, newest first. */
+async function otherCaches() {
+  return (await caches.keys()).filter((n) => n.startsWith(PREFIX) && n !== CACHE).reverse();
+}
+
+/**
+ * `request` in `cache`. A /_next/static name is content-hashed, so the same path under any query (a
+ * deployment id, or none) is the same file: `hashed` matches ignoring the query.
+ */
+async function matchIn(cache, request, hashed) {
+  return (await cache.match(request)) || (hashed ? await cache.match(request, { ignoreSearch: true }) : undefined);
+}
+
+/** `request` from another `lp-` cache, newest first. */
+async function matchOther(request, hashed) {
+  for (const name of await otherCaches()) {
+    const hit = await matchIn(await caches.open(name), request, hashed);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+function isHashed(url) {
+  return pathOf(url).startsWith(HASHED_PREFIX);
+}
+
+let metaQueue = Promise.resolve();
+
+/** Read-modify-write the retired map, one change at a time. */
+function updateRetired(change) {
+  const run = metaQueue.then(async () => {
+    const meta = await caches.open(META);
+    let retired = {};
+    try {
+      const res = await meta.match(RETIRED_KEY);
+      const data = res ? await res.json() : null;
+      if (data && typeof data === 'object' && !Array.isArray(data)) retired = data;
+    } catch (e) {
+      retired = {};
+    }
+    const before = JSON.stringify(retired);
+    await change(retired);
+    const after = JSON.stringify(retired);
+    if (after !== before) await meta.put(RETIRED_KEY, new Response(after, { headers: { 'Content-Type': 'application/json' } }));
+  });
+  metaQueue = run.catch(() => undefined);
+  return run;
+}
+
+/** On activation: every other `lp-` cache may still serve a page open now (an older build). */
+async function retireOthers() {
+  const pages = await self.clients.matchAll({ type: 'all', includeUncontrolled: true });
+  const ids = pages.map((c) => c.id);
+  const names = (await caches.keys()).filter((n) => n.startsWith(PREFIX));
+  await updateRetired((retired) => {
+    const live = liveCaches();
+    for (const name of names) if (!live.has(name) && !retired[name]) retired[name] = ids;
+    for (const name of live) delete retired[name];
+  });
+}
+
+/** Delete each retired cache once none of the pages open when it was retired is left. */
+async function sweep() {
+  await updateRetired(async (retired) => {
+    const live = liveCaches();
+    for (const name of Object.keys(retired)) {
+      // A worker of that version is back (installing, waiting or active): its cache is in use again.
+      if (live.has(name)) {
+        delete retired[name];
+        continue;
+      }
+      const ids = Array.isArray(retired[name]) ? retired[name] : [];
+      const open = await Promise.all(ids.map((id) => self.clients.get(id).catch(() => undefined)));
+      if (open.some(Boolean)) continue;
+      await caches.delete(name);
+      delete retired[name];
+    }
+  });
+}
+
+function sweepLater(event) {
+  try {
+    event.waitUntil(sweep().catch(() => undefined));
+  } catch (e) {
+    // the event can no longer be extended
+  }
+}
+
+// ---- Precache -----------------------------------------------------------------------------------------
+
 async function cacheIfOk(cache, url, init) {
   try {
     const res = await fetch(url, Object.assign({ credentials: 'same-origin', redirect: 'manual' }, init || {}));
@@ -48,9 +182,28 @@ async function cacheIfOk(cache, url, init) {
       return res;
     }
   } catch (e) {
-    // offline or blocked: best effort
+    // offline, blocked or out of space
   }
   return null;
+}
+
+/** `url` in `cache`: already there, copied from an older cache (/_next/static only), or fetched. */
+async function ensureCached(cache, url) {
+  const hashed = isHashed(url);
+  const have = await matchIn(cache, url, hashed);
+  if (have) return have;
+  if (hashed) {
+    const old = await matchOther(url, true);
+    if (old) {
+      try {
+        await cache.put(url, old.clone());
+        return old;
+      } catch (e) {
+        return null;
+      }
+    }
+  }
+  return cacheIfOk(cache, url);
 }
 
 /** /_next/static URLs referenced by an HTML page or a stylesheet (fonts live in /_next/static/media). */
@@ -62,88 +215,159 @@ function assetUrls(text) {
   return [...out];
 }
 
-async function precacheUrls(cache, urls) {
-  let count = 0;
-  const list = urls
-    .filter((u) => typeof u === 'string')
-    .map((u) => {
-      try {
-        const url = new URL(u, self.location.origin);
-        return url.origin === self.location.origin && isStatic(url.pathname) ? url.pathname + url.search : null;
-      } catch (e) {
-        return null;
-      }
-    })
-    .filter(Boolean)
-    .slice(0, MAX_PRECACHE);
-  const unique = [...new Set(list)];
+/** Same-origin static URL as path + query, or null. */
+function staticKey(u) {
+  if (typeof u !== 'string') return null;
+  try {
+    const url = new URL(u, self.location.origin);
+    return url.origin === self.location.origin && isStatic(url.pathname) ? url.pathname + url.search : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Cache `urls` (and the /_next/static URLs their stylesheets name). Returns the URLs that could not be. */
+async function precacheUrls(cache, urls, limit) {
+  const unique = [...new Set(urls.map(staticKey).filter(Boolean))].slice(0, limit);
+  const seen = new Set(unique);
   const queue = unique.slice();
+  const missing = [];
+  let cached = 0;
   const worker = async () => {
     while (queue.length) {
       const url = queue.shift();
-      if (await cache.match(url)) {
-        count += 1;
+      const res = await ensureCached(cache, url);
+      if (!res) {
+        missing.push(url);
         continue;
       }
-      const res = await cacheIfOk(cache, url);
-      if (res) {
-        count += 1;
-        if (url.endsWith('.css')) {
-          try {
-            for (const nested of assetUrls(await res.clone().text())) if (!unique.includes(nested)) queue.push(nested);
-          } catch (e) {
-            // ignore
+      cached += 1;
+      if (pathOf(url).endsWith('.css')) {
+        try {
+          for (const nested of assetUrls(await res.clone().text())) {
+            if (!seen.has(nested)) {
+              seen.add(nested);
+              queue.push(nested);
+            }
           }
+        } catch (e) {
+          // ignore
         }
       }
     }
   };
   await Promise.all([worker(), worker(), worker(), worker()]);
-  return count;
+  return { cached, missing };
 }
 
-/** Cache the signed-in shell and every asset it references (only a 200 page, never the sign-in redirect). */
-async function precacheShell(cache) {
-  const res = await cacheIfOk(cache, '/', { cache: 'no-store' });
-  if (!res) return;
+/** A page fetched fresh, not cached yet (only a 200, never a redirect): {res, html}, or null. */
+async function fetchPage(path, init) {
   try {
-    await precacheUrls(cache, assetUrls(await res.clone().text()));
+    const res = await fetch(path, Object.assign({ credentials: 'same-origin', redirect: 'manual', cache: 'no-store' }, init || {}));
+    if (!cacheable(res)) return null;
+    return { res, html: await res.clone().text() };
   } catch (e) {
-    // ignore
+    return null;
   }
 }
 
-/** The sign-in page as a signed-out visitor gets it (no cookie), and the assets it references. */
-async function precacheSignIn(cache) {
-  const res = await cacheIfOk(cache, '/signin', { cache: 'no-store', credentials: 'omit' });
-  if (!res) return;
+/** Store a fetched page whole (headers included, so its CSP nonce matches its scripts). */
+async function putPage(cache, path, page) {
   try {
-    await precacheUrls(cache, assetUrls(await res.clone().text()));
+    await cache.put(path, page.res);
+    return true;
   } catch (e) {
-    // ignore
+    return false;
   }
+}
+
+/** The live build's /_next/static file list (scripts/sw-manifest.mjs), or null. */
+async function loadManifest() {
+  try {
+    const res = await fetch(MANIFEST_URL, { cache: 'no-store', credentials: 'same-origin', redirect: 'manual' });
+    if (!cacheable(res)) return null;
+    const data = await res.json();
+    const assets = data && Array.isArray(data.assets) ? data.assets.filter((u) => typeof u === 'string' && u.startsWith(HASHED_PREFIX)) : [];
+    return assets.length ? assets : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Cache the whole live build into `cache`: CORE, the signed-in shell `/`, `/signin` as a signed-out
+ * visitor gets it, everything both reference, and every manifest asset. The pages go in last, and when
+ * `strict` only once everything else is in: a cache never holds a page whose files it lacks (a re-install
+ * of the active version writes into the active cache). Returns every URL that must now be in the cache,
+ * and what is missing (empty when the build is complete).
+ */
+async function precacheBuild(cache, strict) {
+  const problems = [];
+  const manifest = await loadManifest();
+  if (!manifest) problems.push(MANIFEST_URL);
+  const [shell, signIn] = await Promise.all([
+    fetchPage('/'),
+    // Without the cookie: signed in, the proxy would redirect /signin to /.
+    fetchPage('/signin', { credentials: 'omit' }),
+  ]);
+  if (!shell) problems.push('/');
+  if (!signIn) problems.push('/signin');
+  const referenced = assetUrls((shell ? shell.html : '') + (signIn ? signIn.html : ''));
+  if (manifest) {
+    // The pages must be the build the manifest lists, not a deploy that landed in between.
+    const listed = new Set(manifest);
+    for (const u of referenced) if (!listed.has(pathOf(u))) problems.push(u);
+  }
+  const assets = referenced.concat(manifest || []);
+  const [core, built] = await Promise.all([Promise.all(CORE.map((u) => ensureCached(cache, u))), precacheUrls(cache, assets, Infinity)]);
+  core.forEach((res, i) => {
+    if (!res) problems.push(CORE[i]);
+  });
+  problems.push(...built.missing);
+  if (!strict || problems.length === 0) {
+    if (shell && !(await putPage(cache, '/', shell))) problems.push('/');
+    if (signIn && !(await putPage(cache, '/signin', signIn))) problems.push('/signin');
+  }
+  return { required: PAGES.concat(CORE, assets.map(staticKey).filter(Boolean)), problems };
+}
+
+async function install() {
+  // Retried after an earlier activation retired this version's cache: it is in use again.
+  await updateRetired((retired) => {
+    delete retired[CACHE];
+  }).catch(() => undefined);
+  const cache = await caches.open(CACHE);
+  if (!self.registration.active) {
+    // The very first install: nothing to replace. Best effort, then take over at once.
+    try {
+      await precacheBuild(cache, false);
+    } catch (e) {
+      // the page tops the cache up (A15)
+    }
+    await self.skipWaiting();
+    return;
+  }
+  // An update waits for "Reload", and Reload must find the whole new build (see the header).
+  const { required, problems } = await precacheBuild(cache, true);
+  if (problems.length === 0) {
+    // Read back by name: the cache that activation will use holds every file.
+    const check = await caches.open(CACHE);
+    for (const url of required) if (!(await matchIn(check, url, isHashed(url)))) problems.push(url);
+  }
+  if (problems.length > 0) throw new Error(`Update not installed: ${problems.length} file(s) could not be cached`);
 }
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    (async () => {
-      const cache = await caches.open(CACHE);
-      await Promise.all(CORE.map((u) => cacheIfOk(cache, u)));
-      await precacheShell(cache);
-      // /signin without the cookie (signed in, the proxy would redirect it to /), plus its own chunks.
-      await precacheSignIn(cache);
-      // The very first install takes over at once; an update waits for "Reload".
-      if (!self.registration.active) await self.skipWaiting();
-    })(),
-  );
+  event.waitUntil(install());
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
-      const names = await caches.keys();
-      await Promise.all(names.filter((n) => n.startsWith('lp-') && n !== CACHE).map((n) => caches.delete(n)));
+      // Book-keeping failures only keep caches longer; they never delete one.
+      await retireOthers().catch(() => undefined);
       await self.clients.claim();
+      await sweep().catch(() => undefined);
     })(),
   );
 });
@@ -160,24 +384,46 @@ self.addEventListener('message', (event) => {
       (async () => {
         try {
           const cache = await caches.open(CACHE);
-          if (!(await cache.match('/'))) await precacheShell(cache);
-          const count = await precacheUrls(cache, data.urls);
-          if (port) port.postMessage({ ok: true, count });
+          if (!(await cache.match('/'))) {
+            const shell = await fetchPage('/');
+            if (shell) {
+              await precacheUrls(cache, assetUrls(shell.html), MAX_PRECACHE);
+              await putPage(cache, '/', shell);
+            }
+          }
+          const { cached } = await precacheUrls(cache, data.urls, MAX_PRECACHE);
+          if (port) port.postMessage({ ok: true, count: cached });
         } catch (e) {
           if (port) port.postMessage({ ok: false });
         }
+        await sweep().catch(() => undefined);
       })(),
     );
   }
 });
 
+// ---- Fetch --------------------------------------------------------------------------------------------
+
 async function cacheFirst(request) {
+  const hashed = isHashed(request.url);
   const cache = await caches.open(CACHE);
-  const hit = await cache.match(request);
+  const hit = await matchIn(cache, request, hashed);
   if (hit) return hit;
-  const res = await fetch(request);
-  if (cacheable(res)) await cache.put(request, res.clone());
-  return res;
+  // Content-hashed: an older cache holds the same bytes (an older tab's chunks too).
+  if (hashed) {
+    const old = await matchOther(request, true);
+    if (old) return old;
+  }
+  try {
+    const res = await fetch(request);
+    if (cacheable(res)) await cache.put(request, res.clone());
+    return res;
+  } catch (e) {
+    // Offline: an older copy of an icon, logo or font beats none.
+    const old = hashed ? undefined : await matchOther(request, false);
+    if (old) return old;
+    throw e;
+  }
 }
 
 async function networkFirst(request) {
@@ -230,6 +476,8 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname === '/api' || url.pathname.startsWith('/api/')) return;
   if (request.mode === 'navigate') {
     event.respondWith(navigation(event));
+    // A reload or a closed tab may have released a retired cache.
+    sweepLater(event);
     return;
   }
   if (isStatic(url.pathname)) {
