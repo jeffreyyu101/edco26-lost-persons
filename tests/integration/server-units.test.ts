@@ -1,12 +1,13 @@
 // Pure server helpers (no HTTP server needed): CSV escaping with every injection prefix, the allowlist
 // mappers and legacy audit normalisation, error mapping, Origin / IP / body helpers, magic bytes, logging.
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { buildCsv, csvCell, csvFilename, needsFormulaGuard } from '@/lib/server/csv';
 import { ApiFailure, fieldFromDetail, isDefinitiveRejection, mapDbError, snakeToCamel } from '@/lib/server/errors';
 import { assertSameOrigin, clientIp, expectedOrigins, readBodyLimited } from '@/lib/server/http';
 import { logRequest, newErrorId } from '@/lib/server/log';
 import { REQUEST_SUMMARY_KEYS, createPayload, editChanges, mapAudit, mapPhoto, mapRow, mapSync, patchPayload } from '@/lib/server/mappers';
-import { photoPaths, sniffImage } from '@/lib/server/photos';
+import { contentHash, isObjectAlreadyExists, photoPaths, sniffImage } from '@/lib/server/photos';
 import { createRequestSchema, requestPatchSchema } from '@/lib/validation';
 
 describe('CSV injection guard', () => {
@@ -231,7 +232,35 @@ describe('photos and logging', () => {
     expect(sniffImage(new Uint8Array(Buffer.from('GIF89a')))).toBeNull();
     expect(sniffImage(new Uint8Array(Buffer.from('<svg')))).toBeNull();
     expect(sniffImage(new Uint8Array())).toBeNull();
-    expect(photoPaths('p', 'f')).toEqual({ full: 'p/f.jpg', thumb: 'p/f_thumb.jpg' });
+  });
+
+  it('object paths are content-addressed: a path names exactly one content (A44)', () => {
+    const a = new Uint8Array([0xff, 0xd8, 0xff, 1, 2, 3]);
+    const b = new Uint8Array([0xff, 0xd8, 0xff, 1, 2, 4]);
+    const hashA = createHash('sha256').update(a).digest('hex');
+    const hashB = createHash('sha256').update(b).digest('hex');
+    expect(contentHash(a)).toBe(hashA);
+    expect(photoPaths('p', 'f', a, b)).toEqual({ full: `p/f-${hashA}.jpg`, thumb: `p/f-${hashB}_thumb.jpg` });
+    expect(photoPaths('p', 'f', a, null)).toEqual({ full: `p/f-${hashA}.jpg`, thumb: null });
+    // Same bytes → same path (retries find their objects); other bytes → another path (never overwritten).
+    expect(photoPaths('p', 'f', a.slice(), null).full).toBe(photoPaths('p', 'f', a, null).full);
+    expect(photoPaths('p', 'f', b, null).full).not.toBe(photoPaths('p', 'f', a, null).full);
+    expect(contentHash(a.subarray(3))).toBe(contentHash(new Uint8Array([1, 2, 3])));
+    // Within lp_add_photo's 200-character limit for real ids.
+    const uuid = '00000000-0000-4000-8000-000000000000';
+    const longest = photoPaths(uuid, uuid, a, a).thumb as string;
+    expect(longest.length).toBeLessThanOrEqual(200);
+  });
+
+  it('classifies "object already exists" (upsert: false) (A44)', () => {
+    // Local storage answers HTTP 400 with statusCode "409"; hosted storage may answer HTTP 409.
+    expect(isObjectAlreadyExists({ status: 400, statusCode: '409' })).toBe(true);
+    expect(isObjectAlreadyExists({ status: 409, statusCode: '409' })).toBe(true);
+    expect(isObjectAlreadyExists({ status: 409 })).toBe(true);
+    expect(isObjectAlreadyExists({ status: 400, statusCode: '404' })).toBe(false);
+    expect(isObjectAlreadyExists({ status: 500, statusCode: '500' })).toBe(false);
+    expect(isObjectAlreadyExists({})).toBe(false);
+    expect(isObjectAlreadyExists(null)).toBe(false);
   });
 
   it('log lines carry only route, status, codes, error id and timing — sanitised', () => {
