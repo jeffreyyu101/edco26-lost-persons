@@ -302,6 +302,38 @@ test('an update applied with no signal reloads from its own cache and opens ever
   await context.setOffline(false);
 });
 
+test.describe('desk 1180 × 820, offline', () => {
+  test.use({ viewport: { width: 1180, height: 820 }, isMobile: false, hasTouch: true, deviceScaleFactor: 1 });
+
+  // The worker keeps one copy of `/`, the last page it fetched whatever its query, and answers every
+  // navigation with it offline. The brand card is server-drawn for All requests only, so the copy can have
+  // it when the URL asks for Pending, or lack it when the URL is All: hydration must take the HTML as it is
+  // (the afterEach fails on React's hydration error #418).
+  test('the cached shell hydrates under any view: Pending from the All copy, All from the Pending copy', async ({ page, context }) => {
+    test.setTimeout(120_000);
+    await loadOfflineReady(page);
+    await expect(page.getByTestId('desk-brand')).toBeVisible();
+
+    await context.setOffline(true);
+    await page.goto('/?view=pending');
+    await expect(page.locator('html')).toHaveAttribute('data-hydrated', 'true');
+    await expect(page.getByTestId('pending-board')).toBeVisible();
+    await expect(page.getByTestId('desk-brand')).toHaveCount(0);
+
+    await context.setOffline(false);
+    await page.goto('/?view=pending');
+    await expect(page.getByTestId('pending-board')).toBeVisible();
+    await expect(page.getByTestId('desk-brand')).toHaveCount(0);
+
+    await context.setOffline(true);
+    await page.goto('/');
+    await expect(page.locator('html')).toHaveAttribute('data-hydrated', 'true');
+    await expect(page.getByTestId('desk-table-view')).toBeVisible();
+    await expect(page.getByTestId('desk-brand')).toBeVisible();
+    await context.setOffline(false);
+  });
+});
+
 test('activating an update keeps the old cache while an older tab is open, then lets it go', async ({ page, context }) => {
   test.setTimeout(120_000);
   const older = `e2e-older-${RUN}-retain`;

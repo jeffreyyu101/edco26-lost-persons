@@ -18,7 +18,7 @@
 import dynamic from 'next/dynamic';
 import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { isDeskNow, useHydrated, useIsDesk } from '@/components/desk/breakpoints';
-import { DeskFrame } from '@/components/desk/DeskFrame';
+import { DeskFrame, useBrandInHtml } from '@/components/desk/DeskFrame';
 import { useMainView } from '@/components/desk/use-main-view';
 import { isFormView, paneRequestId, type MainView } from '@/components/desk/views';
 import { ConnectionBanner } from '@/components/ui/Banner';
@@ -91,8 +91,11 @@ function ViewRouter({ brand }: { brand: ReactNode }) {
   const main = useMainView(view);
   const hydrated = useHydrated();
   const paneId = desk ? paneRequestId(view) : null;
-  // All requests only (Brian, 2026-11-06: Pending and My requests get no brand card).
-  const showBrand = main.name === 'all' && (desk || !hydrated);
+  // All requests only (Brian, 2026-11-06: Pending and My requests get no brand card). The server draws it
+  // for All at every width; the hydration render keeps whatever the HTML has (useBrandInHtml: the service
+  // worker's cached shell may have been drawn for another view); once hydrated, the desk only.
+  const brandInHtml = useBrandInHtml(main.name === 'all');
+  const showBrand = hydrated ? desk && main.name === 'all' : brandInHtml;
   return (
     <>
       <DeskFrame

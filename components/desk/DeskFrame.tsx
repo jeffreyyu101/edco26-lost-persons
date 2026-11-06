@@ -16,9 +16,28 @@
 // The slot contents (sidebar / rail, top bar, pane header) come from the desk chunk
 // (components/desk/DeskChrome.tsx), loaded only on the desk; this file stays tiny because it is on the
 // first-load path of `/` (spec §7 Performance, the A25 budget).
-import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
 import { DeskContext } from './desk-context';
 import f from './frame.module.css';
+
+const noSubscribe = () => () => {};
+const brandInDocument = () => document.querySelector('[data-desk-main] > [data-testid="desk-brand"]') !== null;
+
+/**
+ * For the hydration render: whether the HTML being hydrated has the brand slot. Usually that is what the
+ * server drew for this URL (`serverValue`), but the service worker keeps one copy of `/` (the last page it
+ * fetched, whatever its query) and answers with it offline or on a stalled signal: /?dashboard=1 can get
+ * the HTML drawn for All requests, card included, and / the HTML drawn for Pending, without it. Hydrating
+ * what is really there keeps React from throwing away the page (error #418); the shell then shows or drops
+ * the card as the view asks. Outside the hydration render it returns `serverValue` (unused there).
+ */
+export function useBrandInHtml(serverValue: boolean): boolean {
+  return useSyncExternalStore(
+    noSubscribe,
+    () => serverValue,
+    () => (typeof document === 'undefined' ? serverValue : brandInDocument()),
+  );
+}
 
 export interface DeskFrameProps {
   /** From 768 px (useIsDesk). False on the server and in the hydration render. */
