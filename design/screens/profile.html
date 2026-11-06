@@ -1,0 +1,180 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Draft · Request profile</title>
+<!-- Draft 2026-11-06. Opens when a request is tapped. Actions sit in a sticky bottom bar and only show what fits the
+     current status. "Cancel request" only appears for the person who logged it. Every one of Jeffrey's profile
+     features is kept: editable details, photos (max 3), friend contact, and the activity timeline from audit events.
+     Real @radix-ui/themes 3.3.0 components, loaded from CDN (needs internet). Synthetic data only. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@radix-ui/themes@3.3.0/styles.css">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+html.standalone{background:#0c0c0d}html.standalone body{margin:0;padding:16px}
+.radix-themes{--default-font-family:InterVariable,Inter,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;font-feature-settings:"cv11";-webkit-font-smoothing:antialiased}
+.radix-themes[data-is-root-theme]{min-height:0!important;height:100%;position:relative}
+.board{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:22px 16px;max-width:760px}
+.board figure{margin:0}.frame{height:760px;border-radius:30px;overflow:hidden;border:1px solid #2b2b30}
+figcaption{margin-top:8px;text-align:center;font:12px/1.3 system-ui;color:#8e8e96}
+.app{height:100%;display:flex;flex-direction:column;position:relative}
+.nav{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:14px 14px 6px}
+.nav>:first-child{justify-self:start}.nav>:last-child{justify-self:end}
+.body{flex:1;overflow:hidden;padding:0 14px 120px}
+.body>*{flex-shrink:0}
+.body.scrolled>*{transform:translateY(-420px)}
+.hero{display:flex;gap:14px;align-items:center;padding:8px 2px 14px}
+.portrait{width:64px;height:82px;border-radius:var(--radius-3);background:var(--gray-a5);color:var(--gray-11);display:grid;place-items:end center;overflow:hidden;flex:none;position:relative}
+.portrait .cnt{position:absolute;top:4px;right:4px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--gray-12);color:var(--gray-1);font-size:10px;font-weight:600;display:grid;place-items:center}
+.hn{display:flex;flex-direction:column;gap:3px;min-width:0}
+.meta{font-size:12.5px;color:var(--gray-10)}
+.status{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:var(--radius-4);background:var(--gray-a3)}
+.status.blue{background:var(--blue-a3)}.status.green{background:var(--green-a3)}.status.amber{background:var(--amber-a3)}
+.status .sx{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+.lbl{display:flex;align-items:center;justify-content:space-between;padding:16px 4px 6px}
+.grp{border-radius:var(--radius-4);background:var(--gray-a2);box-shadow:inset 0 0 0 1px var(--gray-a4);overflow:hidden}
+.grp>*+*{border-top:1px solid var(--gray-a4)}
+.r{display:flex;align-items:center;gap:10px;min-height:44px;padding:0 12px 0 14px}
+.r.top{align-items:flex-start;padding-top:11px;padding-bottom:11px}
+.k{width:74px;flex:none;font-size:14px;color:var(--gray-11)}
+.v{flex:1;min-width:0;font-size:15px;color:var(--gray-12);line-height:1.35}
+.sp{flex:1}
+.photos{display:flex;gap:8px}
+.ph{width:78px;height:78px;border-radius:var(--radius-3);background:var(--gray-a5);color:var(--gray-11);display:grid;place-items:end center;overflow:hidden}
+.ph.add{background:none;box-shadow:inset 0 0 0 1.5px var(--gray-a6);place-items:center;align-content:center;gap:4px;font-size:12px}
+.tl{list-style:none;margin:0;padding:4px 0 0 4px}
+.tl li{position:relative;display:flex;gap:12px;padding:0 0 14px}
+.tl li:not(:last-child)::before{content:"";position:absolute;left:6px;top:16px;bottom:0;width:1.5px;background:var(--gray-a5)}
+.tl .d{flex:none;width:14px;display:flex;justify-content:center;padding-top:3px}
+.tl .tt{display:flex;flex-direction:column;gap:2px}
+.tl .pt{width:7px;height:7px;margin-top:4px;border-radius:50%;background:var(--gray-9)}
+.chg{display:flex;align-items:center;gap:5px;flex-wrap:wrap}.chg.sm{font-size:13px;color:var(--gray-12)}.chg .old{color:var(--gray-10);text-decoration:line-through}.arr{color:var(--gray-10)}
+.danger{display:flex;align-items:center;justify-content:center;gap:8px;min-height:46px;margin-top:18px;border-radius:var(--radius-4);color:var(--red-11);box-shadow:inset 0 0 0 1px var(--red-a5);font-size:15px;font-weight:500}
+.foot{position:absolute;left:0;right:0;bottom:0;padding:12px 14px 26px;background:var(--color-background);box-shadow:0 -1px 0 var(--gray-a4);z-index:3;display:grid;gap:8px}
+.foot .rt-Button,.dialog .rt-Button{white-space:nowrap;padding-left:12px;padding-right:12px}
+.foot.two{grid-template-columns:1fr 1fr}
+.foot.one-two{grid-template-columns:auto 1fr}
+.scrim{position:absolute;inset:0;background:var(--black-a8);z-index:8}
+.dialog{position:absolute;left:24px;right:24px;top:50%;transform:translateY(-50%);z-index:9;background:var(--color-panel-solid);border-radius:var(--radius-5);box-shadow:var(--shadow-6);padding:20px;display:flex;flex-direction:column;gap:6px}
+.dialog .btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px}
+</style>
+<script type="importmap">{"imports":{
+"react":"https://esm.sh/react@18.3.1",
+"react-dom":"https://esm.sh/react-dom@18.3.1",
+"react-dom/client":"https://esm.sh/react-dom@18.3.1/client",
+"@radix-ui/themes":"https://esm.sh/@radix-ui/themes@3.3.0?deps=react@18.3.1,react-dom@18.3.1",
+"htm":"https://esm.sh/htm@3.1.1"}}</script>
+</head><body><div id="b"></div>
+<script type="module">
+import React from 'react';
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
+import htm from 'htm';
+import { Theme, Text, Heading, Button, IconButton, Badge } from '@radix-ui/themes';
+if (location.protocol === 'file:' || location.protocol.startsWith('http')) document.documentElement.classList.add('standalone');
+const h = htm.bind(React.createElement);
+const svg = (p, s = 16) => h`<svg width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style=${{ flex: 'none' }} dangerouslySetInnerHTML=${{ __html: p }} />`;
+const P = {
+  x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  phone: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>',
+  pencil: '<path d="M21.17 6.81a1 1 0 0 0-3.99-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z"/><path d="m15 5 4 4"/>',
+  cam: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
+  bust: '<circle cx="12" cy="10" r="5"/><path d="M2 26a10 9 0 0 1 20 0"/>',
+  walk: '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+  trash: '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+};
+// Same status icons as the list.
+const pie = (f) => { const a = f * 2 * Math.PI, x = 7 + 3.25 * Math.sin(a), y = 7 - 3.25 * Math.cos(a); return `M7 7L7 3.75A3.25 3.25 0 ${f > 0.5 ? 1 : 0} 1 ${x.toFixed(2)} ${y.toFixed(2)}Z`; };
+const ST = {
+  new: { label: 'Waiting for check', c: 'var(--blue-9)', color: 'blue', f: 0 },
+  notfound: { label: 'Not in medical', c: 'var(--amber-9)', color: 'amber', mark: 'x' },
+  found: { label: 'In medical · friend coming', c: 'var(--green-9)', color: 'green', f: 0.75 },
+  logged: { label: 'Logged', c: 'var(--gray-10)', f: 0 },
+};
+const glyph = (k, s = 14) => { const t = ST[k]; return h`<svg width=${s} height=${s} viewBox="0 0 14 14" aria-hidden="true" style=${{ flex: 'none' }}>${t.mark === 'x'
+  ? h`<circle cx="7" cy="7" r="6.25" fill=${t.c}/><path d="M5 5l4 4M9 5l-4 4" stroke="var(--color-panel-solid)" strokeWidth="1.6" strokeLinecap="round"/>`
+  : h`<circle cx="7" cy="7" r="5.75" fill="none" stroke=${t.c} strokeWidth="1.5"/>${t.f ? h`<path d=${pie(t.f)} fill=${t.c}/>` : null}`}</svg>`; };
+
+const Lbl = ({ children, edit }) => h`<div className="lbl"><${Text} size="2" weight="medium" color="gray">${children}<//>${edit ? h`<${Button} size="1" variant="ghost" color="gray">${svg(P.pencil, 13)}Edit<//>` : null}</div>`;
+const Row = ({ k, top, children }) => h`<div className=${'r' + (top ? ' top' : '')}><span className="k">${k}</span><span className="v">${children}</span></div>`;
+
+function Status({ k }) {
+  if (k === 'new') return h`<div className="status blue">${glyph('new', 18)}<div className="sx"><${Text} size="3" weight="medium" color="blue">Waiting for check<//><${Text} size="1" color="gray">Logged 10:58<//></div>
+    <${Badge} size="2" variant="soft" color="amber">${svg(P.clock, 13)}12m<//></div>`;
+  if (k === 'found') return h`<div className="status green">${glyph('found', 18)}<div className="sx"><${Text} size="3" weight="medium" color="green">In medical · friend coming<//>
+    <${Text} size="1" color="gray">Rae Chen · 11:10 · Maya R. heading to Main Med<//></div></div>`;
+  return h`<div className="status amber">${glyph('notfound', 18)}<div className="sx"><${Text} size="3" weight="medium" color="amber">Not in medical<//><${Text} size="1" color="gray">Rae Chen · 11:10<//></div></div>`;
+}
+
+// Jeffrey: a full audit trail. Every status change (from → to), every edit (field, old → new), photos and the
+// original log entry, each with who did it (name · team) and the exact time. Newest first. Comes from audit_events.
+const AUDIT = [
+  { at: 'Nov 6, 10:58 PM', who: 'Dana Kim · Dispatch', what: 'Request logged', note: 'FA 3 – Kinetic' },
+  { at: 'Nov 6, 11:01 PM', who: 'Dana Kim · Dispatch', what: 'Photo added', note: '2 photos · Today' },
+  { at: 'Nov 6, 11:03 PM', who: 'Dana Kim · Dispatch', what: 'Edited Hair', from: '—', to: 'Blond, two braids' },
+  { at: 'Nov 6, 11:10 PM', who: 'Rae Chen · GCHX Med Transpo', what: 'Status', status: ['new', 'found'] },
+];
+const Audit = ({ k }) => {
+  const rows = (k === 'found' ? AUDIT : AUDIT.slice(0, 3)).slice().reverse();
+  return h`<${Lbl}>Audit trail<//><ol className="tl">${rows.map((e) => h`
+    <li key=${e.at + e.what}><span className="d">${e.status ? glyph(e.status[1]) : h`<span className="pt"></span>`}</span><div className="tt">
+      ${e.status
+        ? h`<div className="chg">${glyph(e.status[0], 12)}<${Text} size="2" weight="medium">${ST[e.status[0]].label}<//><span className="arr">→</span>${glyph(e.status[1], 12)}<${Text} size="2" weight="medium" color=${ST[e.status[1]].color}>${ST[e.status[1]].label.split(' · ')[0]}<//></div>`
+        : h`<${Text} size="2" weight="medium">${e.what}<//>`}
+      ${e.from ? h`<div className="chg sm"><span className="old">${e.from}</span><span className="arr">→</span><span>${e.to}</span></div>` : e.note ? h`<${Text} size="1" color="gray">${e.note}<//>` : null}
+      <${Text} size="1" color="gray">${e.who} · ${e.at}<//></div></li>`)}</ol>`;
+};
+function Profile({ dark, k = 'new', mine, scrolled, confirm }) {
+  const foot = k === 'new'
+    ? h`<div className="foot two"><${Button} size="3" variant="soft" color="gray">${svg(P.x, 16)}Not in medical<//><${Button} size="3" color="green">${svg(P.check, 16)}In medical<//></div>`
+    : k === 'found'
+    ? h`<div className="foot one-two"><${Button} size="3" variant="soft" color="gray">${svg(P.undo, 16)}Change answer<//><${Button} size="3" highContrast>${svg(P.check, 16)}Reunited<//></div>`
+    : h`<div className="foot"><${Button} size="3" variant="soft" color="gray">${svg(P.undo, 16)}Change answer<//></div>`;
+  return h`<${Theme} appearance=${dark ? 'dark' : 'light'} accentColor="gray" grayColor="gray" radius="medium"><div className="app">
+    <div className="nav">
+      <${IconButton} variant="soft" color="gray" radius="full" aria-label="Close">${svg(P.x, 16)}<//>
+      <${Text} size="2" weight="medium" color="gray">LP-1012<//>
+      <${IconButton} variant="soft" color="gray" radius="full" aria-label="More actions">${svg(P.more, 16)}<//>
+    </div>
+    <div className=${'body' + (scrolled ? ' scrolled' : '')}>
+      <div className="hero">
+        <div className="portrait" role="img" aria-label="2 photos">${svg(P.bust, 74)}<span className="cnt">2</span></div>
+        <div className="hn"><${Heading} size="5" weight="medium">Kayla Martinez<//><${Text} size="3" color="gray">19 · Female<//>
+          <span className="meta">FA 3 – Kinetic · Dana Kim</span></div>
+      </div>
+      <${Status} k=${k}/>
+      <${Lbl} edit>Missing person<//>
+      <div className="grp">
+        <${Row} k="Wearing" top>Pink cowboy hat, silver fringe top, white shorts<//>
+        <${Row} k="Last seen">kineticFIELD rail, ~10:30<//>
+        <${Row} k="Hair">Blond, two braids<//>
+      </div>
+      <${Lbl} edit>Friend or family<//>
+      <div className="grp">
+        <${Row} k="Name">Maya R. · Best friend<//>
+        <div className="r"><span className="k">Phone</span><span className="v">(407) 555-0142</span><${Button} size="1" variant="soft" color="gray">${svg(P.phone, 13)}Call<//></div>
+      </div>
+      <${Lbl}>Photos<//>
+      <div className="photos">
+        <div className="ph" role="img" aria-label="Photo 1, today">${svg(P.bust, 70)}</div>
+        <div className="ph" role="img" aria-label="Photo 2, today">${svg(P.bust, 70)}</div>
+        <div className="ph add" role="button" aria-label="Add photo">${svg(P.cam, 20)}<span>Add</span></div>
+      </div>
+      <${Audit} k=${k}/>
+      ${mine ? h`<div className="danger" role="button">${svg(P.trash, 16)}Cancel request</div>` : null}
+    </div>
+    ${foot}
+    ${confirm ? h`<div className="scrim"></div><div className="dialog" role="alertdialog" aria-label="Cancel this request?">
+      <${Heading} size="4" weight="medium">Cancel this request?<//><${Text} size="2" color="gray">LP-1012 · Kayla Martinez<//>
+      <div className="btns"><${Button} size="3" variant="soft" color="gray">Keep<//><${Button} size="3" color="red">Cancel request<//></div></div>` : null}
+  </div><//>`;
+}
+
+const Board = () => h`<div className="board">
+  <figure><div className="frame"><${Profile} dark/></div><figcaption>Waiting for check · answer from the profile</figcaption></figure>
+  <figure><div className="frame"><${Profile} mine scrolled/></div><figcaption>Your own request · Cancel at the bottom</figcaption></figure>
+  <figure><div className="frame"><${Profile} dark k="found" scrolled/></div><figcaption>Audit trail · every change, who, and when</figcaption></figure>
+  <figure><div className="frame"><${Profile} mine scrolled confirm/></div><figcaption>Cancel asks once</figcaption></figure>
+</div>`;
+flushSync(() => createRoot(document.getElementById('b')).render(h`<${Board}/>`));
+</script></body></html>

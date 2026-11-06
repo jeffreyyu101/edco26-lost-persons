@@ -1,0 +1,63 @@
+1. Google Health (Fitbit): Log activity
+   Pattern: Required fields sit in one grouped inset block with inline labels and value pills, and everything else is behind a single collapsed "Optional Information" row above Save.
+   Image: https://mobbin.com/api/mcp/short/r12ZwWRx
+   Mobbin: https://mobbin.com/screens/01ff92b4-f6aa-4f3c-852e-ff53b1f0f55c?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+
+2. Google Calendar: New task sheet
+   Pattern: Each optional field appears only as an icon plus a grey "Add …" row ("Add details", "Add deadline"), so the empty row is the add button and needs no label.
+   Image: https://mobbin.com/api/mcp/short/nJb46T2x
+   Mobbin: https://mobbin.com/screens/0dc9770b-32de-433b-91f5-dc855c5a8f01?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+
+3. Linear Mobile: New issue
+   Pattern: Secondary fields sit in a chip row above the keyboard; unset ones stay ghosted (Assignee, Labels) and set ones fill in with their value and glyph (Todo, Medium), so the row doubles as a status summary.
+   Image: https://mobbin.com/api/mcp/short/w9yyaYWz
+   Mobbin: https://mobbin.com/screens/13ffdf4b-8a99-4ff3-b1b4-7acdbc8789ce?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+
+4. Todoist: Quick add task
+   Pattern: Only the title is typed; Date, Deadline, Priority and Reminder are outlined chips in one horizontally scrolling row, so extra fields take no vertical space until they're used.
+   Image: https://mobbin.com/api/mcp/short/c17ZNjv5
+   Mobbin: https://mobbin.com/screens/c0cf3743-238a-46c0-967c-ad91f7df8513?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+
+5. WhatsApp: New contact
+   Pattern: Name fields stack in one inset group and phone gets its own group with left-column labels (Phone, Mobile) and a ✓ on a valid number, while Cancel/Done sit in the nav bar instead of a footer button.
+   Image: https://mobbin.com/api/mcp/short/POvpcGcY
+   Mobbin: https://mobbin.com/screens/c1726f30-d10a-4ca4-a908-6cdddfbb9e1f?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+
+6. Skype: New contact
+   Pattern: One phone row with an inline type picker (Mobile ⌄), plus a "+ Add number" row that adds a second field only when someone needs it.
+   Image: https://mobbin.com/api/mcp/short/4wJO096T
+   Mobbin: https://mobbin.com/screens/37602fc2-6e9d-482b-a49e-c26af26dcaa1?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+
+7. Citizen: Report incident
+   Pattern: "Where" is a map with a pinned address chip filled in from GPS and adjustable, "when" is a compact picker that defaults to "Happening Right Now", and the details text is optional.
+   Image: https://mobbin.com/api/mcp/short/rVnLKBfe
+   Mobbin: https://mobbin.com/screens/43cc94b5-8fc3-4a19-98cd-554fec77c4c1?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+
+8. Alma: Onboarding profile step
+   Pattern: Photo, name and short attributes fit in one compact card, with three small selects sharing a row (Age, Height, Weight under Sex at Birth), which is a close template for the missing-person block.
+   Image: https://mobbin.com/api/mcp/short/Ew4f66Na
+   Mobbin: https://mobbin.com/screens/1c6a2a2b-3f80-4b0e-927b-ac812c640adc?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+
+9. Slopes: Manual Activity
+   Pattern: Two small inset groups of label-left, value-right rows, with X and ✓ circle buttons in the header and no footer button, so the whole form sits above the fold.
+   Image: https://mobbin.com/api/mcp/short/T7VQN8gt
+   Mobbin: https://mobbin.com/screens/87f0a0a9-32e9-4507-b8e9-55856730bf22?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+
+10. Grab: Add Emergency Contacts
+    Pattern: The second-person block is just two fields: Name, with an address-book glyph inside it for importing, and Mobile, split into a country-code picker and a number field that opens the numeric keypad.
+    Image: https://mobbin.com/api/mcp/short/aYqgEK8I
+    Mobbin: https://mobbin.com/screens/8610055c-aa35-41fc-a8e3-830030d5d00a?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+
+Mobbin had no Apple Contacts, Things, or Uber/Lyft/Airbnb lost-item form screens (Uber returned its Help hub and Airbnb a video-verification screen), so these patterns come from other apps. The image links expire after 30 days, so download any you want to keep; the Mobbin links don't expire.
+
+- Required fields first, optional ones collapsed: name, age, gender and last-seen stay visible, while clothing detail, extra phone numbers and notes go behind one "More details" row or "Add …" rows (Fitbit, Google Calendar, Skype).
+- Unset optional fields show as a ghost chip or a grey "Add …" row, never an empty labelled box. Once filled they show their value, so the form also works as a summary of what's been entered (Linear, Todoist, Google Calendar).
+- Grouped inset lists with labels on the left and values on the right, split into a few short groups (person, last seen, friend), are the densest layout that still scans quickly (WhatsApp, Slopes, Fitbit).
+- Context takes one tap: location is a map pin with the address filled in from GPS, time defaults to "now", and the photo is an avatar slot inside the person card (Citizen, Alma).
+- Actions go in the nav bar (Cancel/Done or X/✓) instead of a tall footer button, and phone fields open the numeric keypad and show a ✓ when valid. That saves the vertical space needed to fit everything on one screen (WhatsApp, Slopes, Grab).
+
+---
+
+**Your Mobbin AI usage is high this month**
+
+Usage is unlimited during beta. If your usage stays at this level, you may need to purchase more credits once limits take effect. [View usage and plan options](https://mobbin.com/settings/billing-and-usage?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp)

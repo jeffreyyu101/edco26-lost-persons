@@ -1,0 +1,106 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Approved · Sign in (Radix Themes, monochrome)</title>
+<!-- Approved by Brian 2026-11-06. Real @radix-ui/themes 3.3.0 components, loaded from CDN (needs internet). -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@radix-ui/themes@3.3.0/styles.css">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+html.standalone{background:#0c0c0d}html.standalone body{margin:0;padding:16px}
+.radix-themes{--default-font-family:InterVariable,Inter,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;font-feature-settings:"cv11";-webkit-font-smoothing:antialiased}
+.radix-themes[data-is-root-theme]{min-height:0!important;height:100%;position:relative}
+.dark .logo{filter:invert(1)}.logo{display:block;width:auto}
+.logos{display:flex;align-items:center;gap:16px}.gc{display:block;width:auto}.ldiv{width:1px;height:32px;background:var(--gray-a6)}
+.credit{padding:16px 12px 0;text-align:center;font-size:11.5px;line-height:1.45;color:var(--gray-10);text-wrap:balance}
+.board{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:22px 16px;max-width:760px}
+.board figure{margin:0}.frame{height:640px;border-radius:30px;overflow:hidden;border:1px solid #2b2b30}
+figcaption{margin-top:8px;text-align:center;font:12px/1.3 system-ui;color:#8e8e96}
+.login{box-sizing:border-box;height:100%;display:flex;flex-direction:column;align-items:center;padding:24px 20px 18px}.grow{flex:1}
+.corner{position:absolute;top:18px;right:18px}
+.ti{flex:none;color:var(--gray-10)}[data-state=checked] .ti{color:var(--gray-12)}
+.invalid.rt-TextFieldRoot{box-shadow:inset 0 0 0 1px var(--red-8)!important}
+.idrow{display:flex;align-items:center;gap:12px;padding:10px 10px 10px 12px;border-radius:var(--radius-3);background:var(--gray-a3)}
+.idrow .nm{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+</style>
+<script type="importmap">{"imports":{
+"react":"https://esm.sh/react@18.3.1",
+"react-dom":"https://esm.sh/react-dom@18.3.1",
+"react-dom/client":"https://esm.sh/react-dom@18.3.1/client",
+"@radix-ui/themes":"https://esm.sh/@radix-ui/themes@3.3.0?deps=react@18.3.1,react-dom@18.3.1",
+"htm":"https://esm.sh/htm@3.1.1"}}</script>
+</head><body><div id="b"></div>
+<img id="logo-src" src="../edc-logo.png" alt="" hidden>
+<img id="gc-src" src="../gc-logo.png" alt="" hidden>
+<script type="module">
+import React from 'react';
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
+import htm from 'htm';
+import { Theme, Flex, Text, Heading, IconButton, Button, TextField, Avatar, RadioCards } from '@radix-ui/themes';
+if (location.protocol === 'file:' || location.protocol.startsWith('http')) document.documentElement.classList.add('standalone');
+const h = htm.bind(React.createElement);
+const LOGO = document.getElementById('logo-src').src;
+const GC = document.getElementById('gc-src').src;
+const svg = (p, s = 16, cls = '') => h`<svg width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className=${cls} aria-hidden="true" dangerouslySetInnerHTML=${{ __html: p }} />`;
+const P = {
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>',
+  moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/>',
+  eye: '<path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/>',
+  alert: '<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>',
+  dispatch: '<path d="M16.247 7.761a6 6 0 0 1 0 8.478"/><path d="M19.075 4.933a10 10 0 0 1 0 14.134"/><path d="M4.925 19.067a10 10 0 0 1 0-14.134"/><path d="M7.753 16.239a6 6 0 0 1 0-8.478"/><circle cx="12" cy="12" r="2"/>',
+  base: '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  transpo: '<path d="M10 10H6"/><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.28a1 1 0 0 0-.684-.948l-1.923-.641a1 1 0 0 1-.578-.502l-1.539-3.076A1 1 0 0 0 16.382 8H14"/><path d="M8 8v4"/><path d="M9 18h6"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/>',
+  medical: '<path d="M4 9a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h4a1 1 0 0 1 1 1v4a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2v-4a1 1 0 0 1 1-1h4a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2h-4a1 1 0 0 1-1-1V4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4a1 1 0 0 1-1 1z"/>',
+  prevent: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>',
+};
+// Labels are short; values are exactly what the existing API expects.
+// Jeffrey 2026-11-06: Dispatch, GCHX Base, GCHX Med Transpo, Medical (replaces Prevent). 'Medical' needs adding to DEPARTMENTS in the API.
+const TEAMS = [['GC/HX - Special Operations/Med Transpo', 'GCHX Med Transpo', P.transpo], ['GC/HX - Dispatch', 'Dispatch', P.dispatch], ['GC/HX - Base', 'GCHX Base', P.base], ['Medical', 'Medical', P.medical]];
+const Shell = ({ dark, children }) => h`<${Theme} appearance=${dark ? 'dark' : 'light'} accentColor="gray" grayColor="gray" radius="medium"><div className="login">
+  <${IconButton} className="corner" variant="ghost" color="gray" size="2" aria-label=${dark ? 'Switch to light mode' : 'Switch to dark mode'}>${svg(dark ? P.sun : P.moon, 18)}<//>
+  <span className="grow"></span><${Flex} direction="column" gap="5" width="100%" style=${{ maxWidth: 340 }}>${children}<//><span className="grow"></span>
+  <div className="credit">Built by Jeffrey & Brian for Ground Control / Headliner Experience</div></div><//>`;
+// Brian: with the app name as the heading, the name field read like "enter your friend's name". The app name is
+// now a small line, and the heading says this is staff signing in.
+const Brand = ({ title }) => h`<${Flex} direction="column" align="center" gap="4"><div className="logos"><img className="logo" src=${LOGO} alt="EDC Orlando" height="40"/><span className="ldiv"></span><img className="gc" src=${GC} alt="Ground Control" height="34"/></div>
+  <${Flex} direction="column" align="center" gap="1"><${Text} size="2" color="gray" weight="medium">Is my friend in medical?<//><${Heading} size="5" weight="medium" align="center">${title}<//><//><//>`;
+
+function Who({ dark, name, team, other }) {
+  const valid = name.length >= 2 && (team || (other || '').length >= 2);
+  return h`<${Shell} dark=${dark}><${Brand} title="Staff sign-in"/>
+    <${Flex} direction="column" gap="3">
+      <${TextField.Root} size="3" placeholder="Your name" defaultValue=${name} autoComplete="name" aria-label="Your name (staff)">
+        <${TextField.Slot}>${svg(P.user, 16)}<//>
+      <//>
+      <${Text} as="div" size="2" color="gray" mt="1">Your team<//>
+      <${RadioCards.Root} size="1" columns="2" gap="2" highContrast defaultValue=${team || ''} aria-label="Team">
+        ${TEAMS.map(([v, l, ic]) => h`<${RadioCards.Item} key=${v} value=${v}><${Flex} direction="column" align="start" gap="2" width="100%" py="1">${svg(ic, 18, 'ti')}<${Text} size="2" style=${{ whiteSpace: 'nowrap' }}>${l}<//><//><//>`)}
+      <//>
+      <${TextField.Root} size="3" placeholder="Other team" defaultValue=${other || ''}/>
+      <${Button} size="3" mt="1" highContrast disabled=${!valid}>Continue<//>
+    <//><//>`;
+}
+
+function Pass({ dark, err }) {
+  return h`<${Shell} dark=${dark}><${Brand} title="Enter the event password"/>
+    <${Flex} direction="column" gap="3">
+      <div className="idrow">
+        <${Avatar} size="2" radius="full" variant="solid" color="gray" highContrast fallback="DK"/>
+        <div className="nm"><${Text} size="2" weight="medium">Dana Kim<//><${Text} size="1" color="gray">GCHX Med Transpo<//></div>
+        <${Button} size="1" variant="surface" color="gray" highContrast aria-label="Change name or team">Change<//>
+      </div>
+      <${TextField.Root} size="3" type="password" placeholder="Event password" autoComplete="current-password" defaultValue=${err ? '' : 'orlando26'} className=${err ? 'invalid' : ''} aria-invalid=${err ? 'true' : undefined}>
+        <${TextField.Slot} side="right"><${IconButton} size="2" variant="ghost" color="gray" aria-label="Show password">${svg(P.eye, 18)}<//><//>
+      <//>
+      ${err ? h`<${Flex} align="center" gap="2" style=${{ color: 'var(--red-11)' }}>${svg(P.alert, 15)}<${Text} size="2" color="red">Incorrect password<//><//>` : null}
+      <${Button} size="3" mt="1" highContrast disabled=${!!err}>Sign in<//>
+    <//><//>`;
+}
+
+const Board = () => h`<div className="board">
+  <figure><div className="frame"><${Who} dark name="Dana Kim" team="GC/HX - Special Operations/Med Transpo"/></div><figcaption>1 · Name and team</figcaption></figure>
+  <figure><div className="frame"><${Who} name="Sam Ortiz" team="GC/HX - Special Operations/Med Transpo"/></div><figcaption>1 · Light</figcaption></figure>
+  <figure><div className="frame"><${Pass} dark/></div><figcaption>2 · Event password (every later sign-in starts here)</figcaption></figure>
+  <figure><div className="frame"><${Pass} err/></div><figcaption>2 · Wrong password</figcaption></figure>
+</div>`;
+flushSync(() => createRoot(document.getElementById('b')).render(h`<${Board}/>`));
+</script></body></html>

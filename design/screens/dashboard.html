@@ -1,0 +1,124 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Draft · Dashboard</title>
+<!-- Draft 2026-11-06. Jeffrey's "Global view" from his app, redone. Opened from the avatar menu (a small entry point,
+     not on the main screen). Same numbers as his view: open by status, open by post, recently updated, plus a couple of
+     live timings. Built to the dataviz rules: one hero number; a thin segmented bar for open-by-status (blue/green
+     checked with the palette validator in light and dark) with a legend of icon + label + count; stat tiles; and
+     single-hue bars for posts with the value at the tip. Synthetic data only. Real @radix-ui/themes 3.3.0 components (needs internet). -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@radix-ui/themes@3.3.0/styles.css">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+html.standalone{background:#0c0c0d}html.standalone body{margin:0;padding:16px}
+.radix-themes{--default-font-family:InterVariable,Inter,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;font-feature-settings:"cv11";-webkit-font-smoothing:antialiased}
+.radix-themes[data-is-root-theme]{min-height:0!important;height:100%;position:relative}
+.board{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:22px 16px;max-width:760px}
+.board figure{margin:0}.frame{height:1040px;border-radius:30px;overflow:hidden;border:1px solid #2b2b30}
+figcaption{margin-top:8px;text-align:center;font:12px/1.3 system-ui;color:#8e8e96}
+.app{height:100%;display:flex;flex-direction:column}
+.nav{display:flex;align-items:center;gap:10px;padding:14px 16px 4px}
+.livepill{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--gray-10)}
+.live{width:7px;height:7px;border-radius:50%;background:var(--green-9);box-shadow:0 0 0 3px var(--green-a4)}
+.body{flex:1;overflow:hidden;padding:8px 16px 24px;display:flex;flex-direction:column;gap:22px}
+.hero .num{font-size:56px;line-height:1;font-weight:600;letter-spacing:-.02em;margin:6px 0 14px}
+.seg{display:flex;gap:2px;height:8px}
+.seg span{display:block;height:100%;border-radius:4px}
+.legend{display:flex;flex-direction:column;margin-top:12px}
+.lg{display:flex;align-items:center;gap:10px;min-height:34px}
+.lg .v{font-weight:600}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tile{border-radius:var(--radius-4);box-shadow:inset 0 0 0 1px var(--gray-a4);padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.tile .lb{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--gray-11)}
+.tile .val{font-size:26px;line-height:1.1;font-weight:600}
+.tile .sub{font-size:12px;color:var(--gray-10);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sh{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px}
+.bars{display:flex;flex-direction:column;gap:12px}
+.bar{display:grid;grid-template-columns:96px 1fr;align-items:center;gap:10px;font-size:14px}
+.track{display:flex;align-items:center;gap:8px;height:20px}
+.fill{height:10px;background:var(--gray-11);border-radius:0 4px 4px 0}
+.bv{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
+.recent .row{display:flex;align-items:center;gap:10px;padding:10px 0}
+.recent .row+.row{border-top:1px solid var(--gray-a3)}
+.recent .rm{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.t{font-size:12px;color:var(--gray-10);font-variant-numeric:tabular-nums}
+</style>
+<script type="importmap">{"imports":{
+"react":"https://esm.sh/react@18.3.1",
+"react-dom":"https://esm.sh/react-dom@18.3.1",
+"react-dom/client":"https://esm.sh/react-dom@18.3.1/client",
+"@radix-ui/themes":"https://esm.sh/@radix-ui/themes@3.3.0?deps=react@18.3.1,react-dom@18.3.1",
+"htm":"https://esm.sh/htm@3.1.1"}}</script>
+</head><body><div id="b"></div>
+<script type="module">
+import React from 'react';
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
+import htm from 'htm';
+import { Theme, Text, Heading, Button, IconButton } from '@radix-ui/themes';
+if (location.protocol === 'file:' || location.protocol.startsWith('http')) document.documentElement.classList.add('standalone');
+const h = htm.bind(React.createElement);
+const svg = (p, s = 16) => h`<svg width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style=${{ flex: 'none' }} dangerouslySetInnerHTML=${{ __html: p }} />`;
+const P = {
+  back: '<path d="m15 18-6-6 6-6"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  timer: '<path d="M10 2h4"/><path d="M12 14v-4"/><circle cx="12" cy="14" r="8"/>',
+  download: '<path d="M12 15V3"/><path d="m7 10 5 5 5-5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>',
+};
+const pie = (f) => { const a = f * 2 * Math.PI, x = 7 + 3.25 * Math.sin(a), y = 7 - 3.25 * Math.cos(a); return `M7 7L7 3.75A3.25 3.25 0 ${f > 0.5 ? 1 : 0} 1 ${x.toFixed(2)} ${y.toFixed(2)}Z`; };
+const ST = {
+  new: { label: 'Waiting for check', c: 'var(--blue-9)', color: 'blue', f: 0 },
+  notfound: { label: 'Not in medical', c: 'var(--amber-9)', color: 'amber', mark: 'x' },
+  found: { label: 'In medical · friend coming', c: 'var(--green-9)', color: 'green', f: 0.75 },
+  closed: { label: 'Reunited', c: 'var(--gray-9)', done: true },
+};
+const glyph = (k, s = 14) => { const t = ST[k]; return h`<svg width=${s} height=${s} viewBox="0 0 14 14" aria-hidden="true" style=${{ flex: 'none' }}>${t.done
+  ? h`<circle cx="7" cy="7" r="6.25" fill=${t.c}/><path d="M4.4 7.2l1.8 1.8 3.5-3.6" fill="none" stroke="var(--color-panel-solid)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>`
+  : t.mark === 'x' ? h`<circle cx="7" cy="7" r="6.25" fill=${t.c}/><path d="M5 5l4 4M9 5l-4 4" stroke="var(--color-panel-solid)" strokeWidth="1.6" strokeLinecap="round"/>`
+  : h`<circle cx="7" cy="7" r="5.75" fill="none" stroke=${t.c} strokeWidth="1.5"/>${t.f ? h`<path d=${pie(t.f)} fill=${t.c}/>` : null}`}</svg>`; };
+
+// Synthetic numbers, consistent with the list mockups (21 requests in total).
+const OPEN = [['new', 4], ['found', 3]];
+const POSTS = [['FA 3 – Kinetic', 4], ['FA 4 – Oasis', 2], ['Command', 1], ['Base', 0]];
+const RECENT = [['found', 'Jordan Diaz', '2m'], ['new', 'T.R.', '10m'], ['notfound', 'A.N.', '18m'], ['found', 'S.L.', '21m'], ['closed', 'C.H.', '34m']];
+
+function Dashboard({ dark }) {
+  const open = OPEN.reduce((n, [, v]) => n + v, 0);
+  const max = Math.max(...POSTS.map(([, v]) => v));
+  return h`<${Theme} appearance=${dark ? 'dark' : 'light'} accentColor="gray" grayColor="gray" radius="medium"><div className="app">
+    <div className="nav">
+      <${IconButton} variant="ghost" color="gray" aria-label="Back to requests">${svg(P.back, 20)}<//>
+      <${Heading} size="4" weight="medium">Dashboard<//><span style=${{ flex: 1 }}></span>
+      <span className="livepill"><span className="live"></span>Live</span>
+    </div>
+    <div className="body">
+      <section className="hero" aria-label="Open requests">
+        <${Text} size="2" color="gray">Open requests<//>
+        <div className="num">${open}</div>
+        <div className="seg" role="img" aria-label=${OPEN.map(([k, v]) => `${ST[k].label} ${v}`).join(', ')}>
+          ${OPEN.map(([k, v]) => h`<span key=${k} style=${{ flex: v, background: ST[k].c }}></span>`)}
+        </div>
+        <div className="legend">${OPEN.map(([k, v]) => h`<div key=${k} className="lg">${glyph(k)}<${Text} size="2">${ST[k].label}<//><span style=${{ flex: 1 }}></span><${Text} size="2" className="v">${v}<//></div>`)}</div>
+      </section>
+      <section className="tiles">
+        <div className="tile"><span className="lb">${glyph('notfound', 12)}Not in medical</span><span className="val">2</span></div>
+        <div className="tile"><span className="lb">${glyph('closed', 12)}Reunited</span><span className="val">10</span><span className="sub">+1 discharged, 1 cancelled</span></div>
+        <div className="tile"><span className="lb">${svg(P.clock, 13)}Longest wait</span><span className="val">24m</span><span className="sub">LP-1010 · FA 4</span></div>
+        <div className="tile"><span className="lb">${svg(P.timer, 13)}Avg answer time</span><span className="val">9m</span><span className="sub">Last 2 hours</span></div>
+      </section>
+      <section aria-label="Open requests by post">
+        <div className="sh"><${Text} size="2" weight="medium">Open by post<//></div>
+        <div className="bars">${POSTS.map(([p, v]) => h`<div key=${p} className="bar"><${Text} size="2" color="gray">${p}<//>
+          <div className="track">${v ? h`<span className="fill" style=${{ width: `${(v / max) * 82}%` }}></span>` : null}<span className="bv">${v}</span></div></div>`)}</div>
+      </section>
+      <section className="recent" aria-label="Recently updated">
+        <div className="sh"><${Text} size="2" weight="medium">Recently updated<//></div>
+        ${RECENT.map(([k, nm, t]) => h`<div key=${nm} className="row">${glyph(k)}<div className="rm"><${Text} size="2" weight="medium">${nm}<//><${Text} size="1" weight="medium" color=${ST[k].color}>${ST[k].label}<//></div><span className="t">${t}</span></div>`)}
+      </section>
+      <${Button} size="2" variant="soft" color="gray">${svg(P.download, 15)}Export CSV<//>
+    </div>
+  </div><//>`;
+}
+const Board = () => h`<div className="board">
+  <figure><div className="frame"><${Dashboard} dark/></div><figcaption>Dashboard · from the avatar menu</figcaption></figure>
+  <figure><div className="frame"><${Dashboard}/></div><figcaption>Light</figcaption></figure>
+</div>`;
+flushSync(() => createRoot(document.getElementById('b')).render(h`<${Board}/>`));
+</script></body></html>
