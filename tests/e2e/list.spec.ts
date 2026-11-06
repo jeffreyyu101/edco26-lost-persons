@@ -249,13 +249,15 @@ test('brand card over All, Pending and My requests: logos, event, the big title,
   expect(wide.titleHeight).toBeLessThan(wide.titleSize * 1.5);
   expect(wide.box.width).toBe(760 - 24);
 
-  // From 768 px the desk shell draws the brand and the list's chrome (its rail / sidebar and top bar), so the
-  // list has no card of its own.
+  // From 768 px the desk shell draws the brand (its own card over All requests, tests/e2e/desk-shell.spec.ts)
+  // and the list's chrome (its rail / sidebar and top bar), so the list has no card of its own.
   await page.setViewportSize({ width: 820, height: 1180 });
   await page.goto('/');
   await expect(page.getByTestId('desk-rail')).toBeVisible();
   await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 10_000 });
-  await expect(brand(page)).toHaveCount(0);
+  await expect(page.locator('[data-view] [data-testid="brand-card"]')).toHaveCount(0);
+  await expect(brand(page)).toHaveCount(1);
+  await expect(page.getByTestId('desk-brand').getByTestId('brand-card')).toBeVisible();
 });
 
 test.describe('brand card on a cold load', () => {

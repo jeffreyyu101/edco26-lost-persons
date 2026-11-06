@@ -8,6 +8,7 @@ import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { DashboardContent, DashboardView } from '@/components/dashboard/DashboardView';
+import { DeskContext } from '@/components/desk/desk-context';
 import type { Stats } from '@/lib/api-types';
 import { StoreContext, type AppStore, type StoreState } from '@/lib/client/store-contract';
 import { createStubStore } from '@/lib/client/store-stub';
@@ -243,6 +244,20 @@ describe('dashboard render', () => {
       <DashboardView />,
     );
     expect(error).toMatch(/data-state="retrying" data-testid="dashboard-connection">[\s\S]*?Retrying<\/span>/);
+  });
+
+  it('in the desk shell: no title row (the top bar is the title and holds the chip), six desk-sized tile placeholders', () => {
+    const desk = render(
+      storeWith((s) => ({ ...s, connection: 'offline' })),
+      <DeskContext.Provider value>
+        <DashboardView />
+      </DeskContext.Provider>,
+    );
+    expect(desk).not.toContain('<h1');
+    expect(desk).not.toContain('aria-label="Back to requests"');
+    expect(desk).not.toContain('dashboard-connection');
+    expect(desk).toContain('aria-label="Loading dashboard"');
+    expect(desk.match(/height:92px/g) ?? []).toHaveLength(6);
   });
 
   it('renders the stub store’s own stats (the shape lp_stats returns)', async () => {

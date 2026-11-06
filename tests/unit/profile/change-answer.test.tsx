@@ -183,4 +183,24 @@ describe('the profile footer', () => {
     expect(bar).toContain('>Not in medical<');
     expect(bar).toContain('>In medical<');
   });
+
+  it('in the desk pane: the same actions right after the status block, before the details, two equal halves', () => {
+    const html = render(<ProfileView id={withStatus(STATUS.inMedical).id} presentation="panel" />);
+    const status = html.indexOf('data-testid="status-block"');
+    const actions = html.indexOf('data-testid="profile-actions"');
+    expect(status).toBeGreaterThan(0);
+    expect(actions).toBeGreaterThan(status);
+    expect(actions).toBeLessThan(html.indexOf('Missing person'));
+    expect(html.indexOf('data-testid="profile-actions"', actions + 1)).toBe(-1);
+    const bar = footer(html);
+    expect(bar).toContain('data-layout="two"');
+    const [change, reunited, ...more] = buttons(bar);
+    expect(more).toEqual([]);
+    expect(change).toContain('data-testid="change-answer"');
+    expect(change).toContain('aria-haspopup="menu"');
+    expect(reunited).not.toContain('aria-haspopup');
+    // The phone keeps its bar at the foot, after the main content.
+    const page = render(<ProfileView id={withStatus(STATUS.inMedical).id} />);
+    expect(page.indexOf('data-testid="profile-actions"')).toBeGreaterThan(page.indexOf('</main>'));
+  });
 });

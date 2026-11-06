@@ -367,6 +367,25 @@ button.portrait {
 .foot[data-layout='one-two'] {
   grid-template-columns: auto 1fr;
 }
+/* The desk pane (presentation="panel", design/screens/desktop-log.html .acts): the actions sit right under
+   the status block, two equal buttons, scrolling with the profile. */
+.acts {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.acts :global(.rt-Button) {
+  white-space: nowrap;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.acts :global(.rt-Button) svg {
+  flex: none;
+}
+/* Equal halves; "Change answer" keeps its whole label in the 420 px pane (iPad landscape, small laptops). */
+.acts[data-layout='two'] {
+  grid-template-columns: repeat(2, minmax(max-content, 1fr));
+}
 /* Change answer opens a menu: a small chevron after the label. */
 .chev {
   margin-left: -2px;

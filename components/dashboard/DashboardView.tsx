@@ -10,10 +10,16 @@
 //   recent   "Recently updated ›" opens All. Rows: number, name, status, updated; a row opens the profile.
 //   perf     Longest wait (opens that request), Time to answer, Time to reunite, Logged. "—" when a value is null
 //            or missing (avgReuniteMinutes / loggedLastHour come from the v2.2 lp_stats).
-// ≥ 768 px: six tiles in one row, posts and recent side by side, performance rows in two columns.
+// ≥ 768 px (inside the desk shell, components/desk): the shell's top bar is the title (and holds the
+//            Offline / Retrying chip, published through connection-signal.ts), so there is no title row here.
+//            Tiles are 3 × 2 (open statuses over closed ones), six in one row from 1024 px when the column
+//            has room (not with a request docked beside it); values share one line across a row. Open by
+//            post and Recently updated sit side by side and Performance rows in two columns when the column
+//            has room, stacked when a request is docked. Sized by the main column (container queries).
 import { Skeleton, VisuallyHidden } from '@radix-ui/themes';
-import { ChevronLeft, ChevronRight, Clock, CloudOff, Inbox, RefreshCw, Timer, Users, type LucideIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, Inbox, Timer, Users, type LucideIcon } from 'lucide-react';
 import { Fragment, useEffect, useState, type ReactNode } from 'react';
+import { useInDesk } from '@/components/desk/desk-context';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { Stats } from '@/lib/api-types';
@@ -34,6 +40,8 @@ import {
   postsBusiestFirst,
   type ValuePart,
 } from './dashboard-model';
+import { setDashboardConnection } from './connection-signal';
+import { DashboardConnectionChip } from './ConnectionChip';
 import s from './dashboard.module.css';
 
 export type DashboardViewProps = Record<string, never>;
@@ -50,31 +58,27 @@ export function DashboardView(_props: DashboardViewProps) {
 function Dashboard({ onRetry }: { onRetry: () => void }) {
   const { stats, error } = useStats(true);
   const { connection } = useConnection();
+  const inDesk = useInDesk();
   const offline = connection === 'offline';
   const state = offline ? 'offline' : connection === 'error' || error ? 'retrying' : 'live';
 
+  // On the desk the top bar shows the chip; it goes back to live when the dashboard closes.
+  useEffect(() => {
+    if (inDesk) setDashboardConnection(state);
+  }, [inDesk, state]);
+  useEffect(() => () => setDashboardConnection('live'), []);
+
   return (
     <div className={s.app} data-testid="dashboard">
-      <header className={s.nav}>
-        <button type="button" className={s.back} aria-label="Back to requests" onClick={() => goBack({})}>
-          <ChevronLeft size={24} strokeWidth={2} aria-hidden />
-        </button>
-        <h1 className={s.title}>Dashboard</h1>
-        {/* Always in the tree so the change is announced; empty (and invisible) while live. */}
-        <span className={s.conn} role="status" data-state={state} data-testid="dashboard-connection">
-          {state === 'offline' ? (
-            <>
-              <CloudOff size={14} aria-hidden />
-              Offline
-            </>
-          ) : state === 'retrying' ? (
-            <>
-              <RefreshCw size={14} aria-hidden />
-              Retrying
-            </>
-          ) : null}
-        </span>
-      </header>
+      {inDesk ? null : (
+        <header className={s.nav}>
+          <button type="button" className={s.back} aria-label="Back to requests" onClick={() => goBack({})}>
+            <ChevronLeft size={24} strokeWidth={2} aria-hidden />
+          </button>
+          <h1 className={s.title}>Dashboard</h1>
+          <DashboardConnectionChip state={state} />
+        </header>
+      )}
       <main className={s.body}>
         {stats ? (
           <DashboardContent stats={stats} />
@@ -459,11 +463,16 @@ function PerfRow({ testId, icon: Icon, label, context, parts, phrase, onClick }:
 // Loading
 // ---------------------------------------------------------------------------------------------------
 
+/** Tile placeholders: the phone's two big and four small, or the desk's six alike. */
+const LOADING_TILES = [104, 104, 74, 74, 74, 74];
+const LOADING_TILES_DESK = [92, 92, 92, 92, 92, 92];
+
 function Loading() {
+  const inDesk = useInDesk();
   return (
     <div aria-busy="true" aria-label="Loading dashboard" className={s.loading}>
       <div className={s.tiles}>
-        {[104, 104, 74, 74, 74, 74].map((h, i) => (
+        {(inDesk ? LOADING_TILES_DESK : LOADING_TILES).map((h, i) => (
           <Skeleton key={i} height={`${h}px`} style={{ borderRadius: 12 }} />
         ))}
       </div>

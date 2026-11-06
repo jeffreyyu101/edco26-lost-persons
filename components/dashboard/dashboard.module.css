@@ -467,27 +467,68 @@ button.pr:active {
   gap: 8px;
 }
 
-/* ---- laptop / iPad (Command): one row of tiles, posts beside recent, performance in two columns ---------- */
+/* ---- the desk (from 768 px): inside the shell's main column (design/screens/v7-laptop.png) ----------------
+   The shell's top bar is the title here. The layout follows the main column (the dashboard is an inline-size
+   container), so it narrows when a request docks beside it:
+     tiles        3 × 2 (Open, Waiting, In medical over Closed, Not in medical, Reunited); six in one row from
+                  1024 px when the column has 900 px. Each tile is a three-row subgrid (label, value, foot:
+                  Open's split bar, Reunited's "+n discharged"), so the values share one line across a row
+                  whatever wraps above them or sits below them.
+     posts/recent side by side from a 680 px column, else stacked.
+     performance  two columns from a 680 px column, else one. */
 
 @media (min-width: 768px) {
-  .body {
-    padding-top: 4px;
-    padding-left: max(28px, env(safe-area-inset-left));
-    padding-right: max(28px, env(safe-area-inset-right));
+  .app {
+    container-type: inline-size;
   }
+  .body {
+    max-width: 1440px;
+    margin-inline: 0;
+    padding: 20px max(24px, env(safe-area-inset-right)) max(32px, calc(env(safe-area-inset-bottom) + 16px)) 24px;
+  }
+
   .tiles {
-    grid-template-columns: 1.3fr repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    row-gap: 0;
+    column-gap: 8px;
+  }
+  .tile {
+    display: grid;
+    grid-row: span 3;
+    grid-template-rows: subgrid;
+    /* Explicit: a <button> grid would size an auto column to its content (the split bar's 0). */
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    padding: 12px 14px 14px;
+  }
+  .vw {
+    display: contents;
+  }
+  .lb {
+    align-self: start;
+    margin-bottom: 14px;
+  }
+  .v {
+    align-self: end;
+  }
+  .split,
+  .sub {
+    align-self: start;
   }
   .big {
     min-height: 0;
   }
 
-  /* Open, Waiting, In medical, then the closed ones. */
+  /* Open, Waiting, In medical, then the closed ones (the second row of the 3 × 2). */
   .tileClosed {
     order: 1;
   }
   .tileLate {
     order: 2;
+  }
+  .tileClosed,
+  .tileLate {
+    margin-top: 8px;
   }
   .tileClosed .v {
     font-size: 22px;
@@ -497,32 +538,59 @@ button.pr:active {
   .ghost {
     display: none;
   }
-  .grid2 {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
-    column-gap: 40px;
-    align-items: start;
+
+  .loading .tiles {
+    row-gap: 8px;
   }
-  .prows {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    column-gap: 40px;
+
+  /* A pointer shows what opens something. */
+  @media (hover: hover) {
+    button.tile:hover {
+      background: var(--gray-a4);
+    }
+    .rrow:hover,
+    button.pr:hover {
+      background: var(--gray-a2);
+    }
+    .post:hover .trk {
+      background: var(--gray-a4);
+    }
   }
-  .pr::before,
-  .pr + .pr::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 0;
-    border-top: 1px solid var(--gray-a3);
-    pointer-events: none;
+
+  @container (min-width: 680px) {
+    .grid2 {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+      column-gap: 40px;
+      align-items: start;
+    }
+    .prows {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      column-gap: 40px;
+    }
+    /* Both columns open with a hairline (polish-v7.html .lap .perf .pr). */
+    .pr::before,
+    .pr + .pr::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 0;
+      border-top: 1px solid var(--gray-a3);
+      pointer-events: none;
+    }
   }
 }
 
-/* iPad portrait: a little less side padding so "In medical" stays on one line; longer labels wrap. */
-@media (min-width: 768px) and (max-width: 1023.98px) {
-  .tile {
-    padding-inline: 10px;
+@media (min-width: 1024px) {
+  @container (min-width: 900px) {
+    .tiles {
+      grid-template-columns: 1.3fr repeat(5, minmax(0, 1fr));
+    }
+    .tileClosed,
+    .tileLate {
+      margin-top: 0;
+    }
   }
 }

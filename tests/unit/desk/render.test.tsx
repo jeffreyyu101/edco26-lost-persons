@@ -62,6 +62,20 @@ describe('DeskFrame', () => {
     expect(html).toContain('data-pane=""');
     for (const slot of ['nav', 'top', 'pane']) expect(html).toContain(`data-slot="${slot}"`);
     expect(html).not.toContain('inert');
+    // No brand slot unless the shell passes one (All requests).
+    expect(html).not.toContain('data-testid="desk-brand"');
+
+    // The brand card opens the main column, above the top bar.
+    const withBrand = render(
+      <DeskFrame desk brand={<i data-slot="brand" />} top={<i data-slot="top" />}>
+        <Probe />
+      </DeskFrame>,
+    );
+    const mainAt = withBrand.indexOf('data-desk-main=""');
+    const brandAt = withBrand.indexOf('data-testid="desk-brand"');
+    expect(brandAt).toBeGreaterThan(mainAt);
+    expect(withBrand.indexOf('data-slot="brand"')).toBeGreaterThan(brandAt);
+    expect(withBrand.indexOf('data-slot="top"')).toBeGreaterThan(withBrand.indexOf('data-slot="brand"'));
 
     const withForm = render(
       <DeskFrame desk form={<i data-slot="form" />}>
@@ -81,8 +95,15 @@ describe('DeskNav', () => {
   it('lists the views with live counts, a divider, Dashboard, Alerts and the person', () => {
     const store = storeWith((s) => ({ ...s, myIds: new Set() }));
     const html = render(<DeskNav main={ALL_VIEW} />, store);
-    const sidebar = text(html.slice(html.indexOf('data-testid="desk-sidebar"'), html.indexOf('data-testid="desk-rail"')));
-    expect(sidebar).toContain('Is my friend in medical?');
+    const sidebarHtml = html.slice(html.indexOf('data-testid="desk-sidebar"'), html.indexOf('data-testid="desk-rail"'));
+    const sidebar = text(sidebarHtml);
+    // The compact logo lockup first: EDC Orlando | Ground Control (decoration inside the sync button).
+    const lockup = sidebarHtml.slice(sidebarHtml.indexOf('data-testid="desk-live"'));
+    expect(lockup).toMatch(/^data-testid="desk-live" data-variant="side"/);
+    expect(lockup.indexOf('src="/logos/edc-orlando.png"')).toBeGreaterThan(0);
+    expect(lockup.indexOf('src="/logos/ground-control.png"')).toBeGreaterThan(lockup.indexOf('edc-orlando.png'));
+    expect(sidebarHtml.indexOf('data-testid="desk-live"')).toBeLessThan(sidebarHtml.indexOf('href="/"'));
+    expect(sidebar).not.toContain('Is my friend in medical?');
     expect(sidebar).toContain(`All requests ${counts.all}`);
     expect(sidebar).toContain(`Pending ${counts.pending}`);
     expect(sidebar).toContain('My requests');
@@ -107,6 +128,8 @@ describe('DeskNav', () => {
   it('the rail names each icon and badges Pending with its count', () => {
     const html = render(<DeskNav main={ALL_VIEW} />);
     const rail = html.slice(html.indexOf('data-testid="desk-rail"'));
+    // The rail's lockup: both logos stacked on the square.
+    expect(rail).toMatch(/data-testid="desk-live" data-variant="rail"[^>]*>(<img [^>]*>)<span[^>]*><\/span>(<img [^>]*>)/);
     expect(rail).toContain('aria-label="All requests"');
     expect(rail).toContain(`aria-label="Pending ${counts.pending}"`);
     expect(rail).toContain('aria-label="My requests"');
@@ -141,6 +164,12 @@ describe('DeskTop', () => {
     expect(search).toMatch(/<h1[^>]*>Search<\/h1>/);
     expect(search).toContain('value="kay"');
     expect(search).toContain('data-searching=""');
+  });
+
+  it('on the dashboard, its connection chip sits right after the title (empty while live); no chip elsewhere', () => {
+    const dash = render(<DeskTop main={main('dashboard=1')} />);
+    expect(dash).toMatch(/<h1[^>]*>Dashboard<\/h1><span[^>]*role="status" data-state="live" data-testid="dashboard-connection"><\/span>/);
+    expect(render(<DeskTop main={ALL_VIEW} />)).not.toContain('dashboard-connection');
   });
 });
 

@@ -18,6 +18,8 @@
 //   actions      sticky, by status; disabled offline with "Needs a connection". Change answer (In medical,
 //                Not in medical) opens a menu: the other answer and Back to Waiting for check
 //                (change-answer.ts). Every answer, change and Reunited offers Undo (the store's snackbar).
+//                In the desk pane (presentation="panel", design/screens/desktop-log.html) they sit right under
+//                the status block, two equal buttons, and the menu opens downwards.
 //   cancel       red, creator-only (canonical created_by match, A18), while Waiting, confirm Keep / Cancel
 //   conflict     "Updated by someone else" when another person's change arrives while it is open
 import { AlertDialog, Badge, Button, DropdownMenu, Heading, IconButton, Skeleton, Text, VisuallyHidden } from '@radix-ui/themes';
@@ -301,6 +303,31 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
   const setStatus = (a: StatusAction) => move(a.to, a.kind);
   const menu = menuActions(row.status, isCreator);
   const footer = primaryActions(row.status);
+  // The phone's sticky bar at the foot of the screen; the desk pane's row under the status block.
+  const actionBar =
+    footer.length > 0 ? (
+      <div
+        className={panel ? s.acts : s.foot}
+        data-layout={footer.length === 1 ? 'one' : panel ? 'two' : isInMedical(row.status) ? 'one-two' : 'two'}
+        data-testid="profile-actions"
+      >
+        {offline ? (
+          <span className={s.offline}>
+            <CloudOff size={13} aria-hidden />
+            {NEEDS_CONNECTION}
+          </span>
+        ) : null}
+        {footer.map((a) =>
+          a.kind === 'change' ? (
+            // Keyed by status: an open menu closes when the status moves under it (someone else's answer),
+            // so a tap never lands on a choice that changed meaning.
+            <ChangeAnswerMenu key={`${a.id}:${row.status}`} status={row.status} disabled={offline} side={panel ? 'bottom' : 'top'} onChoose={move} />
+          ) : (
+            <ActionButton key={a.id} action={a} disabled={offline} onClick={() => setStatus(a)} />
+          ),
+        )}
+      </div>
+    ) : null;
 
   return (
     <div className={s.app} data-testid="profile" data-status={row.status} data-presentation={panel ? 'panel' : undefined}>
@@ -367,6 +394,8 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
 
         <StatusBlock row={row} origin={origin} originLoading={!detail && detailLoading} now={now} timeZone={timeZone} />
 
+        {panel ? actionBar : null}
+
         <Details row={row} />
 
         <SectionLabel>Photos</SectionLabel>
@@ -424,25 +453,7 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
         ) : null}
       </main>
 
-      {footer.length > 0 ? (
-        <div className={s.foot} data-layout={footer.length === 1 ? 'one' : isInMedical(row.status) ? 'one-two' : 'two'} data-testid="profile-actions">
-          {offline ? (
-            <span className={s.offline}>
-              <CloudOff size={13} aria-hidden />
-              {NEEDS_CONNECTION}
-            </span>
-          ) : null}
-          {footer.map((a) =>
-            a.kind === 'change' ? (
-              // Keyed by status: an open menu closes when the status moves under it (someone else's answer),
-              // so a tap never lands on a choice that changed meaning.
-              <ChangeAnswerMenu key={`${a.id}:${row.status}`} status={row.status} disabled={offline} onChoose={move} />
-            ) : (
-              <ActionButton key={a.id} action={a} disabled={offline} onClick={() => setStatus(a)} />
-            ),
-          )}
-        </div>
-      ) : null}
+      {panel ? null : actionBar}
 
       <AlertDialog.Root
         open={confirmOpen}
@@ -764,7 +775,18 @@ function ActionButton({ action, disabled, onClick }: { action: StatusAction; dis
  * Change answer: a menu with the other answer and Back to Waiting for check, each marked with the glyph of
  * the status it moves to. A choice saves on tap (kind 'change'); the store shows the overlay and the Undo bar.
  */
-function ChangeAnswerMenu({ status, disabled, onChoose }: { status: string; disabled: boolean; onChoose: (to: SettableStatus, kind: StatusKind) => void }) {
+function ChangeAnswerMenu({
+  status,
+  disabled,
+  side,
+  onChoose,
+}: {
+  status: string;
+  disabled: boolean;
+  /** Up from the phone's bar at the foot of the screen, down from the desk pane's row under the status. */
+  side: 'top' | 'bottom';
+  onChoose: (to: SettableStatus, kind: StatusKind) => void;
+}) {
   const choices = changeAnswerChoices(status);
   const [answer, ...rest] = choices;
   return (
@@ -776,7 +798,7 @@ function ChangeAnswerMenu({ status, disabled, onChoose }: { status: string; disa
           <ChevronDown size={14} aria-hidden className={s.chev} />
         </Button>
       </DropdownMenu.Trigger>
-      <DropdownMenu.Content side="top" align="start" variant="soft" className={s.pmenu} data-testid="change-answer-menu">
+      <DropdownMenu.Content side={side} align="start" variant="soft" className={s.pmenu} data-testid="change-answer-menu">
         {answer ? <ChangeChoiceItem to={answer.to} label={answer.label} disabled={disabled} onSelect={() => onChoose(answer.to, answer.kind)} /> : null}
         {rest.length > 0 ? <DropdownMenu.Separator /> : null}
         {rest.map((c) => (

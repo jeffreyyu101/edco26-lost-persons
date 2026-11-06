@@ -1,14 +1,16 @@
 import { randomUUID } from 'node:crypto';
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
-import type { CreateResponse, RequestDetail, RequestSummary } from '../../lib/api-types';
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+import type { ChangeResponse, CreateResponse, RequestDetail, RequestSummary } from '../../lib/api-types';
 import { testBaseUrl } from '../../scripts/test-env.mjs';
-import { axeViolations, overlappingTargets, smallTargets } from './helpers/a11y';
+import { axeViolations, brandContrast, overlappingTargets, smallTargets } from './helpers/a11y';
 import { signedInAs } from './helpers/session';
 
 // Desk shell (components/desk; design/screens/desktop-log.html, desktop-new-tablet.html): the sidebar or
 // icon rail, the top bar, the request docked beside the list (a sheet over it on iPad portrait), and the
-// keyboard: "/" search, N new request, J/K and the arrows, Enter, Esc. Under 768 px the phone app is
-// unchanged. Synthetic rows only (TEST-shell-e2e-…), closed afterwards.
+// keyboard: "/" search, N new request, J/K and the arrows, Enter, Esc. All requests opens with Jeffrey's
+// brand card above the top bar, and the sidebar / rail start with the compact logo lockup. The pane shows the
+// profile with its actions under the status block, and the Undo snackbar stays clear of it. Under 768 px the
+// phone app is unchanged. Synthetic rows only (TEST-shell-e2e-…), closed afterwards.
 
 const BASE = testBaseUrl();
 const STAFF = { staffName: 'TEST-shell Desk', team: 'GC/HX - Dispatch' };
@@ -50,12 +52,24 @@ async function createRequests(page: Page, n: number, tag: string = nextTag()): P
   return rows;
 }
 
+/** Answer a request through the API (as another phone would). */
+async function setStatus(page: Page, row: RequestSummary, status: string, kind: string): Promise<RequestSummary> {
+  const { request } = await api<ChangeResponse>(page.request, 'POST', `/api/requests/${row.id}/status`, { status, expectedVersion: row.rowVersion, kind });
+  return request;
+}
+
 test.afterEach(async () => {
   for (const { id, request } of created.splice(0)) {
     try {
       const row = await api<RequestDetail>(request, 'GET', `/api/requests/${id}`);
       if (row.status === 'Added') {
         await request.fetch(`/api/requests/${id}/cancel`, { method: 'POST', data: { expectedVersion: row.rowVersion }, headers: { Origin: BASE } });
+      } else if (row.status === 'Found – Awaiting Reunion') {
+        await request.fetch(`/api/requests/${id}/status`, {
+          method: 'POST',
+          data: { status: 'Reunited – Closed', expectedVersion: row.rowVersion, kind: 'reunite' },
+          headers: { Origin: BASE },
+        });
       }
     } catch {
       // Best effort.
@@ -86,6 +100,43 @@ async function paneColumn(page: Page): Promise<number> {
 }
 
 const activeRowId = (page: Page) => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset?.requestId ?? null);
+
+/** The desk's brand card (in the main column's brand slot, above the top bar). */
+const deskBrand = (page: Page) => page.getByTestId('desk-brand').getByTestId('brand-card');
+
+/** The card's title: font size and line box height (one line is under 1.5 × the size). */
+async function brandTitle(card: Locator): Promise<{ size: number; height: number; right: number }> {
+  return card.locator('[class*="title"]').evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const text = document.createRange();
+    text.selectNodeContents(el);
+    return { size: Number.parseFloat(getComputedStyle(el).fontSize), height: r.height, right: text.getBoundingClientRect().right };
+  });
+}
+
+const imagesLoaded = (el: Locator) => el.evaluate((n) => [...n.querySelectorAll('img')].every((img) => img.complete && img.naturalWidth > 0));
+
+/** Where the Undo snackbar is, against the main column and the pane, and whether anything covers it. */
+async function snackPlacement(page: Page) {
+  const snack = page.locator('.lp-snack');
+  await expect(snack.getByRole('button', { name: 'Undo' })).toBeVisible();
+  // Past its 200 ms entrance.
+  await page.waitForTimeout(300);
+  const box = (await snack.boundingBox())!;
+  const pane = (await page.getByTestId('desk-pane').boundingBox())!;
+  const column = (await main(page).boundingBox())!;
+  const uncovered = await snack.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const points = [
+      [r.left + 4, r.top + r.height / 2],
+      [r.left + r.width / 2, r.top + r.height / 2],
+      [r.right - 4, r.top + r.height / 2],
+    ];
+    return points.every(([x, y]) => el.contains(document.elementFromPoint(x!, y!)));
+  });
+  const vw = page.viewportSize()!;
+  return { box, pane, column, uncovered, inView: box.x >= 0 && box.y >= 0 && box.x + box.width <= vw.width && box.y + box.height <= vw.height };
+}
 
 async function openSearchResults(page: Page, tag: string) {
   await page.goto(`/?q=${encodeURIComponent(tag)}`);
@@ -297,6 +348,133 @@ test.describe('desktop 1440 × 900', () => {
     await expect(menu).toBeHidden();
   });
 
+  test('All requests opens with the brand card above the top bar; it scrolls away, the bar stays; no card on the other views; the logo lockup', async ({ page }) => {
+    const [one] = await createRequests(page, 1);
+    await page.goto('/');
+    await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
+    const card = deskBrand(page);
+    await expect(card).toBeVisible();
+    // One card: the desk's (the list's own is phone only).
+    await expect(page.getByTestId('brand-card')).toHaveCount(1);
+    await expect(card.getByRole('img', { name: 'EDC Orlando' })).toBeVisible();
+    await expect(card.getByRole('img', { name: 'Ground Control' })).toBeVisible();
+    await expect(card.locator('[class*="kicker"]')).toHaveText('EVENT OPERATIONS · NOVEMBER 6–8, 2026', { useInnerText: true });
+    await expect(card.locator('[class*="title"]')).toHaveText('Is my friend in medical?');
+    await expect(card.locator('p[class*="credit"]')).toHaveText('Built by Jeffrey & Brian for Ground Control / Headliner Experience');
+    // No heading of its own: the top bar's title is the page's one h1.
+    await expect(card.getByRole('heading')).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
+
+    // The top of the main column, its width less 20 px a side; the title one line of 36-40 px.
+    const column = (await main(page).boundingBox())!;
+    const box = (await card.boundingBox())!;
+    expect(box.x).toBeCloseTo(column.x + 20, 0);
+    expect(box.width).toBeCloseTo(column.width - 40, 0);
+    expect(box.y).toBeCloseTo(16, 0);
+    const title = await brandTitle(card);
+    expect(title.size).toBeGreaterThanOrEqual(36);
+    expect(title.size).toBeLessThanOrEqual(40);
+    expect(title.height).toBeLessThan(title.size * 1.5);
+    const bar = page.getByTestId('desk-topbar');
+    expect((await bar.boundingBox())!.y).toBeGreaterThanOrEqual(box.y + box.height);
+    // Every text on it at 4.5:1 or more against every pixel behind it, at this size too.
+    await expect.poll(() => imagesLoaded(card)).toBe(true);
+    expect(await brandContrast(page, card)).toEqual([]);
+
+    // It scrolls away; the top bar stays at the top with search and New request.
+    await page.evaluate(() => window.scrollTo(0, 600));
+    await expect.poll(async () => {
+      const b = (await card.boundingBox())!;
+      return b.y + b.height;
+    }).toBeLessThan(0);
+    expect((await bar.boundingBox())!.y).toBeCloseTo(0, 0);
+    await expect(page.getByRole('searchbox', { name: 'Search requests' })).toBeInViewport();
+    await expect(page.getByTestId('desk-new')).toBeInViewport();
+
+    // The sidebar starts with the compact lockup: both logos on the brand's dark gradient, the live dot on its
+    // corner; it is the sync button, named by the live state.
+    const lockup = page.getByTestId('desk-sidebar').getByTestId('desk-live');
+    await expect(lockup).toHaveAccessibleName(/^(Live\. Tap to sync now|Syncing)$/);
+    await expect(lockup.locator('img')).toHaveCount(2);
+    await expect.poll(() => imagesLoaded(lockup)).toBe(true);
+    const lock = (await lockup.boundingBox())!;
+    expect(lock.height).toBe(44);
+    expect(lock.width).toBeGreaterThan(180);
+    expect(lock.y).toBeLessThan(20);
+    expect(await lockup.evaluate((el) => getComputedStyle(el).backgroundImage)).toContain('linear-gradient');
+
+    // A request open beside the list: the card stays at the top of the narrower column, title one line.
+    await page.goto(`/?r=${one!.id}`);
+    await expect(page.getByTestId('desk-pane')).toBeVisible({ timeout: 15_000 });
+    await expect(card).toBeVisible();
+    const docked = await brandTitle(card);
+    expect(docked.height).toBeLessThan(docked.size * 1.5);
+    expect((await card.boundingBox())!.x + (await card.boundingBox())!.width).toBeLessThanOrEqual((await page.getByTestId('desk-pane').boundingBox())!.x);
+
+    // Pending, My requests (Brian, 2026-11-06), Search and the dashboard have no card: the top bar is at the top.
+    for (const [url, heading] of [
+      ['/?view=pending', /^Pending/],
+      ['/?view=mine', /^My requests/],
+      ['/?q=TEST-shell', /^Search$/],
+      ['/?dashboard=1', /^Dashboard$/],
+    ] as const) {
+      await page.goto(url);
+      await expect(page.getByRole('heading', { level: 1, name: heading }), url).toBeVisible();
+      await expect(page.getByTestId('brand-card'), url).toHaveCount(0);
+      expect((await bar.boundingBox())!.y, url).toBeCloseTo(0, 0);
+    }
+  });
+
+  test('the pane: the profile with its actions under the status (Change answer menu, Reunited), ⋯, previous / next, close; Undo stays in the list column', async ({ page }) => {
+    const [row] = await createRequests(page, 1);
+    await setStatus(page, row!, 'Found – Awaiting Reunion', 'answer');
+    await page.goto(`/?r=${row!.id}`);
+    const pane = page.getByTestId('desk-pane');
+    await expect(pane.getByTestId('status-block')).toContainText('In medical', { timeout: 15_000 });
+    for (const id of ['desk-prev', 'desk-next', 'desk-more', 'desk-close']) await expect(page.getByTestId(id)).toBeVisible();
+
+    // Right under the status block and before the details (desktop-log.html): two equal buttons.
+    const actions = pane.getByTestId('profile-actions');
+    const status = (await pane.getByTestId('status-block').boundingBox())!;
+    const bar = (await actions.boundingBox())!;
+    expect(bar.y).toBeGreaterThanOrEqual(status.y + status.height);
+    expect(bar.y + bar.height).toBeLessThan((await pane.getByTestId('person-details').boundingBox())!.y);
+    const change = actions.getByRole('button', { name: 'Change answer' });
+    const reunited = actions.getByRole('button', { name: 'Reunited' });
+    const cb = (await change.boundingBox())!;
+    const rb = (await reunited.boundingBox())!;
+    expect(cb.y).toBe(rb.y);
+    expect(Math.abs(cb.width - rb.width)).toBeLessThanOrEqual(1);
+
+    // Change answer: the other answer and Back to Waiting for check, each with its glyph, opening downwards.
+    await change.click();
+    const menu = page.getByTestId('change-answer-menu');
+    await expect(menu.getByRole('menuitem')).toHaveText(['Not in medical', 'Back to Waiting for check']);
+    expect((await menu.boundingBox())!.y).toBeGreaterThanOrEqual(cb.y + cb.height - 1);
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(pane).toBeVisible();
+
+    // ⋯: Edit details and Mark discharged (In medical).
+    await page.getByTestId('desk-more').click();
+    await expect(page.getByRole('menuitem', { name: 'Edit details' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Mark discharged' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('menuitem', { name: 'Edit details' })).toHaveCount(0);
+
+    // Reunited: the Undo bar sits in the list column, clear of the sidebar and the pane, covered by nothing.
+    await reunited.click();
+    await expect(pane.getByTestId('status-block')).toContainText('Reunited');
+    const at = await snackPlacement(page);
+    expect(at.inView).toBe(true);
+    expect(at.uncovered).toBe(true);
+    expect(at.box.x).toBeGreaterThanOrEqual(at.column.x);
+    expect(at.box.x + at.box.width).toBeLessThanOrEqual(at.pane.x);
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await expect(pane.getByTestId('status-block')).toContainText('In medical');
+    await expect(actions.getByRole('button', { name: 'Reunited' })).toBeVisible();
+  });
+
   for (const theme of ['light', 'dark'] as const) {
     test(`passes axe with a request open (${theme})`, async ({ page }) => {
       await page.addInitScript((t) => {
@@ -314,6 +492,38 @@ test.describe('desktop 1440 × 900', () => {
       expect(await axeViolations(page)).toEqual([]);
     });
   }
+});
+
+test.describe('laptop 1024 × 768', () => {
+  test.use({ viewport: { width: 1024, height: 768 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
+
+  test('the brand card fits its column: the title stays one line when a request docks beside the list; the rail lockup', async ({ page }) => {
+    const [one] = await createRequests(page, 1);
+    await page.goto('/');
+    await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
+    const card = deskBrand(page);
+    const wide = await brandTitle(card);
+    expect(wide.size).toBeGreaterThanOrEqual(36);
+    expect(wide.height).toBeLessThan(wide.size * 1.5);
+
+    // The rail's lockup: a 44 px square with both logos.
+    const lockup = page.getByTestId('desk-rail').getByTestId('desk-live');
+    const lock = (await lockup.boundingBox())!;
+    expect([lock.width, lock.height]).toEqual([44, 44]);
+    await expect.poll(() => imagesLoaded(lockup)).toBe(true);
+
+    // A 544 px column next to the 420 px pane: smaller, still one line, inside the card.
+    await page.goto(`/?r=${one!.id}`);
+    await expect(page.getByTestId('desk-pane')).toBeVisible({ timeout: 15_000 });
+    const docked = await brandTitle(card);
+    expect(docked.size).toBeGreaterThanOrEqual(33);
+    expect(docked.size).toBeLessThanOrEqual(wide.size);
+    expect(docked.height).toBeLessThan(docked.size * 1.5);
+    const box = (await card.boundingBox())!;
+    expect(docked.right).toBeLessThanOrEqual(box.x + box.width - 20);
+    expect(box.x + box.width).toBeLessThanOrEqual((await page.getByTestId('desk-pane').boundingBox())!.x);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+  });
 });
 
 test.describe('iPad landscape 1180 × 820 (touch)', () => {
@@ -341,10 +551,35 @@ test.describe('iPad landscape 1180 × 820 (touch)', () => {
 
     const coarse = await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
     test.skip(!coarse, 'this browser does not report a coarse pointer for touch emulation');
-    for (const scope of ['[data-testid="desk-rail"]', '[data-testid="desk-topbar"]', '[data-testid="desk-pane"] header']) {
+    for (const scope of ['[data-testid="desk-rail"]', '[data-testid="desk-topbar"]', '[data-testid="desk-pane"] header', '[data-testid="desk-pane"] [data-testid="profile-actions"]']) {
       expect(await smallTargets(page, scope), scope).toEqual([]);
       expect(await overlappingTargets(page, scope), scope).toEqual([]);
     }
+  });
+});
+
+test.describe('iPad landscape 1180 × 820, the pane\'s actions', () => {
+  test.use({ viewport: { width: 1180, height: 820 }, isMobile: false, hasTouch: true, deviceScaleFactor: 1 });
+
+  test('In medical in the 420 px pane: Change answer keeps its whole label beside Reunited; Undo stays left of the pane', async ({ page }) => {
+    const [row] = await createRequests(page, 1);
+    await setStatus(page, row!, 'Found – Awaiting Reunion', 'answer');
+    await page.goto(`/?r=${row!.id}`);
+    const pane = page.getByTestId('desk-pane');
+    const actions = pane.getByTestId('profile-actions');
+    await expect(actions.getByRole('button', { name: 'Reunited' })).toBeVisible({ timeout: 15_000 });
+    const change = actions.getByRole('button', { name: 'Change answer' });
+    expect(await change.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    for (const svg of await change.locator('svg').all()) expect((await svg.boundingBox())!.width).toBeGreaterThanOrEqual(13);
+
+    await actions.getByRole('button', { name: 'Reunited' }).click();
+    const at = await snackPlacement(page);
+    expect(at.inView).toBe(true);
+    expect(at.uncovered).toBe(true);
+    expect(at.box.x).toBeGreaterThanOrEqual(at.column.x);
+    expect(at.box.x + at.box.width).toBeLessThanOrEqual(at.pane.x);
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await expect(pane.getByTestId('status-block')).toContainText('In medical');
   });
 });
 
@@ -381,6 +616,38 @@ test.describe('iPad portrait 820 × 1180 (touch)', () => {
     await expect.poll(() => paramOf(page, 'r')).toBe(order[1]);
     expect(rows.map((r) => r.id)).toContain(order[1]);
   });
+
+  test('All requests opens with the brand card; the sheet answers under its status, and Undo shows at the foot of the sheet', async ({ page }) => {
+    const [one] = await createRequests(page, 1);
+    await page.goto('/');
+    await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
+    const card = deskBrand(page);
+    await expect(card).toBeVisible();
+    const title = await brandTitle(card);
+    expect(title.size).toBeGreaterThanOrEqual(36);
+    expect(title.size).toBeLessThanOrEqual(40);
+    expect(title.height).toBeLessThan(title.size * 1.5);
+    expect((await card.boundingBox())!.x).toBeCloseTo(60 + 20, 0);
+
+    await page.goto(`/?r=${one!.id}`);
+    const pane = page.getByTestId('desk-pane');
+    const actions = pane.getByTestId('profile-actions');
+    await expect(actions.getByRole('button', { name: 'Not in medical' })).toBeVisible({ timeout: 15_000 });
+    const status = (await pane.getByTestId('status-block').boundingBox())!;
+    expect((await actions.boundingBox())!.y).toBeGreaterThanOrEqual(status.y + status.height);
+    await actions.getByRole('button', { name: 'Not in medical' }).click();
+    await expect(pane.getByTestId('status-block')).toContainText('Not in medical');
+
+    // The list beside the sheet is too narrow for it: the bar sits at the foot of the sheet, inside it.
+    const at = await snackPlacement(page);
+    expect(at.inView).toBe(true);
+    expect(at.uncovered).toBe(true);
+    expect(at.box.x).toBeGreaterThanOrEqual(at.pane.x);
+    expect(at.box.x + at.box.width).toBeLessThanOrEqual(at.pane.x + at.pane.width);
+    expect(at.box.y + at.box.height).toBeLessThanOrEqual(at.pane.y + at.pane.height);
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await expect(pane.getByTestId('status-block')).toContainText('Waiting for check');
+  });
 });
 
 test.describe('phone 390 × 844', () => {
@@ -389,7 +656,10 @@ test.describe('phone 390 × 844', () => {
     const [one] = await createRequests(page, 1);
     await page.goto('/');
     await expect(page.locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
-    for (const id of ['desk-sidebar', 'desk-rail', 'desk-topbar']) await expect(page.getByTestId(id)).toHaveCount(0);
+    for (const id of ['desk-sidebar', 'desk-rail', 'desk-topbar', 'desk-brand']) await expect(page.getByTestId(id)).toHaveCount(0);
+    // The list's own brand card (F1), the only one.
+    await expect(page.getByTestId('brand-card')).toHaveCount(1);
+    await expect(page.locator('[data-view="all"] > [data-testid="brand-card"]')).toBeVisible();
     await expect(page.getByTestId('view-switcher')).toBeVisible();
     await expect(page.getByRole('button', { name: 'New request' })).toBeVisible();
 

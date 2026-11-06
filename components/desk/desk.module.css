@@ -46,48 +46,91 @@
 
 .brand {
   display: flex;
-  align-items: center;
-  gap: 8px;
   min-width: 0;
-  padding: 4px 8px 16px;
+  padding: 0 0 14px;
 }
 
-/* The app mark; its corner dot is the live state (the phone header's live dot). Tap to sync now. */
-.mark {
+/* The compact logo lockup (LiveMark): EDC Orlando (made white) | Ground Control on the brand card's dark
+   gradient (components/list/brand.module.css), the same in both themes. Its corner dot is the live state
+   (the phone header's live dot). Tap to sync now. */
+.lockup {
   position: relative;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: var(--gray-12);
-  color: var(--gray-1);
-  display: grid;
-  place-items: center;
+  isolation: isolate;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid #44316c;
+  border-radius: 10px;
+  background:
+    radial-gradient(ellipse at 10% 140%, rgb(232 63 145 / 0.55) 0, transparent 55%),
+    radial-gradient(ellipse at 88% -50%, rgb(37 199 215 / 0.45) 0, transparent 50%),
+    linear-gradient(112deg, #181329 4%, #36205a 55%, #211835 100%);
+  color-scheme: dark;
   font: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
-  flex: none;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-.mark::before {
-  content: '';
-  position: absolute;
-  inset: -11px;
+.lockup:hover {
+  border-color: #5b4589;
 }
-.mark:focus-visible {
+.lockup:focus-visible {
   outline: 2px solid var(--focus-8);
   outline-offset: 2px;
+}
+
+.lockup img {
+  display: block;
+  width: auto;
+  flex: none;
+  pointer-events: none;
+  user-select: none;
+}
+
+.lockEdc {
+  height: 24px;
+  filter: brightness(0) invert(1);
+}
+
+.lockDiv {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  background: rgb(255 255 255 / 0.33);
+}
+
+.lockGc {
+  height: 19px;
+}
+
+/* The rail: a 44 px square, the two logos stacked. */
+.lockup[data-variant='rail'] {
+  flex: none;
+  width: 44px;
+  padding: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+}
+.lockup[data-variant='rail'] .lockDiv {
+  display: none;
+}
+.lockup[data-variant='rail'] .lockEdc {
+  height: 16px;
+}
+.lockup[data-variant='rail'] .lockGc {
+  height: 11px;
 }
 
 .live {
   position: absolute;
   right: -3px;
   bottom: -3px;
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   background: var(--green-9);
   box-shadow: 0 0 0 2px var(--gray-2);
@@ -98,17 +141,6 @@
 }
 .live[data-state='loading'] {
   background: var(--gray-8);
-}
-
-.bt {
-  min-width: 0;
-  font-size: 13.5px;
-  font-weight: 600;
-  letter-spacing: -0.005em;
-  color: var(--gray-12);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .views {
@@ -310,7 +342,7 @@
 }
 
 .railMark {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .railViews {
@@ -450,6 +482,13 @@
   font-weight: 400;
   color: var(--gray-11);
   font-variant-numeric: tabular-nums;
+}
+
+/* The dashboard's Offline / Retrying chip, beside the title (its look is the dashboard's .conn; doubled to
+   win over its margin-left: auto whatever the stylesheet order). */
+.conn.conn {
+  margin-left: 2px;
+  flex: none;
 }
 
 .kbd {
@@ -667,7 +706,8 @@
   overscroll-behavior: contain;
 }
 
-/* The phone profile fills the pane (not the window) and keeps its sticky actions at the pane's foot. */
+/* The profile fills the pane (not the window); in the pane its actions sit under the status block
+   (ProfileView presentation="panel"). */
 .pbody > [data-testid='profile'] {
   flex: 1 0 auto;
   min-height: 0;
