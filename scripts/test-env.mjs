@@ -3,7 +3,8 @@
 //
 // Rules (spec §3): tests use .env.test only — never .env.local — and refuse to run unless the Supabase
 // URL host is 127.0.0.1 or localhost.
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -44,9 +45,48 @@ export function assertLocalUrl(label, url) {
   }
 }
 
-/** Reads .env.test (and nothing else) and checks every URL in it is local. */
+// The local Supabase keys are NOT committed (GitHub push protection rejects even the CLI's fixed local
+// defaults). They come from `supabase status -o env` for this project's local stack, cached in the
+// gitignored .env.test.local so it runs once.
+const LOCAL_KEYS_FILE = join(ROOT, '.env.test.local');
+
+function localSupabaseKeys(expectedUrl) {
+  if (existsSync(LOCAL_KEYS_FILE)) {
+    const cached = parseEnv(readFileSync(LOCAL_KEYS_FILE, 'utf8'));
+    if (cached.SUPABASE_SECRET_KEY) return cached;
+  }
+  let out;
+  try {
+    out = execFileSync('supabase', ['status', '-o', 'env', '--workdir', ROOT], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    throw new Error('Local Supabase keys unavailable: start the local stack with `supabase start` first.');
+  }
+  const status = parseEnv(out);
+  assertLocalUrl('supabase status API_URL', status.API_URL);
+  if (expectedUrl && hostOf(status.API_URL) !== hostOf(expectedUrl)) {
+    throw new Error('supabase status API_URL does not match .env.test NEXT_PUBLIC_SUPABASE_URL.');
+  }
+  const keys = {
+    SUPABASE_SECRET_KEY: status.SECRET_KEY || status.SERVICE_ROLE_KEY,
+    SUPABASE_PUBLISHABLE_KEY: status.PUBLISHABLE_KEY || status.ANON_KEY,
+  };
+  if (!keys.SUPABASE_SECRET_KEY) throw new Error('supabase status returned no secret key.');
+  writeFileSync(
+    LOCAL_KEYS_FILE,
+    `# Generated from \`supabase status\` (local stack only). Gitignored; never commit.\n` +
+      Object.entries(keys).map(([k, v]) => `${k}=${v}`).join('\n') + '\n',
+    { mode: 0o600 },
+  );
+  return keys;
+}
+
+/** Reads .env.test plus the local stack's keys (never .env.local) and checks every URL is local. */
 export function loadTestEnv() {
   const env = parseEnv(readFileSync(join(ROOT, '.env.test'), 'utf8'));
+  if (!env.SUPABASE_SECRET_KEY) Object.assign(env, localSupabaseKeys(env.NEXT_PUBLIC_SUPABASE_URL));
   assertLocalUrl('.env.test NEXT_PUBLIC_SUPABASE_URL', env.NEXT_PUBLIC_SUPABASE_URL);
   for (const [key, value] of Object.entries(env)) {
     if (/_URL$/.test(key) && value) assertLocalUrl(`.env.test ${key}`, value);
