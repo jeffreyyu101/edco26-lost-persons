@@ -7,9 +7,9 @@
 // medical?"; made one compact row with an X by Brian, 2026-11-06 afternoon), which scrolls away. Its X hides
 // it on this device, and the avatar menu's "Show header" brings it back. Pending and My requests start at
 // their title. Each view owns its sticky bar (the large title that is the view menu, search, and the avatar
-// with its offline / reconnecting badge), the live indicator under the title ("Updated 6s ago"), the offline /
-// error banner, the filter chips, and the New request button. Skeletons show only while there is no cached
-// data yet.
+// with its offline / reconnecting badge), the line under the title ("Updated just now" and Refresh now), the
+// Reconnecting / Offline banner (all four from one useLiveStatus()), the filter chips, and the New request
+// button. Skeletons show only while there is no cached data yet.
 //
 // All requests (option B): queued requests on top, then open requests (newest first), then every closed
 // request folded into one "Archived N" row (Brian, 2026-11-06) that opens in place (remembered for the
@@ -18,7 +18,7 @@
 // the reporter theirs (Not in medical included), so they can tell the friend.
 import { Button, Text } from '@radix-ui/themes';
 import { MapPin, Plus, Search as SearchIcon, X } from 'lucide-react';
-import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AccountMenu } from '@/components/account/AccountMenu';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -30,11 +30,11 @@ import { splitOpenClosed } from '@/lib/client/selectors';
 import {
   useActions,
   useAllRows,
+  useAppStore,
   useConnection,
   useCounts,
   useEventTimezone,
   useIsLoading,
-  useLiveSync,
   useMine,
   useNow,
   useOutbox,
@@ -46,12 +46,14 @@ import {
   useStoreSelector,
   type StoreState,
 } from '@/lib/client/store-contract';
+import { refreshSync } from '@/lib/client/refresh-now';
+import { useLiveStatus } from '@/lib/client/use-live-status';
 import { parsePostFilterKey, postFilterLabel, statusMeta, type GlyphKind } from '@/lib/domain';
 import { formatCreatedTime, formatUpdatedAgo, updatedPhrase } from '@/lib/format';
 import { AppHeader } from './AppHeader';
 import { BrandCard } from './BrandCard';
 import { CheckCard, ComingCard, MineCard, OutboxCard } from './cards';
-import { primeKeyboard, useDelayedFlag, useScrollMemory, useStatusTap, useStickyHeight } from './hooks';
+import { primeKeyboard, useScrollMemory, useStatusTap, useStickyHeight } from './hooks';
 import { mineFreshTone, resultCount, searchDisplay, updatedSince } from './list-helpers';
 import { AllSkeleton, MineSkeleton, PendingSkeleton } from './ListSkeletons';
 import { ArchivedFold, ArchivedRows, ColumnHeader, LogGrid, LogRow, OutboxLogRow, SearchLogRow } from './rows';
@@ -59,9 +61,6 @@ import type { ListViewName } from './ViewSwitcher';
 import s from './list.module.css';
 
 const selectHydrated = (state: StoreState) => state.hydrated;
-
-/** A sync shorter than this doesn't turn the reconnecting arrow (no flicker on every quick retry). */
-const SLOW_SYNC_MS = 400;
 
 /** "New request": the 50 px capsule floating over the list (polish-v7.html .fab). */
 function NewRequestButton() {
@@ -84,9 +83,12 @@ interface ChromeProps {
 }
 
 function Chrome({ view, chips, filtered = false, skeleton, children }: ChromeProps) {
+  const store = useAppStore();
   const actions = useActions();
-  const { connection, syncing } = useConnection();
-  const { syncedAt } = useLiveSync();
+  const { connection } = useConnection();
+  // The one live status of this view: the line, the banner, the avatar badge and the live region all show it.
+  const live = useLiveStatus();
+  const refresh = useCallback(() => refreshSync(store), [store]);
   const counts = useCounts();
   const loading = useIsLoading();
   const hydrated = useStoreSelector(selectHydrated);
@@ -95,8 +97,6 @@ function Chrome({ view, chips, filtered = false, skeleton, children }: ChromePro
   const { rootRef, stickyRef } = useStickyHeight();
   // The brand row is on All only, unless its X hid it on this device.
   const brand = view === 'all' && !prefs.brandHidden;
-  // The reconnecting arrow turns only for a retry that takes a moment (no flicker on fast attempts).
-  const slowSync = useDelayedFlag(syncing, SLOW_SYNC_MS);
 
   const select = (next: ListViewName) => {
     if (next === view && !filtered) return;
@@ -142,16 +142,15 @@ function Chrome({ view, chips, filtered = false, skeleton, children }: ChromePro
           view={view}
           counts={loading ? null : counts}
           onSelect={select}
-          connection={connection}
-          syncing={slowSync}
+          state={live.state}
           onOpenSearch={() => {
             primeKeyboard();
             navigate({ q: '' });
           }}
           account={<AccountMenu onShowHeader={view === 'all' && prefs.brandHidden ? showBrand : undefined} />}
         />
-        <LiveIndicator className={s.live} syncedAt={syncedAt} connection={connection} />
-        {loading ? null : <ConnectionBanner />}
+        <LiveIndicator className={s.live} line={live} onRefresh={refresh} />
+        {loading ? null : <ConnectionBanner status={live} />}
         {chips}
       </div>
       <main className={s.body}>{body}</main>

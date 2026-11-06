@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page, type Route } from '@playwright/test';
 import type { RequestDetail, RequestSummary } from '../../lib/api-types';
 import { formatCreatedTime } from '../../lib/format';
 import { loadTestEnv, testBaseUrl } from '../../scripts/test-env.mjs';
@@ -359,7 +359,7 @@ test.describe('brand row on a cold load', () => {
 
     await page.goto('/');
     await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId('live-text')).toHaveText(/^Updated (now|\d+s ago)$/);
+    await expect(page.getByTestId('live-text')).toHaveText('Updated just now');
     await expect
       .poll(() => brand(page).evaluate((el) => [...el.querySelectorAll('img')].every((img) => img.complete && img.naturalWidth > 0)))
       .toBe(true);
@@ -391,16 +391,21 @@ test.describe('brand row on a cold load', () => {
 const live = (page: Page) => page.getByTestId('live-indicator');
 const liveText = (page: Page) => page.getByTestId('live-text');
 
-test.describe('live indicator', () => {
+const connectionBanner = (page: Page) => page.getByTestId('connection-banner');
+const refreshNow = (page: Page) => page.getByRole('button', { name: 'Refresh now', exact: true });
+const isSync = (url: string) => new URL(url).pathname === '/api/sync';
+
+test.describe('the line under the title (v2.2 afternoon: minutes, a banner for problems, Refresh now)', () => {
   // page.route() never sees a request a service worker passes on in WebKit, so this runs without one.
   test.use({ serviceWorkers: 'block' });
 
-  test('"Updated …" under the title after the first sync, Reconnecting when every sync is aborted, live again after', async ({ page }) => {
+  test('"Updated just now" with no ticking; aborted syncs: the amber Reconnecting banner and "Last updated <time>"; Refresh recovers', async ({ page }) => {
     test.slow();
     await page.goto('/');
     await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 10_000 });
-    await expect(live(page)).toHaveAttribute('data-state', 'live');
-    await expect(liveText(page)).toHaveText(/^Updated (now|\d+s ago)$/);
+    await expect(live(page)).toHaveAttribute('data-state', 'healthy');
+    await expect(liveText(page)).toHaveText('Updated just now');
+    await expect(connectionBanner(page)).toHaveCount(0);
     // One line right under the title, lined up with it, before the list; tabular figures, a plain dot.
     const title = (await page.getByTestId('view-switcher').boundingBox())!;
     const line = (await live(page).boundingBox())!;
@@ -411,33 +416,114 @@ test.describe('live indicator', () => {
     const dot = live(page).locator('[class*="liveDot"]');
     await expect(dot).toHaveCSS('width', '7px');
     await expect(dot).toHaveCSS('box-shadow', 'none');
+    const dotColour = () => dot.evaluate((el) => getComputedStyle(el).backgroundColor);
+    const healthyDot = await dotColour();
+    // Refresh now sits right after the words: a 32 px button centred on the line.
+    const words = (await liveText(page).boundingBox())!;
+    const button = (await refreshNow(page).boundingBox())!;
+    expect(button.width).toBe(32);
+    expect(button.height).toBe(32);
+    expect(button.x - (words.x + words.width)).toBeLessThan(4);
+    expect(Math.abs(button.y + button.height / 2 - (words.y + words.height / 2))).toBeLessThan(1.5);
     // The whole line as one sentence for screen readers.
-    await expect(live(page)).toContainText(/List updated (just now|\d+ seconds? ago)/);
-    // It ticks (at most once a second) and resets on each sync (every 6 s ± 1 s).
-    await expect(liveText(page)).toHaveText(/^Updated [2-9]s ago$/, { timeout: 9_000 });
-    await expect(liveText(page)).toHaveText('Updated now', { timeout: 9_000 });
+    await expect(live(page)).toContainText('List updated just now.');
+    // No ticking: across two syncs (every 6 s ± 1 s) nothing in the line changes at all.
+    await live(page).evaluate((el) => {
+      const w = window as unknown as { __lineChanges: number };
+      w.__lineChanges = 0;
+      new MutationObserver((records) => {
+        w.__lineChanges += records.length;
+      }).observe(el, { subtree: true, childList: true, characterData: true, attributes: true });
+    });
+    for (let i = 0; i < 2; i += 1) await page.waitForResponse((r) => isSync(r.url()), { timeout: 10_000 });
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => (window as unknown as { __lineChanges: number }).__lineChanges)).toBe(0);
 
-    // The log can't be reached (every sync aborted): Reconnecting, amber, with the last good time.
+    // The log can't be reached while the phone reports a connection (every sync aborted): the amber banner,
+    // and the line switches to the fixed clock time of the last good sync, with an amber dot.
+    const before = Date.now();
     await page.route('**/api/sync*', (route) => route.abort());
     try {
-      await expect(live(page)).toHaveAttribute('data-state', 'reconnecting', { timeout: 40_000 });
-      await expect(liveText(page)).toHaveText(/^Reconnecting · updated \d+s ago$/);
-      await expect(live(page).locator('[class*="liveLead"]')).toHaveText('Reconnecting');
+      await expect(connectionBanner(page)).toHaveText('Reconnecting…', { timeout: 40_000 });
+      await expect(connectionBanner(page)).toHaveAttribute('data-tone', 'amber');
+      await expect(live(page)).toHaveAttribute('data-state', 'reconnecting');
+      expect(await dotColour()).not.toBe(healthyDot);
+      const shown = (await liveText(page).textContent()) ?? '';
+      const clocks = [before - 8_000, before].map((t) => `Last updated ${formatCreatedTime(new Date(t).toISOString(), Date.now(), TZ)}`);
+      expect(clocks).toContain(shown);
+      await expect(live(page)).toContainText(`Reconnecting. List last updated at ${shown.replace('Last updated ', '')}.`);
+      await expect(page.getByTestId('connection-indicator')).toHaveAttribute('data-state', 'reconnecting');
       await expect(page.getByTestId('live-announcement')).toHaveText('Reconnecting');
-      await expect(live(page)).toContainText(/Reconnecting\. List updated \d+ seconds ago/);
+      // One state everywhere: never "Offline" while the phone reports a connection (the F1.1 review finding).
+      await expect(page.getByText(/^Offline/)).toHaveCount(0);
     } finally {
       await page.unroute('**/api/sync*');
     }
-    // Back: the next sync makes it live again (the 'online' event syncs at once instead of after the backoff).
-    await page.evaluate(() => window.dispatchEvent(new Event('online')));
-    await expect(live(page)).toHaveAttribute('data-state', 'live', { timeout: 30_000 });
-    await expect(liveText(page)).toHaveText(/^Updated (now|\d+s ago)$/);
-    await expect(page.getByTestId('live-announcement')).toHaveText('List is live');
+    // Refresh now: the sync lands, the banner and the badge go, "Updated just now", "Back online" said once.
+    await refreshNow(page).click();
+    await expect(connectionBanner(page)).toHaveCount(0, { timeout: 15_000 });
+    await expect(live(page)).toHaveAttribute('data-state', 'healthy');
+    await expect(liveText(page)).toHaveText('Updated just now');
+    await expect(page.getByTestId('connection-indicator')).toHaveCount(0);
+    await expect(page.getByTestId('live-announcement')).toHaveText('Back online');
 
     // Pending and My requests have it too.
     for (const url of ['/?view=pending', '/?view=mine']) {
       await page.goto(url);
-      await expect(liveText(page), url).toHaveText(/^Updated (now|\d+s ago)$/, { timeout: 10_000 });
+      await expect(liveText(page), url).toHaveText('Updated just now', { timeout: 10_000 });
+      await expect(refreshNow(page), url).toBeVisible();
+    }
+  });
+
+  test('Refresh now: exactly one immediate /api/sync, the glyph turns while it is in flight, repeat taps ignored, no reload', async ({ page }) => {
+    await page.goto('/?view=pending');
+    await expect(liveText(page)).toHaveText('Updated just now', { timeout: 10_000 });
+    const button = refreshNow(page);
+    // Right after a poll lands, the next one is 6 s ± 1 s away.
+    await page.waitForResponse((r) => isSync(r.url()));
+    await page.evaluate(() => {
+      (window as unknown as { __noReload: boolean }).__noReload = true;
+    });
+    // Each sync is held 1.5 s so the turning glyph can be seen; every sync request from now on is counted.
+    const syncs: number[] = [];
+    page.on('request', (r) => {
+      if (isSync(r.url())) syncs.push(Date.now());
+    });
+    const hold = async (route: Route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      await route.continue();
+    };
+    await page.route('**/api/sync*', hold);
+    try {
+      const tapped = Date.now();
+      await button.click();
+      await expect(button).toHaveAttribute('data-refreshing', '');
+      await expect(button.locator('svg')).toHaveCSS('animation-name', /spin/);
+      // Repeat taps while it is in flight do nothing.
+      await button.click();
+      await button.click();
+      await expect(button).not.toHaveAttribute('data-refreshing', { timeout: 10_000 });
+      expect(syncs).toHaveLength(1);
+      expect(syncs[0]! - tapped).toBeLessThan(1_000);
+    } finally {
+      await page.unroute('**/api/sync*', hold);
+    }
+    await expect(liveText(page)).toHaveText('Updated just now');
+    await expect(connectionBanner(page)).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload)).toBe(true);
+
+    // Reduced motion: no turning, only dimmed while the sync is in flight.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.route('**/api/sync*', hold);
+    try {
+      await button.click();
+      await expect(button).toHaveAttribute('data-refreshing', '');
+      await expect(button.locator('svg')).toHaveCSS('animation-name', 'none');
+      await expect(button).toHaveCSS('opacity', '0.45');
+      await expect(button).not.toHaveAttribute('data-refreshing', { timeout: 10_000 });
+      await expect(button).toHaveCSS('opacity', '1');
+    } finally {
+      await page.unroute('**/api/sync*', hold);
     }
   });
 });
@@ -831,17 +917,22 @@ test('offline: a badge on the avatar, the banner under the header, answers need 
   await expect(checkCard(page, r.id)).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId('connection-indicator')).toHaveCount(0);
 
-  await expect(page.getByTestId('live-text')).toHaveText(/^Updated (now|\d+s ago)$/);
+  await expect(page.getByTestId('live-text')).toHaveText('Updated just now');
 
+  const lastGood = Date.now();
   await context.setOffline(true);
   try {
     const badge = page.getByTestId('connection-indicator');
     await expect(badge).toHaveAttribute('data-state', 'offline');
     await expect(badge).toHaveAccessibleName('Offline');
-    // The live line: a grey dot, "Offline · updated …", announced once.
+    // The gray banner, and the line's fixed clock time with a gray dot; "Offline" announced once.
+    await expect(connectionBanner(page)).toHaveText(/^Offline · \d+ waiting to send$/);
+    await expect(connectionBanner(page)).toHaveAttribute('data-tone', 'gray');
     await expect(page.getByTestId('live-indicator')).toHaveAttribute('data-state', 'offline');
-    await expect(page.getByTestId('live-text')).toHaveText(/^Offline · updated (now|\d+s ago)$/);
+    const clocks = [lastGood - 8_000, lastGood].map((t) => `Last updated ${formatCreatedTime(new Date(t).toISOString(), Date.now(), TZ)}`);
+    expect(clocks).toContain(await page.getByTestId('live-text').textContent());
     await expect(page.getByTestId('live-announcement')).toHaveText('Offline');
+    await expect(page.getByText('Reconnecting…')).toHaveCount(0);
     // The badge sits on the avatar, inside the header row.
     const avatar = await page.getByTestId('account-trigger').boundingBox();
     const badgeBox = await badge.boundingBox();
@@ -869,7 +960,10 @@ test('offline: a badge on the avatar, the banner under the header, answers need 
   } finally {
     await context.setOffline(false);
   }
-  // Live again: the badge goes away and the line is live.
+  // Back online: the badge and the banner go, the line reads "Updated just now", "Back online" is said once.
   await expect(page.getByTestId('connection-indicator')).toHaveCount(0, { timeout: 15_000 });
-  await expect(page.getByTestId('live-indicator')).toHaveAttribute('data-state', 'live', { timeout: 15_000 });
+  await expect(connectionBanner(page)).toHaveCount(0);
+  await expect(page.getByTestId('live-indicator')).toHaveAttribute('data-state', 'healthy', { timeout: 15_000 });
+  await expect(page.getByTestId('live-text')).toHaveText('Updated just now');
+  await expect(page.getByTestId('live-announcement')).toHaveText('Back online');
 });

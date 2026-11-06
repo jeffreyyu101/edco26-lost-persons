@@ -66,12 +66,21 @@
   letter-spacing: -0.022em;
   color: var(--gray-12);
 }
-/* The live indicator (components/ui/LiveIndicator.tsx) on its own line under the title, lined up with its
+/* The line under the title (components/ui/LiveIndicator.tsx) on its own 32 px row, lined up with the title's
    first letter (the Back chevron and the gap before the title are 30 px). */
 .live {
   flex-basis: 100%;
-  margin-top: 2px;
+  margin: -2px 0 -4px;
   padding-left: 30px;
+}
+
+/* The Reconnecting / Offline banner (ConnectionBanner) under the header, its text in line with the tiles. */
+.banner {
+  width: 100%;
+  max-width: 1156px;
+  margin-inline: auto;
+  padding-left: max(4px, calc(env(safe-area-inset-left) - 12px));
+  padding-right: max(4px, calc(env(safe-area-inset-right) - 12px));
 }
 
 .body {

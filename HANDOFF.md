@@ -46,8 +46,12 @@ screenshots.
 
 - **The brand card is one compact row on All requests only**, with an X that hides it on that phone ("Show
   header" in the avatar menu brings it back).
-- **A live line under the title** on All requests, Pending, My requests and the dashboard: "Updated 6s ago",
-  "Reconnecting · updated 2m ago" or "Offline · updated 5m ago". The dashboard's Offline / Retrying chip is gone.
+- **A live line under the title** on All requests, Pending, My requests and the dashboard. The dashboard's
+  Offline / Retrying chip is gone.
+- **F1.2 (the Apple Mail model):** the line counts minutes, never seconds ("Updated just now", "Updated 5 min
+  ago"), and has a Refresh now button. Problems are a banner, "Reconnecting…" (amber) or "Offline · N waiting
+  to send" (gray), and the line then shows "Last updated 3:42 PM". One state drives the line, the banner, the
+  avatar badge and the screen-reader announcements (design/DECISIONS.md items 15–17).
 - Client only: no migration, no new environment variable.
 
 ## The production migration

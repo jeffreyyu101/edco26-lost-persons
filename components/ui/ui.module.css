@@ -438,15 +438,16 @@
   letter-spacing: -0.01em;
 }
 
-/* The live indicator (LiveIndicator.tsx; design/screens/live-indicator.html): a plain solid 7 px dot (no ring,
-   no glow) and one quiet line. The text is gray-11, not the mockup's gray-10, for 4.5:1 in both themes
-   (DECISIONS.md, accessibility pass). The line keeps its height while it is empty (before the first sync). */
+/* The line under the title (LiveIndicator.tsx; v2.2 afternoon, the Apple Mail model): a plain solid 7 px dot
+   (no ring, no glow) in the state's colour, one quiet gray-11 line (4.5:1 in both themes, DECISIONS.md
+   accessibility pass), then Refresh now. The row is the button's 32 px tall, and keeps that height while it is
+   empty (before the first sync), so nothing moves when it appears. */
 .live {
   display: flex;
   align-items: center;
   gap: 7px;
   min-width: 0;
-  min-height: 16px;
+  min-height: 32px;
   font-size: 12.5px;
   line-height: 16px;
   color: var(--gray-11);
@@ -471,6 +472,52 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.live[data-state='reconnecting'] .liveLead {
-  color: var(--amber-11);
+
+/* Refresh now: a 32 px circle right after the words (its 15 px glyph 10 px after the text), with a 44 × 44 tap
+   area that reaches down and to the sides but not up, so it never takes a tap meant for the title above. */
+.liveRefresh {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-left: -5px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--gray-11);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.liveRefresh::before {
+  content: '';
+  position: absolute;
+  inset: 0 -6px -12px;
+}
+.liveRefresh:active {
+  background: var(--gray-a3);
+}
+.liveRefresh:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -2px;
+}
+/* While its sync is in flight the arrow turns (one turn per 800 ms, LiveIndicator SPIN_MS); with reduced
+   motion it only dims. */
+.liveRefresh[data-refreshing] svg {
+  animation: lp-live-spin 0.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .liveRefresh[data-refreshing] svg {
+    animation: none;
+  }
+  .liveRefresh[data-refreshing] {
+    opacity: 0.45;
+  }
+}
+@keyframes lp-live-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }

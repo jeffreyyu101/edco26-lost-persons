@@ -107,10 +107,11 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+/* 44 px tall, grown upward only: the line under the title (and its Refresh now button) starts right below. */
 .ttl::before {
   content: '';
   position: absolute;
-  inset: min(0px, calc((100% - 44px) / 2)) 0;
+  inset: min(0px, calc(100% - 44px)) 0 0;
 }
 
 .ttl:focus-visible {
@@ -152,11 +153,12 @@
   transition: transform 0.15s;
 }
 
-/* The live indicator ("Updated 6s ago", components/ui/LiveIndicator.tsx) right under the title, lined up
-   with its first letter (live-indicator.html .live: 2 px under the title, 10 px above what follows). */
+/* The line under the title ("Updated just now" and Refresh now, components/ui/LiveIndicator.tsx), lined up
+   with its first letter. Its 32 px row starts where the title's box ends (the title's tap area reaches up
+   instead of down, .ttl::before), and Refresh now's tap area reaches 12 px down into the space below. */
 .live {
-  margin-top: -12px;
-  padding: 0 16px 10px;
+  margin-top: -14px;
+  padding: 0 16px 12px;
 }
 
 /* The offline / reconnecting button, search and the avatar. Every one has a 44 px tap area that never
@@ -221,19 +223,10 @@
   pointer-events: none;
 }
 
-.conn[data-state='error'] {
-  background: var(--red-9);
-  color: var(--red-contrast, #fff);
-}
-
-.conn[data-syncing] .connSpin {
-  animation: lp-spin 0.9s linear infinite;
-}
-
-@keyframes lp-spin {
-  to {
-    transform: rotate(360deg);
-  }
+/* Offline: gray, like the Offline banner and the line's dot (reconnecting keeps the amber above). */
+.conn[data-state='offline'] {
+  background: var(--gray-9);
+  color: var(--gray-contrast, #fff);
 }
 
 /* 44 px touch targets for compact icon buttons without changing their layout (as .lp-hit). */

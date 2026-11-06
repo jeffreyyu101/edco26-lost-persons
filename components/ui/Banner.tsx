@@ -1,35 +1,46 @@
 'use client';
-// Inline status banner (states.html .bnr — "Offline · 2 waiting to send", "Can't reach the log · Try
-// again", "Updated by someone else", "Update ready · Reload").
+// Inline status banner (states.html .bnr — "Offline · 2 waiting to send", "Reconnecting…", "Updated by
+// someone else", "Update ready · Reload").
 //
-// ConnectionBanner is the connected offline / error banner. The shell renders one at the top of every view;
-// a view that wants it where the mockup puts it (lists: between the header and the view switcher; the form:
-// under its top bar) renders <ConnectionBanner /> there, and the shell's copy then steps aside.
-import { Button } from '@radix-ui/themes';
-import { CircleAlert, CloudOff, Plug, RefreshCw } from 'lucide-react';
-import { useLayoutEffect, useSyncExternalStore, type ReactNode } from 'react';
-import { useActions, useConnection, useOutbox } from '@/lib/client/store-contract';
+// ConnectionBanner is the connection banner (v2.2 afternoon, Brian 2026-11-06): amber "Reconnecting…" while
+// syncs fail with a connection, gray "Offline · N waiting to send" with none, nothing while healthy. Its state
+// is the view's useLiveStatus() (lib/client/live-status.ts), the same object the line under the title and the
+// avatar badge read, so they never disagree. It also holds the one polite live region that announces a change
+// of state ("Reconnecting", "Offline", "Back online"); the banner itself is not a live region, so a new
+// waiting count is never read out. The shell renders one at the top of every view; a view that wants it where
+// the mockup puts it (lists: under the line; the dashboard: under its header) renders <ConnectionBanner />
+// there, and the shell's copy then steps aside.
+import { Button, VisuallyHidden } from '@radix-ui/themes';
+import { CircleAlert, CloudOff, CloudSync, Plug, RefreshCw } from 'lucide-react';
+import { useLayoutEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { liveAnnouncement, stateCue, type LiveLine, type LiveState } from '@/lib/client/live-status';
+import { useOutbox } from '@/lib/client/store-contract';
+import { useLiveStatus } from '@/lib/client/use-live-status';
 import styles from './ui.module.css';
 
 export type BannerTone = 'amber' | 'red' | 'gray' | 'blue';
-export type BannerIcon = 'offline' | 'error' | 'conflict' | 'update';
+export type BannerIcon = 'offline' | 'reconnecting' | 'error' | 'conflict' | 'update';
 
-const ICONS = { offline: CloudOff, error: Plug, conflict: CircleAlert, update: RefreshCw } as const;
+const ICONS = { offline: CloudOff, reconnecting: CloudSync, error: Plug, conflict: CircleAlert, update: RefreshCw } as const;
 
 export interface BannerProps {
   tone: BannerTone;
   icon: BannerIcon;
   children: ReactNode;
   action?: { label: string; onClick: () => void; disabled?: boolean };
+  /** A polite live region (role="status", the default). The connection banner announces through its own. */
+  live?: boolean;
+  testId?: string;
 }
 
-export function Banner({ tone, icon, children, action }: BannerProps) {
+export function Banner({ tone, icon, children, action, live = true, testId }: BannerProps) {
   const Icon = ICONS[icon];
   return (
     <div
-      role="status"
+      role={live ? 'status' : undefined}
       className={`lp-banner ${styles.banner}`}
       data-tone={tone}
+      data-testid={testId}
       // Step 12 text on the step-3 tint: step 11 there is ~4.2:1 for amber (spec §7: 4.5:1 in both themes).
       style={{ background: `var(--${tone}-a3)`, color: `var(--${tone}-12)` }}
     >
@@ -70,13 +81,25 @@ const bumpPlaced = (delta: number) => {
 export interface ConnectionBannerProps {
   /** 'shell' is the app shell's fallback copy; views leave the default. */
   placement?: 'shell' | 'view';
+  /**
+   * The view's live status (useLiveStatus()), shared with its line and badge. Without it (the profile, the
+   * shell) the banner reads the store's own.
+   */
+  status?: LiveLine;
 }
 
-/** "Offline · N waiting to send" (amber) or "Can't reach the log" + Try again (red); nothing when live. */
-export function ConnectionBanner({ placement = 'view' }: ConnectionBannerProps) {
-  const { connection } = useConnection();
+/** Amber "Reconnecting…", gray "Offline · N waiting to send", or nothing while healthy. */
+export function ConnectionBanner({ placement = 'view', status }: ConnectionBannerProps) {
+  return status ? <StateBanner state={status.state} placement={placement} /> : <StoreBanner placement={placement} />;
+}
+
+function StoreBanner({ placement }: { placement: 'shell' | 'view' }) {
+  const status = useLiveStatus();
+  return <StateBanner state={status.state} placement={placement} />;
+}
+
+function StateBanner({ state, placement }: { state: LiveState; placement: 'shell' | 'view' }) {
   const outbox = useOutbox();
-  const actions = useActions();
   const placedByViews = useSyncExternalStore(subscribePlaced, readPlaced, readPlacedServer);
 
   useLayoutEffect(() => {
@@ -85,22 +108,25 @@ export function ConnectionBanner({ placement = 'view' }: ConnectionBannerProps) 
     return () => bumpPlaced(-1);
   }, [placement]);
 
+  // The live region speaks when the state changes while this banner is mounted, not when it first appears.
+  const [spoken, setSpoken] = useState<{ state: LiveState; text: string }>({ state, text: '' });
+  if (spoken.state !== state) setSpoken({ state, text: liveAnnouncement(spoken.state, state) ?? '' });
+
   if (placement === 'shell' && placedByViews > 0) return null;
-  let banner: ReactNode = null;
-  if (connection === 'offline') {
-    banner = (
-      <Banner tone="amber" icon="offline">
-        Offline · {outbox.length} waiting to send
+  const cue = stateCue(state, outbox.length);
+  const banner =
+    cue.banner && cue.tone !== 'green' ? (
+      <Banner tone={cue.tone} icon={state === 'offline' ? 'offline' : 'reconnecting'} live={false} testId="connection-banner">
+        {cue.banner}
       </Banner>
-    );
-  } else if (connection === 'error') {
-    banner = (
-      <Banner tone="red" icon="error" action={{ label: 'Try again', onClick: actions.syncNow }}>
-        Can&apos;t reach the log
-      </Banner>
-    );
-  }
-  if (!banner) return null;
-  // The shell's copy sits at the very top of the page: clear the status bar / notch.
-  return placement === 'shell' ? <div className={styles.shellBanner}>{banner}</div> : banner;
+    ) : null;
+  return (
+    <>
+      {/* The shell's copy sits at the very top of the page: clear the status bar / notch. */}
+      {banner && placement === 'shell' ? <div className={styles.shellBanner}>{banner}</div> : banner}
+      <VisuallyHidden role="status" data-testid="live-announcement">
+        {spoken.text}
+      </VisuallyHidden>
+    </>
+  );
 }

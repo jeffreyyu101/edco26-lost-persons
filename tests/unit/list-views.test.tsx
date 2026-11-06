@@ -5,7 +5,9 @@ import { Theme } from '@radix-ui/themes';
 import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { ConnectionIndicator } from '@/components/list/AppHeader';
 import { BRAND_DATES_LONG, BRAND_DATES_SHORT, HIDE_HEADER_LABEL } from '@/components/list/BrandCard';
+import { ConnectionBanner } from '@/components/ui/Banner';
 import { AllView, MineView, PendingView, SearchView } from '@/components/list/ListViews';
 import { switcherLabel } from '@/components/list/ViewSwitcher';
 import {
@@ -521,8 +523,8 @@ describe('list views render', () => {
     expect(failed).toContain('data-testid="brand-card"');
   });
 
-  it('the live indicator sits right under the title on All, Pending and My requests: a plain dot and "Updated now"', () => {
-    const store = storeWith((s) => ({ ...s, lastSyncLocalAt: Date.now() + 60_000 }));
+  it('the line sits right under the title on All, Pending and My requests: a plain dot, "Updated just now", Refresh now', () => {
+    const store = storeWith((s) => ({ ...s, lastSyncLocalAt: Date.now() - 5_000 }));
     for (const [name, node] of [
       ['All', <AllView key="all" status={null} post={null} />],
       ['Pending', <PendingView key="pending" />],
@@ -533,28 +535,47 @@ describe('list views render', () => {
       const live = html.indexOf('data-testid="live-indicator"');
       expect(live, name).toBeGreaterThan(header);
       // Directly after the header, inside the sticky bar, before the list.
-      expect(html.slice(header, live), name).toMatch(/^<\/header><div class="[^"]*live[^"]*"[^>]*data-state="live"\s*$/);
+      expect(html.slice(header, live), name).toMatch(/^<\/header><div class="[^"]*live[^"]*"[^>]*data-state="healthy"\s*$/);
       expect(live, name).toBeLessThan(html.indexOf('data-testid="request-list"'));
-      const line = html.slice(live, html.indexOf('data-testid="live-announcement"', live));
+      const line = html.slice(live, html.indexOf('</div>', live));
       expect(line, name).toMatch(/<span class="[^"]*liveDot[^"]*" aria-hidden="true"><\/span>/);
-      expect(line, name).toMatch(/aria-hidden="true" data-testid="live-text">Updated now<\/span>/);
-      // One full sentence for screen readers.
-      expect(line, name).toContain('>List updated just now</span>');
-      // The live region is there, silent until the state changes.
-      expect(html.slice(html.indexOf('data-testid="live-announcement"', live) - 200), name).toMatch(/role="status"[^>]*data-testid="live-announcement"[^>]*><\/span>/);
+      // Minutes only: never seconds.
+      expect(line, name).toMatch(/aria-hidden="true" data-testid="live-text">Updated just now<\/span>/);
+      expect(line, name).not.toMatch(/\ds ago|seconds/);
+      // One full sentence for screen readers, then the button, right after the words.
+      expect(line, name).toContain('>List updated just now.</span>');
+      expect(line, name).toMatch(/<\/span><button type="button" class="[^"]*liveRefresh[^"]*" aria-label="Refresh now" data-testid="refresh-now"><svg[^>]*lucide-refresh-cw[^>]*aria-hidden="true"/);
+      // Healthy: no banner and no badge; the live region is there, silent until the state changes.
+      expect(html, name).not.toContain('connection-banner');
+      expect(html, name).not.toContain('connection-indicator');
+      expect(html.slice(html.indexOf('data-testid="live-announcement"') - 200), name).toMatch(/role="status"[^>]*data-testid="live-announcement"[^>]*><\/span>/);
+      expect(html.match(/data-testid="live-announcement"/g), name).toHaveLength(1);
     }
-    // Search keeps its own bar, with no indicator.
+    // Search keeps its own bar, with no line.
     expect(render(store, <SearchView q="" />)).not.toContain('live-indicator');
   });
 
-  it('the live indicator shows nothing before the first sync (and keeps its line); Reconnecting when the log can\'t be reached', () => {
+  it('the line shows nothing before the first sync (and keeps its row): no words, no button', () => {
     const before = render(storeWith((s) => ({ ...s, lastSyncLocalAt: null })), <PendingView />);
-    expect(before).toMatch(/data-state="none" data-testid="live-indicator"><span[^>]*role="status"[^>]*data-testid="live-announcement"[^>]*><\/span><\/div>/);
+    expect(before).toMatch(/data-state="none" data-testid="live-indicator"><\/div>/);
     expect(before).not.toContain('Updated');
-    const error = render(storeWith((s) => ({ ...s, connection: 'error', lastSyncLocalAt: Date.now() + 60_000 })), <PendingView />);
-    expect(error).toMatch(/data-state="reconnecting" data-testid="live-indicator"/);
-    expect(error).toMatch(/data-testid="live-text"><span class="[^"]*liveLead[^"]*">Reconnecting<\/span> · updated now<\/span>/);
-    expect(error).toContain('>Reconnecting. List updated just now</span>');
+    expect(before).not.toContain('Refresh now');
+  });
+
+  it('one state for the line, the banner and the badge: requests failing with a connection read Reconnecting everywhere', () => {
+    // The F1.1 review finding: the store calls two failed requests 'offline' even while the phone reports a
+    // connection. The line said Reconnecting while the banner said Offline; now all three say Reconnecting.
+    const at = Date.now() - 45_000;
+    const clock = formatCreatedTime(at, Date.now(), 'America/New_York');
+    for (const connection of ['offline', 'error'] as const) {
+      const html = render(storeWith((s) => ({ ...s, connection, lastSyncLocalAt: at })), <PendingView />);
+      expect(html, connection).toMatch(/data-state="reconnecting" data-testid="live-indicator"/);
+      expect(html, connection).toContain(`data-testid="live-text">Last updated ${clock}</span>`);
+      expect(html, connection).toContain(`>Reconnecting. List last updated at ${clock}.</span>`);
+      expect(html, connection).toMatch(/data-tone="amber" data-testid="connection-banner"[^>]*>.*?Reconnecting…<\/span>/);
+      expect(html, connection).not.toContain('waiting to send');
+      expect(html, connection).toMatch(/role="img" data-state="reconnecting" aria-label="Reconnecting" data-testid="connection-indicator"/);
+    }
   });
 
   it('only All archives: Pending lists no closed request; My requests shows the reporter theirs, unfolded', () => {
@@ -664,27 +685,48 @@ describe('list views render', () => {
     expect(html).toContain('Can&#x27;t reach the log');
   });
 
-  it('offline: a badge on the avatar in the header, and the banner between the header and the log', () => {
-    const store = storeWith((s) => ({ ...s, connection: 'offline', outbox: [outboxItem()] }));
+  it('a problem: a badge on the avatar in the header, the line under the title, the banner between them and the log', () => {
+    const store = storeWith((s) => ({ ...s, connection: 'error', outbox: [outboxItem()] }));
     const html = render(store, <AllView status={null} post={null} />);
     const title = html.indexOf('data-testid="view-switcher"');
     const avatar = html.indexOf('data-testid="account-trigger"');
     const indicator = html.indexOf('data-testid="connection-indicator"');
-    const banner = html.indexOf('Offline · <!-- -->1<!-- --> waiting to send');
+    const line = html.indexOf('data-testid="live-indicator"');
+    const banner = html.indexOf('data-testid="connection-banner"');
     const cols = html.indexOf('data-testid="log-columns"');
     expect(title).toBeGreaterThan(0);
-    expect(indicator).toBeGreaterThan(avatar);
     expect(avatar).toBeGreaterThan(title);
+    expect(indicator).toBeGreaterThan(avatar);
     const badge = html.slice(html.lastIndexOf('<span', indicator), indicator + 60);
     expect(badge).toContain('role="img"');
-    expect(badge).toContain('data-state="offline"');
-    expect(badge).toContain('aria-label="Offline"');
-    expect(banner).toBeGreaterThan(indicator);
+    expect(badge).toContain('data-state="reconnecting"');
+    expect(badge).toContain('aria-label="Reconnecting"');
+    expect(line).toBeGreaterThan(indicator);
+    expect(banner).toBeGreaterThan(line);
     expect(cols).toBeGreaterThan(banner);
-    // Can't reach the log: the badge turns red; live: nothing at all.
-    const error = render(storeWith((s) => ({ ...s, connection: 'error' })), <PendingView />);
-    expect(error).toMatch(/data-state="error"[^>]*aria-label="Can&#x27;t reach the log"|aria-label="Can&#x27;t reach the log"[^>]*data-state="error"/);
+    // The banner is not a live region itself (a new waiting count is never read out); the one live region is.
+    expect(html.slice(html.lastIndexOf('<div', banner), banner)).not.toContain('role=');
+    // Healthy: no badge at all.
     expect(render(storeWith((s) => s), <PendingView />)).not.toContain('connection-indicator');
+  });
+
+  it('offline: the gray banner keeps "Offline · N waiting to send", and the badge is gray with a crossed-out cloud', () => {
+    // A server render reads the phone as online, so the offline cues are rendered from the state directly.
+    const store = storeWith((s) => ({ ...s, outbox: [outboxItem()] }));
+    const offline = { state: 'offline' as const, text: 'Last updated 3:42 PM', sentence: 'Offline. List last updated at 3:42 PM.' };
+    const banner = render(store, <ConnectionBanner status={offline} />);
+    expect(banner).toMatch(/<div class="lp-banner [^"]*" data-tone="gray" data-testid="connection-banner" style="background:var\(--gray-a3\);color:var\(--gray-12\)"><svg[^>]*lucide-cloud-off/);
+    expect(banner).toContain('>Offline · 1 waiting to send</span>');
+    // The one live region follows the banner, silent until the state changes.
+    expect(banner).toMatch(/waiting to send<\/span><\/div><span[^>]*role="status"[^>]*data-testid="live-announcement"[^>]*><\/span>/);
+    const reconnecting = render(store, <ConnectionBanner status={{ ...offline, state: 'reconnecting' }} />);
+    expect(reconnecting).toMatch(/data-tone="amber" data-testid="connection-banner"[^>]*><svg[^>]*lucide-cloud-sync/);
+    expect(reconnecting).toContain('>Reconnecting…</span>');
+    expect(render(store, <ConnectionBanner status={{ ...offline, state: 'healthy' }} />)).not.toContain('connection-banner');
+    expect(renderToString(<ConnectionIndicator state="offline" />)).toMatch(
+      /^<span class="[^"]*conn[^"]*" role="img" data-state="offline" aria-label="Offline" data-testid="connection-indicator"><svg[^>]*lucide-cloud-off/,
+    );
+    expect(renderToString(<ConnectionIndicator state="healthy" />)).toBe('');
   });
 
   it('Pending and My requests use the same large title, with no separate ×', () => {
