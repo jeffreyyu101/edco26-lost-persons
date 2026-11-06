@@ -4,13 +4,23 @@
 // the "Alerts are on" sheet, and the offline precache. Views are separate chunks loaded with next/dynamic
 // (client-only: the server HTML never contains request data); all of them are prefetched after the first
 // idle and then handed to the service worker (A15) so they work offline later.
+//
+// Desk (from 768 px, components/desk): the same views inside the desk frame. The main column keeps a list
+// or the dashboard; a request (?r=) opens beside it in the detail pane, and a form (?new=1, edit,
+// needs attention) opens over it. The frame is CSS-only and always rendered (no layout flash); its
+// sidebar / rail, top bar, pane header and keyboard come from the desk chunk, loaded only on the desk.
+// Under 768 px the view router renders exactly what it always did.
 import dynamic from 'next/dynamic';
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { isDeskNow, useIsDesk } from '@/components/desk/breakpoints';
+import { DeskFrame } from '@/components/desk/DeskFrame';
+import { useMainView } from '@/components/desk/use-main-view';
+import { isFormView, paneRequestId } from '@/components/desk/views';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { ProfileSkeleton, RowSkeletons } from '@/components/ui/Skeleton';
 import { Snackbar, Toaster } from '@/components/ui/Toast';
 import { installAudioUnlock, playChime, vibrate } from '@/lib/client/chime';
-import { useView, type ViewName } from '@/lib/client/nav';
+import { useView, type View, type ViewName } from '@/lib/client/nav';
 import { StoreProvider } from '@/lib/client/store';
 import { useAppStore, usePrefs, useSnackbar, useStoreSelector, useToasts, type StoreState } from '@/lib/client/store-contract';
 import { followSystemTheme } from '@/lib/theme';
@@ -24,6 +34,7 @@ const loadDialogs = () => import('@/components/ui/ShellDialogs');
 // new request once the phone is offline.
 const loadImage = () => import('@/lib/client/image');
 const VIEW_CHUNKS = [loadList, loadForm, loadProfile, loadDashboard, loadDialogs, loadImage];
+const loadDesk = () => import('@/components/desk/DeskChrome');
 
 const listLoading = () => <RowSkeletons />;
 const AllView = dynamic(() => loadList().then((m) => m.AllView), { ssr: false, loading: listLoading });
@@ -35,6 +46,12 @@ const ProfileView = dynamic(() => loadProfile().then((m) => m.ProfileView), { ss
 const DashboardView = dynamic(() => loadDashboard().then((m) => m.DashboardView), { ssr: false });
 const OutboxPromptDialog = dynamic(() => loadDialogs().then((m) => m.OutboxPromptDialog), { ssr: false });
 const BellIntroSheet = dynamic(() => loadDialogs().then((m) => m.BellIntroSheet), { ssr: false });
+// Desk only. The pane's profile skeleton has no chrome of its own: the pane draws the header.
+const PaneProfileView = dynamic(() => loadProfile().then((m) => m.ProfileView), { ssr: false, loading: () => <ProfileSkeleton chrome={false} /> });
+const DeskNav = dynamic(() => loadDesk().then((m) => m.DeskNav), { ssr: false });
+const DeskTop = dynamic(() => loadDesk().then((m) => m.DeskTop), { ssr: false });
+const DeskPane = dynamic(() => loadDesk().then((m) => m.DeskPane), { ssr: false });
+const DeskKeys = dynamic(() => loadDesk().then((m) => m.DeskKeys), { ssr: false });
 
 export interface AppShellProps {
   eventTimezone: string;
@@ -54,6 +71,35 @@ export function AppShell({ eventTimezone }: AppShellProps) {
 
 function ViewRouter() {
   const view = useView();
+  const desk = useIsDesk();
+  const main = useMainView(view);
+  const paneId = desk ? paneRequestId(view) : null;
+  return (
+    <>
+      <DeskFrame
+        desk={desk}
+        nav={desk ? <DeskNav main={main} /> : null}
+        top={desk ? <DeskTop main={main} /> : null}
+        pane={
+          paneId ? (
+            <DeskPane id={paneId} main={main}>
+              <PaneProfileView id={paneId} presentation="panel" />
+            </DeskPane>
+          ) : null
+        }
+        // For now the phone's full-screen form, held over the main column and the pane by the frame's form
+        // layer. The desk form (centred modal / side sheet) replaces what renders here.
+        form={desk && isFormView(view) ? viewElement(view, true) : null}
+      >
+        {desk ? viewElement(main, true) : viewElement(view, false)}
+      </DeskFrame>
+      {desk ? <DeskKeys view={view} main={main} /> : null}
+    </>
+  );
+}
+
+/** The element for one view. On the desk, Search follows the top bar's field (?q=) by remounting per query. */
+function viewElement(view: View, desk: boolean) {
   switch (view.name) {
     case 'all':
       return <AllView status={view.status} post={view.post} open={!!view.open} />;
@@ -62,7 +108,7 @@ function ViewRouter() {
     case 'mine':
       return <MineView />;
     case 'search':
-      return <SearchView q={view.q} />;
+      return desk ? <SearchView key={view.q} q={view.q} /> : <SearchView q={view.q} />;
     case 'new':
       return <RequestFormView mode="new" />;
     case 'edit':
@@ -86,7 +132,10 @@ const OWN_CONNECTION_UI: ReadonlySet<ViewName> = new Set(['all', 'pending', 'min
 
 function ShellBanners() {
   const view = useView();
-  if (OWN_CONNECTION_UI.has(view.name)) return null;
+  // On the desk the main column always holds a list or the dashboard, and the pane's profile and the forms
+  // draw their own.
+  const desk = useIsDesk();
+  if (desk || OWN_CONNECTION_UI.has(view.name)) return null;
   return <ConnectionBanner placement="shell" />;
 }
 
@@ -109,7 +158,8 @@ function ShellHosts() {
   useEffect(() => {
     let cancelled = false;
     const prefetch = () => {
-      void Promise.allSettled(VIEW_CHUNKS.map((load) => load())).then((results) => {
+      const chunks = isDeskNow() ? [...VIEW_CHUNKS, loadDesk] : VIEW_CHUNKS;
+      void Promise.allSettled(chunks.map((load) => load())).then((results) => {
         if (cancelled) return;
         void actions.prepareOffline?.();
         if (results.some((r) => r.status === 'rejected')) window.addEventListener('online', prefetch, { once: true });
