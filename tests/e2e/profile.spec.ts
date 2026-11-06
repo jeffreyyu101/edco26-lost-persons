@@ -339,8 +339,9 @@ test.describe('the Change answer menu passes axe', () => {
       await settle(page);
       // A modal Radix menu marks the page behind it aria-hidden and keeps focus inside itself (the ⋯ menu
       // has done the same since Phase 2): axe's aria-hidden-focus on that page root is the only finding it may
-      // make, and Tab never takes focus out of the menu, so nothing aria-hidden can be reached.
-      const findings = (await axeViolations(page)).filter((v) => !(v.rule === 'aria-hidden-focus' && /_app$/.test(v.target)));
+      // make, and Tab never takes focus out of the menu, so nothing aria-hidden can be reached. The page root
+      // is the profile's, or the desk frame's that wraps every view (a plain block on the phone).
+      const findings = (await axeViolations(page)).filter((v) => !(v.rule === 'aria-hidden-focus' && /_(app|frame)$/.test(v.target)));
       expect(findings).toEqual([]);
       for (let i = 0; i < 3; i += 1) {
         await page.keyboard.press('Tab');

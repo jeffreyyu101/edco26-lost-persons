@@ -154,11 +154,13 @@ export function DeskKeys({ view, main }: DeskKeysProps) {
       if (el && el !== document.body && !el.closest(OVERLAY_SELECTOR) && !el.closest(FORM_LAYER_SELECTOR)) outside.current = { el, rowId: id };
     };
     // Focus let go to nothing on purpose (Esc in the search field, a click on empty space) leaves nothing
-    // to return to. Not when a form covering the desk made it inert, or the window lost focus.
+    // to return to. Not when a form covering the desk made it inert, or the window lost focus, and not when
+    // it leaves a dialog, menu or the form layer: closing one removes its focused field, which Chromium
+    // reports as a focusout to nothing, and that close is exactly when the focus should go back.
     const onFocusOut = (e: FocusEvent) => {
       if (e.relatedTarget || !document.hasFocus()) return;
       const el = e.target instanceof HTMLElement ? e.target : null;
-      if (el?.closest('[inert]')) return;
+      if (!el || !el.isConnected || el.closest('[inert]') || el.closest(OVERLAY_SELECTOR) || el.closest(FORM_LAYER_SELECTOR)) return;
       outside.current = null;
     };
     window.addEventListener('keydown', onKeyDown);

@@ -240,14 +240,22 @@ test('brand card over All, Pending and My requests: logos, event, the big title,
   await expect(page.getByRole('searchbox', { name: 'Search requests' })).toBeVisible();
   await expect(brand(page)).toHaveCount(0);
 
-  // Wider screens: the title grows and fits on one line.
-  await page.setViewportSize({ width: 820, height: 1180 });
+  // Wider phone screens (640 px up to the desk's 768): the title grows and fits on one line.
+  await page.setViewportSize({ width: 760, height: 1000 });
   await page.goto('/');
   await expect(brand(page)).toBeVisible();
   const wide = await brandLook(page);
   expect(wide.titleSize).toBeGreaterThan(38);
   expect(wide.titleHeight).toBeLessThan(wide.titleSize * 1.5);
-  expect(wide.box.width).toBe(820 - 24);
+  expect(wide.box.width).toBe(760 - 24);
+
+  // From 768 px the desk shell draws the brand and the list's chrome (its rail / sidebar and top bar), so the
+  // list has no card of its own.
+  await page.setViewportSize({ width: 820, height: 1180 });
+  await page.goto('/');
+  await expect(page.getByTestId('desk-rail')).toBeVisible();
+  await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 10_000 });
+  await expect(brand(page)).toHaveCount(0);
 });
 
 test.describe('brand card on a cold load', () => {

@@ -784,6 +784,12 @@ textarea.lp-rf-in {
   font-size: 12.5px;
   line-height: 16px;
 }
+/* F1's "Optional" badge keeps the label one 16 px line, so the two columns' groups start level. */
+.lp-rf-dlg .lp-rf-optional.lp-rf-optional {
+  padding-block: 0;
+  line-height: 16px;
+  vertical-align: top;
+}
 
 /* Groups lose the phone's card; their rows become separate boxes */
 .lp-rf-dlg .lp-rf-grp {

@@ -182,6 +182,31 @@ export async function overlappingTargets(page: Page, scope = 'body'): Promise<Ov
       }
       return null;
     };
+    // The part of the page a control can show in: its scrolling / clipping ancestors' boxes, up to its
+    // fixed layer. A field half scrolled out of a form's scroller is cut off at the scroller's edge, so the
+    // part under the pinned footer is neither seen nor tapped.
+    const clipOf = (el: Element): Box => {
+      const box: Box = { left: -Infinity, top: -Infinity, right: Infinity, bottom: Infinity };
+      if (getComputedStyle(el).position === 'fixed') return box;
+      for (let n: Element | null = el.parentElement; n; n = n.parentElement) {
+        const s = getComputedStyle(n);
+        if (s.overflowX !== 'visible' || s.overflowY !== 'visible') {
+          const r = n.getBoundingClientRect();
+          box.left = Math.max(box.left, r.left);
+          box.top = Math.max(box.top, r.top);
+          box.right = Math.min(box.right, r.right);
+          box.bottom = Math.min(box.bottom, r.bottom);
+        }
+        if (s.position === 'fixed') break;
+      }
+      return box;
+    };
+    const clip = (a: Box, c: Box): Box => ({
+      left: Math.max(a.left, c.left),
+      top: Math.max(a.top, c.top),
+      right: Math.min(a.right, c.right),
+      bottom: Math.min(a.bottom, c.bottom),
+    });
     const items: Array<{ el: HTMLElement; name: string; own: Box; hit: Box; layer: Element | null }> = [];
     for (const el of Array.from(root.querySelectorAll<HTMLElement>(SELECTOR))) {
       const style = getComputedStyle(el);
@@ -221,7 +246,8 @@ export async function overlappingTargets(page: Page, scope = 'body'): Promise<Ov
         (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 50) ||
         el.getAttribute('data-testid') ||
         el.tagName.toLowerCase();
-      items.push({ el, name, own, hit, layer: layerOf(el) });
+      const c = clipOf(el);
+      items.push({ el, name, own: clip(own, c), hit: clip(hit, c), layer: layerOf(el) });
     }
     const contains = (a: Box, b: Box) => a.left <= b.left + 1 && a.top <= b.top + 1 && a.right >= b.right - 1 && a.bottom >= b.bottom - 1;
     const area = (a: Box, b: Box) => Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
