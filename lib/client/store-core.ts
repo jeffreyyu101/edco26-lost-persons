@@ -41,7 +41,7 @@ import {
 } from './alerts';
 import { DRAFT_DEBOUNCE_MS, LEGACY_QUEUE_KEY, MUTATION_TIMEOUT_MS, SYNC, UNDO_MS } from './constants';
 import { createBodyFromLegacyQueueItem, hasAnyDetail, toCreateBody } from './form-values';
-import { apiRequest, isDefinitive, type FetchLike, type HttpFailure, type HttpResult } from './http';
+import { apiRequest, isDefinitive, isUncertain, type FetchLike, type HttpFailure, type HttpResult } from './http';
 import { navigate } from './nav';
 import {
   CREATE_DEFINITIVE,
@@ -57,16 +57,17 @@ import {
   draftToStored,
   jobToStored,
   openKv,
+  photoBlobsEntry,
   readDraft,
   readJobs,
   readRows,
-  writePhotoBlobs,
   type Kv,
   type StoredCursor,
   type StoredDraft,
   type StoredStaff,
 } from './persist';
 import { readPrefs, subscribePrefs, writePref } from './prefs';
+import { SESSION_CHANNEL, clearLogoutPending, readLogoutPending, writeLogoutPending } from './session-signals';
 import { startServiceWorker, type SwController } from './sw-client';
 import {
   createServerState,
@@ -180,6 +181,10 @@ export const COPY = {
   sessionEnded: 'Session ended',
   /** Undo after this phone already changed the request again (never "someone else"). */
   undoStale: "Can't undo — it changed since",
+  /** The server did not confirm the sign-out: the session is still on (never claimed as signed out). */
+  signOutFailed: "Couldn't sign out — check signal and try again",
+  /** A write found the tab's staff was out of date (another tab signed in as someone else): not sent. */
+  sessionChanged: 'Session changed — try again',
 } as const;
 
 const UNDOABLE_KINDS: ReadonlySet<StatusKind> = new Set(['answer', 'change', 'reunite']);
@@ -195,8 +200,16 @@ const LEASE_MS = 30_000;
 const REDIRECT_GUARD_KEY = 'lp-401-at';
 const REDIRECT_GUARD_MS = 20_000;
 const SIGN_OUT_TIMEOUT_MS = 5_000;
+/** Waits before the 2nd and 3rd DELETE /api/session attempt. */
+const SIGN_OUT_RETRY_MS = [1_000, 2_000] as const;
+/**
+ * Queued jobs go out under whoever the cookie belongs to now. A tab frozen for hours may run its overdue
+ * outbox timer before it hears visibilitychange, so a pass first re-confirms a session older than this.
+ */
+const SESSION_FRESH_MS = 60_000;
 
 type PollOutcome = 'ok' | 'network' | 'http5xx' | 'http4xx' | 'unauthorized' | 'offline' | 'stale';
+type SignOutResult = Awaited<ReturnType<StoreActions['signOut']>>;
 
 interface UndoRecord {
   id: string;
@@ -267,6 +280,12 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   let failures = 0;
   /** The first successful sync after load is the alert baseline. */
   let armed = false;
+  /**
+   * Alerts of synced rows that are applied but not shown yet. A sync shows them when it ends, whether it
+   * succeeded or a later request of it failed, and they survive a stop: an applied row never re-alerts
+   * (its version is no longer newer), so dropping them would lose the alert for good.
+   */
+  let alertBacklog: RaisedAlert[] = [];
   const seen = new Set<string>();
   const ownKeys = new Set<string>();
   /** Rows a mutation answered while a full fetch was loading (kept by replaceAll). */
@@ -301,7 +320,22 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const draftSavedPhotos = new Set<string>();
 
   let updateToastId: string | null = null;
+  /**
+   * A sign-out is pending: the server has not confirmed the cookie is cleared yet. Nothing syncs, sends
+   * or restores the session meanwhile (the localStorage marker carries this across a reload).
+   */
   let signingOut = false;
+  let signOutRun: Promise<SignOutResult> | null = null;
+  let sessionEndedToastId: string | null = null;
+
+  // session re-check (resume, pageshow, a sign-in in another tab)
+  /** GET /api/session must confirm who is signed in before this tab syncs on, writes or sends jobs. */
+  let sessionCheckDue = false;
+  /** Bumped by every reason to re-check; a check only clears sessionCheckDue for the reasons it saw. */
+  let sessionCheckSeq = 0;
+  let sessionCheck: Promise<PollOutcome> | null = null;
+  /** Local time of the last GET /api/session that confirmed the session. */
+  let sessionCheckedAt = 0;
 
   const now = () => Date.now();
   const isLive = (id: number) => running && runId === id;
@@ -439,19 +473,33 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     pruneAlertToasts();
   };
 
-  /** Rows from the server that may be someone else's changes: alert (once armed), then merge. */
-  const ingest = (rows: readonly RequestSummary[], collect?: RaisedAlert[]) => {
+  /**
+   * Rows from the server that may be someone else's changes: alert (once armed), then merge. `defer`: the
+   * sync loop shows the alerts together when the sync ends (alertBacklog), so a burst coalesces.
+   */
+  const ingest = (rows: readonly RequestSummary[], defer = false) => {
     const valid = rows.filter(isRow);
     if (valid.length === 0) return;
     const alerts = armed ? diffRaisedAlerts(state.confirmed, valid, alertCtx()) : [];
-    if (collect) collect.push(...alerts);
+    if (defer) alertBacklog.push(...alerts);
     const merged = mergeRows(state.confirmed, valid);
     if (merged) {
       set({ confirmed: merged, hasData: true });
       markRowsDirty();
     }
-    if (!collect && alerts.length) emitAlerts(alerts);
+    if (!defer && alerts.length) emitAlerts(alerts);
     else if (merged) pruneAlertToasts();
+  };
+
+  /** Shows the alerts of every row a sync applied (also after a later request of that sync failed). */
+  const deliverAlerts = () => {
+    if (alertBacklog.length === 0) {
+      if (armed) pruneAlertToasts();
+      return;
+    }
+    const raised = alertBacklog;
+    alertBacklog = [];
+    emitAlerts(raised);
   };
 
   const rememberOwn = (row: RequestSummary) => {
@@ -563,38 +611,103 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     return { staffName: '', team: '', staff: '' };
   };
 
+  /**
+   * The cookie now belongs to another staff member (signed in on this phone, maybe in another tab): drop
+   * everything that was about the previous one. The data cache is per staff; "My requests", alerts, Undo
+   * and the outbox operator prompt are all derived from the session staff, so none of them may carry over.
+   */
+  const resetForOtherStaff = async () => {
+    await flushRows(); // the previous staff's cache keeps its latest rows
+    set({ confirmed: new Map(), pending: new Map(), hasData: false });
+    cursor = null;
+    cursorAt = 0;
+    armed = false;
+    alertBacklog = [];
+    for (const toastId of [...alertToasts.keys()]) dismissToast(toastId);
+    clearSnackbar();
+    approved.clear();
+    touchedDuringPoll.clear();
+  };
+
   const applySession = async (info: SessionInfo) => {
     const canon = canonStaff(info.staff) ?? '';
     if (cacheStaff !== canon) {
       // Someone else's (or no) cache was loaded: start clean for this staff.
-      if (cacheStaff !== null) {
-        set({ confirmed: new Map(), pending: new Map(), hasData: false });
-        cursor = null;
-        cursorAt = 0;
-        armed = false;
-      }
+      if (cacheStaff !== null) await resetForOtherStaff();
       await loadCache(canon);
       cacheStaff = canon;
     }
     set({ session: { status: 'active', staffName: info.staffName, team: info.team, staff: info.staff, expiresAt: info.expiresAt } });
+    if (sessionEndedToastId) dismissToast(sessionEndedToastId);
+    sessionEndedToastId = null;
     const last: StoredStaff = { staffName: info.staffName, team: info.team, staff: info.staff };
     void enqueue((store) => store.set(K.lastStaff, last));
     refreshPrompt();
     kickOutbox();
+    // Polling stopped at a 401; a session confirmed again (signed in in another tab) restarts it.
+    if (running && !pollInFlight && !pollTimer) schedulePoll(0);
   };
 
   const checkSession = async (): Promise<PollOutcome> => {
     if (!env) return 'stale';
     const gen = ownerGen();
+    const seq = sessionCheckSeq;
     const res = await apiRequest<SessionInfo>(env.fetch, '/api/session', { timeoutMs: SYNC.requestTimeoutMs, signal: pollAbort?.signal });
-    if (gen !== state.generation) return 'stale';
+    if (gen !== state.generation || signingOut) return 'stale';
     if (res.ok) {
       const info = res.data;
       if (typeof info.staff !== 'string' || typeof info.staffName !== 'string' || typeof info.team !== 'string') return 'http5xx';
+      // Cleared before applySession, so the outbox it kicks may send (unless a newer reason came in).
+      if (seq === sessionCheckSeq) sessionCheckDue = false;
+      sessionCheckedAt = now();
       await applySession(info);
       return 'ok';
     }
-    return failureOutcome(res);
+    const outcome = failureOutcome(res);
+    if (outcome === 'unauthorized' && seq === sessionCheckSeq) sessionCheckDue = false;
+    return outcome;
+  };
+
+  /** One GET /api/session at a time; the sync loop and writes share it. */
+  const verifySession = (): Promise<PollOutcome> => {
+    if (!sessionCheck) {
+      sessionCheck = checkSession().finally(() => {
+        sessionCheck = null;
+      });
+    }
+    return sessionCheck;
+  };
+
+  /** The tab resumed, or another tab signed in: who is signed in may have changed. */
+  const sessionMayHaveChanged = () => {
+    sessionCheckDue = true;
+    sessionCheckSeq += 1;
+  };
+
+  /**
+   * Before a write: when the session is not confirmed for this tab yet (just resumed, another tab signed
+   * in, or not checked since load), confirm it first. A write prepared under another staff's identity is
+   * not sent. Nothing is sent while a sign-out is pending either. Returns the failure to answer with, or
+   * null to go ahead.
+   */
+  const writeGate = async (quiet: boolean): Promise<MutationResult | null> => {
+    if (signingOut) {
+      if (!quiet) toastFailure(COPY.sessionEnded, 'amber');
+      return fail('unauthorized', COPY.sessionEnded);
+    }
+    if (!sessionCheckDue && state.session.status !== 'unknown') return null;
+    const before = state.session.staff;
+    const outcome = await verifySession();
+    if (outcome === 'ok') {
+      if (before && !sameStaff(before, state.session.staff)) {
+        if (!quiet) toastFailure(COPY.sessionChanged, 'amber');
+        return fail('failed', COPY.sessionChanged);
+      }
+      return null;
+    }
+    if (outcome === 'unauthorized') return fail('unauthorized', COPY.sessionEnded);
+    if (!quiet) toastFailure(COPY.failed);
+    return fail(outcome === 'offline' ? 'offline' : 'failed', COPY.failed);
   };
 
   const failureOutcome = (res: HttpFailure): PollOutcome => {
@@ -628,7 +741,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     const target = `/signin?next=${encodeURIComponent(e.location())}`;
     if (recent) {
       // We were just sent back here with a cookie the API refuses: don't loop, offer the way out.
-      showToast({ tone: 'amber', icon: 'alert', title: COPY.sessionEnded, action: { label: 'Sign in', run: () => e.redirect(target) }, durationMs: null });
+      sessionEndedToastId = showToast({ tone: 'amber', icon: 'alert', title: COPY.sessionEnded, action: { label: 'Sign in', run: () => e.redirect(target) }, durationMs: null });
       return;
     }
     void Promise.race([Promise.all([draftApi.flush(), flushRows()]), new Promise((r) => setTimeout(r, 600))]).then(() => {
@@ -638,7 +751,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 
   // ---- sync loop ----
   const schedulePoll = (delayMs: number) => {
-    if (!running) return;
+    if (!running || signingOut) return;
     if (pollTimer) clearTimeout(pollTimer);
     const id = runId;
     pollTimer = setTimeout(() => {
@@ -647,9 +760,13 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     }, Math.max(0, delayMs));
   };
 
+  /** An expired session is only asked again when there is a reason (resume, a sign-in in another tab). */
+  const sessionBlocked = () =>
+    state.session.status === 'signed_out' || (state.session.status === 'expired' && !sessionCheckDue);
+
   /** Focus / online / pageshow / visible / tap-the-dot: bursts coalesce into one poll. */
   const triggerSync = () => {
-    if (!running || signingOut || state.session.status === 'expired') return;
+    if (!running || signingOut || sessionBlocked()) return;
     if (pollInFlight) {
       pollRerun = true;
       return;
@@ -658,8 +775,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   };
 
   const poll = async (id: number) => {
-    if (!isLive(id) || pollInFlight || !env) return;
-    if (state.session.status === 'expired' || state.session.status === 'signed_out') return;
+    if (!isLive(id) || pollInFlight || !env || signingOut) return;
+    if (sessionBlocked()) return;
     pollInFlight = true;
     pollRerun = false;
     pollCount += 1;
@@ -681,7 +798,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       }
     }
     pollInFlight = false;
-    if (!isLive(id) || gen !== state.generation || outcome === 'stale') return;
+    // A sign-out aborted this poll: it is not a network failure, and nothing is scheduled until it ends.
+    if (!isLive(id) || gen !== state.generation || outcome === 'stale' || signingOut) return;
     switch (outcome) {
       case 'ok':
         failures = 0;
@@ -713,17 +831,26 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   };
 
   const runSync = async (gen: number): Promise<PollOutcome> => {
+    const outcome = await syncPages(gen);
+    // Rows applied before a later request failed keep their alerts (alertBacklog): show them now. A sync
+    // cut short by a stop keeps them for the next one; a sign-out drops them with the rest of the data.
+    if (outcome !== 'stale' && gen === state.generation && running && !signingOut) deliverAlerts();
+    return outcome;
+  };
+
+  const syncPages = async (gen: number): Promise<PollOutcome> => {
     const e = env;
     if (!e) return 'stale';
-    if (state.session.status !== 'active') {
-      const s = await checkSession();
+    // Confirm who is signed in first when this tab can't be sure (never checked, a 401, resumed, or a
+    // sign-in in another tab): the cookie may now belong to someone else.
+    for (let i = 0; i < 2 && (state.session.status !== 'active' || sessionCheckDue); i += 1) {
+      const s = await verifySession();
       if (s !== 'ok') return s;
     }
     const full = cursor === null || now() - cursorAt > SYNC.fullFetchAfterMs;
     const reconcile = !full && reconcileDue;
     const since = full ? null : cursor;
     touchedDuringPoll.clear();
-    const alerts: RaisedAlert[] = [];
     const fullRows: RequestSummary[] = [];
     let versions: Array<[string, number]> | undefined;
     let firstServerTime: string | null = null;
@@ -738,13 +865,13 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       if (page === 0) firstServerTime = body.serverTime;
       if (Array.isArray(body.versions)) versions = [...(versions ?? []), ...body.versions];
       if (full) fullRows.push(...body.rows.filter(isRow));
-      else ingest(body.rows, alerts);
+      else ingest(body.rows, true);
       if (!body.hasMore || !body.next || typeof body.next.at !== 'string' || typeof body.next.id !== 'string') break;
       after = body.next;
     }
     if (full) {
       const valid = fullRows;
-      if (armed) alerts.push(...diffRaisedAlerts(state.confirmed, valid, alertCtx()));
+      if (armed) alertBacklog.push(...diffRaisedAlerts(state.confirmed, valid, alertCtx()));
       set({ confirmed: replaceAll(state.confirmed, valid, touchedDuringPoll), hasData: true });
       markRowsDirty();
     }
@@ -754,7 +881,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         const res = await apiRequest<SyncResponse>(e.fetch, syncPathIds(ids), { timeoutMs: SYNC.requestTimeoutMs, signal: pollAbort?.signal });
         if (gen !== state.generation || !running) return 'stale';
         if (!res.ok) return failureOutcome(res);
-        if (Array.isArray(res.data.rows)) ingest(res.data.rows, alerts);
+        if (Array.isArray(res.data.rows)) ingest(res.data.rows, true);
       }
       reconcileDue = false;
     }
@@ -765,12 +892,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       writeCursor(firstServerTime);
       set({ lastSyncAt: firstServerTime, hasData: true });
     }
-    if (armed) {
-      if (alerts.length) emitAlerts(alerts);
-      else pruneAlertToasts();
-    } else {
-      armed = true; // the first sync after load is the baseline: it alerts nothing
-    }
+    // The first sync after load is the baseline: it alerts nothing (runSync shows what later ones raise).
+    armed = true;
     if (state.outbox.length) kickOutbox();
     return 'ok';
   };
@@ -942,13 +1065,16 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     return updated;
   };
 
+  /** The job record, and with `withBlobs` its photo bytes, committed in one transaction (persist.ts). */
   const persistJob = async (job: OutboxItem, withBlobs: boolean): Promise<boolean> => {
     if (!kv || !state.durableStorage) return false;
     const gen = ownerGen();
     const ok = await enqueue(async (store) => {
       if (gen !== state.generation) return false;
-      if (withBlobs) for (const p of job.photos) if (!p.acked) await writePhotoBlobs(store, p.photoId, p.blob, p.thumbBlob);
-      await store.set(K.job(job.mutationId), jobToStored(job));
+      const entries: Array<[string, unknown]> = [];
+      if (withBlobs) for (const p of job.photos) if (!p.acked) entries.push(await photoBlobsEntry(p.photoId, p.blob, p.thumbBlob));
+      entries.push([K.job(job.mutationId), jobToStored(job)]);
+      await store.setMany(entries);
       return true;
     });
     return ok === true;
@@ -968,23 +1094,18 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     refreshPrompt();
   };
 
-  /** Deletes photo bytes nobody references (finished jobs, cleared drafts). */
+  /**
+   * Deletes photo bytes nobody references (finished jobs, cleared drafts). The stored draft and jobs (other
+   * tabs' included) are read and the bytes deleted in one transaction, which IndexedDB never interleaves
+   * with another tab's save (bytes and their record also go in one transaction): a photo being saved
+   * elsewhere is either not there yet or already referenced. References only this tab holds in memory are
+   * kept too.
+   */
   const gcBlobs = async () => {
-    await enqueue(async (store) => {
-      const all = await store.keys();
-      const blobKeys = all.filter((k) => k.startsWith('blob:'));
-      if (blobKeys.length === 0) return;
-      const keep = new Set<string>();
-      const draft = await store.get<StoredDraft>(K.draft);
-      for (const p of draft?.photos ?? []) keep.add(K.blob(p.photoId));
-      for (const p of draftPending?.photos ?? []) keep.add(K.blob(p.photoId));
-      for (const j of state.outbox) for (const p of j.photos) if (!p.acked) keep.add(K.blob(p.photoId));
-      // Jobs other tabs wrote that this tab hasn't loaded yet.
-      const jobKeys = all.filter((k) => k.startsWith('outbox:'));
-      const jobs = await store.getMany<{ photos?: Array<{ photoId: string; acked: boolean }> }>(jobKeys);
-      for (const j of jobs) for (const p of j?.photos ?? []) if (!p.acked) keep.add(K.blob(p.photoId));
-      for (const k of blobKeys) if (!keep.has(k)) await store.del(k);
-    });
+    const keep = new Set<string>();
+    for (const p of draftPending?.photos ?? []) keep.add(K.blob(p.photoId));
+    for (const j of state.outbox) for (const p of j.photos) if (!p.acked) keep.add(K.blob(p.photoId));
+    await enqueue((store) => store.collectBlobs(keep));
   };
 
   const refreshPrompt = () => {
@@ -1085,6 +1206,14 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     try {
       do {
         workerAgain = false;
+        if (!canFlush() && !sessionCheckDue) break;
+        const sendable = state.outbox.some((j) => j.state !== 'needs_attention');
+        if (sendable && now() - sessionCheckedAt > SESSION_FRESH_MS) sessionMayHaveChanged();
+        if (sessionCheckDue) {
+          if (!running || !env?.online() || signingOut || state.session.status === 'signed_out') break;
+          // Who the cookie belongs to decides the operator prompt; confirm it before anything is sent.
+          if ((await verifySession()) !== 'ok') break;
+        }
         if (!canFlush()) break;
         await withOutboxLock(flushPass);
       } while (workerAgain && running);
@@ -1096,7 +1225,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     }
   };
 
-  const canFlush = () => running && state.session.status === 'active' && !!env && env.online() && !signingOut;
+  // Jobs go out under the cookie's identity, so never before this tab has confirmed who that is.
+  const canFlush = () => running && state.session.status === 'active' && !sessionCheckDue && !!env && env.online() && !signingOut;
 
   const flushPass = async () => {
     const gen = ownerGen();
@@ -1277,16 +1407,21 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   };
 
   // ---- draft ----
+  /** New photo bytes and the draft record that references them, in one transaction (persist.ts). */
   const writeDraft = async (d: RequestDraft) => {
     const gen = ownerGen();
     await enqueue(async (store) => {
       if (gen !== state.generation) return;
+      const entries: Array<[string, unknown]> = [];
+      const added: string[] = [];
       for (const p of d.photos) {
         if (draftSavedPhotos.has(p.photoId)) continue;
-        await writePhotoBlobs(store, p.photoId, p.blob, p.thumbBlob);
-        draftSavedPhotos.add(p.photoId);
+        entries.push(await photoBlobsEntry(p.photoId, p.blob, p.thumbBlob));
+        added.push(p.photoId);
       }
-      await store.set(K.draft, draftToStored(d));
+      entries.push([K.draft, draftToStored(d)]);
+      await store.setMany(entries);
+      for (const id of added) draftSavedPhotos.add(id);
     });
   };
 
@@ -1394,6 +1529,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     const payload: CreateRequestBody = toCreateBody(input.values, mutationId);
     const already = confirmedRowForJob({ mutationId }, state.confirmed);
     if (already) return { outcome: 'sent', request: already };
+    // A sign-out is pending: nothing new goes out (or into an outbox it may be about to discard).
+    if (signingOut) return { outcome: 'not_saved', message: COPY.sessionEnded };
 
     const existing = getJob(mutationId);
     const job: OutboxItem = existing
@@ -1427,6 +1564,13 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       return { outcome: 'queued', mutationId };
     };
     if (!e.online() || state.session.status === 'expired') return queued();
+    if (sessionCheckDue || state.session.status === 'unknown') {
+      // Saved already; it is sent only once this tab knows whose cookie it is. A different staff than
+      // the one it was saved by gets the operator prompt ("Send as …?") instead of a silent send.
+      const outcome = await verifySession();
+      if (gen !== state.generation) return { outcome: 'not_saved', message: COPY.notSaved };
+      if (outcome !== 'ok' || promptIds.includes(mutationId)) return queued();
+    }
 
     directSends.add(mutationId);
     let res: HttpResult<CreateResponse>;
@@ -1463,6 +1607,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const createWithoutOutbox = async (job: OutboxItem): Promise<CreateResult> => {
     const e = requireEnv();
     if (!e.online()) return { outcome: 'not_saved', message: COPY.notSaved };
+    const blocked = await writeGate(true);
+    if (blocked) return { outcome: 'not_saved', message: blocked.ok ? COPY.notSaved : blocked.message };
     const res = await apiRequest<CreateResponse>(e.fetch, '/api/requests', { method: 'POST', json: job.payload, timeoutMs: MUTATION_TIMEOUT_MS });
     if (!res.ok || !isRow(res.data.request)) {
       if (!res.ok && res.kind === 'http' && res.status === 401) sessionExpired();
@@ -1502,6 +1648,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       refuseOffline(quiet);
       return { added: 0, failed: photos.length };
     }
+    if (await writeGate(quiet)) return { added: 0, failed: photos.length };
     const gen = ownerGen();
     let added = 0;
     let failed = 0;
@@ -1550,6 +1697,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     cursorAt = 0;
     cacheStaff = null;
     armed = false;
+    alertBacklog = [];
     rowsDirty = false;
     if (rowsTimer) clearTimeout(rowsTimer);
     rowsTimer = undefined;
@@ -1580,16 +1728,81 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     outboxTimer = undefined;
   };
 
+  /**
+   * DELETE /api/session, retried while the outcome is uncertain. True only when the server confirmed it:
+   * a 2xx, or a 401 (the server already refuses this cookie, so nothing is left to clear). Never true
+   * offline or after a timeout: the HttpOnly cookie would still open the app again.
+   */
+  const deleteSession = async (e: StoreEnv): Promise<boolean> => {
+    for (let attempt = 0; ; attempt += 1) {
+      if (!e.online()) return false;
+      const res = await apiRequest(e.fetch, '/api/session', { method: 'DELETE', timeoutMs: SIGN_OUT_TIMEOUT_MS });
+      if (res.ok || (res.kind === 'http' && res.status === 401)) return true;
+      const wait = SIGN_OUT_RETRY_MS[attempt];
+      if (wait === undefined || !isUncertain(res)) return false;
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  };
+
+  /**
+   * The whole sign-out (A14), also resumed by a page that loads while one is pending. Pending first (the
+   * marker, and nothing syncs or sends), then the server must confirm the cookie is gone; only then are
+   * the other tabs told, the data cleared and /signin opened. If it can't be confirmed, nothing was
+   * cleared: the session simply goes on and the caller tells the user.
+   */
+  const runSignOut = async (discard: boolean): Promise<SignOutResult> => {
+    const e = requireEnv();
+    const storage = e.localStorage();
+    signingOut = true;
+    writeLogoutPending(storage, { at: now(), discard });
+    haltRuntime();
+    const confirmed = await deleteSession(e);
+    if (!confirmed) {
+      clearLogoutPending(storage);
+      signingOut = false;
+      // Back to normal: polling and the outbox resume (the session was never given up locally).
+      if (running && state.session.status !== 'signed_out') {
+        schedulePoll(0);
+        kickOutbox();
+      }
+      return { ok: false, reason: 'failed', message: COPY.signOutFailed };
+    }
+    set({ generation: state.generation + 1 });
+    haltRuntime();
+    broadcast({ type: 'logout', generation: state.generation });
+    await clearLocalData(discard);
+    set({ session: { status: 'signed_out', staffName: null, team: null, staff: null, expiresAt: null } });
+    clearLogoutPending(storage);
+    e.redirect('/signin');
+    return { ok: true };
+  };
+
+  const signOutOnce = (discard: boolean): Promise<SignOutResult> => {
+    if (!signOutRun) {
+      signOutRun = runSignOut(discard).finally(() => {
+        signOutRun = null;
+      });
+    }
+    return signOutRun;
+  };
+
   const onChannelMessage = (event: MessageEvent) => {
     const data = event.data as { type?: string; generation?: number } | null;
     if (!data || typeof data.type !== 'string') return;
     switch (data.type) {
       case 'logout':
+        // Sent only after the server confirmed the cookie is cleared. A tab with its own sign-out pending
+        // finishes it itself (its DELETE now answers 401, which counts as done).
         if (signingOut) return;
         signingOut = true;
         set({ generation: state.generation + 1, session: { status: 'signed_out', staffName: null, team: null, staff: null, expiresAt: null } });
         haltRuntime();
         void clearLocalData(false).then(() => env?.redirect('/signin'));
+        return;
+      case 'signin':
+        // Someone signed in in another tab: the shared cookie may now be another staff member's.
+        sessionMayHaveChanged();
+        triggerSync();
         return;
       case 'outbox':
         void reloadOutbox();
@@ -1612,7 +1825,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 
     async setStatus(id, status, kind) {
       if (offlineNow()) return refuseOffline();
-      return serialize(id, () => runStatus(id, status, kind, null));
+      return serialize(id, async () => (await writeGate(false)) ?? runStatus(id, status, kind, null));
     },
 
     async undo(snackbarId) {
@@ -1622,6 +1835,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       if (offlineNow()) return refuseOffline();
       // Never retried automatically (A12); expectedVersion = the version the original mutation returned.
       return serialize(record.id, async () => {
+        const blocked = await writeGate(false);
+        if (blocked) return blocked;
         // This phone changed the request again while the Undo was queued behind it: it would only 409.
         const current = state.confirmed.get(record.id);
         if (current && current.rowVersion !== record.version && ownKeys.has(alertKey(current))) {
@@ -1640,6 +1855,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       const quiet = !!opts?.quiet;
       if (offlineNow()) return refuseOffline(quiet);
       return serialize(id, async () => {
+        const blocked = await writeGate(quiet);
+        if (blocked) return blocked;
         const gen = ownerGen();
         const row = state.confirmed.get(id);
         if (!row) return fail('not_found', COPY.notFound);
@@ -1664,6 +1881,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       const quiet = !!opts?.quiet;
       if (offlineNow()) return refuseOffline(quiet);
       return serialize(id, async () => {
+        const blocked = await writeGate(quiet);
+        if (blocked) return blocked;
         const gen = ownerGen();
         const row = state.confirmed.get(id);
         if (!row) return fail('not_found', COPY.notFound);
@@ -1737,16 +1956,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     async signOut(opts) {
       const unsent = state.outbox.length;
       if (unsent > 0 && !opts?.discardOutbox) return { ok: false, reason: 'outbox', count: unsent };
-      const e = requireEnv();
-      signingOut = true;
-      set({ generation: state.generation + 1 });
-      haltRuntime();
-      broadcast({ type: 'logout', generation: state.generation });
-      await apiRequest(e.fetch, '/api/session', { method: 'DELETE', timeoutMs: SIGN_OUT_TIMEOUT_MS });
-      await clearLocalData(true);
-      set({ session: { status: 'signed_out', staffName: null, team: null, staff: null, expiresAt: null } });
-      e.redirect('/signin');
-      return { ok: true };
+      if (state.session.status === 'signed_out') return { ok: true };
+      return signOutOnce(!!opts?.discardOutbox);
     },
 
     setPref(key, value) {
@@ -1823,6 +2034,15 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     set({ hydrated: true, durableStorage: durable });
     if (durable) await importLegacyQueue();
     if (!isLive(id)) return;
+    const pendingSignOut = readLogoutPending(e.localStorage());
+    if (pendingSignOut && !signingOut) {
+      // The app was reloaded or killed while signing out: finish that before trusting the cookie again.
+      const result = await signOutOnce(pendingSignOut.discard);
+      if (!result.ok && result.reason === 'failed' && isLive(id)) {
+        showToast({ tone: 'amber', icon: 'alert', title: COPY.signOutFailed, durationMs: null });
+      }
+      return; // done: /signin is opening; not done: runSignOut already resumed polling and the outbox
+    }
     schedulePoll(0);
     kickOutbox();
   };
@@ -1896,9 +2116,16 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       }),
       e.on('window', 'offline', () => setConnection('offline')),
       e.on('window', 'focus', triggerSync),
-      e.on('window', 'pageshow', triggerSync),
+      e.on('window', 'pageshow', (event) => {
+        // Back from the bfcache: the cookie may be someone else's now. (The first pageshow of a load is
+        // not a resume: that load checks the session anyway.)
+        if ((event as PageTransitionEvent).persisted === true) sessionMayHaveChanged();
+        triggerSync();
+      }),
       e.on('document', 'visibilitychange', () => {
         if (e.visible()) {
+          // A resumed tab confirms who is signed in before it syncs on, writes or sends queued requests.
+          sessionMayHaveChanged();
           triggerSync();
         } else {
           // iOS may kill a hidden page without a pagehide: save now.
@@ -1912,7 +2139,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       }),
       subscribePrefs((prefs) => set({ prefs })),
     );
-    channel = e.channel('lp');
+    channel = e.channel(SESSION_CHANNEL);
     channel?.addEventListener('message', onChannelMessage);
     sw = e.serviceWorker({
       onUpdateReady: () => {
