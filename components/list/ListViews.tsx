@@ -10,7 +10,7 @@ import { Button, Text } from '@radix-ui/themes';
 import { MapPin, Plus, Search as SearchIcon, X } from 'lucide-react';
 import { useDeferredValue, useEffect, useRef, useState, type ReactNode } from 'react';
 import { AccountMenu } from '@/components/account/AccountMenu';
-import { Banner } from '@/components/ui/Banner';
+import { ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import { goBack, navigate } from '@/lib/client/nav';
@@ -48,28 +48,6 @@ import s from './list.module.css';
 const SLOW_SYNC_MS = 400;
 
 const selectHydrated = (state: StoreState) => state.hydrated;
-
-/** Offline · N waiting to send / Can't reach the log · Try again (only once data is on screen). */
-function ConnectionBanner() {
-  const actions = useActions();
-  const { connection } = useConnection();
-  const outbox = useOutbox();
-  if (connection === 'offline') {
-    return (
-      <Banner tone="amber" icon="offline">
-        Offline · {outbox.length} waiting to send
-      </Banner>
-    );
-  }
-  if (connection === 'error') {
-    return (
-      <Banner tone="red" icon="error" action={{ label: 'Try again', onClick: actions.syncNow }}>
-        Can&apos;t reach the log
-      </Banner>
-    );
-  }
-  return null;
-}
 
 interface ChromeProps {
   view: ListViewName;

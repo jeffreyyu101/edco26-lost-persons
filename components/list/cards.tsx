@@ -6,6 +6,7 @@ import { ArrowRight, Check, CircleAlert, Clock, UserRound, X } from 'lucide-reac
 import { memo, useEffect, useId, useRef, useState, type CSSProperties } from 'react';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
+import { photoPath } from '@/lib/client/api-paths';
 import { navigate } from '@/lib/client/nav';
 import { STATUS, ageGender, statusMeta, waitTone } from '@/lib/domain';
 import { formatCaseNumber, formatDuration, minutesSince } from '@/lib/format';
@@ -33,7 +34,7 @@ const dim = (closed: boolean): CSSProperties | undefined => (closed ? { opacity:
 // ---------------------------------------------------------------------------------------------------
 
 export function photoThumbUrl(photoId: string): string {
-  return `/api/photos/${encodeURIComponent(photoId)}?size=thumb`;
+  return photoPath(photoId, 'thumb');
 }
 
 /** The request's first photo (thumbnail size), or the "no photo" placeholder (requests.html .thumb). */

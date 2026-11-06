@@ -1,7 +1,6 @@
 // Pure helpers behind the request form (new / edit / needs-attention editor). No React, no I/O, so the
 // rules are unit-tested in node (tests/unit/request-form/form-logic.test.ts).
 import type { RequestSummary } from '@/lib/api-types';
-import type { CreateResult, ToastItem } from '@/lib/client/store-contract';
 import { hasPost, parseAge, toPatch, type RequestFormValues } from '@/lib/client/form-values';
 import {
   AGE_MAX,
@@ -14,7 +13,6 @@ import {
   statusBucket,
   type EditSection,
 } from '@/lib/domain';
-import { formatCaseNumber } from '@/lib/format';
 
 export type FormKey = keyof RequestFormValues;
 export type FormErrors = Partial<Record<FormKey, string>>;
@@ -234,25 +232,6 @@ export function photoIntake(current: number, picked: number): { take: number; dr
   const room = Math.max(0, MAX_PHOTOS - current);
   const take = Math.min(room, Math.max(0, picked));
   return { take, dropped: Math.max(0, picked) - take };
-}
-
-// ---------------------------------------------------------------------------------------------------
-// Create outcome → toast (A13)
-// ---------------------------------------------------------------------------------------------------
-
-export const QUEUED_TOAST_TITLE = 'Saved on this phone · sends when back online';
-
-/** The toast for a create outcome; null when the form shows the result itself. */
-export function createOutcomeToast(result: CreateResult): Omit<ToastItem, 'id'> | null {
-  switch (result.outcome) {
-    case 'sent':
-      return { tone: 'green', icon: 'check', title: `${formatCaseNumber(result.request.caseNumber)} saved`, durationMs: 4_000 };
-    case 'queued':
-      return { tone: 'neutral', icon: 'cloud-off', title: QUEUED_TOAST_TITLE, durationMs: 5_000 };
-    case 'needs_attention':
-    case 'not_saved':
-      return null;
-  }
 }
 
 // ---------------------------------------------------------------------------------------------------

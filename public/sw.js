@@ -113,14 +113,25 @@ async function precacheShell(cache) {
   }
 }
 
+/** The sign-in page as a signed-out visitor gets it (no cookie), and the assets it references. */
+async function precacheSignIn(cache) {
+  const res = await cacheIfOk(cache, '/signin', { cache: 'no-store', credentials: 'omit' });
+  if (!res) return;
+  try {
+    await precacheUrls(cache, assetUrls(await res.clone().text()));
+  } catch (e) {
+    // ignore
+  }
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     (async () => {
       const cache = await caches.open(CACHE);
       await Promise.all(CORE.map((u) => cacheIfOk(cache, u)));
       await precacheShell(cache);
-      // /signin is cacheable only while signed out (signed in, it redirects to /).
-      await cacheIfOk(cache, '/signin', { cache: 'no-store' });
+      // /signin without the cookie (signed in, the proxy would redirect it to /), plus its own chunks.
+      await precacheSignIn(cache);
       // The very first install takes over at once; an update waits for "Reload".
       if (!self.registration.active) await self.skipWaiting();
     })(),

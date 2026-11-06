@@ -7,14 +7,13 @@ import { Dialog, VisuallyHidden } from '@radix-ui/themes';
 import { X } from 'lucide-react';
 import { useCallback, useRef, useState, type KeyboardEvent } from 'react';
 import type { PhotoInfo } from '@/lib/api-types';
+import { photoPath } from '@/lib/client/api-paths';
 import { PHOTO_TIMING_LABEL, parseStaff } from '@/lib/domain';
 import { formatListTime } from '@/lib/format';
 import { Bust } from './Bust';
 import s from './profile.module.css';
 
-export function photoUrl(id: string, size: 'thumb' | 'full'): string {
-  return `/api/photos/${encodeURIComponent(id)}?size=${size}`;
-}
+export const photoUrl = photoPath;
 
 const near = (i: number) => [i - 1, i, i + 1];
 

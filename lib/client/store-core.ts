@@ -68,6 +68,7 @@ import {
   type CreateResult,
   type DraftPhoto,
   type MutationFailure,
+  type MutationOptions,
   type MutationResult,
   type Overlay,
   type RequestDraft,
@@ -106,7 +107,7 @@ export interface StoreEnv {
   localStorage(): Storage | null;
   /** sessionStorage (401 redirect loop guard). */
   sessionStorage(): Storage | null;
-  /** Full navigation (sign-in after a 401 or a sign-out). */
+  /** Full navigation that replaces the history entry (sign-in after a 401 or a sign-out). */
   redirect(url: string): void;
   /** pathname + search of the current page. */
   location(): string;
@@ -136,7 +137,8 @@ export function browserEnv(): StoreEnv {
     openKv: () => openKv(),
     localStorage: () => safeStorage(() => window.localStorage),
     sessionStorage: () => safeStorage(() => window.sessionStorage),
-    redirect: (url) => window.location.assign(url),
+    // replace: Back from sign-in must not return to an app page that only bounces to sign-in again.
+    redirect: (url) => window.location.replace(url),
     location: () => `${window.location.pathname}${window.location.search}`,
     serviceWorker: (hooks) => startServiceWorker(hooks),
   };
@@ -738,8 +740,15 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     latest ? { ok: false, reason, message, latest } : { ok: false, reason, message };
 
   /** Drop the overlay, then map a failure to a result (and a toast). Never leaves unconfirmed state. */
-  const mutationFailed = async (id: string, res: HttpFailure, opts: { conflictToast: boolean }): Promise<MutationResult> => {
+  /**
+   * Drop the overlay, then map a failure to a result (and a toast). Never leaves unconfirmed state.
+   * `quiet`: the caller shows the failure itself (MutationOptions), so no toast; a 401 still signs out.
+   */
+  const mutationFailed = async (id: string, res: HttpFailure, opts: { conflictToast: boolean; quiet?: boolean }): Promise<MutationResult> => {
     dropOverlay(id);
+    const toast = (title: string, tone?: ToastItem['tone']) => {
+      if (!opts.quiet) toastFailure(title, tone);
+    };
     if (res.kind === 'http') {
       switch (res.status) {
         case 401:
@@ -747,30 +756,30 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
           return fail('unauthorized', COPY.sessionEnded);
         case 409: {
           const latest = await fetchRow(id);
-          if (opts.conflictToast) showToast({ tone: 'amber', icon: 'alert', title: COPY.conflict, durationMs: 6_000 });
+          if (opts.conflictToast && !opts.quiet) showToast({ tone: 'amber', icon: 'alert', title: COPY.conflict, durationMs: 6_000 });
           return fail('conflict', COPY.conflict, latest ?? undefined);
         }
         case 403:
-          toastFailure(COPY.forbidden, 'amber');
+          toast(COPY.forbidden, 'amber');
           return fail('forbidden', COPY.forbidden);
         case 404:
-          toastFailure(COPY.notFound, 'amber');
+          toast(COPY.notFound, 'amber');
           return fail('not_found', COPY.notFound);
         case 422: {
           const latest = await fetchRow(id);
-          toastFailure(COPY.invalid, 'amber');
+          toast(COPY.invalid, 'amber');
           return fail('invalid', res.error?.message || COPY.invalid, latest ?? undefined);
         }
         default:
           break;
       }
     }
-    toastFailure(COPY.failed);
+    toast(COPY.failed);
     return fail('failed', COPY.failed);
   };
 
-  const refuseOffline = (): MutationResult => {
-    showToast({ tone: 'amber', icon: 'cloud-off', title: COPY.needsConnection, durationMs: 4_000 });
+  const refuseOffline = (quiet = false): MutationResult => {
+    if (!quiet) showToast({ tone: 'amber', icon: 'cloud-off', title: COPY.needsConnection, durationMs: 4_000 });
     return fail('offline', COPY.needsConnection);
   };
 
@@ -1398,10 +1407,16 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     if (pendingId === mutationId || saved?.clientMutationId === mutationId) await draftApi.clear();
   };
 
-  const addPhotos = async (id: string, photos: DraftPhoto[], timing: 'today' | 'older'): Promise<{ added: number; failed: number }> => {
+  const addPhotos = async (
+    id: string,
+    photos: DraftPhoto[],
+    timing: 'today' | 'older',
+    opts?: MutationOptions,
+  ): Promise<{ added: number; failed: number }> => {
     const e = requireEnv();
+    const quiet = !!opts?.quiet;
     if (offlineNow()) {
-      refuseOffline();
+      refuseOffline(quiet);
       return { added: 0, failed: photos.length };
     }
     const gen = ownerGen();
@@ -1426,7 +1441,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         return { added, failed: photos.length - added };
       }
     }
-    if (failed > 0) toastFailure(failed === 1 ? "Couldn't add the photo" : `Couldn't add ${failed} photos`);
+    if (failed > 0 && !quiet) toastFailure(failed === 1 ? "Couldn't add the photo" : `Couldn't add ${failed} photos`);
     return { added, failed };
   };
 
@@ -1529,8 +1544,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 
     create,
 
-    async updateFields(id, patch: RequestPatch, baseVersion) {
-      if (offlineNow()) return refuseOffline();
+    async updateFields(id, patch: RequestPatch, baseVersion, opts) {
+      const quiet = !!opts?.quiet;
+      if (offlineNow()) return refuseOffline(quiet);
       return serialize(id, async () => {
         const gen = ownerGen();
         const row = state.confirmed.get(id);
@@ -1548,12 +1564,13 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
           return { ok: true, changed: !!res.data.changed, request: state.confirmed.get(id) ?? res.data.request };
         }
         // A10: the form shows the conflict review itself (latest data, the user's edits kept).
-        return mutationFailed(id, res.ok ? { ok: false, kind: 'network' } : res, { conflictToast: false });
+        return mutationFailed(id, res.ok ? { ok: false, kind: 'network' } : res, { conflictToast: false, quiet });
       });
     },
 
-    async cancel(id) {
-      if (offlineNow()) return refuseOffline();
+    async cancel(id, opts) {
+      const quiet = !!opts?.quiet;
+      if (offlineNow()) return refuseOffline(quiet);
       return serialize(id, async () => {
         const gen = ownerGen();
         const row = state.confirmed.get(id);
@@ -1571,7 +1588,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
           markLive();
           return { ok: true, changed: !!res.data.changed, request: state.confirmed.get(id) ?? res.data.request };
         }
-        return mutationFailed(id, res.ok ? { ok: false, kind: 'network' } : res, { conflictToast: true });
+        return mutationFailed(id, res.ok ? { ok: false, kind: 'network' } : res, { conflictToast: true, quiet });
       });
     },
 

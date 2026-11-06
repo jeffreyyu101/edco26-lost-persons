@@ -538,3 +538,9 @@ button.portrait {
   font-size: 14px;
   color: rgba(255, 255, 255, 0.65);
 }
+
+/* The shell's Undo snackbar (bottom 24 px) would cover the sticky actions for its 6 s: while the profile
+   shows them, lift it just above the bar (12 + 40 + 26 px, or the safe area on phones with a home bar). */
+:global(body):has(.foot) :global(.lp-snack) {
+  bottom: calc(max(26px, calc(env(safe-area-inset-bottom) + 8px)) + 52px + 12px);
+}

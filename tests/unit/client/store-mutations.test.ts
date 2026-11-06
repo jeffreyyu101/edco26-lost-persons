@@ -6,7 +6,7 @@ import { COPY } from '@/lib/client/store-core';
 import { applyOverlay } from '@/lib/client/selectors';
 import { STATUS } from '@/lib/domain';
 import { advance } from './helpers/env';
-import { boot, finish, gate, installStoreHooks, ready } from './helpers/boot';
+import { boot, finish, gate, installStoreHooks, photo, ready } from './helpers/boot';
 import { FakeServer, STAFF, apiError, json, makeRow } from './helpers/fake-server';
 
 installStoreHooks();
@@ -245,5 +245,32 @@ describe('cancel', () => {
     expect(res).toMatchObject({ ok: true, changed: true });
     expect(server.requests('POST', `/api/requests/${mine.id}/cancel`)[0]?.body).toEqual({ expectedVersion: 1 });
     expect(s().confirmed.get(mine.id)?.status).toBe(STATUS.cancelled);
+  });
+});
+
+describe('quiet mutations (the screen shows the failure itself)', () => {
+  it('cancel, updateFields and addPhotos add no failure toast with { quiet: true }; the default still toasts', async () => {
+    const mine = makeRow(6, { createdBy: STAFF.dana.staff });
+    const server = new FakeServer([mine]);
+    const { a, s } = boot(server);
+    await ready();
+    server.override = (req) => (req.path.includes('/api/requests/') && req.method !== 'GET' ? apiError(403, 'forbidden', 'Creator only') : undefined);
+    expect(await finish(a.cancel(mine.id, { quiet: true }))).toMatchObject({ ok: false, reason: 'forbidden' });
+    expect(await finish(a.updateFields(mine.id, { clothing: 'x' }, 1, { quiet: true }))).toMatchObject({ ok: false, reason: 'forbidden' });
+    expect(await finish(a.addPhotos(mine.id, [photo('p0000000-0000-4000-8000-0000000000aa')], 'today', { quiet: true }))).toEqual({ added: 0, failed: 1 });
+    expect(s().toasts).toHaveLength(0);
+    expect(s().pending.size).toBe(0);
+    expect(await finish(a.cancel(mine.id))).toMatchObject({ ok: false, reason: 'forbidden' });
+    expect(s().toasts.map((t) => t.title)).toContain(COPY.forbidden);
+  });
+
+  it('a quiet refusal offline returns "offline" without the "Needs a connection" toast', async () => {
+    const server = new FakeServer([R1]);
+    const { a, fe, s } = boot(server);
+    await ready();
+    fe.setOnline(false);
+    fe.fire('window', 'offline');
+    expect(await finish(a.cancel(R1.id, { quiet: true }))).toMatchObject({ ok: false, reason: 'offline' });
+    expect(s().toasts).toHaveLength(0);
   });
 });

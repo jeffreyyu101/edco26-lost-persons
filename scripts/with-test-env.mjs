@@ -22,9 +22,12 @@ try {
   process.exit(1);
 }
 
-// `next start` needs the port as a flag; add it when the caller did not.
-if (cmd === 'next' && (args[0] === 'start' || args[0] === 'dev') && !args.includes('--port') && !args.includes('-p')) {
-  args.push('--port', env.PORT || '3100');
+// `next start` needs the port as a flag; add it when the caller did not. Test servers listen on loopback
+// only (the default binds every interface, which would expose a test server to the LAN), matching the
+// 127.0.0.1 base URL the tests use.
+if (cmd === 'next' && (args[0] === 'start' || args[0] === 'dev')) {
+  if (!args.includes('--port') && !args.includes('-p')) args.push('--port', env.PORT || '3100');
+  if (!args.includes('--hostname') && !args.includes('-H')) args.push('--hostname', '127.0.0.1');
 }
 
 const child = spawn(cmd === 'next' ? 'node_modules/.bin/next' : cmd, args, { env, stdio: 'inherit' });

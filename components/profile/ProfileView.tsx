@@ -18,7 +18,7 @@
 import { AlertDialog, Badge, Button, DropdownMenu, Heading, IconButton, Skeleton, Text, VisuallyHidden } from '@radix-ui/themes';
 import { Camera, Check, Clock, CloudOff, Ellipsis, Pencil, Phone, RotateCcw, Trash2, Undo2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
-import { Banner } from '@/components/ui/Banner';
+import { Banner, ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ProfileSkeleton } from '@/components/ui/Skeleton';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
@@ -104,7 +104,7 @@ export function ProfileView({ id }: ProfileViewProps) {
     }
     return (
       <Frame>
-        <ProfileSkeleton />
+        <ProfileSkeleton chrome={false} />
       </Frame>
     );
   }
@@ -237,7 +237,7 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh }: ProfileP
     setAdd({ ...add, phase: 'uploading', error: null });
     let failed = picks.length;
     try {
-      ({ failed } = await actions.addPhotos(row.id, picks.map((p) => p.photo), timing));
+      ({ failed } = await actions.addPhotos(row.id, picks.map((p) => p.photo), timing, { quiet: true }));
     } catch {
       // Treated as every photo failing; a retry resends the same photo ids.
     }
@@ -270,7 +270,7 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh }: ProfileP
     setCancelState({ busy: true, error: null });
     let result: MutationResult;
     try {
-      result = await actions.cancel(row.id);
+      result = await actions.cancel(row.id, { quiet: true });
     } catch {
       result = { ok: false, reason: 'failed', message: '' };
     }
@@ -318,6 +318,7 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh }: ProfileP
           </DropdownMenu.Content>
         </DropdownMenu.Root>
       </div>
+      <ConnectionBanner />
       {conflict ? (
         <div className={s.banner}>
           <Banner tone="amber" icon="conflict">

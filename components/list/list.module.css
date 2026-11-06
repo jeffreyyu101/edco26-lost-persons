@@ -13,14 +13,6 @@
   padding-right: env(safe-area-inset-right);
 }
 
-/* The list views draw the offline / error banner themselves, between the header and the view bar
-   (states.html Offline). Until the page shell stops rendering its own copy above list views, hide that
-   copy when it sits right before a list view, so the banner never shows twice. Inert otherwise. */
-:global(.lp-banner):has(+ .root) {
-  /* !important: the shell banner sets its display inline. */
-  display: none !important;
-}
-
 /* Header, banner and view bar stay on screen while the list scrolls (the document scrolls, so iOS keeps
    its momentum scrolling and collapsing toolbars). */
 .sticky {

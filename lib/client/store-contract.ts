@@ -160,6 +160,14 @@ export type MutationFailure =
   /** 401: the store pauses and sends the user to sign-in. */
   | 'unauthorized';
 
+/**
+ * (Added at integration.) `quiet`: the screen shows this mutation's failure itself (an inline error in a
+ * dialog or form), so the store adds no failure toast. A 401 still sends the user to sign-in.
+ */
+export interface MutationOptions {
+  quiet?: boolean;
+}
+
 export type MutationResult =
   | { ok: true; changed: boolean; request: RequestSummary }
   | { ok: false; reason: MutationFailure; message: string; latest?: RequestSummary };
@@ -230,11 +238,11 @@ export interface StoreActions {
   /** Every create is an outbox job, persisted before sending (A13). Resolves within ~10 s. */
   create(input: CreateInput): Promise<CreateResult>;
   /** Edit: only changed keys, with the version captured when editing started (A10). */
-  updateFields(id: string, patch: RequestPatch, baseVersion: number): Promise<MutationResult>;
+  updateFields(id: string, patch: RequestPatch, baseVersion: number, opts?: MutationOptions): Promise<MutationResult>;
   /** Creator only, while Waiting. */
-  cancel(id: string): Promise<MutationResult>;
+  cancel(id: string, opts?: MutationOptions): Promise<MutationResult>;
   /** Photos for an existing request (needs a connection in v1). */
-  addPhotos(id: string, photos: DraftPhoto[], timing: PhotoTiming): Promise<{ added: number; failed: number }>;
+  addPhotos(id: string, photos: DraftPhoto[], timing: PhotoTiming, opts?: MutationOptions): Promise<{ added: number; failed: number }>;
   /** Decode via <img>, draw straight into target-size canvases, re-encode (EXIF stripped). */
   preparePhoto(file: File): Promise<DraftPhoto>;
 
@@ -274,7 +282,8 @@ export interface StoreActions {
 
   /**
    * Refused while unsent outbox jobs exist unless discardOutbox is true. Otherwise clears the cache,
-   * phone-created ids, drafts and the cookie (remembered name/team stay unless changed at sign-in).
+   * phone-created ids, drafts and the cookie (remembered name/team stay unless changed at sign-in), then
+   * navigates to /signin itself (location.replace), so callers only close their own UI.
    */
   signOut(opts?: { discardOutbox?: boolean }): Promise<{ ok: true } | { ok: false; reason: 'outbox'; count: number }>;
 

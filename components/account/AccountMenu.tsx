@@ -51,10 +51,9 @@ export function AccountMenu({ size = '2' }: AccountMenuProps) {
     try {
       const result = await actions.signOut(discardOutbox ? { discardOutbox: true } : undefined);
       if (result.ok) {
+        // The store has already started the full navigation to /signin (replace: Back can't return here).
         setOpen(false);
         setUnsent(null);
-        // A full navigation to the separate sign-in route; replace so Back doesn't return to the app.
-        window.location.replace('/signin');
         return;
       }
       setOpen(false);

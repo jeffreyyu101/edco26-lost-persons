@@ -23,7 +23,7 @@ test('/ without a session goes to sign-in and keeps the view', async ({ page }) 
   await expect(page).toHaveURL(/\/signin\?next=%2F%3Fview%3Dmine$/);
 });
 
-// Signed-in shell over the Phase 1a stub store (synthetic rows; LP-1012 is "Kayla Martinez").
+// Signed-in shell over the real store and the seeded local database (LP-1012 is "Kayla Martinez").
 test.describe('signed-in navigation', () => {
   const KAYLA = '5eed0000-0000-4000-8000-000000001012';
   let errors: string[];
@@ -52,7 +52,9 @@ test.describe('signed-in navigation', () => {
 
   test('typing in search updates the results (replace) and Cancel returns to the list', async ({ page }) => {
     await page.goto('/?q=');
-    await expect(page.getByText('0 results', { exact: true })).toBeVisible();
+    // No count before anything is typed.
+    await expect(page.getByRole('textbox', { name: 'Search requests' })).toBeVisible();
+    await expect(page.getByText(/^\d+ results?$/)).toHaveCount(0);
     await page.getByRole('textbox', { name: 'Search requests' }).fill('Kayla');
     await expect(page).toHaveURL(/\?q=Kayla$/);
     await expect(page.getByText('1 result', { exact: true })).toBeVisible();

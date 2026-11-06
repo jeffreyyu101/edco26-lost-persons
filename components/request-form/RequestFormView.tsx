@@ -33,20 +33,17 @@ import {
   useIsLoading,
   useRequest,
   useStoreSelector,
-  type AppStore,
   type CreateResult,
   type DraftPhoto,
   type MutationResult,
   type RequestDraft,
   type StoreState,
-  type ToastItem,
 } from '@/lib/client/store-contract';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { isPostValue, isUuid, postFull, type EditSection, type PhotoTiming } from '@/lib/domain';
 import { formatCaseNumber } from '@/lib/format';
 import {
   canSaveEdit,
-  createOutcomeToast,
   findDuplicate,
   newUuid,
   rebaseOnConflict,
@@ -83,12 +80,6 @@ const selectOffline = (s: StoreState) => s.connection === 'offline';
 const selectDurable = (s: StoreState) => s.durableStorage;
 const selectHydrated = (s: StoreState) => s.hydrated;
 const noop = () => undefined;
-
-/** Shows a toast unless the same one is already up (the store may announce a create outcome itself). */
-function showToastOnce(store: AppStore, toast: Omit<ToastItem, 'id'>): void {
-  if (store.getState().toasts.some((t) => t.title === toast.title)) return;
-  store.actions.showToast(toast);
-}
 
 /** "Similar open request: LP-1009" — the newest open request with the same name (case-insensitive). */
 function useDuplicate(name: string, exclude: { id?: string | null; clientMutationId?: string | null }): DuplicateRef | null {
@@ -289,8 +280,7 @@ function NewRequest() {
       return;
     }
     await clearDraft();
-    const toast = createOutcomeToast(result);
-    if (toast) showToastOnce(store, toast);
+    // The store has already announced the outcome ("LP-1014 saved" / "Saved on this phone").
     // A definitive rejection stays in the outbox: show it in the needs-attention editor, error pointed at.
     if (result.outcome === 'needs_attention') navigate({ outbox: result.mutationId }, { replace: true });
     else goBack({});
@@ -419,7 +409,7 @@ function EditForm({ id, section, row }: { id: string; section: EditSection; row:
     setFailure(null);
     let result: MutationResult;
     try {
-      result = await actions.updateFields(id, patch, form.baseVersion);
+      result = await actions.updateFields(id, patch, form.baseVersion, { quiet: true });
     } catch {
       result = { ok: false, reason: 'failed', message: "Couldn't save — check signal and try again" };
     }
@@ -436,12 +426,11 @@ function EditForm({ id, section, row }: { id: string; section: EditSection; row:
         else setReview([]);
         return;
       }
-      case 'failed':
-      case 'offline':
       case 'unauthorized':
-        // The store already says so (toast / sign-in); the edits stay in the form.
+        // The store sends the user to sign-in; the edits stay in the form.
         return;
       default:
+        // Quiet mutation: the form shows the failure (no store toast); the edits stay in the form.
         setFailure(result.message);
     }
   };

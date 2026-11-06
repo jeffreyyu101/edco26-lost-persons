@@ -47,3 +47,8 @@ export function syncPath(query: SyncPathQuery): string {
   const qs = params.toString();
   return qs ? `/api/sync?${qs}` : '/api/sync';
 }
+
+/** GET /api/photos/:id: a 302 to a short-lived signed URL. Lists and the profile use thumb, the viewer full. */
+export function photoPath(id: string, size: 'thumb' | 'full'): string {
+  return `/api/photos/${encodeURIComponent(id)}?size=${size}`;
+}

@@ -10,7 +10,7 @@ import { ConnectionBanner } from '@/components/ui/Banner';
 import { ProfileSkeleton, RowSkeletons } from '@/components/ui/Skeleton';
 import { Snackbar, Toaster } from '@/components/ui/Toast';
 import { installAudioUnlock, playChime, vibrate } from '@/lib/client/chime';
-import { useView } from '@/lib/client/nav';
+import { useView, type ViewName } from '@/lib/client/nav';
 import { StoreProvider } from '@/lib/client/store';
 import { useAppStore, usePrefs, useSnackbar, useStoreSelector, useToasts, type StoreState } from '@/lib/client/store-contract';
 import { followSystemTheme } from '@/lib/theme';
@@ -74,10 +74,16 @@ function ViewRouter() {
 }
 
 /**
- * The offline / error banner for views that don't place their own <ConnectionBanner /> (lists and the
- * form put it under their own top bar, as in the mockups).
+ * Views that show the connection state in their own layout, where the mockups put it: the lists between
+ * the header and the view bar (or the "Can't reach the log" empty state before any data), the form under
+ * its top bar, the dashboard as its Live / Offline pill. The profile places a <ConnectionBanner /> under its
+ * top bar, which makes this fallback copy step aside once the profile chunk has loaded.
  */
+const OWN_CONNECTION_UI: ReadonlySet<ViewName> = new Set(['all', 'pending', 'mine', 'search', 'new', 'edit', 'outbox', 'dashboard']);
+
 function ShellBanners() {
+  const view = useView();
+  if (OWN_CONNECTION_UI.has(view.name)) return null;
   return <ConnectionBanner placement="shell" />;
 }
 

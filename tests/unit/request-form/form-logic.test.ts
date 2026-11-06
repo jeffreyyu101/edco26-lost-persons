@@ -7,10 +7,8 @@ import { EMPTY_FORM_VALUES, toPatch, type RequestFormValues } from '@/lib/client
 import { LIMITS, STATUS, isUuid } from '@/lib/domain';
 import {
   MORE_FIELDS,
-  QUEUED_TOAST_TITLE,
   canSaveEdit,
   changedKeys,
-  createOutcomeToast,
   findDuplicate,
   lastSeenWithChip,
   moreFieldsFor,
@@ -276,19 +274,6 @@ describe('photo intake (max 3)', () => {
     expect(photoIntake(2, 2)).toEqual({ take: 1, dropped: 1 });
     expect(photoIntake(3, 1)).toEqual({ take: 0, dropped: 1 });
     expect(photoIntake(1, 0)).toEqual({ take: 0, dropped: 0 });
-  });
-});
-
-describe('create outcome toasts (A13)', () => {
-  it('says "LP-1014 saved" when sent and the queued copy when saved on the phone', () => {
-    expect(createOutcomeToast({ outcome: 'sent', request: row({ caseNumber: 1014 }) })).toMatchObject({ tone: 'green', icon: 'check', title: 'LP-1014 saved' });
-    expect(createOutcomeToast({ outcome: 'queued', mutationId: newUuid() })).toMatchObject({ icon: 'cloud-off', title: QUEUED_TOAST_TITLE });
-    expect(QUEUED_TOAST_TITLE).toBe('Saved on this phone · sends when back online');
-  });
-
-  it('leaves needs-attention and not-saved to the form', () => {
-    expect(createOutcomeToast({ outcome: 'needs_attention', mutationId: newUuid(), message: 'x' })).toBeNull();
-    expect(createOutcomeToast({ outcome: 'not_saved', message: 'x' })).toBeNull();
   });
 });
 
