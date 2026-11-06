@@ -585,6 +585,11 @@ $fn$;
 
 -- lp_create_request: idempotent on client_mutation_id. An existing row is returned first (so a retry
 -- never burns a case number); otherwise insert … on conflict do nothing. Audit only on an actual insert.
+--   p: {client_mutation_id, reporting_location, other_location, first_name, last_name, age, gender, clothing,
+--       last_seen, hair, height_build, identifying_features, physical_description, additional_notes,
+--       contact_name, contact_phone, contact_relationship, contact_notes} — snake_case; the server splits the
+--       form's single `name` with domain.splitName. Omitted keys are stored as null.
+--   p_staff: the attribution string from the session ("Name · Team"), never from the client.
 -- Returns {created: boolean, row}.
 create function public.lp_create_request(p jsonb, p_staff text)
 returns jsonb
@@ -783,6 +788,8 @@ end
 $fn$;
 
 -- lp_update_fields: edit details. Only whitelisted keys; never status, identity or system fields.
+--   p_patch: snake_case keys as in lp_create_request (minus client_mutation_id); a name change sends
+--   both first_name and last_name. Omitted = unchanged, null = clear.
 --   Version mismatch → P0409. Unchanged keys are skipped; nothing changed → {changed: false, row}, no audit.
 --   Field rules apply to the keys sent; the post rule applies to the merged row (Other needs
 --   other_location; any other post clears it). Audit patient_updated with only the changed keys.
