@@ -43,7 +43,7 @@ import { formatCreatedTime, formatUpdatedAgo, updatedPhrase } from '@/lib/format
 import { AppHeader } from './AppHeader';
 import { CheckCard, ComingCard, MineCard, OutboxCard } from './cards';
 import { primeKeyboard, useDelayedFlag, useScrollMemory, useStatusTap, useStickyHeight } from './hooks';
-import { logRowLabel, mineFreshTone, resultCount, searchDisplay, searchLogLabel, updatedSince } from './list-helpers';
+import { mineFreshTone, resultCount, searchDisplay, updatedSince } from './list-helpers';
 import { AllSkeleton, MineSkeleton, PendingSkeleton } from './ListSkeletons';
 import { ClosedFold, ClosedRows, ColumnHeader, LogGrid, LogRow, OutboxLogRow, SearchLogRow } from './rows';
 import type { ListViewName } from './ViewSwitcher';
@@ -203,7 +203,7 @@ function FilterChips({ status, post, open, count }: { status: string | null; pos
   );
 }
 
-/** The created / updated text and the updated phrase for one log row. */
+/** The created / updated text, and Updated as a screen reader says it, for one log row. */
 function rowTimes(row: RequestSummary, now: number, tz: string) {
   const since = updatedSince(row);
   return {
@@ -213,16 +213,11 @@ function rowTimes(row: RequestSummary, now: number, tz: string) {
   };
 }
 
-function logTexts(row: RequestSummary, now: number, tz: string) {
-  const { created, updated, updatedSaid } = rowTimes(row, now, tz);
-  return { created, updated, label: logRowLabel(row, created, updatedSaid) };
-}
-
 function Rows({ rows, now, tz }: { rows: readonly RequestSummary[]; now: number; tz: string }) {
   return (
     <>
       {rows.map((row) => (
-        <LogRow key={row.id} row={row} {...logTexts(row, now, tz)} />
+        <LogRow key={row.id} row={row} {...rowTimes(row, now, tz)} />
       ))}
     </>
   );
@@ -487,14 +482,11 @@ export function SearchView({ q }: SearchViewProps) {
               const d = searchDisplay(hit);
               // Name and LP number hits are highlighted in place; any other field shows the matched text.
               const line = hit.field === 'name' || hit.field === 'caseNumber' ? '' : d.line;
-              const { created, updated, updatedSaid } = rowTimes(row, now, tz);
               return (
                 <SearchLogRow
                   key={row.id}
                   hit={hit}
-                  created={created}
-                  updated={updated}
-                  label={searchLogLabel(row, created, updatedSaid, line)}
+                  {...rowTimes(row, now, tz)}
                   nameRanges={d.nameRanges}
                   caseRanges={d.caseRanges}
                   line={line}

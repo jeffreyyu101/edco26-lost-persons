@@ -320,6 +320,37 @@ describe('list views render', () => {
     if (at < 0) return '';
     return html.slice(html.lastIndexOf('<', at), html.indexOf('>', at) + 1);
   };
+  /** What a screen reader says for LP-n's row: its text without the aria-hidden parts (no aria-label). */
+  const spoken = (html: string, n: number) => {
+    const at = html.indexOf(`data-request-id="${idOf(n)}"`);
+    const button = html.slice(at, html.indexOf('</button>', at));
+    return button
+      .replace(/<svg[^]*?<\/svg>/g, '')
+      .replace(/<span aria-hidden="true">[^<]*<\/span>/g, '')
+      .replace(/<[^>]+>/g, '')
+      .replace(/<!-- -->/g, '')
+      .replace(/&#x27;/g, "'")
+      .replace(/&amp;/g, '&')
+      .replace(/^[^>]*>/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+  /** What LP-n's row shows in one column: the cell's text without the screen-reader-only words. */
+  const shown = (html: string, n: number, col: string) => {
+    const at = html.indexOf(`data-request-id="${idOf(n)}"`);
+    const button = html.slice(at, html.indexOf('</button>', at));
+    const start = button.indexOf(`data-col="${col}"`);
+    if (start < 0) return null;
+    const cell = button.slice(button.indexOf('>', start) + 1);
+    // The cell ends where the next column starts (cells hold no nested data-col).
+    const end = cell.search(/<span [^>]*data-col="/);
+    return (end < 0 ? cell : cell.slice(0, end))
+      .replace(/<span class="[^"]*vh[^"]*">[^<]*<\/span>/g, '')
+      .replace(/<svg[^]*?<\/svg>/g, '')
+      .replace(/<[^>]+>/g, '')
+      .replace(/<!-- -->/g, '')
+      .trim();
+  };
 
   it('All (option B): queued on top, open rows newest first, every closed one folded into "Closed N"', () => {
     const store = storeWith((s) => ({ ...s, outbox: [outboxItem(), outboxItem({ mutationId: '1b5a3c2e-8d4f-4a1b-9c7e-2f6d8a1b3c4d', state: 'needs_attention', createdAt: NOW - 120_000 })] }));
@@ -386,20 +417,34 @@ describe('list views render', () => {
     const tr = row(1013);
     const created = formatCreatedTime(tr.createdAt, now, 'America/New_York');
     expect(created).toMatch(/^(\w{3} )?\d{1,2}:\d{2} (AM|PM)$/);
-    expect(rowTag(html, 1013)).toContain(`aria-label="LP-1013, T.R., Waiting for check, created ${created}, not updated yet"`);
-    const trHtml = html.slice(html.indexOf(`data-request-id="${idOf(1013)}"`), html.indexOf('</button>', html.indexOf(`data-request-id="${idOf(1013)}"`)));
-    expect(trHtml).toMatch(/data-col="number"[^>]*>1013</);
-    expect(trHtml).toMatch(/data-col="name"[^>]*>T\.R\.</);
-    expect(trHtml).toMatch(/data-tone="blue"/);
-    expect(trHtml).toContain('Waiting for check');
-    expect(trHtml).toContain(`>${created}<`);
-    expect(trHtml).toMatch(/data-col="updated"[^>]*data-none=""[^>]*>—</);
+    // The row's name is its content (no aria-label, so it always says what is shown): one sentence.
+    expect(rowTag(html, 1013)).not.toContain('aria-label');
+    expect(spoken(html, 1013)).toBe(logRowLabel(tr, created, 'not updated yet'));
+    expect(spoken(html, 1013)).toBe(`LP-1013, T.R., Waiting for check, created ${created}, not updated yet`);
+    // What it shows: the bare number, the name, the blue status, the created time, "—".
+    expect(shown(html, 1013, 'number')).toBe('1013');
+    expect(shown(html, 1013, 'name')).toBe('T.R.');
+    expect(shown(html, 1013, 'status')).toBe('Waiting for check');
+    expect(shown(html, 1013, 'created')).toBe(created);
+    expect(shown(html, 1013, 'updated')).toBe('—');
+    expect(html.slice(html.indexOf(`data-request-id="${idOf(1013)}"`))).toMatch(/^[^]*?data-col="status" data-tone="blue"/);
     // Jordan Diaz (LP-1007) moved to In medical 2 minutes ago: green, "2m" (or 1m/3m at a minute edge).
-    const jd = rowTag(html, 1007);
-    expect(jd).toMatch(/aria-label="LP-1007, Jordan Diaz, In medical, friend coming, created [^"]+ (AM|PM), updated [123] minutes? ago"/);
-    const jdHtml = html.slice(html.indexOf(`data-request-id="${idOf(1007)}"`), html.indexOf('</button>', html.indexOf(`data-request-id="${idOf(1007)}"`)));
-    expect(jdHtml).toMatch(/data-tone="green"/);
-    expect(jdHtml).toMatch(/data-col="updated"[^>]*>[123]m</);
+    expect(spoken(html, 1007)).toMatch(/^LP-1007, Jordan Diaz, In medical, friend coming, created \S+ (AM|PM), updated [123] minutes? ago$/);
+    expect(shown(html, 1007, 'status')).toBe('In medical');
+    expect(shown(html, 1007, 'updated')).toMatch(/^[123]m$/);
+    expect(html.slice(html.indexOf(`data-request-id="${idOf(1007)}"`))).toMatch(/^[^]*?data-col="status" data-tone="green"/);
+    // Kayla Martinez (LP-1012) was logged with 2 photos and edited since: updated.
+    expect(shown(html, 1012, 'updated')).toMatch(/^\d+m$/);
+  });
+
+  it('search rows: the matched text under the name is part of the spoken sentence', () => {
+    const now = Date.now();
+    const store = storeWith((s) => s);
+    const html = render(store, <SearchView q="ferris" />);
+    const df = store.getState().confirmed.get(idOf(1011))!;
+    const created = formatCreatedTime(df.createdAt, now, 'America/New_York');
+    expect(shown(html, 1011, 'match')).toBe('Ferris wheel line');
+    expect(spoken(html, 1011)).toBe(searchLogLabel(df, created, 'not updated yet', 'Ferris wheel line'));
   });
 
   it('All filtered (status, post, open): one list, closed rows greyed in place, no fold, no queued rows', () => {

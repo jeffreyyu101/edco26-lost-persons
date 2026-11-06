@@ -518,6 +518,20 @@ button.lr:focus-visible {
   flex: none;
 }
 
+/* Words for screen readers only (a row's name is its content: see rows.tsx). Out of the flow and of the
+   grid; white space kept, so the words of the sentence never run together. */
+.vh {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: pre;
+  border: 0;
+}
+
 /* A label longer than any status this app writes (an unknown legacy value) is cut, not the layout. */
 .stl {
   max-width: 10.5em;
