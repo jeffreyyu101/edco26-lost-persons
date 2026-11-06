@@ -29,4 +29,14 @@ describe('search: free-text age', () => {
     expect(searchRequests(numeric, '24').filter((h) => h.field === 'age')).toEqual([]);
     expect(searchRequests(numeric, 'LP-1011').map((h) => h.field)).toEqual(['caseNumber']);
   });
+
+  it('a row cached before age became text (age still a number) never throws', () => {
+    // The smallint → text change bumped neither updated_at nor row_version, so delta sync keeps such rows,
+    // and a PATCH queued by an older client can put a number into an overlay.
+    const cached = base.map((r) => ({ ...r, age: 24 as unknown as string }));
+    expect(searchRequests(cached, 'kayla').map((h) => [h.row.caseNumber, h.field])).toEqual([[1012, 'name']]);
+    // Every field is checked, the numeric age last: no match anywhere, no throw.
+    expect(searchRequests(cached, 'mid-20s')).toEqual([]);
+    expect(searchRequests(cached, 'LP-1012').map((h) => h.row.caseNumber)).toEqual([1012]);
+  });
 });

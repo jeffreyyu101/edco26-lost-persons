@@ -11,6 +11,16 @@ export function sameRow(a: RequestSummary, b: RequestSummary): boolean {
 }
 
 /**
+ * A row as the client keeps it. Age became text on 2026-11-06 ("mid-20s"), and the column change touched
+ * neither updated_at nor row_version, so a phone's cache (and the delta sync after it) can still hold the
+ * old numeric age: it becomes its text (24 → "24"), as the server maps it. Same object when nothing changes.
+ */
+export function normalizeRow(row: RequestSummary): RequestSummary {
+  const age: unknown = row.age;
+  return typeof age === 'number' ? { ...row, age: String(age) } : row;
+}
+
+/**
  * Monotonic merge: a row replaces the stored one only when its rowVersion is greater than or equal to it.
  * Returns null when nothing changed, so the confirmed map (and every selector memo) keeps its identity.
  */
@@ -19,7 +29,8 @@ export function mergeRows(
   rows: readonly RequestSummary[],
 ): Map<string, RequestSummary> | null {
   let next: Map<string, RequestSummary> | null = null;
-  for (const row of rows) {
+  for (const raw of rows) {
+    const row = normalizeRow(raw);
     const current = (next ?? confirmed).get(row.id);
     if (current) {
       if (row.rowVersion < current.rowVersion) continue;
@@ -42,7 +53,8 @@ export function replaceAll(
   keep: ReadonlySet<string>,
 ): Map<string, RequestSummary> {
   const next = new Map<string, RequestSummary>();
-  for (const row of rows) {
+  for (const raw of rows) {
+    const row = normalizeRow(raw);
     const current = confirmed.get(row.id);
     if (current && current.rowVersion > row.rowVersion) next.set(row.id, current);
     else if (current && current.rowVersion === row.rowVersion && sameRow(current, row)) next.set(row.id, current);
@@ -92,6 +104,9 @@ export function overlayForPatch(row: RequestSummary, patch: RequestPatch): Parti
       out['lastName'] = lastName;
     } else if (typeof value === 'string' || value === null) {
       out[key] = key === 'reportingLocation' ? value : cleanText(value);
+    } else if (key === 'age' && typeof value === 'number') {
+      // A PATCH queued by a client from before age became text: the server stores its text.
+      out[key] = String(value);
     } else {
       out[key] = value;
     }

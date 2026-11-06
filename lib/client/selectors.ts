@@ -162,6 +162,13 @@ export function highlightRanges(text: string, query: string): Array<[number, num
   return out;
 }
 
+/**
+ * A field's text for search. sync-merge normalises a cached numeric age to text on load; this also keeps a
+ * stray number (or any other non-string) from throwing in highlightRanges while the list renders.
+ */
+const searchableText = (value: unknown): string | null =>
+  typeof value === 'string' ? value : typeof value === 'number' ? String(value) : null;
+
 export function searchRequests(rows: readonly RequestSummary[], query: string): SearchHit[] {
   const q = query.trim();
   if (!q) return [];
@@ -179,7 +186,7 @@ export function searchRequests(rows: readonly RequestSummary[], query: string): 
         continue;
       }
     }
-    const fields: Array<[SearchField, string | null]> = [
+    const fields: Array<[SearchField, unknown]> = [
       ['name', row.name],
       ['clothing', row.clothing],
       ['lastSeen', row.lastSeen],
@@ -189,7 +196,8 @@ export function searchRequests(rows: readonly RequestSummary[], query: string): 
       ['post', `${row.postShort} · ${postFull(row.reportingLocation, row.otherLocation)}`],
       ['age', caseNumber === null ? row.age : null],
     ];
-    for (const [field, text] of fields) {
+    for (const [field, value] of fields) {
+      const text = searchableText(value);
       if (!text) continue;
       const ranges = highlightRanges(text, q);
       if (ranges.length > 0) {
