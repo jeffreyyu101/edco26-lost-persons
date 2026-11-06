@@ -1,13 +1,15 @@
-// Logout boundary (A14), alerts through the store (baseline, someone else's change, own mutations, bell,
-// bursts) and drafts (A20). Synthetic data only.
+// Logout boundary (A14) including a sign-out the server never confirmed, alerts through the store
+// (baseline, someone else's change, own mutations, bell, bursts, a sync that fails half-way) and drafts
+// (A20). Synthetic data only.
 import { describe, expect, it, vi } from 'vitest';
 import { openKv, K } from '@/lib/client/persist';
 import { COPY } from '@/lib/client/store-core';
+import { LOGOUT_PENDING_KEY, announceSignIn } from '@/lib/client/session-signals';
 import type { AlertEvent } from '@/lib/client/store-contract';
 import { STATUS } from '@/lib/domain';
-import { advance, settle } from './helpers/env';
+import { MemoryStorage, advance, settle } from './helpers/env';
 import { boot, finish, gate, installStoreHooks, photo, ready, values } from './helpers/boot';
-import { FakeServer, STAFF, makeRow } from './helpers/fake-server';
+import { FakeServer, STAFF, apiError, makeRow } from './helpers/fake-server';
 
 installStoreHooks();
 
@@ -59,6 +61,152 @@ describe('sign out (A14)', () => {
     const n = server.log.length;
     await advance(60_000);
     expect(server.log.length).toBe(n);
+  });
+
+  it('regression: never claims success when the server did not clear the cookie; retries, keeps everything, says so', async () => {
+    const server = new FakeServer([makeRow(1), makeRow(2)]);
+    const one = boot(server);
+    await ready();
+    const two = boot(server, { dbName: one.fe.dbName, channelName: `${one.fe.dbName}-channel` });
+    await ready();
+    await advance(3_500); // the cache write
+    server.override = (req) => (req.path === '/api/session' && req.method === 'DELETE' ? apiError(503, 'unavailable', 'Try again') : undefined);
+    const res = await finish(one.a.signOut(), 5_000);
+    expect(res).toEqual({ ok: false, reason: 'failed', message: COPY.signOutFailed });
+    expect(server.requests('DELETE', '/api/session')).toHaveLength(3); // retried (1 s, 2 s)
+    expect(server.session).not.toBeNull(); // the cookie still works…
+    expect(one.fe.redirects).toEqual([]); // …so /signin is not opened (it would bounce straight back)
+    expect(one.s()).toMatchObject({ session: { status: 'active', staff: STAFF.dana.staff }, generation: 0, hasData: true });
+    expect(one.s().confirmed.size).toBe(2);
+    expect(one.fe.local.getItem(LOGOUT_PENDING_KEY)).toBeNull();
+    expect(((await openKv(one.fe.dbName)?.keys()) ?? []).some((k) => k.endsWith(':rows'))).toBe(true);
+    await settle(200);
+    expect(two.s().confirmed.size).toBe(2); // other tabs were never told to sign out
+    expect(two.fe.redirects).toEqual([]);
+    // The session simply goes on: polling resumes.
+    const n = server.requests('GET', '/api/sync').length;
+    await advance(7_000);
+    expect(server.requests('GET', '/api/sync').length).toBeGreaterThan(n);
+  });
+
+  it('regression: a DELETE lost to the network is retried, and only a confirmed one signs out', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    const { a, s, fe } = boot(server);
+    await ready();
+    let drops = 1;
+    server.override = (req) => (req.path === '/api/session' && req.method === 'DELETE' && drops-- > 0 ? 'network' : undefined);
+    const res = await finish(a.signOut(), 2_000);
+    expect(res).toEqual({ ok: true });
+    expect(server.requests('DELETE', '/api/session')).toHaveLength(2);
+    expect(server.session).toBeNull();
+    expect(s()).toMatchObject({ session: { status: 'signed_out' }, generation: 1 });
+    expect(fe.redirects).toEqual(['/signin']);
+    expect(fe.local.getItem(LOGOUT_PENDING_KEY)).toBeNull();
+  });
+
+  it('regression: offline, sign-out is refused at once (no cookie can be cleared) and nothing is lost', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    const { a, s, fe } = boot(server);
+    await ready();
+    fe.setOnline(false);
+    server.override = () => 'network';
+    const res = await finish(a.signOut());
+    expect(res).toEqual({ ok: false, reason: 'failed', message: COPY.signOutFailed });
+    expect(fe.redirects).toEqual([]);
+    expect(s().session.status).toBe('active');
+    expect(s().confirmed.size).toBe(1);
+  });
+
+  it('nothing is synced or sent while the sign-out is pending; a double tap sends one DELETE', async () => {
+    const row = makeRow(1);
+    const server = new FakeServer([row]);
+    const { a, s } = boot(server);
+    await ready();
+    const g = gate();
+    server.override = (req) => (req.path === '/api/session' && req.method === 'DELETE' ? g.wait() : undefined);
+    const first = a.signOut();
+    const second = a.signOut();
+    await settle(20);
+    const n = server.log.length;
+    const write = await finish(a.setStatus(row.id, STATUS.inMedical, 'answer'));
+    expect(write).toMatchObject({ ok: false, reason: 'unauthorized' });
+    expect((await finish(a.create({ values: values(), clientMutationId: CMID(9), photos: [], photoTiming: 'today' }))).outcome).toBe('not_saved');
+    await advance(30_000);
+    expect(server.log.length).toBe(n); // no poll, no write, no create while pending
+    server.override = null;
+    g.open();
+    expect(await finish(first)).toEqual({ ok: true });
+    expect(await finish(second)).toEqual({ ok: true });
+    expect(server.requests('DELETE', '/api/session')).toHaveLength(1);
+    expect(s().session.status).toBe('signed_out');
+  });
+
+  it('a 401 on DELETE means the server already refuses the cookie: signed out', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    const { a, fe } = boot(server);
+    await ready();
+    server.override = (req) => (req.path === '/api/session' && req.method === 'DELETE' ? apiError(401, 'unauthorized', 'Sign in again') : undefined);
+    expect(await finish(a.signOut())).toEqual({ ok: true });
+    expect(fe.redirects).toEqual(['/signin']);
+  });
+
+  it('regression: a page loaded while a sign-out is pending finishes it before it trusts the cookie', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    const first = boot(server);
+    await ready();
+    await advance(3_500);
+    first.stop();
+    // The app was killed mid sign-out (the marker survives); the cookie still works.
+    const local = new MemoryStorage();
+    local.setItem(LOGOUT_PENDING_KEY, JSON.stringify({ at: Date.now(), discard: false }));
+    const before = server.log.length;
+    const second = boot(server, { dbName: first.fe.dbName, local });
+    const statuses: string[] = [];
+    second.store.subscribe(() => statuses.push(second.s().session.status));
+    await ready();
+    await advance(100);
+    const after = server.log.slice(before);
+    expect(after[0]).toMatchObject({ method: 'DELETE', path: '/api/session' });
+    expect(after.some((r) => r.method === 'GET' && r.path === '/api/session')).toBe(false);
+    expect(statuses).not.toContain('active');
+    expect(second.s().session.status).toBe('signed_out');
+    expect(second.fe.redirects).toEqual(['/signin']);
+    expect(local.getItem(LOGOUT_PENDING_KEY)).toBeNull();
+    expect(((await openKv(first.fe.dbName)?.keys()) ?? []).some((k) => k.startsWith('cache:'))).toBe(false);
+  });
+
+  it('a pending sign-out that still cannot finish at load says so and leaves the session as it is', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    const local = new MemoryStorage();
+    local.setItem(LOGOUT_PENDING_KEY, JSON.stringify({ at: Date.now(), discard: false }));
+    server.override = (req) => (req.path === '/api/session' && req.method === 'DELETE' ? apiError(503, 'unavailable', 'Try again') : undefined);
+    const { s, fe } = boot(server, { local });
+    await ready();
+    await advance(3_100);
+    await advance(100);
+    expect(server.requests('DELETE', '/api/session')).toHaveLength(3);
+    expect(s().toasts.map((t) => t.title)).toContain(COPY.signOutFailed);
+    expect(fe.redirects).toEqual([]);
+    expect(s().session.status).toBe('active');
+    expect(local.getItem(LOGOUT_PENDING_KEY)).toBeNull();
+  });
+
+  it('a successful sign-in removes a pending sign-out and tells open tabs (announceSignIn)', async () => {
+    const local = new MemoryStorage();
+    local.setItem(LOGOUT_PENDING_KEY, JSON.stringify({ at: 1, discard: true }));
+    const heard: unknown[] = [];
+    const listener = new BroadcastChannel('lp');
+    listener.onmessage = (e: MessageEvent) => heard.push(e.data);
+    vi.stubGlobal('window', { localStorage: local });
+    try {
+      announceSignIn();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    await settle(20);
+    listener.close();
+    expect(local.getItem(LOGOUT_PENDING_KEY)).toBeNull();
+    expect(heard).toEqual([{ type: 'signin' }]);
   });
 
   it('ignores responses from before the sign-out (generation)', async () => {
@@ -132,6 +280,81 @@ describe('alerts through the store', () => {
     await advance(6_000);
     expect(heard.at(-1)).toEqual({ kind: 'combined', title: '3 updates', count: 3 });
     expect(s().toasts.map((t) => t.title)).toContain('3 updates');
+  });
+});
+
+describe('alerts of a sync that fails half-way (regression)', () => {
+  it('an alert on an applied page is shown even though a later request of that sync timed out, and only once', async () => {
+    const mine = makeRow(4, { firstName: 'Sofia', lastName: 'Lopez', createdBy: STAFF.dana.staff });
+    const server = new FakeServer([mine, makeRow(5)]);
+    server.overlap = 0;
+    const { store, s } = boot(server);
+    const heard: AlertEvent[] = [];
+    store.actions.subscribeAlerts((e) => heard.push(e));
+    await ready();
+    server.pageSize = 1;
+    server.change(mine.id, { status: STATUS.inMedical }); // page 1
+    server.change(makeRow(5).id, { clothing: 'Blue' }); // page 2
+    let hung = false;
+    server.override = (req) => {
+      if (req.path === '/api/sync' && req.query.get('afterAt') && !hung) {
+        hung = true;
+        return 'hang';
+      }
+      return undefined;
+    };
+    await advance(6_000);
+    expect(s().confirmed.get(mine.id)?.status).toBe(STATUS.inMedical); // page 1 is applied at once
+    await advance(12_000); // page 2 times out
+    expect(hung).toBe(true);
+    expect(heard.map((e) => e.title)).toEqual(['LP-1004 · S.L. is in medical']);
+    expect(s().toasts.filter((t) => t.title === 'LP-1004 · S.L. is in medical')).toHaveLength(1);
+    await advance(6_000); // the retry completes the sync: no second alert
+    await advance(6_000);
+    expect(s().confirmed.get(makeRow(5).id)?.clothing).toBe('Blue');
+    expect(heard).toHaveLength(1);
+  });
+
+  it('a 5xx on the reconcile fetch does not lose the alert of an earlier page either', async () => {
+    const mine = makeRow(4, { firstName: 'Sofia', lastName: 'Lopez', createdBy: STAFF.dana.staff });
+    const server = new FakeServer([mine]);
+    const { store } = boot(server);
+    const heard: AlertEvent[] = [];
+    store.actions.subscribeAlerts((e) => heard.push(e));
+    await ready();
+    for (let i = 0; i < 8; i += 1) await advance(6_000); // polls 2–9; the next one reconciles
+    server.change(mine.id, { status: STATUS.notInMedical });
+    // A row the delta never delivers makes the reconcile fetch ids; that fetch fails.
+    server.put(makeRow(6));
+    const other = server.rows.get(makeRow(6).id);
+    if (other) other.seq = -1;
+    server.override = (req) => (req.path === '/api/sync' && req.query.get('ids') ? apiError(503, 'unavailable', 'Try again') : undefined);
+    await advance(6_000);
+    expect(server.requests('GET', '/api/sync').some((r) => r.query.get('ids'))).toBe(true);
+    expect(heard.map((e) => e.title)).toEqual(['LP-1004 · S.L. — not in medical']);
+  });
+
+  it('the first sync after load is still the baseline when it fails half-way', async () => {
+    const mine = makeRow(4, { createdBy: STAFF.dana.staff, status: STATUS.inMedical });
+    const server = new FakeServer([mine, makeRow(5)]);
+    server.pageSize = 1;
+    let failed = false;
+    server.override = (req) => {
+      if (req.path === '/api/sync' && req.query.get('afterAt') && !failed) {
+        failed = true;
+        return apiError(503, 'unavailable', 'Try again');
+      }
+      return undefined;
+    };
+    const { store, s } = boot(server);
+    const heard: AlertEvent[] = [];
+    store.actions.subscribeAlerts((e) => heard.push(e));
+    await ready();
+    await advance(6_000);
+    await advance(6_000);
+    expect(failed).toBe(true);
+    expect(s().confirmed.size).toBe(2);
+    expect(heard).toEqual([]);
   });
 });
 

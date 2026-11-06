@@ -7,6 +7,7 @@ import { Avatar, Button, Flex, IconButton, Text, TextField } from '@radix-ui/the
 import { Eye, EyeOff } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { writeRememberedIdentity } from '@/lib/client/prefs';
+import { announceSignIn } from '@/lib/client/session-signals';
 import { avatarInitials, teamShort } from '@/lib/domain';
 import { safeNextPath } from '@/lib/safe-next';
 import { MESSAGES, retryMinutes, signInBody, type Identity } from './logic';
@@ -75,6 +76,8 @@ export function PasswordStep({ identity, onChange, next, autoFocus }: PasswordSt
     if (outcome.kind === 'ok') {
       // Remember what the server stored (canonical team), then open the app with the new cookie.
       writeRememberedIdentity(outcome.session?.staffName ?? identity.name, outcome.session?.team ?? identity.team);
+      // A sign-out left pending must not end this new session; open tabs re-check who is signed in.
+      announceSignIn();
       window.location.replace(safeNextPath(next) ?? '/');
       return; // Stay busy while the app loads.
     }

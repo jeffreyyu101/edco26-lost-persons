@@ -2,7 +2,8 @@
 // Avatar + account menu (design/screens/states.html "Avatar"): name and short team, Theme (Light / Dark /
 // Auto), Dashboard, Export CSV (a new tab in an iOS Home Screen app), Sign out, and "Built by Jeffrey Yu".
 // Self-contained: reads the store. Sign out is refused by the store while unsent outbox jobs exist; the
-// menu then asks once, and only an explicit "Discard & sign out" throws them away.
+// menu then asks once, and only an explicit "Discard & sign out" throws them away. When the server can't
+// confirm the sign-out (no signal), the store keeps the session and the menu or dialog says so.
 //
 // A Radix Popover rather than a DropdownMenu: the Theme segmented control must stay reachable with Tab,
 // which a menu's roving focus does not allow.
@@ -56,6 +57,11 @@ export function AccountMenu({ size = '2' }: AccountMenuProps) {
         setUnsent(null);
         return;
       }
+      if (result.reason === 'failed') {
+        // Still signed in: shown where the tap was (the menu, or the discard dialog).
+        setError(result.message);
+        return;
+      }
       setOpen(false);
       setUnsent(result.count);
     } catch {
@@ -67,7 +73,13 @@ export function AccountMenu({ size = '2' }: AccountMenuProps) {
 
   return (
     <>
-      <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Root
+        open={open}
+        onOpenChange={(o) => {
+          setOpen(o);
+          if (o) setError(null);
+        }}
+      >
         <Popover.Trigger>
           {/* The name starts with the initials the avatar shows (WCAG 2.5.3): "DK, account: Dana Kim". */}
           <button
@@ -164,13 +176,21 @@ export function AccountMenu({ size = '2' }: AccountMenuProps) {
       <AlertDialog.Root
         open={unsent !== null}
         onOpenChange={(o) => {
-          if (!o && !busy) setUnsent(null);
+          if (!o && !busy) {
+            setUnsent(null);
+            setError(null);
+          }
         }}
       >
         <AlertDialog.Content maxWidth="342px" style={{ padding: 20 }} aria-describedby={undefined}>
           <AlertDialog.Title size="4" weight="medium" mb="0">
             {unsent === 1 ? '1 request not sent' : `${unsent ?? 0} requests not sent`}
           </AlertDialog.Title>
+          {error ? (
+            <Text as="p" size="2" color="red" role="alert" mt="2" mb="0">
+              {error}
+            </Text>
+          ) : null}
           <div className={s.btns}>
             <AlertDialog.Cancel>
               <Button size="3" variant="soft" color="gray" disabled={busy}>

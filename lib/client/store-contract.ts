@@ -281,11 +281,15 @@ export interface StoreActions {
   };
 
   /**
-   * Refused while unsent outbox jobs exist unless discardOutbox is true. Otherwise clears the cache,
-   * phone-created ids, drafts and the cookie (remembered name/team stay unless changed at sign-in), then
-   * navigates to /signin itself (location.replace), so callers only close their own UI.
+   * Refused while unsent outbox jobs exist unless discardOutbox is true. Otherwise asks the server to clear
+   * the cookie (retried) and, only once it confirmed, clears the cache, phone-created ids, drafts and the
+   * cookie (remembered name/team stay unless changed at sign-in), then navigates to /signin itself
+   * (location.replace), so callers only close their own UI. `failed`: the server never confirmed (offline,
+   * timeouts, 5xx); nothing was cleared, the session goes on, and the caller shows `message`.
    */
-  signOut(opts?: { discardOutbox?: boolean }): Promise<{ ok: true } | { ok: false; reason: 'outbox'; count: number }>;
+  signOut(opts?: { discardOutbox?: boolean }): Promise<
+    { ok: true } | { ok: false; reason: 'outbox'; count: number } | { ok: false; reason: 'failed'; message: string }
+  >;
 
   /**
    * Writes through lib/client/prefs.ts (writePref), then updates state.prefs. setPref('theme', t) also
