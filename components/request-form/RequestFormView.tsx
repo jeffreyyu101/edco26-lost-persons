@@ -176,6 +176,12 @@ function NewRequest() {
     latest.current = form;
   }, [form]);
 
+  // Warm the photo-compression chunk now, while there may still be signal: the photo slot needs it, and a
+  // phone that goes offline with the form open could not fetch it later.
+  useEffect(() => {
+    void import('@/lib/client/image').catch(noop);
+  }, []);
+
   // Restore the draft (or start one) once, on mount.
   useEffect(() => {
     let live = true;

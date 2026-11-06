@@ -53,10 +53,10 @@ test.describe('signed-in navigation', () => {
   test('typing in search updates the results (replace) and Cancel returns to the list', async ({ page }) => {
     await page.goto('/?q=');
     // No count before anything is typed.
-    await expect(page.getByRole('textbox', { name: 'Search requests' })).toBeVisible();
+    await expect(page.getByRole('searchbox', { name: 'Search requests' })).toBeVisible();
     await expect(page.getByText(/^\d+ results?$/)).toHaveCount(0);
-    await page.getByRole('textbox', { name: 'Search requests' }).fill('Kayla');
-    await expect(page).toHaveURL(/\?q=Kayla$/);
+    await page.getByRole('searchbox', { name: 'Search requests' }).fill('Martinez');
+    await expect(page).toHaveURL(/\?q=Martinez$/);
     await expect(page.getByText('1 result', { exact: true })).toBeVisible();
     await expect(page.locator(`[data-request-id="${KAYLA}"]`)).toBeVisible();
     await page.getByRole('button', { name: 'Cancel' }).click();

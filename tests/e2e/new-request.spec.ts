@@ -294,37 +294,43 @@ test('a conflict keeps my edits, shows theirs, and saves again without reverting
   expect(await apiDetail(page.request, row.id)).toMatchObject({ hair: 'TEST-F blond braids', clothing: 'TEST-F glitter jacket' });
 });
 
-test('a rejected create opens the needs-attention editor; fix and resend with the same id', async ({ page }) => {
-  const name = uniqueName('rejected');
-  let rejectedId: string | null = null;
-  await page.route('**/api/requests', async (route) => {
-    if (route.request().method() !== 'POST' || rejectedId) return route.fallback();
-    rejectedId = (route.request().postDataJSON() as { clientMutationId: string }).clientMutationId;
-    await route.fulfill({
-      status: 422,
-      contentType: 'application/json',
-      body: JSON.stringify({ error: { code: 'invalid', message: 'TEST-F rejected name', field: 'name' } }),
+// page.route can't see requests that pass through a service worker in WebKit, so this mocked rejection runs
+// with the worker blocked (nothing here needs it).
+test.describe('mocked rejection', () => {
+  test.use({ serviceWorkers: 'block' });
+
+  test('a rejected create opens the needs-attention editor; fix and resend with the same id', async ({ page }) => {
+    const name = uniqueName('rejected');
+    let rejectedId: string | null = null;
+    await page.route('**/api/requests', async (route) => {
+      if (route.request().method() !== 'POST' || rejectedId) return route.fallback();
+      rejectedId = (route.request().postDataJSON() as { clientMutationId: string }).clientMutationId;
+      await route.fulfill({
+        status: 422,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { code: 'invalid', message: 'TEST-F rejected name', field: 'name' } }),
+      });
     });
+    await openNew(page);
+    await pickPost(page, 'Base');
+    await personName(page).fill(name);
+    await submit(page).click();
+
+    await expect(page).toHaveURL(/\?outbox=[0-9a-f-]{36}$/);
+    expect(page.url()).toContain(String(rejectedId));
+    await expect(personName(page)).toHaveAttribute('aria-invalid', 'true');
+    await expect(page.getByText('TEST-F rejected name')).toBeVisible();
+    await expect(submit(page)).toHaveText('Resend');
+    await expect(submit(page)).toBeDisabled();
+
+    const fixed = `${name} fixed`;
+    await personName(page).fill(fixed);
+    await expect(page.getByText('TEST-F rejected name')).toHaveCount(0);
+    const resend = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/api/requests'));
+    await submit(page).click();
+    expect(((await resend).postDataJSON() as { clientMutationId: string; name: string })).toMatchObject({ clientMutationId: rejectedId, name: fixed });
+    await expect.poll(async () => (await rowsNamed(page.request, fixed)).map((r) => r.clientMutationId)).toEqual([rejectedId]);
   });
-  await openNew(page);
-  await pickPost(page, 'Base');
-  await personName(page).fill(name);
-  await submit(page).click();
-
-  await expect(page).toHaveURL(/\?outbox=[0-9a-f-]{36}$/);
-  expect(page.url()).toContain(String(rejectedId));
-  await expect(personName(page)).toHaveAttribute('aria-invalid', 'true');
-  await expect(page.getByText('TEST-F rejected name')).toBeVisible();
-  await expect(submit(page)).toHaveText('Resend');
-  await expect(submit(page)).toBeDisabled();
-
-  const fixed = `${name} fixed`;
-  await personName(page).fill(fixed);
-  await expect(page.getByText('TEST-F rejected name')).toHaveCount(0);
-  const resend = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/api/requests'));
-  await submit(page).click();
-  expect(((await resend).postDataJSON() as { clientMutationId: string; name: string })).toMatchObject({ clientMutationId: rejectedId, name: fixed });
-  await expect.poll(async () => (await rowsNamed(page.request, fixed)).map((r) => r.clientMutationId)).toEqual([rejectedId]);
 });
 
 test('offline: Save offline queues the request and it sends once back online', async ({ page, context }) => {
@@ -338,7 +344,8 @@ test('offline: Save offline queues the request and it sends once back online', a
   await page.locator('input[type=file]').setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: syntheticPng() });
   await expect(page.getByRole('button', { name: /^1 photo/ })).toBeVisible();
   await submit(page).click();
-  await expect(page.getByText('Saved on this phone · sends when back online')).toBeVisible();
+  await expect(page.getByText('Saved on this phone', { exact: true })).toBeVisible();
+  await expect(page.getByText('Sends when back online', { exact: true })).toBeVisible();
   await expect(form(page)).toHaveCount(0);
 
   await context.setOffline(false);

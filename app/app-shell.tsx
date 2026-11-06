@@ -20,7 +20,10 @@ const loadForm = () => import('@/components/request-form/RequestFormView');
 const loadProfile = () => import('@/components/profile/ProfileView');
 const loadDashboard = () => import('@/components/dashboard/DashboardView');
 const loadDialogs = () => import('@/components/ui/ShellDialogs');
-const VIEW_CHUNKS = [loadList, loadForm, loadProfile, loadDashboard, loadDialogs];
+// Photo compression (store.actions.preparePhoto) is its own chunk: without it, a photo can't be added to a
+// new request once the phone is offline.
+const loadImage = () => import('@/lib/client/image');
+const VIEW_CHUNKS = [loadList, loadForm, loadProfile, loadDashboard, loadDialogs, loadImage];
 
 const listLoading = () => <RowSkeletons />;
 const AllView = dynamic(() => loadList().then((m) => m.AllView), { ssr: false, loading: listLoading });
@@ -88,6 +91,7 @@ function ShellBanners() {
 }
 
 const selectPrompt = (s: StoreState) => s.outboxPrompt;
+const selectOfflineReady = (s: StoreState) => s.offlineReady;
 
 function ShellHosts() {
   const store = useAppStore();
@@ -96,6 +100,7 @@ function ShellHosts() {
   const snackbar = useSnackbar();
   const prompt = useStoreSelector(selectPrompt);
   const prefs = usePrefs();
+  const offlineReady = useStoreSelector(selectOfflineReady);
   const [bellIntro, setBellIntro] = useState(false);
   const bellWasOn = useRef<boolean | null>(null);
 
@@ -120,6 +125,12 @@ function ShellHosts() {
       clearTimeout(id);
     };
   }, [actions]);
+
+  // <html data-offline-ready="true"> once every view chunk is cached by the service worker (A15), like
+  // data-hydrated: QA and the offline specs wait for it before going offline.
+  useEffect(() => {
+    if (offlineReady) document.documentElement.dataset.offlineReady = 'true';
+  }, [offlineReady]);
 
   // Auto theme follows the phone's setting live.
   useEffect(() => followSystemTheme(), []);

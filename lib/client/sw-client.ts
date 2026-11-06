@@ -137,7 +137,9 @@ export function startServiceWorker(hooks: SwHooks): SwController | null {
 
   const register = (id: string) =>
     sw.register(`/sw.js?v=${encodeURIComponent(id)}`, { scope: '/' }).then(
-      (r) => {
+      (r: ServiceWorkerRegistration | undefined) => {
+        // Some environments (blocked or stubbed service workers) resolve without a registration.
+        if (!r) return null;
         if (!reg) {
           reg = r;
           watch(r);

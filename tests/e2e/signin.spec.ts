@@ -6,7 +6,7 @@
 //   * "@api" tests use the real POST /api/session and the local Supabase stack. They skip themselves when
 //     the route is missing (404). Each test sends a unique fake client IP (x-vercel-forwarded-for, read
 //     locally per A17) and a unique synthetic name, so login limits never leak between tests or runs.
-//     The "@store" test also needs the real store's 401 handling (lib/client/store.tsx).
+//     The in-app 401 test also exercises the real store's redirect (lib/client/store-core.ts).
 // Run one group with `--grep @api` or `--grep-invert @api`. Synthetic data only.
 import { expect, test, type BrowserContext, type Page, type Request, type Route } from '@playwright/test';
 import { loadTestEnv } from '../../scripts/test-env.mjs';
@@ -381,7 +381,7 @@ test.describe('sign-in with the real server @api', () => {
     await expect(signInButton(page)).toBeDisabled();
   });
 
-  test('a 401 inside the app lands on step 2 prefilled and returns after sign-in @api @store', async ({ page, context }) => {
+  test('a 401 inside the app lands on step 2 prefilled and returns after sign-in @api', async ({ page, context }) => {
     const name = `TEST-B expiry ${uniq()}`;
     await openSignIn(page, `/signin?next=${encodeURIComponent('/?view=mine')}`);
     await fillStepOne(page, name, { card: 'GCHX Base' });
