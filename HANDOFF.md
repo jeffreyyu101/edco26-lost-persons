@@ -38,6 +38,9 @@ screenshots.
   Jeffrey runs [`docs/export.sql`](docs/export.sql) in the Supabase SQL editor and downloads the results.
 - **Header:** the view switcher is the large page title, the bell moved into the avatar menu, the live dot
   shows only when offline or reconnecting, and "Newest first" is gone.
+- **New request is fully open** in Jeffrey's order (post, missing person, more details, then friend or family
+  last and optional). **Age and gender are free text** ("mid-20s", "Non-binary"; Male / Female / Other are
+  quick-fill chips), and search matches the age text. This needs the migration re-run below.
 
 ## The production migration
 
@@ -47,12 +50,20 @@ file production needs. The other files in that folder are the local chain: the b
 
 - **Applied to production on 2026-11-06** through the Supabase Management API, with a dry run (ending in
   `rollback;`) first, then the commit run.
-- **It must be applied again after this merge**, because v2.5 changed `lp_stats` (it now also returns
-  `avgReuniteMinutes` and `loggedLastHour`). The integrator does this, with the same dry run, then commit.
-  Apply it **before** deploying the new build: the new dashboard reads both fields, and two extra fields
-  change nothing for the build that is live now, so that order is safe. The file is one transaction, keeps
-  its preflight, and is safe on a database that already has every `lp_*` function (`lp_stats` is
-  `create or replace`).
+- **It must be re-applied on production before this build deploys** (release `release/f1`). Two changes
+  need it:
+  - `lp_stats` now also returns `avgReuniteMinutes` and `loggedLastHour` (the new dashboard reads both).
+  - `patients.age` becomes free text ("mid-20s"; step 1b), its 0–120 CHECK is dropped, and
+    `lp_clean_fields` takes free-text age and gender (at most 40 characters each). Every stored age is kept
+    as its text (24 → `'24'`).
+
+  The integrator does this, with the same dry run, then commit. **Order: migration first, then deploy.**
+  The new build sends text ages, which the old `lp_clean_fields` refuses, and its dashboard needs the two
+  new stats fields. The build that is live now keeps working on the migrated database: it sends whole-number
+  ages, which are stored as their text, and reads them back as numbers. The extra stats fields change nothing
+  for it. The file is one transaction, keeps its preflight, and is safe to re-run on a database that already
+  has every `lp_*` function and a text `age`. `lp_stats` is `create or replace`, and step 1b prints
+  `patients.age: already text, unchanged.` on a second run.
 
 By hand, in the Supabase dashboard:
 
@@ -64,7 +75,9 @@ By hand, in the Supabase dashboard:
    failure leaves the database as it was, and running it a second time is harmless.
 4. **Check.** `select proname from pg_proc where proname like 'lp\_%' order by 1;` lists the `lp_*`
    functions (among them `lp_sync`, `lp_create_request`, `lp_set_status` and `lp_stats`), and
-   `select lp_stats() ? 'avgReuniteMinutes', lp_stats() ? 'loggedLastHour';` returns `true | true`.
+   `select lp_stats() ? 'avgReuniteMinutes', lp_stats() ? 'loggedLastHour';` returns `true | true`, and
+   `select format_type(atttypid, atttypmod) from pg_attribute where attrelid = 'public.patients'::regclass and attname = 'age';`
+   returns `text`.
 5. **Storage.** Confirm the `patient-photos` bucket is still **private**.
 
 If the preflight stops it ("Preflight failed: …"), the SQL editor is pointed at the wrong project or the
@@ -103,7 +116,8 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 - [ ] Airplane mode in the middle of a send: it says "Saved on this phone" and sends once the signal is back,
       exactly once.
 - [ ] Lie-fi (one bar): a new request queues after about 10 s and sends later.
-- [ ] The re-run of the migration after this merge: dry run, then commit (see above).
+- [ ] The re-run of the migration on production **before** this build deploys (lp_stats + age → text): dry
+      run, then commit (see above).
 - [ ] Several staff sign in at once behind the venue Wi-Fi (one shared IP).
 
 ## Known limits

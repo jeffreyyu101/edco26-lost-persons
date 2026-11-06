@@ -56,7 +56,7 @@ and `.env.test`, which holds local-only values that work against `127.0.0.1` and
 | `20261101000000_baseline_local_only.sql` | A copy of `supabase/schema.sql`, the production baseline. | **Never paste.** Already applied. |
 | `20261105000001_add_last_seen.sql` | Jeffrey's `last_seen` column. | Already applied (verified 2026-11-05). |
 | `20261105000002_update_locations_and_statuses.sql` | Jeffrey's location and status CHECK update. | Not needed: the rework covers it whether or not it ran. |
-| `20261106000000_rework.sql` | Row versions, the touch trigger, thumbnails, login limits and every `lp_*` function the app calls. | **The one file production needs.** Applied 2026-11-06; apply it again after the v2.5 `lp_stats` change, before deploying. See [`HANDOFF.md`](HANDOFF.md). |
+| `20261106000000_rework.sql` | Row versions, the touch trigger, thumbnails, login limits, free-text `age` (text since 2026-11-06) and every `lp_*` function the app calls. | **The one file production needs.** Applied 2026-11-06; apply it again (the v2.5 `lp_stats` change and `age` → text) **before** deploying this build. See [`HANDOFF.md`](HANDOFF.md). |
 
 Without `20261106000000_rework.sql`, every API route fails, because each one calls an `lp_*` function. The
 file is one transaction, is safe to run twice (also on a database that already has every `lp_*` function),
