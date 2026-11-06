@@ -11,16 +11,29 @@
 //
 // Photos are stored as ArrayBuffers, not Blobs (older iOS Safari failed to store Blobs in IndexedDB), and
 // under their own keys so frequent draft / checkpoint writes never re-copy megabytes of image data.
-import { createStore, del, get, getMany, keys, set, type UseStore } from 'idb-keyval';
+//
+// Photo bytes and the record that references them (a job or the draft) are committed in ONE transaction
+// (setMany), and the garbage collection of unreferenced bytes reads every reference and deletes in ONE
+// readwrite transaction (collectBlobs). IndexedDB never runs two readwrite transactions on the same store
+// at the same time, across tabs too, so a collection in another tab sees either none of a save or all of
+// it: it can never delete bytes whose reference is about to be written.
+import { createStore, del, get, getMany, keys, set, setMany, type UseStore } from 'idb-keyval';
 import type { OutboxItem, OutboxPhoto, RequestSummary } from '../api-types';
 import type { DraftPhoto, RequestDraft } from './store-contract';
 
 export interface Kv {
   get<T>(key: string): Promise<T | undefined>;
   set(key: string, value: unknown): Promise<void>;
+  /** Writes every entry in one transaction: all of them, or none. */
+  setMany(entries: Array<[string, unknown]>): Promise<void>;
   del(key: string): Promise<void>;
   keys(): Promise<string[]>;
   getMany<T>(keys: string[]): Promise<Array<T | undefined>>;
+  /**
+   * In one readwrite transaction: deletes every `blob:` key that neither the stored draft, nor an unacked
+   * photo of a stored job, nor `keep` (references only held in memory) refers to. Resolves to the count.
+   */
+  collectBlobs(keep: ReadonlySet<string>): Promise<number>;
 }
 
 export const EVENT_KEY = 'edco26';
@@ -38,10 +51,67 @@ export function openKv(dbName: string = DB_NAME): Kv | null {
   return {
     get: <T>(key: string) => get<T>(key, store),
     set: (key, value) => set(key, value, store),
+    setMany: (entries) => setMany(entries, store),
     del: (key) => del(key, store),
     keys: async () => (await keys(store)).map((k) => String(k)),
     getMany: <T>(ks: string[]) => getMany<T>(ks, store),
+    collectBlobs: (keep) => store('readwrite', (os) => collectInTransaction(os, keep)),
   };
+}
+
+/** The `blob:` keys a stored draft or job still needs (a job only needs its photos not yet acknowledged). */
+export function referencedBlobKeys(key: string, value: unknown): string[] {
+  const photos = (value as { photos?: unknown } | null | undefined)?.photos;
+  if (!Array.isArray(photos)) return [];
+  const isJob = key.startsWith('outbox:');
+  const out: string[] = [];
+  for (const p of photos as Array<{ photoId?: unknown; acked?: unknown } | null>) {
+    if (!p || typeof p.photoId !== 'string') continue;
+    if (isJob && p.acked === true) continue;
+    out.push(K.blob(p.photoId));
+  }
+  return out;
+}
+
+/**
+ * Garbage collection inside one transaction. Only request callbacks are used (no awaits between requests),
+ * so the transaction stays active until the deletes are queued; it resolves when it has committed.
+ */
+function collectInTransaction(os: IDBObjectStore, keep: ReadonlySet<string>): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    const tx = os.transaction;
+    let deleted = 0;
+    tx.oncomplete = () => resolve(deleted);
+    tx.onabort = () => reject(tx.error ?? new Error('aborted'));
+    const keysRequest = os.getAllKeys();
+    keysRequest.onsuccess = () => {
+      const all = keysRequest.result.map((k) => String(k));
+      const blobKeys = all.filter((k) => k.startsWith('blob:'));
+      if (blobKeys.length === 0) return; // nothing to collect: the transaction commits on its own
+      const refKeys = all.filter((k) => k === K.draft || k.startsWith('outbox:'));
+      const referenced = new Set(keep);
+      const sweep = () => {
+        for (const k of blobKeys) {
+          if (referenced.has(k)) continue;
+          os.delete(k);
+          deleted += 1;
+        }
+      };
+      let left = refKeys.length;
+      if (left === 0) {
+        sweep();
+        return;
+      }
+      for (const k of refKeys) {
+        const request = os.get(k);
+        request.onsuccess = () => {
+          for (const b of referencedBlobKeys(k, request.result)) referenced.add(b);
+          left -= 1;
+          if (left === 0) sweep();
+        };
+      }
+    };
+  });
 }
 
 export const K = {
@@ -93,9 +163,12 @@ async function toBytes(blob: Blob): Promise<StoredBytes> {
 
 const fromBytes = (s: StoredBytes): Blob => new Blob([s.b], { type: s.t });
 
-export async function writePhotoBlobs(kv: Kv, photoId: string, full: Blob, thumb: Blob): Promise<void> {
-  const value: StoredPhotoBlobs = { full: await toBytes(full), thumb: await toBytes(thumb) };
-  await kv.set(K.blob(photoId), value);
+/**
+ * The `blob:` entry of one photo, ready for Kv.setMany together with the record that references it. The
+ * bytes are read here, before the transaction opens (an await inside it would let it commit early).
+ */
+export async function photoBlobsEntry(photoId: string, full: Blob, thumb: Blob): Promise<[string, StoredPhotoBlobs]> {
+  return [K.blob(photoId), { full: await toBytes(full), thumb: await toBytes(thumb) }];
 }
 
 export async function readPhotoBlobs(kv: Kv, photoId: string): Promise<{ full: Blob; thumb: Blob } | null> {
