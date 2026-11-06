@@ -217,7 +217,14 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
   const [viewerAt, setViewerAt] = useState<number | null>(null);
   const [add, setAdd] = useState<AddState | null>(null);
   const addRun = useRef(0);
+  // The open add run (the Add sheet): its prepared picks, its unreadable count, how many files were handed
+  // to it (prepared, still preparing or unreadable), and how many preparations are in flight. Refs, so a
+  // second hand-over while the first is still preparing appends to it.
   const livePicks = useRef<PhotoPick[]>([]);
+  const runOpen = useRef(false);
+  const runFiles = useRef(0);
+  const runUnreadable = useRef(0);
+  const runPreparing = useRef(0);
   useEffect(() => {
     const picks = livePicks;
     return () => revoke(picks.current);
@@ -227,40 +234,48 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
     addRun.current += 1;
     revoke(livePicks.current);
     livePicks.current = [];
+    runOpen.current = false;
+    runFiles.current = 0;
+    runUnreadable.current = 0;
+    runPreparing.current = 0;
     setAdd(null);
   }, []);
 
-  // Each picked photo goes through the quick-crop step first (CropSheet, v2.2 #10), then is prepared.
+  // Each picked photo goes through the quick-crop step first (CropSheet, v2.2 #10), then is prepared. Photos
+  // handed over while an add run is open (a Retake's photo that came in after the others were handed over)
+  // join that run: nothing it already holds is revoked or replaced (F2 review).
   const fileInput = useRef<HTMLInputElement | null>(null);
   const prepareCropped = async (cropped: CropPick[]) => {
-    const run = (addRun.current += 1);
-    revoke(livePicks.current);
-    livePicks.current = [];
-    setAdd({ picks: [], unreadable: 0, phase: 'preparing', error: null });
-    const picks: PhotoPick[] = [];
-    let unreadable = 0;
+    if (!runOpen.current) {
+      addRun.current += 1;
+      runOpen.current = true;
+    }
+    const run = addRun.current;
+    runFiles.current += cropped.length;
+    runPreparing.current += 1;
+    setAdd({ picks: livePicks.current, unreadable: runUnreadable.current, phase: 'preparing', error: null });
     // One at a time: decoding several camera photos at once can exhaust iOS memory.
     for (const { file, crop: cropRect } of cropped) {
       try {
         const photo = await actions.preparePhoto(file, { crop: cropRect });
         if (addRun.current !== run) return;
-        const pick = { photo, url: URL.createObjectURL(photo.thumbBlob) };
-        picks.push(pick);
-        livePicks.current = [...picks];
+        livePicks.current = [...livePicks.current, { photo, url: URL.createObjectURL(photo.thumbBlob) }];
       } catch {
-        unreadable += 1;
+        if (addRun.current !== run) return;
+        runUnreadable.current += 1;
       }
     }
     if (addRun.current !== run) return;
-    setAdd({ picks, unreadable, phase: 'ready', error: null });
+    runPreparing.current -= 1;
+    setAdd({ picks: livePicks.current, unreadable: runUnreadable.current, phase: runPreparing.current > 0 ? 'preparing' : 'ready', error: null });
   };
-  const reopenPicker = useCallback(() => fileInput.current?.click(), []);
-  const crop = useCropQueue((picks) => void prepareCropped(picks), reopenPicker);
+  const crop = useCropQueue((picks) => void prepareCropped(picks), fileInput);
 
   const onFiles = (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.currentTarget.files ?? []);
     event.currentTarget.value = '';
-    const room = MAX_PHOTOS - photoCount - crop.pending();
+    const inRun = runOpen.current ? runFiles.current - runUnreadable.current : 0;
+    const room = MAX_PHOTOS - photoCount - crop.pending() - inRun;
     if (files.length === 0 || room <= 0) return;
     crop.enqueue(files.slice(0, room));
   };
@@ -454,7 +469,9 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
                   type="file"
                   accept="image/*"
                   multiple
-                  disabled={offline || add !== null}
+                  // Never while a Retake's picker is open (its photo must arrive); else not offline or while
+                  // the add run uploads (a photo picked then joins the open run).
+                  disabled={!crop.retaking && (offline || add?.phase === 'uploading')}
                   aria-label={offline ? `Add photo (${NEEDS_CONNECTION.toLowerCase()})` : 'Add photo'}
                   onChange={onFiles}
                 />

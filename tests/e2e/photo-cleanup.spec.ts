@@ -165,6 +165,71 @@ test('keyboard: arrows move a corner, Enter uses the photo; Escape keeps the who
   expect(second.cropped).toBe(false);
 });
 
+// F2 review (b): the once-guard keyed on the photo on screen, so the second tap of a double tap, an Escape
+// right after Enter, or a held Enter's repeats answered the NEXT photo of a multi-photo pick unseen.
+test('a double tap, Enter then Escape, or a held Enter answers one photo, never the next', async ({ page }) => {
+  test.setTimeout(90_000);
+  await openNew(page);
+  const fixture = await screenPhotoJpeg(page, { width: 600, height: 800 });
+  const files = (n: number) => Array.from({ length: n }, (_, i) => ({ name: `p${i + 1}.jpg`, mimeType: 'image/jpeg', buffer: fixture.jpeg }));
+  await page.locator('input[type=file]').setInputFiles(files(3));
+  const step = cropStep(page);
+  const use = step.getByRole('button', { name: 'Use photo' });
+  await expect(step.getByText('1 of 3', { exact: true })).toBeVisible();
+  await expect(step.getByTestId('crop-frame')).toHaveAttribute('data-ready', '');
+  await settled(page);
+
+  // A double tap on Use photo: the first photo only; the second is on screen, unanswered.
+  await use.dblclick();
+  await expect(step.getByText('2 of 3', { exact: true })).toBeVisible();
+  await page.waitForTimeout(600);
+  await expect(step.getByText('2 of 3', { exact: true })).toBeVisible();
+
+  // Enter, then Escape at once: the second photo only; the third stays.
+  await expect(use).toBeFocused();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Escape');
+  await expect(step.getByText('3 of 3', { exact: true })).toBeVisible();
+  await page.waitForTimeout(600);
+  await expect(step).toBeVisible();
+  await expect(step.getByText('3 of 3', { exact: true })).toBeVisible();
+
+  // A deliberate answer after a moment works as always.
+  await use.click();
+  await expect(step).toBeHidden();
+  await expect(page.getByRole('button', { name: /^3 photos, today/ })).toBeVisible({ timeout: 30_000 });
+});
+
+test('a held Enter answers the photo once; its repeats never reach the next one', async ({ page }) => {
+  test.setTimeout(60_000);
+  await openNew(page);
+  const fixture = await screenPhotoJpeg(page, { width: 600, height: 800 });
+  await page.locator('input[type=file]').setInputFiles([
+    { name: 'a.jpg', mimeType: 'image/jpeg', buffer: fixture.jpeg },
+    { name: 'b.jpg', mimeType: 'image/jpeg', buffer: fixture.jpeg },
+  ]);
+  const step = cropStep(page);
+  const use = step.getByRole('button', { name: 'Use photo' });
+  await expect(step.getByText('1 of 2', { exact: true })).toBeVisible();
+  await settled(page);
+  await expect(use).toBeFocused();
+  // Held: the first keydown, then auto-repeats (repeat: true) for well past the next photo's guard.
+  await page.keyboard.down('Enter');
+  for (let i = 0; i < 12; i += 1) {
+    await page.waitForTimeout(60);
+    await page.keyboard.down('Enter');
+  }
+  await page.keyboard.up('Enter');
+  await expect(step.getByText('2 of 2', { exact: true })).toBeVisible();
+  await page.waitForTimeout(400);
+  await expect(step).toBeVisible();
+  // Pressed again, it answers the second.
+  await expect(use).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(step).toBeHidden();
+  await expect(page.getByRole('button', { name: /^2 photos, today/ })).toBeVisible({ timeout: 30_000 });
+});
+
 test('Retake drops the photo and opens the picker again', async ({ page }) => {
   await openNew(page);
   // Landscape this time: the photo fits the width of the sheet.

@@ -15,6 +15,8 @@ interface SheetBase {
   dismissOnOutside?: boolean;
   /** Focused when the sheet opens, instead of its first control. */
   initialFocus?: RefObject<HTMLElement | null>;
+  /** Escape pressed: call preventDefault() to keep the sheet open (Radix Dialog's onEscapeKeyDown). */
+  onEscapeKeyDown?: (event: KeyboardEvent) => void;
 }
 
 export type SheetProps = SheetBase &
@@ -64,7 +66,7 @@ function useKeyboardInset(active: boolean): number {
 }
 
 export function Sheet(props: SheetProps) {
-  const { open, onOpenChange, title, hideTitle, description, titleInContent, children, dismissOnOutside = true, initialFocus } = props;
+  const { open, onOpenChange, title, hideTitle, description, titleInContent, children, dismissOnOutside = true, initialFocus, onEscapeKeyDown } = props;
   const keyboard = useKeyboardInset(open);
   const style = { '--lp-kb': `${keyboard}px` } as CSSProperties;
   // Radix points aria-describedby at a Description it finds; without one, say so (no console warning).
@@ -76,6 +78,7 @@ export function Sheet(props: SheetProps) {
         style={style}
         {...describedBy}
         onPointerDownOutside={dismissOnOutside ? undefined : (e) => e.preventDefault()}
+        onEscapeKeyDown={onEscapeKeyDown}
         onOpenAutoFocus={
           initialFocus
             ? (e) => {

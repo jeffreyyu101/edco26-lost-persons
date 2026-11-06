@@ -7,9 +7,13 @@
 //             Escape skips the crop (the whole photo)
 //   other     a tap on the scrim does nothing (no accidental add); a photo the browser can't show is passed
 //             on uncropped, so preparePhoto reports it the way it always has
+//   answers   each photo is answered once. The next photo of a multi-photo pick takes over in the same
+//             sheet, so for its first FRESH_MS it ignores Use, Retake, Escape and Enter (the second tap of a
+//             double tap, an Escape right after Enter, a key meant for the photo before), and a held key's
+//             repeats never answer anything.
 import { Button, IconButton, Text, VisuallyHidden } from '@radix-ui/themes';
 import { Check, Maximize, RotateCcw } from 'lucide-react';
-import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type RefObject } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type RefObject } from 'react';
 import { Sheet, SheetDescription, SheetTitle } from '@/components/ui/Sheet';
 import {
   FULL_CROP,
@@ -34,21 +38,46 @@ export interface CropSheetProps {
   onRetake: () => void;
 }
 
+/**
+ * How long (ms) the next photo of a multi-photo pick ignores Use, Retake, Escape and Enter after it took over
+ * from the one just answered: long enough for the second tap of a double tap or an Escape right after Enter,
+ * well under the time it takes to look at a new photo.
+ */
+export const FRESH_MS = 350;
+
+const clock = () => performance.now();
+
 export function CropSheet({ item, position, onUse, onRetake }: CropSheetProps) {
   // Keep the last photo on screen while the sheet slides away.
   const [last, setLast] = useState<CropItem | null>(item);
   if (item && item !== last) setLast(item);
   const shown = item ?? last;
+  // Whether the photo on screen took over from another in the open sheet (the next of a multi-photo pick),
+  // rather than opening it. (State adjusted during render, React's pattern for state that follows props.)
+  const [chain, setChain] = useState<{ id: number | null; next: boolean }>({ id: item?.id ?? null, next: false });
+  const itemId = item?.id ?? null;
+  if (itemId !== chain.id) setChain({ id: itemId, next: chain.id !== null && itemId !== null });
   const useButton = useRef<HTMLButtonElement | null>(null);
-  // Each photo is answered once: a double tap, or Enter then Escape, never reaches the next photo.
+  // Each photo is answered once (the same photo never twice) ...
   const answered = useRef<number | null>(null);
-  const once = (fn: () => void) => {
+  // ... and a photo that took over from the one just answered ignores answers until then (clock()): the second
+  // tap of a double tap, Enter then Escape, or a key meant for the photo before, never answers it. Set when
+  // its body mounts (CropBody's onShown); 0 for a photo that opened the sheet.
+  const freshUntil = useRef(0);
+  const shownAt = (next: boolean) => {
+    freshUntil.current = next ? clock() + FRESH_MS : 0;
+  };
+  const fresh = () => clock() < freshUntil.current;
+  const once = (fn: () => void, { user = true } = {}) => {
     if (!item || answered.current === item.id) return;
+    if (user && fresh()) return;
     answered.current = item.id;
     fn();
   };
   const use = (crop: CropRect | null) => once(() => onUse(crop && !isFullCrop(crop) ? crop : null));
   const retake = () => once(onRetake);
+  // A photo the browser can't show is passed on uncropped at once (not an answer from the person).
+  const unreadable = () => once(() => onUse(null), { user: false });
   return (
     <Sheet
       open={item !== null}
@@ -56,11 +85,27 @@ export function CropSheet({ item, position, onUse, onRetake }: CropSheetProps) {
         // Escape: skip the crop, keep the whole photo.
         if (!open) use(null);
       }}
+      // A held Escape's repeats, or one right after the photo before was answered, keep this photo open.
+      onEscapeKeyDown={(e) => {
+        if (e.repeat || fresh()) e.preventDefault();
+      }}
       titleInContent
       dismissOnOutside={false}
       initialFocus={useButton}
     >
-      {shown ? <CropBody key={shown.id} file={shown.file} position={item ? position : null} useButton={useButton} onUse={use} onRetake={retake} /> : null}
+      {shown ? (
+        <CropBody
+          key={shown.id}
+          file={shown.file}
+          position={item ? position : null}
+          useButton={useButton}
+          next={item !== null && chain.next}
+          onShown={shownAt}
+          onUse={use}
+          onRetake={retake}
+          onUnreadable={unreadable}
+        />
+      ) : null}
     </Sheet>
   );
 }
@@ -96,11 +141,16 @@ interface CropBodyProps {
   file: File;
   position: { index: number; total: number } | null;
   useButton: RefObject<HTMLButtonElement | null>;
+  /** This photo took over from the one just answered in the open sheet (the next of a multi-photo pick). */
+  next: boolean;
+  /** Called once when this body is on screen (it mounts), with `next`: the sheet starts its FRESH_MS then. */
+  onShown: (next: boolean) => void;
   onUse: (crop: CropRect | null) => void;
   onRetake: () => void;
+  onUnreadable: () => void;
 }
 
-function CropBody({ file, position, useButton, onUse, onRetake }: CropBodyProps) {
+function CropBody({ file, position, useButton, next, onShown, onUse, onRetake, onUnreadable }: CropBodyProps) {
   const [rect, setRect] = useState<CropRect>(FULL_CROP);
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const [box, setBox] = useState<{ width: number; height: number } | null>(null);
@@ -110,6 +160,13 @@ function CropBody({ file, position, useButton, onUse, onRetake }: CropBodyProps)
   const frameRef = useRef<HTMLDivElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const drag = useRef<Drag | null>(null);
+
+  // The mount time is the start of the sheet's FRESH_MS for this photo (before the browser paints it, so no
+  // event can reach it earlier). Only the mount counts: later renders keep it.
+  const shown = useRef({ next, onShown });
+  useLayoutEffect(() => {
+    shown.current.onShown(shown.current.next);
+  }, []);
 
   // The next photo of a multi-photo pick replaces this body: keep keyboard focus on Use photo.
   useEffect(() => {
@@ -197,7 +254,13 @@ function CropBody({ file, position, useButton, onUse, onRetake }: CropBodyProps)
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
+  // A held Enter repeats: its repeats never answer (on Use photo or Retake, a repeat would click again).
+  const onKeyDownCapture = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.repeat && e.key === 'Enter') e.preventDefault();
+  };
+
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.defaultPrevented) return;
     if (e.key === 'Enter') {
       e.preventDefault();
       onUse(rect);
@@ -218,7 +281,7 @@ function CropBody({ file, position, useButton, onUse, onRetake }: CropBodyProps)
   const rectStyle: CSSProperties = { left: pct(rect.x), top: pct(rect.y), width: pct(rect.width), height: pct(rect.height) };
 
   return (
-    <div className={s.body}>
+    <div className={s.body} onKeyDownCapture={onKeyDownCapture}>
       <div className={s.head}>
         <SheetTitle size="4" weight="medium" mb="0" trim="normal">
           Crop photo
@@ -272,7 +335,7 @@ function CropBody({ file, position, useButton, onUse, onRetake }: CropBodyProps)
             draggable={false}
             decoding="async"
             onLoad={(e) => setNatural({ width: e.currentTarget.naturalWidth || 1, height: e.currentTarget.naturalHeight || 1 })}
-            onError={() => onUse(null)}
+            onError={onUnreadable}
           />
           {box ? (
             <>

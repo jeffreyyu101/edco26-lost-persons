@@ -474,6 +474,73 @@ test('photos open the full-screen viewer, and Add uploads another', async ({ pag
   await expect(page.getByRole('button', { name: 'Photo 2 of 2, Not today' })).toBeVisible({ timeout: 15_000 });
 });
 
+// F2 review (a): Retake on a later photo of a multi-photo pick must not lose the photos already kept. Before
+// the fix the kept one was prepared and shown at once, the input went disabled, and the retaken photo then
+// replaced it in the Add sheet.
+test('Add with two photos: Use on the first, Retake on the second, a new photo: both are in the Add sheet and upload', async ({ page, baseURL }) => {
+  const origin = baseURL as string;
+  const row = await createRequest(page, origin);
+  await page.goto(`/?r=${row.id}`);
+  await expect(page.getByTestId('add-photo')).toBeVisible({ timeout: 15_000 });
+
+  await page.getByLabel('Add photo').setInputFiles([
+    { name: 'one.jpg', mimeType: 'image/jpeg', buffer: JPEG },
+    { name: 'two.jpg', mimeType: 'image/jpeg', buffer: JPEG },
+  ]);
+  const crop = page.getByRole('dialog', { name: 'Crop photo' });
+  await expect(crop.getByText('1 of 2', { exact: true })).toBeVisible();
+  await crop.getByRole('button', { name: 'Use photo' }).click();
+  await expect(crop.getByText('2 of 2', { exact: true })).toBeVisible();
+  // Past the next photo's guard (a tap this soon is ignored, CropSheet FRESH_MS).
+  await page.waitForTimeout(500);
+  // Nothing is prepared or shown while the retake is open: no Add sheet yet.
+  const chooser = page.waitForEvent('filechooser');
+  await crop.getByRole('button', { name: 'Retake' }).click();
+  const picker = await chooser;
+  await expect(crop).toBeHidden();
+  await expect(page.getByRole('dialog', { name: /^Add/ })).toHaveCount(0);
+  await expect(page.getByLabel('Add photo')).toBeEnabled();
+  await picker.setFiles({ name: 'three.jpg', mimeType: 'image/jpeg', buffer: JPEG });
+  // The new photo joins the run: the second of two.
+  await expect(crop.getByText('2 of 2', { exact: true })).toBeVisible();
+  await page.waitForTimeout(500);
+  await crop.getByRole('button', { name: 'Use photo' }).click();
+  await expect(crop).toBeHidden();
+
+  const sheet = page.getByRole('dialog', { name: 'Add 2 photos' });
+  await expect(sheet).toBeVisible({ timeout: 15_000 });
+  await expect(sheet.getByRole('img')).toHaveCount(2);
+  await expect(sheet.getByRole('img', { name: 'New photo 1' })).toBeVisible();
+  await expect(sheet.getByRole('img', { name: 'New photo 2' })).toBeVisible();
+  await sheet.getByRole('button', { name: 'Add 2 photos' }).click();
+  await expect(sheet).toBeHidden({ timeout: 20_000 });
+  await expect(page.getByRole('button', { name: 'Photo 2 of 2, Today' })).toBeVisible({ timeout: 15_000 });
+});
+
+test('Retake on a later photo, then the picker closed with no photo: the kept photo still reaches the Add sheet', async ({ page, baseURL }) => {
+  const origin = baseURL as string;
+  const row = await createRequest(page, origin);
+  await page.goto(`/?r=${row.id}`);
+  await expect(page.getByTestId('add-photo')).toBeVisible({ timeout: 15_000 });
+  await page.getByLabel('Add photo').setInputFiles([
+    { name: 'one.jpg', mimeType: 'image/jpeg', buffer: JPEG },
+    { name: 'two.jpg', mimeType: 'image/jpeg', buffer: JPEG },
+  ]);
+  const crop = page.getByRole('dialog', { name: 'Crop photo' });
+  await crop.getByRole('button', { name: 'Use photo' }).click();
+  await expect(crop.getByText('2 of 2', { exact: true })).toBeVisible();
+  await page.waitForTimeout(500);
+  const chooser = page.waitForEvent('filechooser');
+  await crop.getByRole('button', { name: 'Retake' }).click();
+  await chooser;
+  await expect(crop).toBeHidden();
+  // The picker is dismissed: the browser fires `cancel` on the input.
+  await page.getByLabel('Add photo').dispatchEvent('cancel');
+  const sheet = page.getByRole('dialog', { name: 'Add photo' });
+  await expect(sheet).toBeVisible({ timeout: 15_000 });
+  await expect(sheet.getByRole('img')).toHaveCount(1);
+});
+
 test("another person's answer shows the conflict banner and the new status within a poll", async ({ browser, page, baseURL }) => {
   const origin = baseURL as string;
   const row = await createRequest(page, origin);

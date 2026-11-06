@@ -96,8 +96,7 @@ export function PhotoSlot({ photos, onPhotosChange, timing, onTimingChange, read
     },
     [actions],
   );
-  const reopenPicker = useCallback(() => fileRef.current?.click(), []);
-  const crop = useCropQueue((picks) => void prepare(picks), reopenPicker);
+  const crop = useCropQueue((picks) => void prepare(picks), fileRef);
 
   const onFiles = (list: FileList | null) => {
     const files = list ? Array.from(list) : [];
