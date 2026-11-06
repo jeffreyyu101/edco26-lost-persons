@@ -4,7 +4,7 @@
 // alert is out of date is closed like its toast. Fake notifier; synthetic rows only.
 import { describe, expect, it } from 'vitest';
 import type { AlertEvent } from '@/lib/client/store-contract';
-import type { AlertNotifier, AlertRoute, SystemNotice } from '@/lib/client/system-notify';
+import { systemNotice, type AlertNotifier, type AlertRoute, type SystemNotice } from '@/lib/client/system-notify';
 import { STATUS } from '@/lib/domain';
 import { advance } from './helpers/env';
 import { boot, finish, installStoreHooks, ready } from './helpers/boot';
@@ -22,7 +22,9 @@ function fakeNotifier(initial: AlertRoute = 'system') {
   };
   const notifier: AlertNotifier = {
     route: () => n.route,
-    show: async (notice) => {
+    show: async (alert, rowOf, sources) => {
+      // Built at once from the rows the store passes, as the real notifier does.
+      const notice = systemNotice(alert, rowOf, sources);
       if (!n.works) return false;
       n.shown.push(notice);
       return true;

@@ -343,28 +343,41 @@ describe('the notifier', () => {
     system.start();
     await f.ready();
     const notice = sample();
-    expect(await system.show(notice)).toBe(true);
+    expect(await system.showNotice(notice)).toBe(true);
     expect(f.shows).toHaveLength(1);
     expect(f.shows[0]).toMatchObject({ title: 'LP-1004 · In medical', options: { tag: notice.tag, renotify: true } });
     // Another tab of this browser raises the same alert: already showing.
-    expect(await system.show(notice)).toBe(true);
+    expect(await system.showNotice(notice)).toBe(true);
     expect(f.shows).toHaveLength(1);
     // A newer change of the request replaces it (same tag).
-    expect(await system.show({ ...notice, title: 'LP-1004 · Not in medical', key: `${notice.tag}:3` })).toBe(true);
+    expect(await system.showNotice({ ...notice, title: 'LP-1004 · Not in medical', key: `${notice.tag}:3` })).toBe(true);
     expect(f.shows).toHaveLength(2);
     expect(f.open.map((n) => n.title)).toEqual(['LP-1004 · Not in medical']);
+  });
+
+  it('show(alert) builds the notification from the rows at call time (the store’s entry point)', async () => {
+    const f = fakeHost({ permission: 'granted' });
+    const system = createNotifySystem(f.host);
+    system.start();
+    await f.ready();
+    let row: RequestSummary | undefined = makeRow(4, { firstName: 'Sofia', lastName: 'Lopez', status: STATUS.inMedical, rowVersion: 2 });
+    const alert = statusAlert(row);
+    const shown = system.show(alert, () => row, [alert]);
+    row = undefined; // the store moves on; the notification was already built
+    expect(await shown).toBe(true);
+    expect(f.shows[0]).toMatchObject({ title: 'LP-1004 · In medical', options: { body: 'S.L. · FA 4\nBring the friend to Main Med', data: { key: `${alert.requestId}:2` } } });
   });
 
   it('reports failure so the store can toast instead: no permission, no worker, or showNotification throws', async () => {
     const f = fakeHost({ permission: 'default' });
     const system = createNotifySystem(f.host);
     system.start();
-    expect(await system.show(sample())).toBe(false); // no worker yet
+    expect(await system.showNotice(sample())).toBe(false); // no worker yet
     await f.ready();
-    expect(await system.show(sample())).toBe(false); // not granted
+    expect(await system.showNotice(sample())).toBe(false); // not granted
     f.setPermission('granted');
     f.failShow(true);
-    expect(await system.show(sample())).toBe(false);
+    expect(await system.showNotice(sample())).toBe(false);
     expect(f.shows).toHaveLength(0);
   });
 
@@ -375,8 +388,8 @@ describe('the notifier', () => {
     await f.ready();
     const a = sample();
     const b = { ...a, tag: 'other', key: 'other:1' };
-    await system.show(a);
-    await system.show(b);
+    await system.showNotice(a);
+    await system.showNotice(b);
     system.close(a.tag, `${a.tag}:99`); // an older change: leaves the newer notification alone
     await Promise.resolve();
     await Promise.resolve();
@@ -426,7 +439,7 @@ describe('the browser host (stubbed globals)', () => {
     await Promise.resolve();
     expect(system.state()).toEqual({ supported: true, permission: 'granted' });
     expect(system.route()).toBe('system');
-    expect(await system.show(sample())).toBe(true);
+    expect(await system.showNotice(sample())).toBe(true);
     expect(b.showNotification).toHaveBeenCalledWith('LP-1004 · In medical', expect.objectContaining({ tag: sample().tag, renotify: true }));
   });
 

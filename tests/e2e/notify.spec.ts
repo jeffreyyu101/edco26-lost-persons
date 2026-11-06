@@ -61,6 +61,9 @@ async function installSpy(context: BrowserContext, mode: Mode): Promise<void> {
     if (typeof Notification !== 'undefined') {
       const real = Notification.requestPermission.bind(Notification);
       let permission: NotificationPermission | null = m === 'granted' ? null : m;
+      // Chromium's headless shell keeps Notification.permission at 'denied' even after
+      // context.grantPermissions(['notifications']) (the Permissions API does say 'granted'): mirror the grant.
+      if (m === 'granted' && Notification.permission !== 'granted') permission = 'granted';
       if (permission !== null) Object.defineProperty(Notification, 'permission', { configurable: true, get: () => permission });
       Notification.requestPermission = () => {
         w.__lpAsked += 1;
@@ -173,6 +176,8 @@ test.describe('desktop (Chromium)', () => {
       const page = await desk.newPage();
       watch(page);
       await openApp(page);
+      // The grant is real for this origin (see installSpy for the headless-shell getter).
+      expect(await page.evaluate(() => navigator.permissions.query({ name: 'notifications' }).then((s) => s.state))).toBe('granted');
       // Once the service worker is active the menu shows the granted state (no "Allow" button).
       await page.getByTestId('account-trigger').click();
       const menu = page.getByRole('dialog', { name: 'Account' });

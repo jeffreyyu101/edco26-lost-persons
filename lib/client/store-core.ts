@@ -69,7 +69,7 @@ import {
 import { readPrefs, subscribePrefs, writePref } from './prefs';
 import { SESSION_CHANNEL, clearLogoutPending, readLogoutPending, writeLogoutPending, type LogoutPending } from './session-signals';
 import { startServiceWorker, type SwController } from './sw-client';
-import { notifySystem, systemNotice, type AlertNotifier } from './system-notify';
+import type { AlertNotifier } from './system-notify';
 import {
   createServerState,
   type AlertEvent,
@@ -157,11 +157,27 @@ export function browserEnv(): StoreEnv {
     redirect: (url) => window.location.replace(url),
     location: () => `${window.location.pathname}${window.location.search}`,
     serviceWorker: (hooks) => startServiceWorker(hooks),
-    notifier: () => {
-      const system = notifySystem();
-      system.start();
-      return system;
+    notifier: () => lazyNotifier(),
+  };
+}
+
+/**
+ * System notifications (v2.5 A52), loaded with import() so they cost nothing on the first load (A25).
+ * Until the module is in, every alert is a toast, as on a device without them.
+ */
+function lazyNotifier(): AlertNotifier {
+  let real: AlertNotifier | null = null;
+  import('./system-notify').then(
+    (m) => {
+      real = m.startNotify();
     },
+    () => undefined,
+  );
+  return {
+    route: () => real?.route() ?? 'toast',
+    show: (alert, rowOf, sources) => real?.show(alert, rowOf, sources) ?? Promise.resolve(false),
+    close: (tag, key) => real?.close(tag, key),
+    closeAll: () => real?.closeAll(),
   };
 }
 
@@ -558,13 +574,17 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
    * never both. If it can't be shown after all (permission withdrawn), the toast carries it.
    */
   const showSystemAlert = (n: AlertNotifier, alert: AlertEvent, status: string | null, sources: readonly AlertEvent[]) => {
-    const notice = systemNotice(alert, (id) => state.confirmed.get(id), sources);
+    // The rows as they are now: the notifier builds the notification from them before it awaits anything.
+    const rows = state.confirmed;
+    const row = alert.requestId ? rows.get(alert.requestId) : undefined;
+    // The (id, rowVersion) the notification carries (systemNotice), so only this change is ever closed.
+    const key = row ? alertKey(row) : null;
     const tracked = alert.requestId && alert.kind !== 'new_request' ? alert.requestId : null;
-    if (tracked) systemAlerts.set(tracked, { requestId: tracked, kind: alert.kind, status, key: notice.key });
+    if (tracked) systemAlerts.set(tracked, { requestId: tracked, kind: alert.kind, status, key });
     const gen = state.generation;
-    void n.show(notice).then((shown) => {
+    void n.show(alert, (id) => rows.get(id), sources).then((shown) => {
       if (shown || !running || gen !== state.generation) return;
-      if (tracked && systemAlerts.get(tracked)?.key === notice.key) systemAlerts.delete(tracked);
+      if (tracked && systemAlerts.get(tracked)?.key === key) systemAlerts.delete(tracked);
       if (alert.requestId && !alertStillCurrent(alert.kind, status, state.confirmed.get(alert.requestId))) return;
       showAlertToast(alert, status);
     });

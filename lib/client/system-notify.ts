@@ -17,12 +17,18 @@
 //     (id, rowVersion) is not shown twice.
 //   * Content: the LP number, "New request" or the status, initials and the post. Never a phone number or
 //     any other contact detail: it lands on the lock screen and in the notification centre.
+//   * Click: public/sw.js focuses an app window and posts {type: 'lp-open', url}; this page opens that view
+//     in place (no reload, so an open form or sheet is not lost) and answers {ok}. A page that does not
+//     answer (a sign-in page, an older build) is navigated by the worker instead.
+//
+// Off the first load (A25): the store loads this module with import() after start (store-core.ts
+// browserEnv), and the avatar menu and the sheets import it from their own view chunks.
 import { useSyncExternalStore } from 'react';
 import type { RequestSummary } from '../api-types';
 import { initials, statusMeta } from '../domain';
 import { formatCaseNumber } from '../format';
 import { alertKey } from './alerts';
-import { hrefFor } from './nav';
+import { hrefFor, navigate, parseView, viewToParams } from './nav';
 import type { AlertEvent } from './store-contract';
 
 export type NotifyPermission = 'default' | 'granted' | 'denied';
@@ -195,8 +201,11 @@ export interface NotifyHost {
 /** What the store uses to deliver alerts (StoreEnv.notifier). */
 export interface AlertNotifier {
   route(): AlertRoute;
-  /** Shows it; false when it could not be shown (the store then toasts it). */
-  show(notice: SystemNotice): Promise<boolean>;
+  /**
+   * Shows `alert` as a system notification (systemNotice, built at once from `rowOf`; `sources` are the
+   * alerts a combined one stands for). False when it could not be shown: the store then toasts it.
+   */
+  show(alert: AlertEvent, rowOf: (id: string) => RequestSummary | undefined, sources: readonly AlertEvent[]): Promise<boolean>;
   /** Closes the notification with this tag (only the one of `key`, when given). */
   close(tag: string, key?: string | null): void;
   /** Closes every notification of the app (sign-out, another staff signed in). */
@@ -206,6 +215,8 @@ export interface AlertNotifier {
 export interface NotifySystem extends AlertNotifier {
   /** Starts reading the registration and watching the permission (idempotent). */
   start(): void;
+  /** Shows a built notice (show() builds it from the alert). */
+  showNotice(notice: SystemNotice): Promise<boolean>;
   state(): NotifyState;
   subscribe(listener: () => void): () => void;
   /**
@@ -249,6 +260,26 @@ export function createNotifySystem(host: NotifyHost): NotifySystem {
       () => undefined,
     );
     host.watch(refresh);
+  };
+
+  const showNotice = async (notice: SystemNotice): Promise<boolean> => {
+    const r = registration;
+    if (!r || read().permission !== 'granted') return false;
+    if (notice.key && r.getNotifications) {
+      try {
+        const open = await r.getNotifications({ tag: notice.tag });
+        // Another tab of this browser already showed this very change.
+        if (open.some((n) => keyOf(n) === notice.key)) return true;
+      } catch {
+        // Only the dedupe is lost.
+      }
+    }
+    try {
+      await r.showNotification(notice.title, noticeOptions(notice));
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   const closeWhere = (filter: { tag?: string } | undefined, match: (n: ShownNotificationLike) => boolean) => {
@@ -295,25 +326,9 @@ export function createNotifySystem(host: NotifyHost): NotifySystem {
       refresh();
       return routeAlert(snapshot, host.window());
     },
-    async show(notice) {
-      const r = registration;
-      if (!r || read().permission !== 'granted') return false;
-      if (notice.key && r.getNotifications) {
-        try {
-          const open = await r.getNotifications({ tag: notice.tag });
-          // Another tab of this browser already showed this very change.
-          if (open.some((n) => keyOf(n) === notice.key)) return true;
-        } catch {
-          // Only the dedupe is lost.
-        }
-      }
-      try {
-        await r.showNotification(notice.title, noticeOptions(notice));
-        return true;
-      } catch {
-        return false;
-      }
-    },
+    // The notice is built before anything is awaited, from the rows the store holds at this moment.
+    show: (alert, rowOf, sources) => showNotice(systemNotice(alert, rowOf, sources)),
+    showNotice,
     close(tag, key) {
       closeWhere({ tag }, (n) => key === undefined || key === null || keyOf(n) === key);
     },
@@ -370,6 +385,7 @@ const NULL_SYSTEM: NotifySystem = {
   request: () => Promise.resolve('default'),
   route: () => 'toast',
   show: () => Promise.resolve(false),
+  showNotice: () => Promise.resolve(false),
   close: () => undefined,
   closeAll: () => undefined,
 };
@@ -394,4 +410,71 @@ export function useNotifyState(): NotifyState {
 /** Ask for permission from a tap; a no-op where unsupported or already answered. */
 export function askNotifyPermission(): Promise<NotifyPermission> {
   return notifySystem().request();
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Notification clicks (the page side of public/sw.js notificationclick)
+// ---------------------------------------------------------------------------------------------------
+
+/** The message public/sw.js posts when a notification is clicked. */
+export const OPEN_MESSAGE = 'lp-open';
+
+/**
+ * Open `url` (a path + query of `/`, e.g. "/?r=<id>") as an in-app view. False when it is not a view of
+ * this page (another origin or path): the worker then navigates the window.
+ */
+export function openFromNotification(url: string): boolean {
+  if (typeof window === 'undefined') return false;
+  let target: URL;
+  try {
+    target = new URL(url, window.location.origin);
+  } catch {
+    return false;
+  }
+  if (target.origin !== window.location.origin || target.pathname !== '/') return false;
+  const params = viewToParams(parseView(target.searchParams));
+  // Already showing it: no second history entry (Back would land on the same view).
+  if (hrefFor(params) === `${window.location.pathname}${window.location.search}`) return true;
+  navigate(params);
+  return true;
+}
+
+/** Answers the worker's {type: 'lp-open', url} messages. Returns the remover. */
+export function listenForNotificationOpens(
+  container: Pick<ServiceWorkerContainer, 'addEventListener' | 'removeEventListener'>,
+  open: (url: string) => boolean = openFromNotification,
+): () => void {
+  const onMessage = (event: Event) => {
+    const { data, ports } = event as MessageEvent<{ type?: unknown; url?: unknown } | null>;
+    if (!data || data.type !== OPEN_MESSAGE || typeof data.url !== 'string') return;
+    let ok = false;
+    try {
+      ok = open(data.url);
+    } catch {
+      ok = false;
+    }
+    try {
+      ports?.[0]?.postMessage({ ok });
+    } catch {
+      // The worker stopped waiting.
+    }
+  };
+  container.addEventListener('message', onMessage);
+  return () => container.removeEventListener('message', onMessage);
+}
+
+let opensInstalled = false;
+
+/**
+ * The store's entry point (loaded with import() after start): the page's notifier, started, and the
+ * notification-click listener, installed once for the page's lifetime.
+ */
+export function startNotify(): NotifySystem {
+  const system = notifySystem();
+  system.start();
+  if (!opensInstalled && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+    opensInstalled = true;
+    listenForNotificationOpens(navigator.serviceWorker);
+  }
+  return system;
 }

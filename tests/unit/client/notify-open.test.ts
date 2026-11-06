@@ -1,8 +1,8 @@
-// The page side of a notification click (v2.5 A52, lib/client/sw-client.ts): public/sw.js posts
+// The page side of a notification click (v2.5 A52, lib/client/system-notify.ts): public/sw.js posts
 // {type: 'lp-open', url}; the app page opens that view in place (pushState, no reload) and answers {ok}.
 // Anything else is ignored. Stubbed window and service worker container; synthetic ids only.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { listenForNotificationOpens, openFromNotification } from '@/lib/client/sw-client';
+import { listenForNotificationOpens, openFromNotification } from '@/lib/client/system-notify';
 
 const ID = '0f0f0f0f-0000-4000-8000-000000000012';
 
