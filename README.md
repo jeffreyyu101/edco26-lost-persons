@@ -117,13 +117,14 @@ Pending.
   (with a progress line), Search, New request, the profile, Edit and the dashboard. Views are URL parameters
   on `/`, so Back and shared links work. The view menu is the large page title ("All requests 13 ⌄").
 - **All requests.** Open requests (Waiting for check, In medical) come first, newest first; every closed one
-  (Not in medical, Reunited, Discharged, Cancelled) folds into one "Closed N" row. Each row shows the LP
+  (Not in medical, Reunited, Discharged, Cancelled) folds into one "Archived N" row. Each row shows the LP
   number, the name, the status, when it was logged ("11:02 PM", or "Thu 11:02 PM" for an earlier day) and
   when it last changed ("now", "2m", "1h", "3d", or "—").
 - **Live.** The list syncs every 6 s while the app is open (60 s in the background). A dot by the title shows
   only while the app is offline or reconnecting. Offline and "can't reach the log" show as banners.
-- **Answers.** Not in medical, In medical, Reunited and Change answer each offer Undo for 6 s. Two people
-  giving the same answer is harmless. A change made by someone else shows as "Updated by someone else".
+- **Answers.** Not in medical, In medical, Reunited and Change answer each offer Undo for 10 s. Change answer
+  is a menu: the other answer, or Back to Waiting for check. Two people giving the same answer is harmless.
+  A change made by someone else shows as "Updated by someone else".
 - **Alerts** appear only while the app is open: changes to your requests by someone else, and new requests
   when alerts are on (the bell, in the avatar menu). There are no lock-screen notifications.
 - **Offline.** A new request (with its photos) is saved on the phone first and sent when the signal is back.
