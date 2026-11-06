@@ -1,5 +1,11 @@
 /* Avatar + account menu, ported from design/screens/states.html (.menu, .mhead, .mitem, .msep, .mfoot). */
 
+.menu,
+.menu *,
+.trigger {
+  box-sizing: border-box;
+}
+
 /* The 32 px avatar with a 44 px hit area. */
 .trigger {
   position: relative;

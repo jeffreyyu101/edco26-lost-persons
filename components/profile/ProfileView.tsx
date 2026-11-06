@@ -287,13 +287,13 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh }: ProfileP
         <Text size="2" weight="medium" color="gray" data-testid="profile-case">
           {label}
         </Text>
-        <DropdownMenu.Root modal={false}>
+        <DropdownMenu.Root>
           <DropdownMenu.Trigger>
             <IconButton variant="soft" color="gray" radius="full" aria-label="More actions" className={s.hit}>
               <Ellipsis size={16} aria-hidden />
             </IconButton>
           </DropdownMenu.Trigger>
-          <DropdownMenu.Content align="end" variant="soft">
+          <DropdownMenu.Content align="end" variant="soft" className={s.pmenu}>
             <DropdownMenu.Item onSelect={() => navigate({ r: row.id, edit: 'all' })}>
               <Pencil size={15} aria-hidden />
               Edit details

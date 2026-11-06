@@ -89,7 +89,7 @@ export function PhotoViewer({ photos, startIndex, personLabel, timeZone, now, on
               </span>
             </button>
           </Dialog.Close>
-          <Dialog.Title size="2" weight="medium" aria-live="polite">
+          <Dialog.Title as="h2" size="2" weight="medium" mb="0" className={s.vtitle} aria-live="polite">
             {count > 0 ? `${index + 1} of ${count}` : 'No photos'}
           </Dialog.Title>
           <span />

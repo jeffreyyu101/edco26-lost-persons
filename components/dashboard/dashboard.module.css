@@ -1,5 +1,12 @@
 /* Dashboard, ported from design/screens/dashboard.html. */
 
+.app,
+.app *,
+.app *::before,
+.app *::after {
+  box-sizing: border-box;
+}
+
 .app {
   min-height: 100vh;
   min-height: 100dvh;
@@ -121,7 +128,8 @@
 
 .tiles {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* Columns size to their content (as in the mockup) and shrink, with ellipses, when it doesn't fit. */
+  grid-template-columns: minmax(0, auto) minmax(0, auto);
   gap: 10px;
 }
 .tile {

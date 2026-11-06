@@ -1,5 +1,16 @@
 /* Request profile, ported from design/screens/profile.html (and the photo viewer in states.html). */
 
+.app,
+.app *,
+.app *::before,
+.app *::after,
+.viewer,
+.viewer *,
+.picks,
+.picks * {
+  box-sizing: border-box;
+}
+
 .app {
   min-height: 100vh;
   min-height: 100dvh;
@@ -382,6 +393,12 @@ button.portrait {
   color: var(--red-11);
 }
 
+/* The ⋯ menu: 44 px rows. */
+.pmenu.pmenu {
+  --base-menu-item-height: 44px;
+  min-width: 200px;
+}
+
 /* Add-photos sheet. */
 .picks {
   display: flex;
@@ -422,8 +439,8 @@ button.portrait {
   padding: 9px 9px 0;
   padding-top: max(9px, env(safe-area-inset-top));
 }
-.vtop h2 {
-  margin: 0;
+.vtitle {
+  margin: 0 !important;
   text-align: center;
   color: #fff;
 }
