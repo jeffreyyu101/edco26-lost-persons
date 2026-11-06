@@ -202,7 +202,11 @@ export interface RequestDraft {
 
 /** What an alert host plays a chime / vibration for (the toast itself is added by the store). */
 export interface AlertEvent {
-  kind: 'in_medical' | 'not_in_medical' | 'reunited' | 'new_request' | 'combined';
+  /**
+   * 'status_changed' (added in Phase 1b): any other status change of one of my requests by someone else
+   * (back to Waiting after an Undo, Discharged, Cancelled), since spec §7 alerts on ANY status change.
+   */
+  kind: 'in_medical' | 'not_in_medical' | 'reunited' | 'new_request' | 'combined' | 'status_changed';
   /** Absent for 'combined'. */
   requestId?: string;
   title: string;
@@ -287,6 +291,13 @@ export interface StoreActions {
 
   /** Activate the waiting service worker and reload (refused while a draft or outbox job exists). */
   applyUpdate(): Promise<boolean>;
+
+  /**
+   * (Added in Phase 1b, A15.) Post every `/_next/static/*` URL this page has loaded to the service worker
+   * and wait until it cached them; sets state.offlineReady. The shell calls it after the idle prefetch of
+   * every view chunk. Resolves false without a service worker (development, unsupported browsers).
+   */
+  prepareOffline?(): Promise<boolean>;
 }
 
 /**
