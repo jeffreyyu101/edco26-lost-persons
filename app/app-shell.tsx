@@ -8,14 +8,16 @@
 // Desk (from 768 px, components/desk): the same views inside the desk frame. The main column keeps a list
 // or the dashboard; a request (?r=) opens beside it in the detail pane, and a form (?new=1, edit,
 // needs attention) opens over it. The frame is CSS-only and always rendered (no layout flash); its
-// sidebar / rail, top bar, pane header and keyboard come from the desk chunk, loaded only on the desk.
+// sidebar / rail, top bar, pane header and keyboard come from the desk chunk, loaded only on the desk. All
+// requests, My requests and Search are the desk's request table there (components/desk/table, its own
+// chunk, also desk only); Pending and the dashboard render their views as they are.
 // Under 768 px the view router renders exactly what it always did.
 import dynamic from 'next/dynamic';
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { isDeskNow, useIsDesk } from '@/components/desk/breakpoints';
 import { DeskFrame } from '@/components/desk/DeskFrame';
 import { useMainView } from '@/components/desk/use-main-view';
-import { isFormView, paneRequestId } from '@/components/desk/views';
+import { isFormView, paneRequestId, type MainView } from '@/components/desk/views';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { TestDataBanner } from '@/components/ui/TestDataBanner';
 import { ProfileSkeleton, RowSkeletons } from '@/components/ui/Skeleton';
@@ -36,6 +38,7 @@ const loadDialogs = () => import('@/components/ui/ShellDialogs');
 const loadImage = () => import('@/lib/client/image');
 const VIEW_CHUNKS = [loadList, loadForm, loadProfile, loadDashboard, loadDialogs, loadImage];
 const loadDesk = () => import('@/components/desk/DeskChrome');
+const loadDeskTable = () => import('@/components/desk/table/DeskTableViews');
 
 const listLoading = () => <RowSkeletons />;
 const AllView = dynamic(() => loadList().then((m) => m.AllView), { ssr: false, loading: listLoading });
@@ -53,6 +56,9 @@ const DeskNav = dynamic(() => loadDesk().then((m) => m.DeskNav), { ssr: false })
 const DeskTop = dynamic(() => loadDesk().then((m) => m.DeskTop), { ssr: false });
 const DeskPane = dynamic(() => loadDesk().then((m) => m.DeskPane), { ssr: false });
 const DeskKeys = dynamic(() => loadDesk().then((m) => m.DeskKeys), { ssr: false });
+const DeskAllTable = dynamic(() => loadDeskTable().then((m) => m.DeskAllTable), { ssr: false, loading: listLoading });
+const DeskMineTable = dynamic(() => loadDeskTable().then((m) => m.DeskMineTable), { ssr: false, loading: listLoading });
+const DeskSearchTable = dynamic(() => loadDeskTable().then((m) => m.DeskSearchTable), { ssr: false, loading: listLoading });
 
 export interface AppShellProps {
   eventTimezone: string;
@@ -94,7 +100,7 @@ function ViewRouter() {
         // list (and the pane) show behind it; anything drawn in place would cover them.
         form={desk && isFormView(view) ? viewElement(view, true) : null}
       >
-        {desk ? viewElement(main, true) : viewElement(view, false)}
+        {desk ? deskMainElement(main, paneId) : viewElement(view, false)}
       </DeskFrame>
       {desk ? <DeskKeys view={view} main={main} /> : null}
     </>
@@ -122,6 +128,23 @@ function viewElement(view: View, desk: boolean) {
       return <ProfileView id={view.id} />;
     case 'dashboard':
       return <DashboardView />;
+  }
+}
+
+/**
+ * The desk's main column: the request table for All, My requests and Search, with the request open in the
+ * pane highlighted; Pending and the dashboard as their views.
+ */
+function deskMainElement(main: MainView, selected: string | null) {
+  switch (main.name) {
+    case 'all':
+      return <DeskAllTable status={main.status} post={main.post} open={!!main.open} selected={selected} />;
+    case 'mine':
+      return <DeskMineTable selected={selected} />;
+    case 'search':
+      return <DeskSearchTable q={main.q} selected={selected} />;
+    default:
+      return viewElement(main, true);
   }
 }
 
@@ -161,7 +184,7 @@ function ShellHosts() {
   useEffect(() => {
     let cancelled = false;
     const prefetch = () => {
-      const chunks = isDeskNow() ? [...VIEW_CHUNKS, loadDesk] : VIEW_CHUNKS;
+      const chunks = isDeskNow() ? [...VIEW_CHUNKS, loadDesk, loadDeskTable] : VIEW_CHUNKS;
       void Promise.allSettled(chunks.map((load) => load())).then((results) => {
         if (cancelled) return;
         void actions.prepareOffline?.();
