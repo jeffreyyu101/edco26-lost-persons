@@ -183,7 +183,8 @@ test('offline: amber dot, banner between the header and the view bar, answers ne
   await context.setOffline(true);
   try {
     await expect(page.getByTestId('live-dot')).toHaveAttribute('data-state', 'off');
-    const banner = page.getByText(/^Offline · \d+ waiting to send$/);
+    // The shell may render its own copy (hidden before list views): only one is ever visible.
+    const banner = page.getByText(/^Offline · \d+ waiting to send$/).filter({ visible: true });
     await expect(banner).toBeVisible();
     const header = await page.getByRole('heading', { name: 'Is my friend in medical?' }).boundingBox();
     const bannerBox = await banner.boundingBox();
@@ -197,7 +198,7 @@ test('offline: amber dot, banner between the header and the view bar, answers ne
     // Each disabled answer is described by a hidden "Needs a connection"; the tap adds the visible toast.
     const reasons = page.getByText('Needs a connection', { exact: true });
     const before = await reasons.count();
-    await answer.click();
+    await answer.click({ force: true }); // aria-disabled: Playwright would wait for it to be enabled
     await expect(reasons).toHaveCount(before + 1);
     await expect(checkCard(page, r.id)).toBeVisible();
   } finally {
