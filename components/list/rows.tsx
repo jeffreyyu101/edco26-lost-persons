@@ -18,9 +18,10 @@ import {
   isClosed,
   logNumber,
   logNumberRanges,
+  logRowLabel,
   outboxDisplay,
   outboxRowLabel,
-  statusPhrase,
+  searchLogLabel,
   type Ranges,
 } from './list-helpers';
 import s from './list.module.css';
@@ -64,11 +65,10 @@ export function ColumnHeader() {
   );
 }
 
-// A row's accessible name comes from its content, not an aria-label, so the visible values and the spoken
-// sentence never disagree (WCAG 2.5.3 label in name). Screen-reader-only words sit between the visible
-// values, and the compact Updated ("2m", "—") is swapped for its spoken form, so the row reads as one
-// sentence: "LP-1013, T.R., Waiting for check, created 11:02 PM, updated 2 minutes ago"
-// (list-helpers.logRowLabel builds the same sentence).
+// A row's accessible name is its content, not an aria-label: one screen-reader-only sentence, with the
+// visible cells hidden from screen readers. So it reads "LP-1013, T.R., Waiting for check, created
+// 11:02 PM, updated 2 minutes ago" (list-helpers.logRowLabel) and never "1013 T.R. … 2m", and the label-in-
+// name check (WCAG 2.5.3) has no aria-label to compare against the compact visible values.
 
 /** Words for screen readers only (in the row's name, not on screen). */
 function Vh({ children }: { children: ReactNode }) {
@@ -82,54 +82,33 @@ interface LogCellsProps {
   /** The status glyph. */
   glyph: ReactNode;
   tone: string;
-  /** The visible status label, and what a screen reader adds after it (", friend coming"). */
   statusLabel: string;
-  statusMore?: string;
   created: string;
   updated: string;
-  /** "updated 2 minutes ago" / "not updated yet". */
-  updatedSaid: string;
 }
 
-function LogCells({ number, name, glyph, tone, statusLabel, statusMore = '', created, updated, updatedSaid }: LogCellsProps) {
+/** The visible cells of a row (hidden from screen readers: the row's sentence says it all). */
+function LogCells({ number, name, glyph, tone, statusLabel, created, updated }: LogCellsProps) {
   return (
     <>
-      <span className={`${s.c1} ${s.num}`} data-col="number">
-        {number ? (
-          <>
-            <Vh>LP-</Vh>
-            {number}
-            <Vh>, </Vh>
-          </>
-        ) : null}
+      <span className={`${s.c1} ${s.num}`} data-col="number" aria-hidden>
+        {number}
       </span>
-      <span className={`${s.c2} ${s.nm}`} data-col="name">
+      <span className={`${s.c2} ${s.nm}`} data-col="name" aria-hidden>
         {name}
-        <Vh>, </Vh>
       </span>
-      <span className={`${s.c3} ${s.stc}`} data-col="status" data-tone={tone}>
+      <span className={`${s.c3} ${s.stc}`} data-col="status" data-tone={tone} aria-hidden>
         {glyph}
         <span className={s.stl}>{statusLabel}</span>
-        <Vh>{`${statusMore}, `}</Vh>
       </span>
-      <span className={`${s.c4} ${s.tm}`} data-col="created">
-        <Vh>created </Vh>
+      <span className={`${s.c4} ${s.tm}`} data-col="created" aria-hidden>
         {created}
-        <Vh>, </Vh>
       </span>
-      <span className={`${s.c5} ${s.tm}`} data-col="updated" data-none={updated === NOT_UPDATED ? '' : undefined}>
-        <span aria-hidden>{updated}</span>
-        <Vh>{updatedSaid}</Vh>
+      <span className={`${s.c5} ${s.tm}`} data-col="updated" data-none={updated === NOT_UPDATED ? '' : undefined} aria-hidden>
+        {updated}
       </span>
     </>
   );
-}
-
-/** What a screen reader says after the visible status label: ", friend coming" for In medical. */
-function statusMore(status: string): string {
-  const label = statusMeta(status).shortLabel;
-  const said = statusPhrase(status);
-  return said.startsWith(label) ? said.slice(label.length) : '';
 }
 
 export interface LogRowProps {
@@ -154,16 +133,15 @@ export const LogRow = memo(function LogRow({ row, created, updated, updatedSaid 
       data-closed={closed ? '' : undefined}
       onClick={() => navigate({ r: row.id })}
     >
+      <Vh>{logRowLabel(row, created, updatedSaid)}</Vh>
       <LogCells
         number={logNumber(row.caseNumber)}
         name={displayName(row.name)}
         glyph={<StatusGlyph status={row.status} className={s.lg} />}
         tone={meta.tone}
         statusLabel={meta.shortLabel}
-        statusMore={statusMore(row.status)}
         created={created}
         updated={updated}
-        updatedSaid={updatedSaid}
       />
     </button>
   );
@@ -192,20 +170,18 @@ export const SearchLogRow = memo(function SearchLogRow({ hit, created, updated, 
       data-closed={closed ? '' : undefined}
       onClick={() => navigate({ r: row.id })}
     >
+      <Vh>{searchLogLabel(row, created, updatedSaid, line)}</Vh>
       <LogCells
         number={<Highlight text={logNumber(row.caseNumber)} ranges={logNumberRanges(row.caseNumber, caseRanges)} />}
         name={<Highlight text={displayName(row.name)} ranges={row.name ? nameRanges : []} />}
         glyph={<StatusGlyph status={row.status} className={s.lg} />}
         tone={meta.tone}
         statusLabel={meta.shortLabel}
-        statusMore={statusMore(row.status)}
         created={created}
         updated={updated}
-        updatedSaid={updatedSaid}
       />
       {line ? (
-        <span className={s.match} data-col="match">
-          <Vh>. </Vh>
+        <span className={s.match} data-col="match" aria-hidden>
           <Highlight text={line} ranges={lineRanges} />
         </span>
       ) : null}
@@ -219,6 +195,8 @@ export const SearchLogRow = memo(function SearchLogRow({ hit, created, updated, 
  */
 export function OutboxLogRow({ item, created }: { item: OutboxItem; created: string }) {
   const d = outboxDisplay(item);
+  // "Kayla, 19 F, 11:02 PM. Waiting to send, FA 3, Not sent." (+ "Open to fix and resend.")
+  const label = outboxRowLabel(d, created);
   const cells = (
     <LogCells
       number={item.caseNumber ? logNumber(item.caseNumber) : null}
@@ -234,20 +212,19 @@ export function OutboxLogRow({ item, created }: { item: OutboxItem; created: str
       statusLabel={d.label}
       created={created}
       updated={NOT_UPDATED}
-      updatedSaid={`${d.post}, ${d.caseText}.${d.needsAttention ? ' Open to fix and resend.' : ''}`}
     />
   );
   if (d.needsAttention) {
     return (
       <button type="button" className={`${s.lrow} ${s.lr}`} data-outbox-id={item.mutationId} onClick={() => navigate({ outbox: item.mutationId })}>
+        <Vh>{label}</Vh>
         {cells}
       </button>
     );
   }
-  // Not a control: a group named by the queued sentence ("Kayla, 19 F, 11:02 PM. Waiting to send, FA 3,
-  // Not sent.").
+  // Not a control: a group named by the same sentence.
   return (
-    <div className={`${s.lrow} ${s.lr}`} data-outbox-id={item.mutationId} role="group" aria-label={outboxRowLabel(d, created)}>
+    <div className={`${s.lrow} ${s.lr}`} data-outbox-id={item.mutationId} role="group" aria-label={label}>
       {cells}
     </div>
   );

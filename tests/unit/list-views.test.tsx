@@ -320,18 +320,35 @@ describe('list views render', () => {
     if (at < 0) return '';
     return html.slice(html.lastIndexOf('<', at), html.indexOf('>', at) + 1);
   };
-  /** What a screen reader says for LP-n's row: its text without the aria-hidden parts (no aria-label). */
+  /**
+   * What a screen reader says for LP-n's row (it has no aria-label): its content minus everything marked
+   * aria-hidden, which leaves the one screen-reader-only sentence.
+   */
   const spoken = (html: string, n: number) => {
     const at = html.indexOf(`data-request-id="${idOf(n)}"`);
-    const button = html.slice(at, html.indexOf('</button>', at));
-    return button
-      .replace(/<svg[^]*?<\/svg>/g, '')
-      .replace(/<span aria-hidden="true">[^<]*<\/span>/g, '')
+    const button = html.slice(html.indexOf('>', at) + 1, html.indexOf('</button>', at));
+    // Each aria-hidden cell is a top-level child of the row: drop it with everything inside it.
+    let out = button;
+    for (;;) {
+      const start = out.search(/<span [^>]*aria-hidden="true"[^>]*>/);
+      if (start < 0) break;
+      let depth = 0;
+      let i = start;
+      const tag = /<\/?span\b[^>]*>/g;
+      tag.lastIndex = start;
+      for (let m = tag.exec(out); m; m = tag.exec(out)) {
+        depth += m[0].startsWith('</') ? -1 : 1;
+        if (depth === 0) {
+          i = m.index + m[0].length;
+          break;
+        }
+      }
+      out = out.slice(0, start) + out.slice(i);
+    }
+    return out
       .replace(/<[^>]+>/g, '')
-      .replace(/<!-- -->/g, '')
       .replace(/&#x27;/g, "'")
       .replace(/&amp;/g, '&')
-      .replace(/^[^>]*>/, '')
       .replace(/\s+/g, ' ')
       .trim();
   };
