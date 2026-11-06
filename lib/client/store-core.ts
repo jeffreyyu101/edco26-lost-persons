@@ -422,6 +422,14 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   };
 
   /**
+   * This phone set request `id`'s medical location (version `from` → `to`): the status Undo on screen for
+   * it is still right (a location is not a status), so it moves to the new version instead of going.
+   */
+  const carryUndoFor = (id: string, from: number, to: number) => {
+    for (const record of undoRecords.values()) if (record.id === id && record.version === from) record.version = to;
+  };
+
+  /**
    * This phone changed request `id` again (an edit, cancel, photo, another answer): an Undo offered for an
    * earlier version of it would only 409, so it goes. An unchanged repeat (same version) keeps it.
    */
@@ -2022,6 +2030,49 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         }
         // A10: the form shows the conflict review itself (latest data, the user's edits kept).
         return mutationFailed(id, res.ok ? { ok: false, kind: 'network' } : res, { conflictToast: false, quiet });
+      });
+    },
+
+    async setMedicalLocation(id, location, opts) {
+      const quiet = !!opts?.quiet;
+      if (offlineNow()) return refuseOffline(quiet);
+      const value = location === null ? null : location.trim() || null;
+      return serialize(id, async () => {
+        const blocked = await writeGate(quiet);
+        if (blocked) return blocked;
+        const gen = ownerGen();
+        const row = state.confirmed.get(id);
+        if (!row) return fail('not_found', COPY.notFound);
+        if ((row.medicalLocation ?? null) === value) return { ok: true, changed: false, request: row };
+        setOverlay(id, { mutationId: uuid(), kind: 'fields', fields: { medicalLocation: value }, startedAt: now() });
+        const send = (version: number) =>
+          call<ChangeResponse>(`/api/requests/${encodeURIComponent(id)}`, {
+            method: 'PATCH',
+            json: { patch: { medicalLocation: value }, expectedVersion: version },
+            timeoutMs: MUTATION_TIMEOUT_MS,
+          });
+        let base = row.rowVersion;
+        let res = await send(base);
+        if (gen !== state.generation) return fail('failed', COPY.failed);
+        if (!res.ok && res.kind === 'http' && res.status === 409) {
+          // Someone else saved something in between: the location is one field this person just typed, so
+          // it goes on top of the latest version (once).
+          const latest = await fetchRow(id);
+          if (gen !== state.generation) return fail('failed', COPY.failed);
+          if (latest) {
+            base = latest.rowVersion;
+            res = await send(base);
+            if (gen !== state.generation) return fail('failed', COPY.failed);
+          }
+        }
+        if (res.ok && isRow(res.data.request)) {
+          const request = res.data.request;
+          if (res.data.changed) carryUndoFor(id, base, request.rowVersion);
+          commitOwn(request, id);
+          markLive();
+          return { ok: true, changed: !!res.data.changed, request: state.confirmed.get(id) ?? request };
+        }
+        return mutationFailed(id, res.ok ? { ok: false, kind: 'network' } : res, { conflictToast: true, quiet });
       });
     },
 

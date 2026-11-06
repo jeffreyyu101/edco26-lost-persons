@@ -3,11 +3,12 @@
 // header declutter of 2026-11-06, design/screens/polish-v7.html + v7-log.png). The page loads each export
 // with next/dynamic. Every action goes through the store contract; every view change through lib/client/nav.
 //
-// All, Pending and My requests open with the brand card (Jeffrey, 2026-11-06 10:31: logos, event details and
-// the big "Is my friend in medical?"), which scrolls away. Under it, each view owns its sticky bar (the large
-// title that is the view menu, search, and the avatar with its offline / reconnecting badge), the offline /
-// error banner under it, the filter chips, and the New request button. Skeletons show only while there is no
-// cached data yet.
+// All requests opens with the brand card (Jeffrey, 2026-11-06 10:31: logos, event details and the big "Is my
+// friend in medical?"), which scrolls away; Pending and My requests open with just their large title (Pending
+// v8, Brian 2026-11-06 afternoon). Each view owns its sticky bar (the large title that is the view menu,
+// search, and the avatar with its offline / reconnecting badge), the offline / error banner under it, the
+// filter chips (Pending: its To check | Friend coming control), and the New request button. Skeletons show
+// only while there is no cached data yet.
 //
 // All requests (option B): queued requests on top, then open requests (newest first), then every closed
 // request folded into one "Archived N" row (Brian, 2026-11-06) that opens in place (remembered for the
@@ -16,11 +17,13 @@
 // the reporter theirs (Not in medical included), so they can tell the friend.
 import { Button, Text } from '@radix-ui/themes';
 import { MapPin, Plus, Search as SearchIcon, X } from 'lucide-react';
-import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { AccountMenu } from '@/components/account/AccountMenu';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
+import { PendingBoard } from '@/components/desk/PendingBoard';
+import { LocationEditor, anchorFor, type LocationTarget, type Measurable } from '@/components/profile/LocationEditor';
 import type { RequestSummary } from '@/lib/api-types';
 import { goBack, navigate } from '@/lib/client/nav';
 import { splitOpenClosed } from '@/lib/client/selectors';
@@ -42,12 +45,14 @@ import {
   useStoreSelector,
   type StoreState,
 } from '@/lib/client/store-contract';
-import { parsePostFilterKey, postFilterLabel, statusMeta, type GlyphKind } from '@/lib/domain';
+import { STATUS, parsePostFilterKey, postFilterLabel, statusMeta, type GlyphKind } from '@/lib/domain';
 import { formatCreatedTime, formatUpdatedAgo, updatedPhrase } from '@/lib/format';
 import { useInDesk } from '@/components/desk/desk-context';
 import { AppHeader } from './AppHeader';
 import { BrandCard } from './BrandCard';
 import { CheckCard, ComingCard, MineCard, OutboxCard } from './cards';
+import { displayName } from './list-helpers';
+import { PendingTabs, pendingTabIds, usePendingTab } from './PendingTabs';
 import { primeKeyboard, useDelayedFlag, useScrollMemory, useStatusTap, useStickyHeight } from './hooks';
 import { mineFreshTone, resultCount, searchDisplay, updatedSince } from './list-helpers';
 import { AllSkeleton, MineSkeleton, PendingSkeleton } from './ListSkeletons';
@@ -88,7 +93,8 @@ function Chrome({ view, chips, filtered = false, skeleton, children }: ChromePro
   const hydrated = useStoreSelector(selectHydrated);
   const snackbar = useSnackbar();
   const { rootRef, stickyRef } = useStickyHeight();
-  // From 768 px the desk shell draws the brand (its sidebar) and this view's chrome: the brand card is phone only.
+  // From 768 px the desk shell draws the brand (its sidebar) and this view's chrome: the brand card is phone
+  // only, and only on All requests (Pending v8: Pending and My requests get just the large title).
   const inDesk = useInDesk();
   // The reconnecting arrow turns only for a retry that takes a moment (no flicker on fast attempts).
   const slowSync = useDelayedFlag(syncing, SLOW_SYNC_MS);
@@ -117,7 +123,7 @@ function Chrome({ view, chips, filtered = false, skeleton, children }: ChromePro
 
   return (
     <div className={s.root} data-view={view} ref={rootRef}>
-      {inDesk ? null : <BrandCard />}
+      {inDesk || view !== 'all' ? null : <BrandCard />}
       <div className={s.sticky} ref={stickyRef}>
         <AppHeader
           view={view}
@@ -294,7 +300,11 @@ export function AllView({ status, post, open = false }: AllViewProps) {
 }
 
 // ---------------------------------------------------------------------------------------------------
-// Pending: Friend coming (oldest first), then Waiting for check (oldest first)
+// Pending v8 (design/screens/pending-v8.html, Brian + Dani 2026-11-06 afternoon): To check (oldest first) and
+// Friend coming (oldest answer first). The phone shows one at a time under a segmented control (To check by
+// default, the last tab remembered); the desk shows both side by side (components/desk/PendingBoard.tsx).
+// In medical saves at once (overlay + Undo, as before) and then asks where medical has them: the phone's
+// bottom sheet, the desk's popover at the card. A Friend coming card's location chip edits it.
 // ---------------------------------------------------------------------------------------------------
 
 function SectionHeader({ kind, label, count }: { kind: GlyphKind; label: string; count: number }) {
@@ -311,37 +321,139 @@ function SectionHeader({ kind, label, count }: { kind: GlyphKind; label: string;
   );
 }
 
+/** The location being asked for or edited, and where the desk popover points. */
+interface Locating {
+  target: LocationTarget;
+  anchor: RefObject<Measurable | null>;
+}
+
 export function PendingView() {
   const { friendComing, waiting } = usePending();
   const loading = useIsLoading();
   const now = useNow();
+  const inDesk = useInDesk();
   const { offline, tap } = useStatusTap();
+  const actions = useActions();
+  const [tab, chooseTab] = usePendingTab();
+  const [locating, setLocating] = useState<Locating | null>(null);
+  const idBase = useId();
   useScrollMemory('pending', !loading);
+  // The other list starts at its top (the title and the control stay on screen, they are sticky).
+  const setTab = useCallback(
+    (next: typeof tab) => {
+      if (next !== tab) window.scrollTo(0, 0);
+      chooseTab(next);
+    },
+    [tab, chooseTab],
+  );
 
+  const openLocation = useCallback((row: RequestSummary, mode: LocationTarget['mode'], card: HTMLElement | null) => {
+    setLocating({
+      target: { id: row.id, name: displayName(row.name), mode, initial: (row.medicalLocation ?? '').trim() },
+      // The desk popover points at what was tapped: the To check card (where it stays once the card has
+      // moved on to Friend coming), or the location chip.
+      anchor: anchorFor(
+        mode === 'answer' ? `[data-desk-main] [data-testid="check-card"][data-pending-card="${row.id}"]` : `[data-desk-main] [data-location-anchor="${row.id}"]`,
+        card?.getBoundingClientRect() ?? null,
+      ),
+    });
+  }, []);
+  const closeLocation = useCallback(() => setLocating(null), []);
+
+  const onNotInMedical = useCallback((row: RequestSummary) => void tap(row.id, STATUS.notInMedical, 'answer'), [tap]);
+  const onReunited = useCallback((row: RequestSummary) => void tap(row.id, STATUS.reunited, 'reunite'), [tap]);
+  const onInMedical = useCallback(
+    (row: RequestSummary, card: HTMLElement | null) => {
+      const result = tap(row.id, STATUS.inMedical, 'answer');
+      if (!result) return;
+      // iOS opens the keyboard only for a focus made during the tap: the sheet's field takes it over.
+      if (!inDesk) primeKeyboard();
+      openLocation(row, 'answer', card);
+      // The answer didn't stick (someone else answered first, no signal): nothing to locate.
+      void result.then((r) => {
+        if (!r.ok) setLocating((cur) => (cur?.target.id === row.id && cur.target.mode === 'answer' ? null : cur));
+      });
+    },
+    [tap, inDesk, openLocation],
+  );
+  const onLocate = useCallback(
+    (row: RequestSummary, card: HTMLElement | null) => {
+      if (offline) {
+        actions.showToast({ tone: 'amber', icon: 'cloud-off', title: 'Needs a connection', durationMs: 3_000 });
+        return;
+      }
+      if (!inDesk) primeKeyboard();
+      openLocation(row, 'edit', card);
+    },
+    [actions, offline, inDesk, openLocation],
+  );
+  // The desk popover hands the focus back to the chip that opened it. After an answer the tapped card has
+  // left To check, so the focus is let go (J / K carry on from the last card).
+  const returnFocus = useCallback(() => {
+    const target = locating?.target;
+    if (!target || target.mode !== 'edit') return null;
+    const chips = Array.from(document.querySelectorAll<HTMLElement>(`[data-desk-main] [data-location-anchor="${target.id}"]`));
+    return chips.find((el) => el.getClientRects().length > 0) ?? null;
+  }, [locating]);
+
+  const counts = { check: waiting.length, coming: friendComing.length };
+  const editor = (
+    <LocationEditor
+      target={locating?.target ?? null}
+      desk={inDesk}
+      anchor={locating?.anchor}
+      returnFocus={returnFocus}
+      onClose={closeLocation}
+    />
+  );
+
+  if (inDesk) {
+    return (
+      <Chrome view="pending" skeleton={<PendingSkeleton />}>
+        <PendingBoard
+          waiting={waiting}
+          friendComing={friendComing}
+          now={now}
+          offline={offline}
+          tab={tab}
+          onTab={setTab}
+          idBase={idBase}
+          onNotInMedical={onNotInMedical}
+          onInMedical={onInMedical}
+          onReunited={onReunited}
+          onLocate={onLocate}
+        />
+        {editor}
+      </Chrome>
+    );
+  }
+
+  const ids = pendingTabIds(idBase, tab);
+  const shown = tab === 'check' ? waiting : friendComing;
   return (
-    <Chrome view="pending" skeleton={<PendingSkeleton />}>
+    <Chrome
+      view="pending"
+      chips={<PendingTabs tab={tab} onChange={setTab} counts={loading ? null : counts} idBase={idBase} />}
+      skeleton={<PendingSkeleton />}
+    >
       {friendComing.length + waiting.length === 0 ? (
         <EmptyState icon="inbox" title="Nothing pending" />
+      ) : shown.length === 0 ? (
+        <div className={s.tabBody} role="tabpanel" id={ids.panel} aria-labelledby={ids.tab}>
+          <EmptyState icon="inbox" title={tab === 'check' ? 'Nothing to check' : 'No friends coming'} />
+        </div>
       ) : (
-        <div className={s.scroll} data-testid="request-list">
-          {friendComing.length > 0 ? (
-            <section className={s.scroll} style={{ padding: 0 }} aria-label={`Friend coming, ${friendComing.length}`}>
-              <SectionHeader kind="inMedical" label="Friend coming" count={friendComing.length} />
-              {friendComing.map((row) => (
-                <ComingCard key={row.id} row={row} now={now} offline={offline} onTap={tap} />
+        <div className={s.scroll} role="tabpanel" id={ids.panel} aria-labelledby={ids.tab} data-testid="request-list" data-tab={tab}>
+          {tab === 'check'
+            ? waiting.map((row) => (
+                <CheckCard key={row.id} row={row} now={now} offline={offline} onNotInMedical={onNotInMedical} onInMedical={onInMedical} />
+              ))
+            : friendComing.map((row) => (
+                <ComingCard key={row.id} row={row} now={now} offline={offline} onReunited={onReunited} onLocate={onLocate} />
               ))}
-            </section>
-          ) : null}
-          {waiting.length > 0 ? (
-            <section className={s.scroll} style={{ padding: 0 }} aria-label={`Waiting for check, ${waiting.length}`}>
-              <SectionHeader kind="waiting" label="Waiting for check" count={waiting.length} />
-              {waiting.map((row) => (
-                <CheckCard key={row.id} row={row} now={now} offline={offline} onTap={tap} />
-              ))}
-            </section>
-          ) : null}
         </div>
       )}
+      {editor}
     </Chrome>
   );
 }

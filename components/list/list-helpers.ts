@@ -55,6 +55,16 @@ export function cardDescription(row: Pick<RequestSummary, 'clothing' | 'physical
   return parts.join(' · ');
 }
 
+/**
+ * Who is on the way to Main Med, for a Friend coming card (pending-v8.html .coming): the friend's name in
+ * bold, then "boyfriend, on the way". Without a name it reads "Friend", without a relation "on the way".
+ */
+export function friendComingLine(row: Pick<RequestSummary, 'contactName' | 'contactRelationship'>): { friend: string; rest: string } {
+  const friend = clean(row.contactName).replace(/\s+/g, ' ') || 'Friend';
+  const relation = clean(row.contactRelationship).replace(/\s+/g, ' ');
+  return { friend, rest: relation ? `${relation}, on the way` : 'on the way' };
+}
+
 /** When the request entered its current status (Friend coming time, My requests "3m"). */
 export function statusSince(row: Pick<RequestSummary, 'status' | 'createdAt' | 'updatedAt' | 'foundAt' | 'reunionStartedAt' | 'closedAt'>): string {
   if (row.status === STATUS.waiting) return row.createdAt;

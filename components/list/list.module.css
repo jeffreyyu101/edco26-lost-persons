@@ -770,12 +770,6 @@ button.lr:focus-visible {
   z-index: 2;
 }
 
-/* Pending answers (Not in medical, In medical, Reunited) are the liaison's main taps: 40 px tall, with
-   the .lp-hit area taking them to 44. */
-.answer {
-  --base-button-height: 40px;
-}
-
 /* A closed request's card in My requests: dimmed like .muted rows (text to gray-11, pictures fade). */
 .dimCard {
   color: var(--gray-11);
@@ -844,64 +838,6 @@ button.lr:focus-visible {
 .thumbPhoto {
   background: var(--gray-a5);
   color: var(--gray-11);
-}
-
-.thumbNone {
-  background: var(--gray-a2);
-  color: var(--gray-8);
-  box-shadow: inset 0 0 0 1px var(--gray-a4);
-}
-
-.thumbSmall {
-  width: 36px;
-  height: 36px;
-}
-
-.qd {
-  margin: 10px 0 12px;
-  color: var(--gray-11);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-}
-
-.qa {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.qaGap {
-  margin-top: 12px;
-}
-
-.cc {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.who {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  font-size: 12px;
-  line-height: 16px;
-  color: var(--green-11);
-}
-
-.who > span {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.who svg {
-  flex: none;
 }
 
 .badgeIcon {
@@ -977,6 +913,320 @@ button.lr:focus-visible {
 
 .st[data-step='cur'] .lb,
 .st[data-step='pend'] .lb {
+  color: var(--gray-12);
+  font-weight: 500;
+}
+
+/* ---- Pending v8 (design/screens/pending-v8.html, 2026-11-06 afternoon) --------------------------------
+   One list at a time under a segmented control on the phone (To check | Friend coming), the two side by side
+   on the desk (components/desk/PendingBoard.tsx). Cards answer one question each; a photo only when there is
+   one. The card is the solid panel colour (white in light, gray-2 in dark: the mockup's gray-a2 over the
+   page), so the amber and red minutes keep 4.5:1. */
+
+/* "To check 4 | Friend coming 3": a 40 px track, 34 px segments with a 44 px tap area. */
+.seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin: 2px 16px 12px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--gray-a3);
+}
+
+.segb {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  height: 34px;
+  margin: 0;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--gray-11);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.segb::before {
+  content: '';
+  position: absolute;
+  inset: -5px 0;
+}
+
+.segb[aria-selected='true'] {
+  background: var(--color-panel-solid);
+  color: var(--gray-12);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.segb:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 1px;
+}
+
+.segl {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.segn {
+  flex: none;
+  font-weight: 400;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A tab with nothing in it: its empty state fills the page like the view's own. */
+.tabBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.pcard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--color-panel-solid);
+  box-shadow: inset 0 0 0 1px var(--gray-a4);
+}
+
+.pcard.fresh {
+  border-radius: 14px;
+}
+
+.pwho {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.pphoto {
+  flex: none;
+  width: 60px;
+  height: 72px;
+  border-radius: 10px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--gray-a5);
+  color: var(--gray-11);
+}
+
+.pphoto img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.pphotoSm {
+  width: 52px;
+  height: 62px;
+}
+
+.pwt {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Name 18/600, age and sex 15 grey, the minutes on the right. */
+.pl1 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pnm {
+  min-width: 0;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--gray-12);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pas {
+  flex: none;
+  font-size: 15px;
+  color: var(--gray-11);
+  white-space: nowrap;
+}
+
+.pwait {
+  flex: none;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pwait[data-tone='amber'] {
+  color: var(--amber-11);
+}
+
+.pwait[data-tone='red'] {
+  color: var(--red-11);
+}
+
+/* What they're wearing: two lines at most. */
+.pdesc {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.35;
+  color: var(--gray-12);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* "FA 4 · LP-0010": one quiet line. */
+.pmeta {
+  font-size: 12.5px;
+  line-height: 16px;
+  color: var(--gray-11);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pacts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* 44 px answers and Reunited (doubled: over the Radix Button size). */
+.pbtn.pbtn {
+  --base-button-height: 44px;
+  height: 44px;
+  gap: 8px;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pbtnSoft.pbtnSoft {
+  font-weight: 500;
+}
+
+/* The location chip: green with a pin, or a quiet outlined "+ Location". 28 px, with a 44 px tap area. */
+.plocRow {
+  display: flex;
+  min-width: 0;
+  margin-top: 2px;
+}
+
+.loc {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 44px;
+  height: 28px;
+  margin: 0;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--green-a4);
+  color: var(--green-12);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.loc::before {
+  content: '';
+  position: absolute;
+  inset: -8px 0;
+}
+
+.loc > svg {
+  flex: none;
+}
+
+.loc:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+
+.loc[data-disabled] {
+  opacity: 0.6;
+}
+
+.locAdd {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--gray-a6);
+  color: var(--gray-11);
+  font-weight: 500;
+}
+
+.locText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* "→ Chris P. · boyfriend, on the way". */
+.pcoming {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 4px;
+  font-size: 14.5px;
+  line-height: 20px;
+  color: var(--gray-11);
+}
+
+.pcoming > svg {
+  flex: none;
+}
+
+.pcoming > span {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pcoming b {
   color: var(--gray-12);
   font-weight: 500;
 }

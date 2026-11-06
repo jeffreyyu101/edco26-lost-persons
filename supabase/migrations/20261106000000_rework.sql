@@ -16,6 +16,7 @@
 --   1. patients.row_version (optimistic concurrency and sync) and patients.last_seen (if missing).
 --   1b. patients.age becomes free text ("mid-20s"), only while it is not text yet: its CHECK is dropped and
 --      every value is kept as its text (24 → '24').
+--   1c. patients.medical_location (nullable text): where medical has the patient ("Chair 14"). Additive.
 --   2. Replaces the reporting_location / status CHECK only when it lacks a needed value (or a value rows
 --      already hold), NOT VALID. Values already in the table stay allowed, so legacy rows stay editable.
 --   3. lp_touch() BEFORE UPDATE trigger: updated_at = clock_timestamp(), row_version + 1.
@@ -150,6 +151,16 @@ begin
     v_type, coalesce(nullif(pg_catalog.array_to_string(v_dropped, ', '), ''), 'none');
 end
 $age$;
+
+-- -----------------------------------------------------------------------------------------------------
+-- 1c. Where medical has the patient (Dani + Brian, 2026-11-06 afternoon): an optional free-text location
+--     ("Chair 14", "Bed 3 · triage"), at most 60 characters, set through lp_update_fields like any other
+--     field and audited the same way. It stays until someone edits it (no status change clears it).
+--     Additive and safe while the build that is live now serves: a nullable column with no default needs no
+--     table rewrite, the previous build never writes it, and its server maps lp_row through an allowlist,
+--     so the extra key is ignored. A re-run keeps every value (add column if not exists).
+-- -----------------------------------------------------------------------------------------------------
+alter table public.patients add column if not exists medical_location text;
 
 -- -----------------------------------------------------------------------------------------------------
 -- 2. Locations and statuses (in case 20261105_update_locations_and_statuses never ran in production).
@@ -449,7 +460,8 @@ begin
   ) || pg_catalog.jsonb_build_object(
     'row_version', p.row_version,
     'first_photo_id', v_first,
-    'photo_count', v_count
+    'photo_count', v_count,
+    'medical_location', p.medical_location
   );
 end
 $fn$;
@@ -476,6 +488,7 @@ $fn$;
 --     characters each. age also takes a JSON number (a request queued by an older client), stored as its
 --     text (24 → '24').
 --   * Length limits per spec §4. reporting_location, when present, must be a valid post (never null).
+--   * medical_location (2026-11-06 afternoon) is trimmed, ≤60 characters. Only lp_update_fields stores it.
 -- Returns the cleaned object with exactly the keys given (create requires reporting_location).
 create function public.lp_clean_fields(p jsonb, p_partial boolean)
 returns jsonb
@@ -514,6 +527,7 @@ begin
       when 'age' then 40
       when 'gender' then 40
       when 'reporting_location' then 40
+      when 'medical_location' then 60
       else null
     end;
 
@@ -533,6 +547,10 @@ begin
       v_text := v_val #>> '{}';
     else
       raise exception using errcode = 'P0422', message = 'invalid_field', detail = pg_catalog.format('field:%s', v_key);
+    end if;
+
+    if v_key = 'medical_location' and v_text is not null then
+      v_text := pg_catalog.btrim(v_text, E' \t\r\n');
     end if;
 
     if v_text is not null and pg_catalog.char_length(v_text) > v_limit then
@@ -690,7 +708,10 @@ begin
     return pg_catalog.jsonb_build_object('created', false, 'row', public.lp_row(v_row));
   end if;
 
-  -- 2. Validate.
+  -- 2. Validate. A new request has no medical location yet (it is set once medical has the patient).
+  if p ? 'medical_location' then
+    raise exception using errcode = 'P0422', message = 'unknown_field', detail = 'field:medical_location';
+  end if;
   v_fields := public.lp_clean_fields(p - 'client_mutation_id', false);
 
   -- Other needs other_location; any other post never keeps a stale other_location.
@@ -860,8 +881,9 @@ end
 $fn$;
 
 -- lp_update_fields: edit details. Only whitelisted keys; never status, identity or system fields.
---   p_patch: snake_case keys as in lp_create_request (minus client_mutation_id); a name change sends
---   both first_name and last_name. Omitted = unchanged, null = clear.
+--   p_patch: snake_case keys as in lp_create_request (minus client_mutation_id), plus medical_location
+--   (where medical has the patient); a name change sends both first_name and last_name. Omitted =
+--   unchanged, null = clear.
 --   Version mismatch → P0409. Unchanged keys are skipped; nothing changed → {changed: false, row}, no audit.
 --   Field rules apply to the keys sent; the post rule applies to the merged row (Other needs
 --   other_location; any other post clears it). Audit patient_updated with the changed keys, except that
@@ -979,6 +1001,7 @@ begin
            contact_phone = v_merged.contact_phone,
            contact_relationship = v_merged.contact_relationship,
            contact_notes = v_merged.contact_notes,
+           medical_location = v_merged.medical_location,
            updated_by = p_staff
      where id = p_id
     returning * into v_row;

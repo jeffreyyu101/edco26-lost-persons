@@ -76,6 +76,7 @@ export function mapRow(raw: unknown): RequestSummary {
     photoCount: reqNum(r.photo_count),
     name: joinName(firstName, lastName),
     postShort: postShort(reportingLocation, otherLocation),
+    medicalLocation: str(r.medical_location),
   };
 }
 

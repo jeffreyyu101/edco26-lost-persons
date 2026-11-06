@@ -232,6 +232,15 @@ export function createStubStore(options: StubOptions): AppStore {
       putRow(next);
       return { ok: true, changed: true, request: next };
     },
+    async setMedicalLocation(id, location) {
+      const row = state.confirmed.get(id);
+      if (!row) return fail('not_found', 'Request not found');
+      const value = location === null ? null : location.trim() || null;
+      if ((row.medicalLocation ?? null) === value) return { ok: true, changed: false, request: row };
+      const next: RequestSummary = { ...row, medicalLocation: value, updatedBy: staff(), updatedAt: stamp(), rowVersion: row.rowVersion + 1 };
+      putRow(next);
+      return { ok: true, changed: true, request: next };
+    },
     async cancel(id) {
       const row = state.confirmed.get(id);
       if (!row) return fail('not_found', 'Request not found');

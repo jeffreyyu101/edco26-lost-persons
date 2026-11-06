@@ -264,6 +264,16 @@ for (const theme of ['light', 'dark'] as const) {
         await page.locator(`[data-testid="check-card"]:has([data-request-id="${answerMe.id}"])`).getByRole('button', { name: 'Not in medical' }).click();
         await expect(page.getByRole('button', { name: 'Undo' })).toBeVisible();
         results.push(await audit(page, 'Pending + Undo snackbar'));
+        // Pending v8: the Friend coming tab (location chips) and the location sheet.
+        await page.getByRole('tab', { name: /^Friend coming/ }).click();
+        await expect(row(coming.id)).toBeVisible();
+        results.push(await audit(page, 'Pending, Friend coming'));
+        await page.locator(`[data-testid="friend-coming-card"]:has([data-request-id="${coming.id}"])`).getByTestId('location-chip').click();
+        await expect(page.getByTestId('location-form')).toBeVisible();
+        results.push(await audit(page, 'location sheet'));
+        await page.keyboard.press('Escape');
+        await expect(page.getByTestId('location-form')).toHaveCount(0);
+        await page.getByRole('tab', { name: /^To check/ }).click();
 
         await visit('/?view=mine', 'My requests', () => expect(row(coming.id)).toBeVisible({ timeout: 15_000 }));
         await visit(`/?q=${encodeURIComponent(TAG)}`, 'Search', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
