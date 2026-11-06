@@ -41,7 +41,7 @@ import {
 } from './alerts';
 import { DRAFT_DEBOUNCE_MS, LEGACY_QUEUE_KEY, MUTATION_TIMEOUT_MS, SYNC, UNDO_MS } from './constants';
 import { createBodyFromLegacyQueueItem, hasAnyDetail, toCreateBody } from './form-values';
-import { apiRequest, isDefinitive, isUncertain, type FetchLike, type HttpFailure, type HttpResult } from './http';
+import { apiRequest, isDefinitive, isUncertain, type FetchLike, type HttpFailure, type HttpResult, type RequestOptions } from './http';
 import { navigate } from './nav';
 import {
   CREATE_DEFINITIVE,
@@ -67,7 +67,7 @@ import {
   type StoredStaff,
 } from './persist';
 import { readPrefs, subscribePrefs, writePref } from './prefs';
-import { SESSION_CHANNEL, clearLogoutPending, readLogoutPending, writeLogoutPending } from './session-signals';
+import { SESSION_CHANNEL, clearLogoutPending, readLogoutPending, writeLogoutPending, type LogoutPending } from './session-signals';
 import { startServiceWorker, type SwController } from './sw-client';
 import {
   createServerState,
@@ -207,6 +207,12 @@ const SIGN_OUT_RETRY_MS = [1_000, 2_000] as const;
  * outbox timer before it hears visibilitychange, so a pass first re-confirms a session older than this.
  */
 const SESSION_FRESH_MS = 60_000;
+/**
+ * How long this tab sends nothing after another tab said it is signing out (its 'signout-pending'), unless
+ * it hears how that ended first. Longer than a whole sign-out (3 rounds of DELETE + GET, 5 s each, and the
+ * waits between them), so only a tab that died mid sign-out lets it run out.
+ */
+const PEER_SIGN_OUT_HOLD_MS = 45_000;
 
 type PollOutcome = 'ok' | 'network' | 'http5xx' | 'http4xx' | 'unauthorized' | 'offline' | 'stale';
 type SignOutResult = Awaited<ReturnType<StoreActions['signOut']>>;
@@ -336,10 +342,29 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   let sessionCheck: Promise<PollOutcome> | null = null;
   /** Local time of the last GET /api/session that confirmed the session. */
   let sessionCheckedAt = 0;
+  /** When the scheduled poll is due: a timer that fires far later means the tab was frozen meanwhile. */
+  let pollDueAt = 0;
+  /** Bumped whenever the data starts belonging to another staff; a sync begun before that is dropped. */
+  let staffEpoch = 0;
+
+  // sign-out, as far as the network is concerned
+  /** This tab's API requests on their way (see call()). */
+  const inflight = new Set<AbortController>();
+  /**
+   * Another tab is signing out: until it says how that ended (or PEER_SIGN_OUT_HOLD_MS ran out) this tab
+   * sends nothing either. Any answer could carry a re-issued cookie after the server cleared it.
+   */
+  let peerSignOutUntil = 0;
+  let peerHoldTimer: ReturnType<typeof setTimeout> | undefined;
+  /** A sign-out that was pending when this page loaded (the localStorage marker): boot finishes it. */
+  let resumeSignOut: LogoutPending | null = null;
 
   const now = () => Date.now();
   const isLive = (id: number) => running && runId === id;
   const ownerGen = () => state.generation;
+  const peerSigningOut = () => peerSignOutUntil > now();
+  /** A sign-out is pending, in this tab or another: nothing goes to the API meanwhile. */
+  const networkHeld = () => signingOut || peerSigningOut();
 
   // ---- persistence queue (writes are serialised so a logout clear always lands last) ----
   const enqueue = <T>(op: (store: Kv) => Promise<T>): Promise<T | undefined> => {
@@ -423,6 +448,33 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   };
   const offlineNow = () => !(env?.online() ?? true) || state.connection === 'offline';
 
+  // ---- API ----
+  /**
+   * Every API request of the store goes through here, except the sign-out's own. The server re-issues the
+   * cookie on an authenticated answer (sliding session), so an answer that lands after a sign-out cleared
+   * the cookie would bring it back: a sign-out aborts every request still on its way before it asks the
+   * server (an aborted request's answer is never stored), and none starts while a sign-out is pending.
+   */
+  const call = <T>(path: string, opts: RequestOptions): Promise<HttpResult<T>> => {
+    const e = requireEnv();
+    if (networkHeld()) return Promise.resolve<HttpResult<T>>({ ok: false, kind: 'network' });
+    const controller = new AbortController();
+    const outer = opts.signal;
+    const onOuter = () => controller.abort();
+    if (outer?.aborted) controller.abort();
+    else outer?.addEventListener('abort', onOuter, { once: true });
+    inflight.add(controller);
+    return apiRequest<T>(e.fetch, path, { ...opts, signal: controller.signal }).finally(() => {
+      inflight.delete(controller);
+      outer?.removeEventListener('abort', onOuter);
+    });
+  };
+
+  const abortInflight = () => {
+    for (const controller of [...inflight]) controller.abort();
+    inflight.clear();
+  };
+
   // ---- rows ----
   const alertCtx = (): AlertContext => ({
     sessionStaff: state.session.staff,
@@ -457,7 +509,10 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     const current = latestPerRequest(raised).filter((r) =>
       r.alert.requestId ? alertStillCurrent(r.alert.kind, r.status, state.confirmed.get(r.alert.requestId)) : true,
     );
-    for (const r of raised) if (r.alert.requestId) dismissAlertToastsFor(r.alert.requestId);
+    // Only a current alert replaces the toast of its request. A dropped one (the row changed again since,
+    // and that change may have its own toast up already) closes nothing: pruneAlertToasts below still
+    // closes any toast that no longer matches its row.
+    for (const r of current) if (r.alert.requestId) dismissAlertToastsFor(r.alert.requestId);
     const statusOf = new Map(current.map((r) => [r.alert, r.status]));
     for (const alert of coalesceAlerts(current.map((r) => r.alert))) {
       const toastId = showToast(alertToast(alert, (id) => navigate({ r: id })));
@@ -617,6 +672,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
    * and the outbox operator prompt are all derived from the session staff, so none of them may carry over.
    */
   const resetForOtherStaff = async () => {
+    staffEpoch += 1; // a sync begun for the previous staff applies nothing from here on
     await flushRows(); // the previous staff's cache keeps its latest rows
     set({ confirmed: new Map(), pending: new Map(), hasData: false });
     cursor = null;
@@ -629,12 +685,15 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     touchedDuringPoll.clear();
   };
 
-  const applySession = async (info: SessionInfo) => {
+  /** False when a sign-out overtook it (nothing applied then). */
+  const applySession = async (info: SessionInfo): Promise<boolean> => {
+    const gen = ownerGen();
     const canon = canonStaff(info.staff) ?? '';
     if (cacheStaff !== canon) {
       // Someone else's (or no) cache was loaded: start clean for this staff.
       if (cacheStaff !== null) await resetForOtherStaff();
       await loadCache(canon);
+      if (gen !== state.generation || signingOut) return false;
       cacheStaff = canon;
     }
     set({ session: { status: 'active', staffName: info.staffName, team: info.team, staff: info.staff, expiresAt: info.expiresAt } });
@@ -646,21 +705,24 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     kickOutbox();
     // Polling stopped at a 401; a session confirmed again (signed in in another tab) restarts it.
     if (running && !pollInFlight && !pollTimer) schedulePoll(0);
+    return true;
   };
 
   const checkSession = async (): Promise<PollOutcome> => {
     if (!env) return 'stale';
     const gen = ownerGen();
     const seq = sessionCheckSeq;
-    const res = await apiRequest<SessionInfo>(env.fetch, '/api/session', { timeoutMs: SYNC.requestTimeoutMs, signal: pollAbort?.signal });
+    const res = await call<SessionInfo>('/api/session', { timeoutMs: SYNC.requestTimeoutMs, signal: pollAbort?.signal });
     if (gen !== state.generation || signingOut) return 'stale';
     if (res.ok) {
       const info = res.data;
       if (typeof info.staff !== 'string' || typeof info.staffName !== 'string' || typeof info.team !== 'string') return 'http5xx';
-      // Cleared before applySession, so the outbox it kicks may send (unless a newer reason came in).
-      if (seq === sessionCheckSeq) sessionCheckDue = false;
       sessionCheckedAt = now();
-      await applySession(info);
+      if (!(await applySession(info))) return 'stale';
+      // Only now, with the new staff's session, cache and outbox prompt in place: until here every write,
+      // create and outbox pass waits for this check (canFlush, writeGate and create all see it as due).
+      // The outbox and poll applySession kicked wait on this same check, then go on.
+      if (seq === sessionCheckSeq) sessionCheckDue = false;
       return 'ok';
     }
     const outcome = failureOutcome(res);
@@ -684,6 +746,16 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     sessionCheckSeq += 1;
   };
 
+  /** verifySession until no reason to re-check is left (a newer one can come in during a check). */
+  const confirmSession = async (): Promise<PollOutcome> => {
+    let outcome: PollOutcome = 'ok';
+    for (let i = 0; i < 3; i += 1) {
+      outcome = await verifySession();
+      if (outcome !== 'ok' || !sessionCheckDue) return outcome;
+    }
+    return sessionCheckDue ? 'network' : outcome;
+  };
+
   /**
    * Before a write: when the session is not confirmed for this tab yet (just resumed, another tab signed
    * in, or not checked since load), confirm it first. A write prepared under another staff's identity is
@@ -691,13 +763,13 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
    * null to go ahead.
    */
   const writeGate = async (quiet: boolean): Promise<MutationResult | null> => {
-    if (signingOut) {
+    if (networkHeld()) {
       if (!quiet) toastFailure(COPY.sessionEnded, 'amber');
       return fail('unauthorized', COPY.sessionEnded);
     }
     if (!sessionCheckDue && state.session.status !== 'unknown') return null;
     const before = state.session.staff;
-    const outcome = await verifySession();
+    const outcome = await confirmSession();
     if (outcome === 'ok') {
       if (before && !sameStaff(before, state.session.staff)) {
         if (!quiet) toastFailure(COPY.sessionChanged, 'amber');
@@ -751,13 +823,18 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 
   // ---- sync loop ----
   const schedulePoll = (delayMs: number) => {
-    if (!running || signingOut) return;
+    if (!running || networkHeld()) return;
     if (pollTimer) clearTimeout(pollTimer);
     const id = runId;
+    const delay = Math.max(0, delayMs);
+    pollDueAt = now() + delay;
     pollTimer = setTimeout(() => {
       pollTimer = undefined;
+      // Far past due: the tab was frozen (phone locked). Its overdue timer can run before it hears
+      // visibilitychange, and the cookie may be someone else's by now: confirm before syncing on.
+      if (now() - pollDueAt > SESSION_FRESH_MS) sessionMayHaveChanged();
       void poll(id);
-    }, Math.max(0, delayMs));
+    }, delay);
   };
 
   /** An expired session is only asked again when there is a reason (resume, a sign-in in another tab). */
@@ -766,7 +843,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 
   /** Focus / online / pageshow / visible / tap-the-dot: bursts coalesce into one poll. */
   const triggerSync = () => {
-    if (!running || signingOut || sessionBlocked()) return;
+    if (!running || networkHeld() || sessionBlocked()) return;
     if (pollInFlight) {
       pollRerun = true;
       return;
@@ -775,7 +852,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   };
 
   const poll = async (id: number) => {
-    if (!isLive(id) || pollInFlight || !env || signingOut) return;
+    if (!isLive(id) || pollInFlight || !env || networkHeld()) return;
     if (sessionBlocked()) return;
     pollInFlight = true;
     pollRerun = false;
@@ -798,8 +875,14 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       }
     }
     pollInFlight = false;
-    // A sign-out aborted this poll: it is not a network failure, and nothing is scheduled until it ends.
-    if (!isLive(id) || gen !== state.generation || outcome === 'stale' || signingOut) return;
+    // A sign-out (here or in another tab) aborted this poll: it is not a network failure, and nothing is
+    // scheduled until it ends.
+    if (!isLive(id) || gen !== state.generation || networkHeld()) return;
+    if (outcome === 'stale') {
+      // The data now belongs to another staff (a write or the outbox switched it): sync again for them.
+      schedulePoll(0);
+      return;
+    }
     switch (outcome) {
       case 'ok':
         failures = 0;
@@ -834,7 +917,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     const outcome = await syncPages(gen);
     // Rows applied before a later request failed keep their alerts (alertBacklog): show them now. A sync
     // cut short by a stop keeps them for the next one; a sign-out drops them with the rest of the data.
-    if (outcome !== 'stale' && gen === state.generation && running && !signingOut) deliverAlerts();
+    if (outcome !== 'stale' && gen === state.generation && running && !networkHeld()) deliverAlerts();
     return outcome;
   };
 
@@ -843,10 +926,14 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     if (!e) return 'stale';
     // Confirm who is signed in first when this tab can't be sure (never checked, a 401, resumed, or a
     // sign-in in another tab): the cookie may now belong to someone else.
-    for (let i = 0; i < 2 && (state.session.status !== 'active' || sessionCheckDue); i += 1) {
-      const s = await verifySession();
+    if (state.session.status !== 'active' || sessionCheckDue) {
+      const s = await confirmSession();
       if (s !== 'ok') return s;
     }
+    // Every page is for this staff: if the data switches to another staff meanwhile (a write or the outbox
+    // confirmed a new session), nothing more of this sync is applied, and the cursor is not written.
+    const epoch = staffEpoch;
+    const stale = () => gen !== state.generation || !running || epoch !== staffEpoch;
     const full = cursor === null || now() - cursorAt > SYNC.fullFetchAfterMs;
     const reconcile = !full && reconcileDue;
     const since = full ? null : cursor;
@@ -857,8 +944,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     let after: SyncResponse['next'] = null;
     for (let page = 0; page < MAX_SYNC_PAGES; page += 1) {
       const path = syncPathFor(since, page === 0 && reconcile, after);
-      const res = await apiRequest<SyncResponse>(e.fetch, path, { timeoutMs: SYNC.requestTimeoutMs, signal: pollAbort?.signal });
-      if (gen !== state.generation || !running) return 'stale';
+      const res = await call<SyncResponse>(path, { timeoutMs: SYNC.requestTimeoutMs, signal: pollAbort?.signal });
+      if (stale()) return 'stale';
       if (!res.ok) return failureOutcome(res);
       const body = res.data;
       if (typeof body.serverTime !== 'string' || !Array.isArray(body.rows)) return 'http5xx';
@@ -876,10 +963,10 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       markRowsDirty();
     }
     if (reconcile && versions) {
-      const stale = staleIds(state.confirmed, versions);
-      for (const ids of chunk(stale, 200)) {
-        const res = await apiRequest<SyncResponse>(e.fetch, syncPathIds(ids), { timeoutMs: SYNC.requestTimeoutMs, signal: pollAbort?.signal });
-        if (gen !== state.generation || !running) return 'stale';
+      const outdated = staleIds(state.confirmed, versions);
+      for (const ids of chunk(outdated, 200)) {
+        const res = await call<SyncResponse>(syncPathIds(ids), { timeoutMs: SYNC.requestTimeoutMs, signal: pollAbort?.signal });
+        if (stale()) return 'stale';
         if (!res.ok) return failureOutcome(res);
         if (Array.isArray(res.data.rows)) ingest(res.data.rows, true);
       }
@@ -902,7 +989,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const fetchRow = async (id: string): Promise<RequestSummary | null> => {
     if (!env) return null;
     const gen = ownerGen();
-    const res = await apiRequest<SyncResponse>(env.fetch, syncPathIds([id]), { timeoutMs: MUTATION_TIMEOUT_MS });
+    const res = await call<SyncResponse>(syncPathIds([id]), { timeoutMs: MUTATION_TIMEOUT_MS });
     if (gen !== state.generation) return null;
     if (!res.ok) {
       if (res.kind === 'http' && res.status === 401) sessionExpired();
@@ -978,7 +1065,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   };
 
   const postStatus = (id: string, status: SettableStatus, expectedVersion: number, kind: StatusKind) =>
-    apiRequest<ChangeResponse>(requireEnv().fetch, `/api/requests/${encodeURIComponent(id)}/status`, {
+    call<ChangeResponse>(`/api/requests/${encodeURIComponent(id)}/status`, {
       method: 'POST',
       json: { status, expectedVersion, kind },
       timeoutMs: MUTATION_TIMEOUT_MS,
@@ -1210,9 +1297,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         const sendable = state.outbox.some((j) => j.state !== 'needs_attention');
         if (sendable && now() - sessionCheckedAt > SESSION_FRESH_MS) sessionMayHaveChanged();
         if (sessionCheckDue) {
-          if (!running || !env?.online() || signingOut || state.session.status === 'signed_out') break;
+          if (!running || !env?.online() || networkHeld() || state.session.status === 'signed_out') break;
           // Who the cookie belongs to decides the operator prompt; confirm it before anything is sent.
-          if ((await verifySession()) !== 'ok') break;
+          if ((await confirmSession()) !== 'ok') break;
         }
         if (!canFlush()) break;
         await withOutboxLock(flushPass);
@@ -1226,7 +1313,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   };
 
   // Jobs go out under the cookie's identity, so never before this tab has confirmed who that is.
-  const canFlush = () => running && state.session.status === 'active' && !sessionCheckDue && !!env && env.online() && !signingOut;
+  const canFlush = () => running && state.session.status === 'active' && !sessionCheckDue && !!env && env.online() && !networkHeld();
 
   const flushPass = async () => {
     const gen = ownerGen();
@@ -1285,7 +1372,6 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 
   /** Create (idempotent), then every photo (idempotent on photoId). Returns 'stop' to end the pass. */
   const processJob = async (mutationId: string, gen: number): Promise<'next' | 'stop'> => {
-    const e = requireEnv();
     let job = getJob(mutationId);
     if (!job) return 'next';
     patchJob(mutationId, { state: 'sending' });
@@ -1295,7 +1381,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         // A6: it was created already (another tab, or a lost response): continue with its photos.
         createdOk(mutationId, existing);
       } else {
-        const res = await apiRequest<CreateResponse>(e.fetch, '/api/requests', { method: 'POST', json: job.payload, timeoutMs: OUTBOX_CREATE_TIMEOUT_MS });
+        const res = await call<CreateResponse>('/api/requests', { method: 'POST', json: job.payload, timeoutMs: OUTBOX_CREATE_TIMEOUT_MS });
         if (gen !== state.generation) return 'stop';
         if (!getJob(mutationId)) return 'next'; // discarded meanwhile
         if (res.ok && isRow(res.data.request)) {
@@ -1328,7 +1414,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       form.set('timing', photo.timing);
       form.set('photo', photo.blob, `${photo.photoId}.jpg`);
       form.set('thumb', photo.thumbBlob, `${photo.photoId}_thumb.jpg`);
-      const res = await apiRequest<PhotoResponse>(e.fetch, `/api/requests/${encodeURIComponent(serverId)}/photos`, { method: 'POST', form, timeoutMs: PHOTO_TIMEOUT_MS });
+      const res = await call<PhotoResponse>(`/api/requests/${encodeURIComponent(serverId)}/photos`, { method: 'POST', form, timeoutMs: PHOTO_TIMEOUT_MS });
       if (gen !== state.generation) return 'stop';
       const current = getJob(mutationId);
       if (!current) return 'next';
@@ -1374,7 +1460,15 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     return 'next';
   };
 
-  const broadcast = (message: { type: 'logout'; generation: number } | { type: 'outbox' } | { type: 'myids' } | { type: 'outbox-idle' }) => {
+  const broadcast = (
+    message:
+      | { type: 'logout'; generation: number }
+      | { type: 'signout-pending' }
+      | { type: 'signout-failed' }
+      | { type: 'outbox' }
+      | { type: 'myids' }
+      | { type: 'outbox-idle' },
+  ) => {
     try {
       channel?.postMessage(message);
     } catch {
@@ -1529,8 +1623,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     const payload: CreateRequestBody = toCreateBody(input.values, mutationId);
     const already = confirmedRowForJob({ mutationId }, state.confirmed);
     if (already) return { outcome: 'sent', request: already };
-    // A sign-out is pending: nothing new goes out (or into an outbox it may be about to discard).
-    if (signingOut) return { outcome: 'not_saved', message: COPY.sessionEnded };
+    // A sign-out is pending (here or in another tab): nothing new goes out, or into an outbox it may be
+    // about to discard.
+    if (networkHeld()) return { outcome: 'not_saved', message: COPY.sessionEnded };
 
     const existing = getJob(mutationId);
     const job: OutboxItem = existing
@@ -1567,7 +1662,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     if (sessionCheckDue || state.session.status === 'unknown') {
       // Saved already; it is sent only once this tab knows whose cookie it is. A different staff than
       // the one it was saved by gets the operator prompt ("Send as …?") instead of a silent send.
-      const outcome = await verifySession();
+      const outcome = await confirmSession();
       if (gen !== state.generation) return { outcome: 'not_saved', message: COPY.notSaved };
       if (outcome !== 'ok' || promptIds.includes(mutationId)) return queued();
     }
@@ -1575,7 +1670,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     directSends.add(mutationId);
     let res: HttpResult<CreateResponse>;
     try {
-      res = await apiRequest<CreateResponse>(e.fetch, '/api/requests', { method: 'POST', json: payload, timeoutMs: MUTATION_TIMEOUT_MS });
+      res = await call<CreateResponse>('/api/requests', { method: 'POST', json: payload, timeoutMs: MUTATION_TIMEOUT_MS });
     } finally {
       directSends.delete(mutationId);
     }
@@ -1609,7 +1704,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     if (!e.online()) return { outcome: 'not_saved', message: COPY.notSaved };
     const blocked = await writeGate(true);
     if (blocked) return { outcome: 'not_saved', message: blocked.ok ? COPY.notSaved : blocked.message };
-    const res = await apiRequest<CreateResponse>(e.fetch, '/api/requests', { method: 'POST', json: job.payload, timeoutMs: MUTATION_TIMEOUT_MS });
+    const res = await call<CreateResponse>('/api/requests', { method: 'POST', json: job.payload, timeoutMs: MUTATION_TIMEOUT_MS });
     if (!res.ok || !isRow(res.data.request)) {
       if (!res.ok && res.kind === 'http' && res.status === 401) sessionExpired();
       return { outcome: 'not_saved', message: COPY.notSaved };
@@ -1642,7 +1737,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     timing: 'today' | 'older',
     opts?: MutationOptions,
   ): Promise<{ added: number; failed: number }> => {
-    const e = requireEnv();
+    requireEnv();
     const quiet = !!opts?.quiet;
     if (offlineNow()) {
       refuseOffline(quiet);
@@ -1658,7 +1753,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       form.set('timing', timing);
       form.set('photo', p.blob, `${p.photoId}.jpg`);
       form.set('thumb', p.thumbBlob, `${p.photoId}_thumb.jpg`);
-      const res = await apiRequest<PhotoResponse>(e.fetch, `/api/requests/${encodeURIComponent(id)}/photos`, { method: 'POST', form, timeoutMs: PHOTO_TIMEOUT_MS });
+      const res = await call<PhotoResponse>(`/api/requests/${encodeURIComponent(id)}/photos`, { method: 'POST', form, timeoutMs: PHOTO_TIMEOUT_MS });
       if (gen !== state.generation) return { added, failed: photos.length - added };
       if (res.ok) {
         added += 1;
@@ -1728,18 +1823,31 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     outboxTimer = undefined;
   };
 
+  /** Our API's own 401 (an HTML 401 from a portal or proxy in between says nothing about the cookie). */
+  const refusedByApi = (res: HttpResult<unknown>) => !res.ok && res.kind === 'http' && res.status === 401 && res.error !== null;
+
   /**
-   * DELETE /api/session, retried while the outcome is uncertain. True only when the server confirmed it:
-   * a 2xx, or a 401 (the server already refuses this cookie, so nothing is left to clear). Never true
-   * offline or after a timeout: the HttpOnly cookie would still open the app again.
+   * DELETE /api/session, then GET /api/session must answer our API's 401: only that proves the browser
+   * holds no session any more (an answer that landed after the DELETE could have re-issued the cookie).
+   * Retried while the outcome is uncertain, or when the cookie is still valid. Never true offline or after
+   * a timeout: the HttpOnly cookie would still open the app again. These two requests are the only ones
+   * that bypass call() (which holds everything while a sign-out is pending).
    */
   const deleteSession = async (e: StoreEnv): Promise<boolean> => {
     for (let attempt = 0; ; attempt += 1) {
       if (!e.online()) return false;
       const res = await apiRequest(e.fetch, '/api/session', { method: 'DELETE', timeoutMs: SIGN_OUT_TIMEOUT_MS });
-      if (res.ok || (res.kind === 'http' && res.status === 401)) return true;
+      let again: boolean;
+      if (res.ok || refusedByApi(res)) {
+        const check = await apiRequest(e.fetch, '/api/session', { timeoutMs: SIGN_OUT_TIMEOUT_MS });
+        if (refusedByApi(check)) return true;
+        again = true; // still signed in (a late answer re-issued the cookie), or unknown: clear it again
+      } else {
+        // Not our API's answer (a portal's 401 or 2xx), a timeout or a 5xx: unknown, try again.
+        again = isUncertain(res) || (res.kind === 'http' && res.error === null);
+      }
       const wait = SIGN_OUT_RETRY_MS[attempt];
-      if (wait === undefined || !isUncertain(res)) return false;
+      if (wait === undefined || !again) return false;
       await new Promise((r) => setTimeout(r, wait));
     }
   };
@@ -1754,12 +1862,19 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     const e = requireEnv();
     const storage = e.localStorage();
     signingOut = true;
+    resumeSignOut = null;
     writeLogoutPending(storage, { at: now(), discard });
+    // Every request still on its way is aborted (in this tab, and the other tabs abort theirs when they
+    // hear this) before the DELETE goes: an answer landing after it could re-issue the cookie. Nothing new
+    // starts until the sign-out ended (call()).
+    broadcast({ type: 'signout-pending' });
     haltRuntime();
+    abortInflight();
     const confirmed = await deleteSession(e);
     if (!confirmed) {
       clearLogoutPending(storage);
       signingOut = false;
+      broadcast({ type: 'signout-failed' });
       // Back to normal: polling and the outbox resume (the session was never given up locally).
       if (running && state.session.status !== 'signed_out') {
         schedulePoll(0);
@@ -1768,7 +1883,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       return { ok: false, reason: 'failed', message: COPY.signOutFailed };
     }
     set({ generation: state.generation + 1 });
+    staffEpoch += 1;
     haltRuntime();
+    abortInflight();
     broadcast({ type: 'logout', generation: state.generation });
     await clearLocalData(discard);
     set({ session: { status: 'signed_out', staffName: null, team: null, staff: null, expiresAt: null } });
@@ -1786,17 +1903,45 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     return signOutRun;
   };
 
+  /** Another tab's sign-out ended without signing out (or its tab died): this tab goes on. */
+  const endPeerHold = () => {
+    if (peerHoldTimer) clearTimeout(peerHoldTimer);
+    peerHoldTimer = undefined;
+    peerSignOutUntil = 0;
+    if (!running || signingOut || state.session.status === 'signed_out') return;
+    if (!sessionBlocked()) schedulePoll(0);
+    kickOutbox();
+  };
+
   const onChannelMessage = (event: MessageEvent) => {
     const data = event.data as { type?: string; generation?: number } | null;
     if (!data || typeof data.type !== 'string') return;
     switch (data.type) {
+      case 'signout-pending':
+        // Another tab is signing out: abort what this tab has on its way and send nothing until it says
+        // how that ended. Any answer from now on could re-issue the cookie the server is about to clear.
+        if (signingOut) return;
+        peerSignOutUntil = now() + PEER_SIGN_OUT_HOLD_MS;
+        haltRuntime();
+        abortInflight();
+        if (peerHoldTimer) clearTimeout(peerHoldTimer);
+        peerHoldTimer = setTimeout(endPeerHold, PEER_SIGN_OUT_HOLD_MS);
+        return;
+      case 'signout-failed':
+        if (peerSignOutUntil > 0) endPeerHold();
+        return;
       case 'logout':
         // Sent only after the server confirmed the cookie is cleared. A tab with its own sign-out pending
         // finishes it itself (its DELETE now answers 401, which counts as done).
         if (signingOut) return;
         signingOut = true;
+        if (peerHoldTimer) clearTimeout(peerHoldTimer);
+        peerHoldTimer = undefined;
+        peerSignOutUntil = 0;
         set({ generation: state.generation + 1, session: { status: 'signed_out', staffName: null, team: null, staff: null, expiresAt: null } });
+        staffEpoch += 1;
         haltRuntime();
+        abortInflight();
         void clearLocalData(false).then(() => env?.redirect('/signin'));
         return;
       case 'signin':
@@ -1861,7 +2006,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         const row = state.confirmed.get(id);
         if (!row) return fail('not_found', COPY.notFound);
         setOverlay(id, { mutationId: uuid(), kind: 'fields', fields: overlayForPatch(row, patch), startedAt: now() });
-        const res = await apiRequest<ChangeResponse>(requireEnv().fetch, `/api/requests/${encodeURIComponent(id)}`, {
+        const res = await call<ChangeResponse>(`/api/requests/${encodeURIComponent(id)}`, {
           method: 'PATCH',
           json: { patch, expectedVersion: baseVersion },
           timeoutMs: MUTATION_TIMEOUT_MS,
@@ -1888,7 +2033,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         if (!row) return fail('not_found', COPY.notFound);
         if (row.status === STATUS.cancelled) return { ok: true, changed: false, request: row };
         setOverlay(id, { mutationId: uuid(), kind: 'cancel', fields: { status: STATUS.cancelled }, startedAt: now() });
-        const res = await apiRequest<ChangeResponse>(requireEnv().fetch, `/api/requests/${encodeURIComponent(id)}/cancel`, {
+        const res = await call<ChangeResponse>(`/api/requests/${encodeURIComponent(id)}/cancel`, {
           method: 'POST',
           json: { expectedVersion: row.rowVersion },
           timeoutMs: MUTATION_TIMEOUT_MS,
@@ -1913,8 +2058,10 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     async fetchDetail(id): Promise<RequestDetail> {
       const e = requireEnv();
       if (!isUuid(id)) throw new FetchError('not_found');
+      // Never while a sign-out is pending: its answer could bring the cookie back (see call()).
+      if (networkHeld()) throw new FetchError('failed');
       const gen = ownerGen();
-      const res = await apiRequest<RequestDetail>(e.fetch, `/api/requests/${encodeURIComponent(id)}`, { timeoutMs: SYNC.requestTimeoutMs });
+      const res = await call<RequestDetail>(`/api/requests/${encodeURIComponent(id)}`, { timeoutMs: SYNC.requestTimeoutMs });
       if (gen !== state.generation) throw new FetchError('failed');
       if (res.ok) {
         const detail = res.data;
@@ -1935,9 +2082,10 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     },
 
     async fetchStats(): Promise<Stats> {
-      const e = requireEnv();
+      requireEnv();
+      if (networkHeld()) throw new FetchError('failed');
       const gen = ownerGen();
-      const res = await apiRequest<Stats>(e.fetch, '/api/stats', { timeoutMs: SYNC.requestTimeoutMs });
+      const res = await call<Stats>('/api/stats', { timeoutMs: SYNC.requestTimeoutMs });
       if (gen !== state.generation) throw new FetchError('failed');
       if (res.ok) {
         markLive();
@@ -2034,9 +2182,10 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     set({ hydrated: true, durableStorage: durable });
     if (durable) await importLegacyQueue();
     if (!isLive(id)) return;
-    const pendingSignOut = readLogoutPending(e.localStorage());
-    if (pendingSignOut && !signingOut) {
-      // The app was reloaded or killed while signing out: finish that before trusting the cookie again.
+    const pendingSignOut = resumeSignOut;
+    if (pendingSignOut) {
+      // The app was reloaded or killed while signing out (start() saw the marker and has held everything
+      // since): finish that before trusting the cookie again.
       const result = await signOutOnce(pendingSignOut.discard);
       if (!result.ok && result.reason === 'failed' && isLive(id)) {
         showToast({ tone: 'amber', icon: 'alert', title: COPY.signOutFailed, durationMs: null });
@@ -2106,7 +2255,16 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     running = true;
     runId += 1;
     const id = runId;
-    if (signingOut) return stop;
+    if (signingOut && !resumeSignOut) return stop;
+    if (!signingOut) {
+      // A sign-out was pending when this page loaded: hold everything from the first moment, before any
+      // listener below can start a sync or send a job (boot finishes the sign-out once it has loaded).
+      const pending = readLogoutPending(e.localStorage());
+      if (pending) {
+        signingOut = true;
+        resumeSignOut = pending;
+      }
+    }
     if (!e.online()) setConnection('offline');
     offs.push(
       e.on('window', 'online', () => {
@@ -2158,6 +2316,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     if (!running) return;
     running = false;
     haltRuntime();
+    if (peerHoldTimer) clearTimeout(peerHoldTimer);
+    peerHoldTimer = undefined;
     for (const off of offs.splice(0)) off();
     channel?.removeEventListener('message', onChannelMessage);
     channel?.close();

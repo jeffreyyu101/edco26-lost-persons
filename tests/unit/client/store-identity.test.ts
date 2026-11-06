@@ -2,12 +2,14 @@
 // was suspended while someone else signed in must confirm GET /api/session before it syncs on, writes or
 // sends queued requests, and switch its per-staff cache, "My requests" and outbox prompt to that staff.
 // Synthetic data only.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { K } from '@/lib/client/persist';
 import { mineRows } from '@/lib/client/selectors';
 import { COPY } from '@/lib/client/store-core';
-import { STATUS } from '@/lib/domain';
+import type { AlertEvent } from '@/lib/client/store-contract';
+import { STATUS, canonStaff } from '@/lib/domain';
 import { advance, settle } from './helpers/env';
-import { boot, finish, installStoreHooks, ready, values } from './helpers/boot';
+import { boot, finish, gate, installStoreHooks, ready, values } from './helpers/boot';
 import { FakeServer, STAFF, apiError, makeRow } from './helpers/fake-server';
 
 installStoreHooks();
@@ -154,5 +156,107 @@ describe('a resumed tab confirms who is signed in (regression)', () => {
     expect(tab.s().toasts.map((t) => t.title)).not.toContain(COPY.sessionEnded);
     await advance(7_000);
     expect(server.requests('GET', '/api/sync').length).toBeGreaterThan(n);
+  });
+});
+
+/** Sam signed in in another tab of this phone (the 'signin' announcement). */
+function samSignsInElsewhere(tab: Booted, server: FakeServer) {
+  server.session = SAM;
+  const other = new BroadcastChannel(`${tab.fe.dbName}-channel:lp`);
+  other.postMessage({ type: 'signin' });
+  other.close();
+}
+
+describe('switching to the new staff is one step (regression: nothing in between)', () => {
+  it('while the new staff’s cache is still loading, queued jobs and a new create wait, then get the prompt', async () => {
+    const server = new FakeServer([]);
+    const slowCache = gate();
+    const samCursor = K.cursor(canonStaff(STAFF.sam.staff) ?? '');
+    const tab = boot(server, {}, (env) => {
+      const open = env.openKv;
+      env.openKv = () => {
+        const kv = open();
+        if (!kv) return kv;
+        // IndexedDB is slow to read Sam's cache.
+        return {
+          ...kv,
+          get: async <T,>(key: string) => {
+            if (key === samCursor) await slowCache.wait();
+            return kv.get<T>(key);
+          },
+        };
+      };
+    });
+    await ready();
+    server.override = (req) => (req.path === '/api/requests' ? apiError(503, 'unavailable', 'Try again') : undefined);
+    expect((await finish(tab.a.create({ values: values(), clientMutationId: CMID(3), photos: [], photoTiming: 'today' }))).outcome).toBe('queued');
+    server.override = null;
+    samSignsInElsewhere(tab, server);
+    await settle(20);
+    await advance(100); // GET /api/session answered Sam; his cache is still loading
+    expect(server.requests('GET', '/api/session').length).toBeGreaterThan(1);
+    expect(tab.s().session.staff).toBe(STAFF.dana.staff);
+    // Meanwhile: back online, a create from the form (the screen still shows Dana), the retry timer.
+    tab.fe.fire('window', 'online');
+    const second = tab.a.create({ values: values(), clientMutationId: CMID(4), photos: [], photoTiming: 'today' });
+    tab.a.syncNow();
+    await advance(20_000);
+    expect(creates(server)).toHaveLength(1); // only Dana's first, failed attempt
+    slowCache.open();
+    await settle();
+    await advance(100);
+    expect((await finish(second)).outcome).toBe('queued');
+    expect(tab.s().session.staff).toBe(STAFF.sam.staff);
+    expect(tab.s().outboxPrompt).toEqual({ count: 2, savedBy: 'Dana Kim', sendAs: 'Sam Lee' });
+    await advance(70_000);
+    expect(creates(server)).toHaveLength(1);
+  });
+
+  it('a sync begun for the previous staff applies nothing once the data switched: the new staff gets a full fetch', async () => {
+    const rows = [makeRow(1), makeRow(2), makeRow(3)];
+    const server = new FakeServer(rows);
+    server.overlap = 0;
+    const tab = boot(server);
+    await ready();
+    expect(tab.s().confirmed.size).toBe(3);
+    server.change(rows[2]!.id, { clothing: 'Blue' });
+    const hold = gate();
+    server.override = (req) => (req.path === '/api/sync' ? hold.wait() : undefined);
+    await advance(6_000); // Dana's delta sync is on its way
+    expect(server.requests('GET', '/api/sync').at(-1)?.query.get('since')).not.toBeNull();
+    suspendWhileSamSignsIn(tab, server);
+    resume(tab);
+    // A write confirms the session first: it is Sam's now, so the data switches to him.
+    const res = await finish(tab.a.setStatus(rows[0]!.id, STATUS.inMedical, 'answer'));
+    expect(res).toMatchObject({ ok: false, message: COPY.sessionChanged });
+    expect(tab.s().session.staff).toBe(STAFF.sam.staff);
+    const switchedAt = server.log.length;
+    server.override = null;
+    hold.open(); // Dana's delta arrives only now
+    await settle();
+    await advance(100);
+    const next = server.log.slice(switchedAt).find((r) => r.path === '/api/sync');
+    expect(next?.query.get('since')).toBeNull(); // a full fetch for Sam, not Dana's cursor
+    expect(tab.s().confirmed.size).toBe(3);
+    await advance(6_000);
+    expect(tab.s().confirmed.size).toBe(3);
+  });
+
+  it('a poll timer that fires long overdue (phone locked) confirms the session before it syncs on', async () => {
+    const mine = makeRow(4, { firstName: 'Sofia', lastName: 'Lopez', createdBy: STAFF.dana.staff });
+    const server = new FakeServer([mine]);
+    const tab = boot(server);
+    const heard: AlertEvent[] = [];
+    tab.store.actions.subscribeAlerts((e) => heard.push(e));
+    await ready();
+    // Locked for 10 minutes: no timer ran, Sam signed in in another tab, and Dana's request was answered.
+    server.session = SAM;
+    server.change(mine.id, { status: STATUS.inMedical });
+    vi.setSystemTime(Date.now() + 10 * 60_000);
+    const before = server.log.length;
+    await advance(7_000); // the overdue poll timer runs before any visibilitychange
+    expect(server.log[before]).toMatchObject({ method: 'GET', path: '/api/session' });
+    expect(tab.s().session.staff).toBe(STAFF.sam.staff);
+    expect(heard).toEqual([]); // Dana's alert is not raised for Sam
   });
 });

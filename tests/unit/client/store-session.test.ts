@@ -3,7 +3,7 @@
 // (A20). Synthetic data only.
 import { describe, expect, it, vi } from 'vitest';
 import { openKv, K } from '@/lib/client/persist';
-import { COPY } from '@/lib/client/store-core';
+import { COPY, type StoreEnv } from '@/lib/client/store-core';
 import { LOGOUT_PENDING_KEY, announceSignIn } from '@/lib/client/session-signals';
 import type { AlertEvent } from '@/lib/client/store-contract';
 import { STATUS } from '@/lib/domain';
@@ -145,9 +145,23 @@ describe('sign out (A14)', () => {
     const server = new FakeServer([makeRow(1)]);
     const { a, fe } = boot(server);
     await ready();
+    server.session = null; // the cookie expired meanwhile
     server.override = (req) => (req.path === '/api/session' && req.method === 'DELETE' ? apiError(401, 'unauthorized', 'Sign in again') : undefined);
     expect(await finish(a.signOut())).toEqual({ ok: true });
     expect(fe.redirects).toEqual(['/signin']);
+  });
+
+  it('regression: an HTML 401 to the DELETE (a portal, not our API) is not taken as signed out', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    const { a, s, fe } = boot(server);
+    await ready();
+    server.override = (req) =>
+      req.path === '/api/session' && req.method === 'DELETE' ? new Response('<html>Log in to Wi-Fi</html>', { status: 401, headers: { 'content-type': 'text/html' } }) : undefined;
+    const res = await finish(a.signOut(), 5_000);
+    expect(res).toEqual({ ok: false, reason: 'failed', message: COPY.signOutFailed });
+    expect(server.requests('DELETE', '/api/session')).toHaveLength(3); // unknown outcome: retried
+    expect(fe.redirects).toEqual([]);
+    expect(s().session.status).toBe('active');
   });
 
   it('regression: a page loaded while a sign-out is pending finishes it before it trusts the cookie', async () => {
@@ -165,9 +179,8 @@ describe('sign out (A14)', () => {
     second.store.subscribe(() => statuses.push(second.s().session.status));
     await ready();
     await advance(100);
-    const after = server.log.slice(before);
-    expect(after[0]).toMatchObject({ method: 'DELETE', path: '/api/session' });
-    expect(after.some((r) => r.method === 'GET' && r.path === '/api/session')).toBe(false);
+    // Nothing before the DELETE; the only GET /api/session is the check that the cookie is gone (401).
+    expect(server.log.slice(before).map((r) => `${r.method} ${r.path}`)).toEqual(['DELETE /api/session', 'GET /api/session']);
     expect(statuses).not.toContain('active');
     expect(second.s().session.status).toBe('signed_out');
     expect(second.fe.redirects).toEqual(['/signin']);
@@ -224,6 +237,178 @@ describe('sign out (A14)', () => {
     await finish(out);
     await settle(50);
     expect(s().confirmed.size).toBe(0);
+  });
+});
+
+/**
+ * The server re-issues the cookie on an authenticated answer once it is over 1 h old (sliding session).
+ * This fetch answers at once (the server side is done, with that re-issued cookie) but the answer is slow
+ * to reach the phone: the cookie is stored only when the answer arrives, never when it was aborted.
+ */
+function slowAnswers(server: FakeServer, match: (method: string, path: string) => boolean, late: ReturnType<typeof gate>): StoreEnv['fetch'] {
+  return async (input, init = {}) => {
+    const method = (init.method ?? 'GET').toUpperCase();
+    const path = new URL(input, 'https://lp.test').pathname;
+    if (!match(method, path)) return server.fetch(input, init);
+    const reissued = server.session;
+    const res = await server.fetch(input, init);
+    await new Promise<void>((resolve, reject) => {
+      const signal = init.signal;
+      const aborted = () => reject(new DOMException('The operation was aborted.', 'AbortError'));
+      if (signal?.aborted) return aborted();
+      signal?.addEventListener('abort', aborted, { once: true });
+      void late.wait().then(() => resolve());
+    });
+    if (reissued) server.session = reissued; // the browser stores the re-issued cookie
+    return res;
+  };
+}
+
+describe('sign out vs answers still on their way (regression: a re-issued cookie must not survive it)', () => {
+  it('aborts this tab’s requests before the DELETE, so a late answer cannot bring the cookie back', async () => {
+    const row = makeRow(1);
+    const server = new FakeServer([row]);
+    const late = gate();
+    const { a, s, fe } = boot(server, {}, (env) => {
+      env.fetch = slowAnswers(server, (method, path) => method === 'POST' && path.endsWith('/status'), late);
+    });
+    await ready();
+    const write = a.setStatus(row.id, STATUS.inMedical, 'answer');
+    await settle(20);
+    expect(server.requests('POST', `/api/requests/${row.id}/status`)).toHaveLength(1);
+    expect(await finish(a.signOut())).toEqual({ ok: true });
+    expect(server.session).toBeNull();
+    late.open(); // the write's answer arrives now, after the sign-out
+    await settle(50);
+    expect(server.session).toBeNull(); // its re-issued cookie never landed: /signin stays on /signin
+    expect(await finish(write)).toMatchObject({ ok: false });
+    expect(s().session.status).toBe('signed_out');
+    expect(fe.redirects).toEqual(['/signin']);
+  });
+
+  it('an answer that lands right after the DELETE is caught by the check, and the cookie is cleared again', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    let landed = false;
+    const { a, fe } = boot(server, {}, (env) => {
+      const inner = env.fetch;
+      env.fetch = async (input, init = {}) => {
+        const res = await inner(input, init);
+        if ((init.method ?? 'GET') === 'DELETE' && !landed) {
+          landed = true;
+          // An answer this tab could not abort (another tab's) re-issued the cookie after the clear.
+          server.session = { ...STAFF.dana, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
+        }
+        return res;
+      };
+    });
+    await ready();
+    expect(await finish(a.signOut(), 2_000)).toEqual({ ok: true });
+    expect(server.requests('DELETE', '/api/session')).toHaveLength(2);
+    expect(server.session).toBeNull();
+    expect(fe.redirects).toEqual(['/signin']);
+  });
+
+  it('fetchStats and fetchDetail send nothing while the sign-out is pending', async () => {
+    const row = makeRow(1);
+    const server = new FakeServer([row]);
+    const { a } = boot(server);
+    await ready();
+    const g = gate();
+    server.override = (req) => (req.path === '/api/session' && req.method === 'DELETE' ? g.wait() : undefined);
+    const out = a.signOut();
+    await settle(20);
+    const n = server.log.length;
+    await expect(finish(a.fetchStats())).rejects.toMatchObject({ reason: 'failed' });
+    await expect(finish(a.fetchDetail(row.id))).rejects.toMatchObject({ reason: 'failed' });
+    expect(server.log.length).toBe(n);
+    server.override = null;
+    g.open();
+    expect(await finish(out)).toEqual({ ok: true });
+  });
+
+  it('other tabs abort what they have on its way and send nothing until the sign-out ended', async () => {
+    const row = makeRow(1);
+    const server = new FakeServer([row]);
+    const one = boot(server);
+    await ready();
+    const late = gate();
+    const two = boot(server, { dbName: one.fe.dbName, channelName: `${one.fe.dbName}-channel` }, (env) => {
+      env.fetch = slowAnswers(server, (method, path) => method === 'POST' && path.endsWith('/status'), late);
+    });
+    await ready();
+    const write = two.a.setStatus(row.id, STATUS.inMedical, 'answer');
+    await settle(20);
+    // The DELETE is slow, and fails in the end.
+    const del = gate();
+    server.override = async (req) => {
+      if (req.path !== '/api/session' || req.method !== 'DELETE') return undefined;
+      await del.wait();
+      return apiError(503, 'unavailable', 'Try again');
+    };
+    const out = one.a.signOut();
+    await settle(200);
+    expect(await finish(write)).toMatchObject({ ok: false }); // aborted when tab two heard the sign-out
+    const n = server.log.length;
+    await advance(30_000); // nothing from either tab while it is pending
+    expect(server.log.length).toBe(n);
+    late.open();
+    del.open();
+    expect(await finish(out, 5_000)).toMatchObject({ ok: false, reason: 'failed' });
+    await settle(200);
+    // It failed: tab two goes on as before.
+    const syncs = server.requests('GET', '/api/sync').length;
+    await advance(7_000);
+    expect(server.requests('GET', '/api/sync').length).toBeGreaterThan(syncs);
+    expect(two.fe.redirects).toEqual([]);
+    expect(two.s().session.status).toBe('active');
+  });
+
+  it('another tab’s late answer is aborted when the sign-out succeeds too', async () => {
+    const row = makeRow(1);
+    const server = new FakeServer([row]);
+    const one = boot(server);
+    await ready();
+    const late = gate();
+    const two = boot(server, { dbName: one.fe.dbName, channelName: `${one.fe.dbName}-channel` }, (env) => {
+      env.fetch = slowAnswers(server, (method, path) => method === 'POST' && path.endsWith('/status'), late);
+    });
+    await ready();
+    const write = two.a.setStatus(row.id, STATUS.inMedical, 'answer');
+    await settle(20);
+    expect(await finish(one.a.signOut())).toEqual({ ok: true });
+    await settle(200);
+    late.open();
+    await settle(50);
+    expect(await finish(write)).toMatchObject({ ok: false });
+    expect(server.session).toBeNull();
+    expect(two.fe.redirects).toEqual(['/signin']);
+  });
+
+  it('a page loaded while a sign-out is pending holds everything from start(), before boot has loaded', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    const first = boot(server);
+    await ready();
+    first.fe.setOnline(false);
+    await finish(first.a.create({ values: values(), clientMutationId: CMID(5), photos: [], photoTiming: 'today' }));
+    first.stop();
+    // "Discard & sign out" was tapped, then the app was killed: the queued request must never be sent.
+    const local = new MemoryStorage();
+    local.setItem(LOGOUT_PENDING_KEY, JSON.stringify({ at: Date.now(), discard: true }));
+    const before = server.log.length;
+    const second = boot(server, { dbName: first.fe.dbName, local });
+    const statuses: string[] = [];
+    second.store.subscribe(() => statuses.push(second.s().session.status));
+    // The page comes to the front at once: these fire before boot has read IndexedDB.
+    second.fe.fire('document', 'visibilitychange');
+    second.fe.fire('window', 'pageshow');
+    second.fe.fire('window', 'focus');
+    second.fe.fire('window', 'online');
+    await ready();
+    await advance(100);
+    expect(server.log.slice(before).map((r) => `${r.method} ${r.path}`)).toEqual(['DELETE /api/session', 'GET /api/session']);
+    expect(statuses).not.toContain('active');
+    expect(second.s().session.status).toBe('signed_out');
+    expect(((await openKv(first.fe.dbName)?.keys()) ?? []).some((k) => k.startsWith('outbox:'))).toBe(false);
   });
 });
 
@@ -332,6 +517,36 @@ describe('alerts of a sync that fails half-way (regression)', () => {
     await advance(6_000);
     expect(server.requests('GET', '/api/sync').some((r) => r.query.get('ids'))).toBe(true);
     expect(heard.map((e) => e.title)).toEqual(['LP-1004 · S.L. — not in medical']);
+  });
+
+  it('an out-of-date alert held back by a page that then times out never closes the newer toast', async () => {
+    const mine = makeRow(4, { firstName: 'Sofia', lastName: 'Lopez', createdBy: STAFF.dana.staff });
+    const server = new FakeServer([mine, makeRow(5)]);
+    server.overlap = 0;
+    const { a, s } = boot(server);
+    await ready();
+    server.pageSize = 1;
+    server.change(mine.id, { status: STATUS.notInMedical }); // page 1
+    server.change(makeRow(5).id, { clothing: 'Blue' }); // page 2
+    let hung = false;
+    server.override = (req) => {
+      if (req.path === '/api/sync' && req.query.get('afterAt') && !hung) {
+        hung = true;
+        return 'hang';
+      }
+      return undefined;
+    };
+    await advance(6_000);
+    expect(hung).toBe(true);
+    expect(s().confirmed.get(mine.id)?.status).toBe(STATUS.notInMedical); // applied; its alert held back
+    server.change(mine.id, { status: STATUS.inMedical }); // the answer is corrected
+    await finish(a.fetchDetail(mine.id)); // the open profile refetches: shown at once
+    const IN_MED = 'LP-1004 · S.L. is in medical';
+    expect(s().toasts.map((t) => t.title)).toEqual([IN_MED]);
+    await advance(12_000); // page 2 times out: the held "not in medical" is out of date
+    expect(s().toasts.map((t) => t.title)).toEqual([IN_MED]);
+    await advance(30_000); // sticky, and nothing re-raises it
+    expect(s().toasts.map((t) => t.title)).toEqual([IN_MED]);
   });
 
   it('the first sync after load is still the baseline when it fails half-way', async () => {

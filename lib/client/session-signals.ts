@@ -12,7 +12,10 @@
 // Neither carries a name or anything else about the person: the marker holds a time and a flag, and the
 // message only says that a sign-in happened.
 
-/** The store's BroadcastChannel name (logout, outbox, myids, signin). */
+/**
+ * The store's BroadcastChannel name: logout, signout-pending / signout-failed (another tab is signing out:
+ * hold every request until it ends), outbox, outbox-idle, myids, signin.
+ */
 export const SESSION_CHANNEL = 'lp';
 export const LOGOUT_PENDING_KEY = 'lp-logout-pending';
 
