@@ -1,13 +1,16 @@
 'use client';
 // The main column's top bar (design/screens/desktop-log.html .top): the view's title and count, search
 // (a field with the "/" cap when the column has room, else an icon that opens search), and New request
-// with the "N" cap ("New" when the column is narrow, desktop-new-tablet.html iPad landscape).
+// with the "N" cap ("New" when the column is narrow, desktop-new-tablet.html iPad landscape). On the
+// dashboard, its Offline / Retrying chip sits beside the title (the dashboard has no title row of its own here).
 //
 // Search drives the existing Search view through ?q= (lib/client/nav): the first character opens it (one
 // history entry), later ones replace it, Esc clears and then leaves.
 import { IconButton } from '@radix-ui/themes';
 import { Plus, Search, X } from 'lucide-react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { DashboardConnectionChip } from '@/components/dashboard/ConnectionChip';
+import { useDashboardConnection } from '@/components/dashboard/connection-signal';
 import { goBack, navigate } from '@/lib/client/nav';
 import { Kbd, useMainCount } from './parts';
 import { mainTitle } from './nav-model';
@@ -35,6 +38,7 @@ export function DeskTop({ main }: DeskTopProps) {
           </>
         )}
       </h1>
+      {main.name === 'dashboard' ? <DashboardChip /> : null}
       <span className={d.sp} />
       <SearchField main={main} />
       <IconButton
@@ -57,6 +61,10 @@ export function DeskTop({ main }: DeskTopProps) {
       </button>
     </div>
   );
+}
+
+function DashboardChip() {
+  return <DashboardConnectionChip state={useDashboardConnection()} className={d.conn} />;
 }
 
 function SearchField({ main }: DeskTopProps) {

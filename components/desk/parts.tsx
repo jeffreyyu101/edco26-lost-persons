@@ -60,10 +60,12 @@ const LIVE_LABEL: Readonly<Record<Connection, string>> = {
 };
 
 /**
- * The app mark with the phone header's live dot on its corner: green live, amber offline or unreachable,
- * grey while loading. Tap to sync now.
+ * The compact logo lockup at the top of the sidebar (EDC Orlando | Ground Control on the brand card's dark
+ * gradient) or the rail (the two logos stacked on a square), with the phone header's live dot on its corner:
+ * green live, amber offline or unreachable, grey while loading. Tap to sync now. The logos are decoration
+ * here: the button is named by the live state.
  */
-export function LiveMark({ className }: { className?: string }) {
+export function LiveMark({ variant, className }: { variant: 'side' | 'rail'; className?: string }) {
   const actions = useActions();
   const { connection } = useConnection();
   const loading = useIsLoading();
@@ -71,13 +73,16 @@ export function LiveMark({ className }: { className?: string }) {
   return (
     <button
       type="button"
-      className={`${d.mark} ${className ?? ''}`}
+      className={`${d.lockup} ${className ?? ''}`}
       onClick={actions.syncNow}
       aria-label={state === 'loading' ? 'Syncing' : LIVE_LABEL[connection]}
       data-testid="desk-live"
+      data-variant={variant}
       data-state={state}
     >
-      <span aria-hidden>?</span>
+      <img className={d.lockEdc} src="/logos/edc-orlando.png" alt="" width={194} height={132} decoding="async" draggable={false} />
+      <span className={d.lockDiv} aria-hidden />
+      <img className={d.lockGc} src="/logos/ground-control.png" alt="" width={313} height={120} decoding="async" draggable={false} />
       <span className={d.live} data-state={state} />
     </button>
   );

@@ -191,3 +191,43 @@
     font-size: 13px;
   }
 }
+
+/* The desk (from 768 px): the card opens All requests' main column, above the top bar (the brand slot in
+   components/desk/DeskFrame.tsx, an inline-size container; the list's own card is phone only). A little
+   shorter than on a phone, and the title is one line of 30-40 px sized to the column (cqi), so it still fits
+   when a request docks beside the list. */
+@media (min-width: 768px) {
+  .brand {
+    margin: 16px 20px 8px;
+    padding: 20px 28px 18px;
+  }
+
+  .logos {
+    height: 32px;
+  }
+
+  .edc {
+    height: 32px;
+  }
+
+  .div {
+    height: 24px;
+  }
+
+  .gc {
+    height: 26px;
+  }
+
+  .kicker {
+    margin-top: 12px;
+  }
+
+  .title {
+    margin-top: 4px;
+    font-size: clamp(30px, calc((100cqi - 96px) / 13), 40px);
+  }
+
+  .credit {
+    margin-top: 8px;
+  }
+}

@@ -1,6 +1,7 @@
 'use client';
 // Sidebar (from 1280 px) and icon rail (768–1279), design/screens/desktop-log.html .side and
-// desktop-new-tablet.html .rl. Both render; CSS shows one. Views with live counts, a divider, Dashboard;
+// desktop-new-tablet.html .rl. Both render; CSS shows one. At the top, the compact logo lockup (EDC Orlando |
+// Ground Control, the brand card's colours) with the live dot; then views with live counts, a divider, Dashboard;
 // at the bottom the Alerts switch and the signed-in person with the phone's account menu. Rail icons show
 // their label as a tooltip on hover and keyboard focus.
 import { BellOff, BellRing, ChartColumn, ChevronDown, Inbox, List, UserRound, type LucideIcon } from 'lucide-react';
@@ -42,8 +43,7 @@ function Sidebar({ main }: DeskNavProps) {
   return (
     <div className={d.side} data-testid="desk-sidebar">
       <div className={d.brand}>
-        <LiveMark />
-        <span className={d.bt}>Is my friend in medical?</span>
+        <LiveMark variant="side" />
       </div>
       <nav className={d.views} aria-label="Views">
         {VIEW_KEYS.map((k) => {
@@ -122,7 +122,7 @@ function Rail({ main }: DeskNavProps) {
   };
   return (
     <div className={d.rail} data-testid="desk-rail">
-      <LiveMark className={d.railMark} />
+      <LiveMark variant="rail" className={d.railMark} />
       <nav className={d.railViews} aria-label="Views">
         {VIEW_KEYS.map(item)}
         <span className={d.railSep} aria-hidden />

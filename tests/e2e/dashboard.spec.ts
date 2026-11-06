@@ -462,15 +462,40 @@ test.describe('with /api/stats mocked', () => {
     await expect(page).toHaveURL(/\?r=5eed0000-0000-4000-8000-000000001010$/);
   });
 
-  test('768 px and wider: six tiles in one row, posts beside recent, performance in two columns', async ({ page }) => {
+  // The desk (from 768 px, components/desk): the dashboard sits in the shell's main column and follows its
+  // width (v7-laptop.png). Six tiles in one row from 1024 px with room, else 3 × 2 (open statuses over closed
+  // ones); every value in a row on one line; posts beside recent and Performance in two columns with room,
+  // stacked when a request docks beside it.
+  const TILE_ORDER = ['tile-open', 'tile-waiting', 'tile-in-medical', 'tile-closed', 'tile-not-in-medical', 'tile-reunited'];
+  const VALUE_IDS = ['open-count', 'tile-waiting-value', 'tile-in-medical-value', 'tile-closed-value', 'tile-not-in-medical-value', 'tile-reunited-value'];
+  const hScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+
+  test('768 px and wider: in the desk column, six tiles in one row or 3 × 2, values on one line, posts beside recent, two-column performance', async ({ page }) => {
     await routeStats(page, mockStats());
     await page.setViewportSize({ width: 1100, height: 800 });
     await page.goto('/?dashboard=1');
     await expect(page.getByTestId('open-count')).toHaveText('7');
-    const order = ['tile-open', 'tile-waiting', 'tile-in-medical', 'tile-closed', 'tile-not-in-medical', 'tile-reunited'];
-    const boxes = await Promise.all(order.map((id) => box(page, id)));
+    await expect(page.getByTestId('desk-rail')).toBeVisible();
+    // The shell's top bar is the title: one h1, no Back, and the live chip (empty) beside it.
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Dashboard');
+    await expect(page.getByRole('button', { name: 'Back to requests' })).toHaveCount(0);
+    await expect(page.getByTestId('desk-topbar').getByTestId('dashboard-connection')).toHaveText('');
+    await expect(page.getByTestId('dashboard-connection')).toHaveCount(1);
+    // The tiles start where the top bar's title does.
+    const title = (await page.getByRole('heading', { level: 1 }).boundingBox())!;
+    expect(Math.abs((await box(page, 'tile-open')).x - Math.round(title.x))).toBeLessThanOrEqual(1);
+
+    // 1100 px (a 1040 px column): six in one row, values on one line, the split bar and Reunited's
+    // "+1 discharged · 1 cancelled" under them.
+    let boxes = await Promise.all(TILE_ORDER.map((id) => box(page, id)));
     for (const b of boxes) expect(b.y).toBe(boxes[0]?.y);
     for (let i = 1; i < boxes.length; i += 1) expect(boxes[i]?.x).toBeGreaterThan(boxes[i - 1]?.x ?? Infinity);
+    let values = await Promise.all(VALUE_IDS.map((id) => box(page, id)));
+    for (const v of values) expect(Math.abs(v.bottom - values[0]!.bottom)).toBeLessThanOrEqual(1);
+    const split = await box(page, 'open-split');
+    expect(split.y).toBeGreaterThanOrEqual(values[0]!.bottom);
+    expect(split.right - split.x).toBeGreaterThan(100);
+    expect((await box(page, 'reunited-sub')).y).toBeGreaterThanOrEqual(values[5]!.bottom);
     const posts = await regionBox(page, 'Open by post');
     const recent = await regionBox(page, 'Recently updated');
     expect(Math.round(recent.y)).toBe(Math.round(posts.y));
@@ -480,10 +505,65 @@ test.describe('with /api/stats mocked', () => {
     expect(answer.y).toBe(longest.y);
     expect(answer.x).toBeGreaterThan(longest.right);
 
-    // An iPad in portrait is still the wide layout.
-    await page.setViewportSize({ width: 768, height: 1024 });
-    const narrow = await Promise.all(order.map((id) => box(page, id)));
-    for (const b of narrow) expect(b.y).toBe(narrow[0]?.y);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+    // iPad portrait: 3 × 2, Open / Waiting / In medical over Closed / Not in medical / Reunited, each row's
+    // values on one line; posts still beside recent.
+    for (const width of [820, 768]) {
+      await page.setViewportSize({ width, height: 1024 });
+      await expect.poll(async () => (await box(page, 'tile-closed')).y, `${width}`).toBeGreaterThan((await box(page, 'tile-open')).y);
+      boxes = await Promise.all(TILE_ORDER.map((id) => box(page, id)));
+      values = await Promise.all(VALUE_IDS.map((id) => box(page, id)));
+      for (const row of [boxes.slice(0, 3), boxes.slice(3)]) for (const b of row) expect(b.y, `${width}`).toBe(row[0]!.y);
+      expect(boxes[3]!.y, `${width}`).toBeGreaterThan(boxes[0]!.bottom);
+      for (const i of [1, 2]) expect(boxes[i]!.x, `${width}`).toBeGreaterThan(boxes[i - 1]!.x);
+      expect(boxes[3]!.x, `${width}`).toBe(boxes[0]!.x);
+      for (const row of [values.slice(0, 3), values.slice(3)]) for (const v of row) expect(Math.abs(v.bottom - row[0]!.bottom), `${width}`).toBeLessThanOrEqual(1);
+      const p = await regionBox(page, 'Open by post');
+      const r = await regionBox(page, 'Recently updated');
+      expect(Math.round(r.y), `${width}`).toBe(Math.round(p.y));
+      expect(await hScroll(page), `${width}`).toBe(false);
+    }
+  });
+
+  test('desk: with a request docked beside it the dashboard narrows (3 × 2, sections stacked); the top bar shows Offline', async ({ page, context }) => {
+    await routeStats(page, mockStats());
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto('/?dashboard=1');
+    await expect(page.getByTestId('open-count')).toHaveText('7');
+    // Six in a row while nothing is open (a 964 px column).
+    let boxes = await Promise.all(TILE_ORDER.map((id) => box(page, id)));
+    for (const b of boxes) expect(b.y).toBe(boxes[0]!.y);
+
+    // Longest wait opens its request in the pane: the column is 544 px now.
+    await page.getByTestId('perf-longest-wait').click();
+    await expect(page.getByTestId('desk-pane')).toBeVisible();
+    await expect(page.getByTestId('dashboard')).toBeVisible();
+    await expect.poll(async () => (await box(page, 'tile-closed')).y).toBeGreaterThan((await box(page, 'tile-open')).bottom);
+    boxes = await Promise.all(TILE_ORDER.map((id) => box(page, id)));
+    for (const row of [boxes.slice(0, 3), boxes.slice(3)]) for (const b of row) expect(b.y).toBe(row[0]!.y);
+    const posts = await regionBox(page, 'Open by post');
+    const recent = await regionBox(page, 'Recently updated');
+    expect(recent.y).toBeGreaterThan(posts.y + posts.height - 1);
+    const longest = await box(page, 'perf-longest-wait');
+    const answer = await box(page, 'perf-answer');
+    expect(answer.y).toBeGreaterThan(longest.y);
+    // Nothing in the column runs under the pane.
+    const pane = (await page.getByTestId('desk-pane').boundingBox())!;
+    for (const id of TILE_ORDER) expect((await box(page, id)).right).toBeLessThanOrEqual(Math.round(pane.x));
+    expect(await hScroll(page)).toBe(false);
+
+    // Offline: the chip is beside the title, the numbers stay.
+    const chip = page.getByTestId('desk-topbar').getByTestId('dashboard-connection');
+    await context.setOffline(true);
+    try {
+      await expect(chip).toHaveText('Offline', { timeout: 15_000 });
+      const t = (await page.getByTestId('desk-topbar').getByRole('heading', { level: 1 }).boundingBox())!;
+      const c = (await chip.boundingBox())!;
+      expect(c.x).toBeGreaterThan(t.x + t.width - 1);
+      expect(c.x).toBeLessThan(t.x + t.width + 24);
+      await expect(page.getByTestId('open-count')).toBeVisible();
+    } finally {
+      await context.setOffline(false);
+    }
+    await expect(chip).toHaveText('', { timeout: 20_000 });
   });
 });

@@ -11,10 +11,13 @@
 // sidebar / rail, top bar, pane header and keyboard come from the desk chunk, loaded only on the desk. All
 // requests, My requests and Search are the desk's request table there (components/desk/table, its own
 // chunk, also desk only); Pending and the dashboard render their views as they are.
+// All requests opens with Jeffrey's brand card above the top bar; it is drawn from the server on (no data
+// in it), so it is there at the first paint, and dropped once hydrated on a phone, whose list has its own
+// (until then it is display: none there, and its lazy logos are never fetched).
 // Under 768 px the view router renders exactly what it always did.
 import dynamic from 'next/dynamic';
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { isDeskNow, useIsDesk } from '@/components/desk/breakpoints';
+import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { isDeskNow, useHydrated, useIsDesk } from '@/components/desk/breakpoints';
 import { DeskFrame } from '@/components/desk/DeskFrame';
 import { useMainView } from '@/components/desk/use-main-view';
 import { isFormView, paneRequestId, type MainView } from '@/components/desk/views';
@@ -62,31 +65,40 @@ const DeskSearchTable = dynamic(() => loadDeskTable().then((m) => m.DeskSearchTa
 
 export interface AppShellProps {
   eventTimezone: string;
+  /**
+   * The desk's brand card, rendered by the page (a server component): <BrandCard logoLoading="lazy" />. Shown
+   * above the top bar on All requests from 768 px.
+   */
+  brand?: ReactNode;
 }
 
-export function AppShell({ eventTimezone }: AppShellProps) {
+export function AppShell({ eventTimezone, brand = null }: AppShellProps) {
   return (
     <StoreProvider eventTimezone={eventTimezone}>
       <TestDataBanner />
       <Suspense fallback={<RowSkeletons />}>
         <ShellBanners />
-        <ViewRouter />
+        <ViewRouter brand={brand} />
       </Suspense>
       <ShellHosts />
     </StoreProvider>
   );
 }
 
-function ViewRouter() {
+function ViewRouter({ brand }: { brand: ReactNode }) {
   const view = useView();
   const desk = useIsDesk();
   const main = useMainView(view);
+  const hydrated = useHydrated();
   const paneId = desk ? paneRequestId(view) : null;
+  // All requests only (Brian, 2026-11-06: Pending and My requests get no brand card).
+  const showBrand = main.name === 'all' && (desk || !hydrated);
   return (
     <>
       <DeskFrame
         desk={desk}
         nav={desk ? <DeskNav main={main} /> : null}
+        brand={showBrand ? brand : null}
         top={desk ? <DeskTop main={main} /> : null}
         pane={
           paneId ? (

@@ -1,4 +1,3 @@
-'use client';
 // The brand card at the top of All requests, Pending and My requests (Jeffrey, 2026-11-06 10:31: "add logo,
 // event details, the 'is my friend in medical' bigger and similar design to the previous version"). It is
 // his original header (git show 1f4580b:app/ui.tsx .topbar): the dark gradient banner with faint orbit
@@ -7,6 +6,11 @@
 //
 // It scrolls away with the page; the sticky bar under it (the view menu title, search, the avatar) stays.
 // Nothing in it waits for data, and the logos carry their size, so it never moves what is below it.
+//
+// From 768 px the desk shell draws the same card above its top bar on All requests (app/app-shell.tsx,
+// components/desk/DeskFrame.tsx); brand.module.css sizes it for the desk. No 'use client': it has no state,
+// so the page (a server component) renders the desk's copy with no JavaScript on the first load, while the
+// list (a client chunk) imports it as client code.
 import { memo } from 'react';
 import b from './brand.module.css';
 
@@ -15,7 +19,16 @@ export const BRAND_KICKER = 'Event operations · November 6–8, 2026';
 export const BRAND_CREDIT_NAMES = 'Jeffrey & Brian';
 export const BRAND_CREDIT_FOR = 'Ground Control / Headliner Experience';
 
-export const BrandCard = memo(function BrandCard() {
+export interface BrandCardProps {
+  /**
+   * 'lazy' for the desk's copy, which the server draws at every width and a phone keeps display: none until
+   * it is hydrated: a hidden lazy image is never fetched, so the phone loads the logos exactly as before
+   * (for its own card). Left out, the images load as usual.
+   */
+  logoLoading?: 'lazy';
+}
+
+export const BrandCard = memo(function BrandCard({ logoLoading }: BrandCardProps) {
   return (
     <div className={b.brand} data-testid="brand-card">
       <div className={b.orbit} aria-hidden="true">
@@ -24,9 +37,9 @@ export const BrandCard = memo(function BrandCard() {
         <span />
       </div>
       <div className={b.logos}>
-        <img className={b.edc} src="/logos/edc-orlando.png" alt="EDC Orlando" width={194} height={132} decoding="async" />
+        <img className={b.edc} src="/logos/edc-orlando.png" alt="EDC Orlando" width={194} height={132} decoding="async" loading={logoLoading} />
         <span className={b.div} aria-hidden="true" />
-        <img className={b.gc} src="/logos/ground-control.png" alt="Ground Control" width={313} height={120} decoding="async" />
+        <img className={b.gc} src="/logos/ground-control.png" alt="Ground Control" width={313} height={120} decoding="async" loading={logoLoading} />
       </div>
       <p className={b.kicker}>{BRAND_KICKER}</p>
       <p className={b.title}>

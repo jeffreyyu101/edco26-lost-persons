@@ -47,3 +47,17 @@ export function useIsDesk(): boolean {
 export function isDeskNow(): boolean {
   return snapshot();
 }
+
+const noSubscribe = () => () => {};
+
+/**
+ * false on the server and in the hydration render, true once hydrated. Lets the shell keep something the
+ * server drew (the desk's brand card, for a first paint with nothing moving) until it knows the width.
+ */
+export function useHydrated(): boolean {
+  return useSyncExternalStore(
+    noSubscribe,
+    () => true,
+    () => false,
+  );
+}

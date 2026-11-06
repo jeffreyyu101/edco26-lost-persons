@@ -4,6 +4,7 @@
    working); the sidebar, top bar and docked pane are sticky. */
 
 .nav,
+.brand,
 .top {
   display: none;
 }
@@ -38,6 +39,14 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
+  }
+
+  /* Jeffrey's brand card on All requests (components/list/brand.module.css sizes it for the desk): above the
+     top bar, scrolling away under it. A container, so the card can size its title to the column. */
+  .brand {
+    display: block;
+    container-type: inline-size;
+    padding-top: env(safe-area-inset-top);
   }
 
   .top {
@@ -95,20 +104,19 @@
   }
 
   /* ---- Phone chrome inside the main column --------------------------------------------------------------
-     The list and dashboard views are the phone's (another wave swaps in the desk table). Their own header
-     (title, live dot, search, bell, avatar), the view switcher row and the floating New request button are
-     phone chrome the shell supplies here, so they are hidden; the offline banner and the filter chips stay.
-     The brand card (F1) is phone chrome too: the list skips it in the desk (useInDesk) and it is hidden here
-     as well. Hooks used: the list root's data-view, its first child (the sticky block: header, banner, view
-     bar), data-testid="view-switcher" and the *-chip test ids; the dashboard's data-testid and its first child
-     (back button, h1, live pill). If those views read useInDesk() and drop the chrome themselves, these
-     rules simply stop matching. */
+     The list views are the phone's (another wave swaps in the desk table). Their own header (title, live dot,
+     search, bell, avatar), the view switcher row and the floating New request button are phone chrome the
+     shell supplies here, so they are hidden; the offline banner and the filter chips stay. The list's brand
+     card (F1) is phone chrome too: the list skips it in the desk (useInDesk) and it is hidden here as well;
+     the desk draws its own in the brand slot. Hooks used: the list root's data-view, its first child (the
+     sticky block: header, banner, view bar), data-testid="view-switcher" and the *-chip test ids. If the list
+     reads useInDesk() and drops the chrome itself, these rules simply stop matching. (The dashboard reads
+     useInDesk() and has no phone chrome here.) */
   .content > [data-view],
   .content > [data-testid='dashboard'] {
     min-height: 0;
   }
-  .content > [data-view] > :first-child,
-  .content > [data-testid='dashboard'] > :first-child {
+  .content > [data-view] > :first-child {
     top: var(--desk-top);
     padding-top: 0;
   }
@@ -117,9 +125,7 @@
   .content > [data-view] > :first-child > form[role='search'],
   .content > [data-view] > :first-child > div > div:has(> [data-testid='view-switcher']),
   .content > [data-view] > :first-child > div:has(> div > [data-testid='view-switcher']):not(:has([data-testid$='-chip'])),
-  .content > [data-view] > button,
-  .content > [data-testid='dashboard'] > :first-child > button:first-child,
-  .content > [data-testid='dashboard'] > :first-child > h1 {
+  .content > [data-view] > button {
     display: none;
   }
   .content > [data-view] > :first-child > div:has(> div > [data-testid='view-switcher']) {
@@ -162,5 +168,42 @@
   }
   .frame[data-pane] {
     grid-template-columns: var(--desk-nav) minmax(0, 1fr) 452px;
+  }
+}
+
+/* ---- The Undo snackbar on the desk ------------------------------------------------------------------------
+   The shell's snackbar (components/ui/Toast.tsx, .lp-snack) is centred on the window on a phone. On the desk
+   it stays in the main column, clear of the sidebar / rail and of an open request: it never covers the
+   pane's actions, and the pane never covers it. On an iPad in portrait the request is a sheet over the list,
+   so the snackbar sits at the foot of that sheet, where the answer was given. */
+@media (min-width: 768px) {
+  :global(body):has(.frame[data-desk]) :global(.lp-snack) {
+    left: calc(60px + env(safe-area-inset-left) + 12px);
+    right: calc(12px + env(safe-area-inset-right));
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023.98px) {
+  :global(body):has(.frame[data-desk][data-pane]) :global(.lp-snack) {
+    left: auto;
+    right: calc(22px + env(safe-area-inset-right));
+    box-sizing: border-box;
+    width: min(456px, calc(100vw - 60px - 44px));
+    margin: 0;
+  }
+}
+
+@media (min-width: 1024px) {
+  :global(body):has(.frame[data-desk][data-pane]) :global(.lp-snack) {
+    right: calc(420px + 12px);
+  }
+}
+
+@media (min-width: 1280px) {
+  :global(body):has(.frame[data-desk]) :global(.lp-snack) {
+    left: calc(232px + env(safe-area-inset-left) + 12px);
+  }
+  :global(body):has(.frame[data-desk][data-pane]) :global(.lp-snack) {
+    right: calc(452px + 12px);
   }
 }
