@@ -690,16 +690,20 @@
   .bell {
     height: 44px;
   }
-  .search {
-    height: 44px;
-    padding-right: 0;
-  }
+  /* The field keeps the mockup's 32 px; its input and clear button reach 44 px past it (the bar is 56). */
   .searchInput {
+    height: 44px;
+    margin: -6px 0;
     font-size: 16px;
   }
   .searchClear {
     width: 44px;
     height: 44px;
+    margin: -6px -8px -6px -6px;
+    border-radius: 8px;
+  }
+  .searchClear:hover {
+    background: none;
   }
   .ph {
     gap: 0;
