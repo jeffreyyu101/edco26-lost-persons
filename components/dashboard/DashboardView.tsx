@@ -53,9 +53,10 @@ export function DashboardView(_props: DashboardViewProps) {
 }
 
 function Dashboard({ onRetry }: { onRetry: () => void }) {
-  const { stats, error, updatedAt, refresh } = useStats(true);
-  // The line, the banner and its live region share one status: the last stats fetch (the numbers on this page).
-  const live = useLiveStatus({ syncedAt: updatedAt, failing: error, subject: 'Dashboard' });
+  const { stats, error, failing, updatedAt, refresh } = useStats(true);
+  // The line, the banner and its live region share one status: the last stats fetch (the numbers on this page),
+  // by the lists' rules (one failed poll shows nothing; 2 network failures or 3 server errors in a row do).
+  const live = useLiveStatus({ syncedAt: updatedAt, failing, subject: 'Dashboard' });
 
   return (
     <div className={s.app} data-testid="dashboard">

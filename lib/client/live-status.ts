@@ -5,9 +5,11 @@
 //   healthy       syncs land: green dot, "Updated just now" (last good sync under 60 s old), then
 //                 "Updated 1 min ago", "Updated 5 min ago", "Updated 1 hr ago". Minutes only, never seconds.
 //   reconnecting  the phone reports a connection, but syncs fail (the store's connection is 'error', or
-//                 'offline' after failed requests), the view's own fetch fails (the dashboard's stats), or
-//                 nothing has landed for more than 30 s of visible time: the amber "Reconnecting…" banner,
-//                 and the line reads "Last updated 3:42 PM" with an amber dot.
+//                 'offline' after failed requests), the view's own fetches fail by the same thresholds (the
+//                 dashboard's stats: 2 network failures or 3 server errors in a row), or nothing has landed
+//                 for more than 30 s of visible time: the amber "Reconnecting…" banner, and the line reads
+//                 "Last updated 3:42 PM" with an amber dot. (On the dashboard the lists' syncs count as
+//                 landing too, so one missed 15 s stats poll never reads as Reconnecting.)
 //   offline       the phone reports no connection: the gray "Offline · N waiting to send" banner, and the
 //                 line reads "Last updated 3:42 PM" with a gray dot.
 //
@@ -36,19 +38,30 @@ export interface LiveInput {
   visibleSince?: number | null;
   /** The page is hidden: staleness doesn't count (background tabs poll once a minute). */
   hidden?: boolean;
-  /** The view's own fetch is failing (the dashboard's stats). */
+  /** The view's own fetches failed past the lists' thresholds (the dashboard's stats, useStats().failing). */
   failing?: boolean;
+  /**
+   * When anything else last landed (epoch ms; the dashboard: the lists' last sync). It counts for the 30 s rule
+   * ("nothing landed"), never for the line's words.
+   */
+  aliveAt?: number | null;
+}
+
+/** When the 30 s rule counts from: the last thing that landed, or the page coming back into view; null: never. */
+function staleFrom({ syncedAt, aliveAt = null, visibleSince = null }: LiveInput): number | null {
+  const landed = syncedAt === null ? aliveAt : aliveAt === null ? syncedAt : Math.max(syncedAt, aliveAt);
+  if (landed === null) return null;
+  // Visible time only: a phone back from the lock screen gets 30 s for its catch-up sync.
+  return visibleSince === null ? landed : Math.max(landed, visibleSince);
 }
 
 /** The one state every connection cue shows. */
-export function liveState({ syncedAt, connection, now, online = true, visibleSince = null, hidden = false, failing = false }: LiveInput): LiveState {
+export function liveState(input: LiveInput): LiveState {
+  const { connection, now, online = true, hidden = false, failing = false } = input;
   if (!online) return 'offline';
   if (connection !== 'live' || failing) return 'reconnecting';
-  if (syncedAt !== null && !hidden) {
-    // Visible time only: a phone back from the lock screen gets 30 s for its catch-up sync.
-    const since = visibleSince === null ? syncedAt : Math.max(syncedAt, visibleSince);
-    if (now - since > STALE_AFTER_MS) return 'reconnecting';
-  }
+  const since = hidden ? null : staleFrom(input);
+  if (since !== null && now - since > STALE_AFTER_MS) return 'reconnecting';
   return 'healthy';
 }
 
@@ -109,12 +122,13 @@ export const sameLine = (a: LiveLine, b: LiveLine) => a === b || (a.state === b.
  * sync, or the moment it turns stale, whichever comes first. A banner state shows a fixed clock time: nothing.
  */
 export function nextLiveChange(input: LiveInput): number | null {
-  const { syncedAt, now, hidden = false, visibleSince = null } = input;
-  if (syncedAt === null || hidden || liveState(input) !== 'healthy') return null;
+  const { syncedAt, now, hidden = false } = input;
+  if (hidden || liveState(input) !== 'healthy') return null;
+  const since = staleFrom(input);
+  const stale = since === null ? Infinity : since + STALE_AFTER_MS + 1;
+  if (syncedAt === null) return since === null ? null : stale;
   const age = now - syncedAt;
   const nextMinute = syncedAt + (age < 0 ? MINUTE_MS : (Math.floor(age / MINUTE_MS) + 1) * MINUTE_MS);
-  const since = visibleSince === null ? syncedAt : Math.max(syncedAt, visibleSince);
-  const stale = since + STALE_AFTER_MS + 1;
   return Math.min(nextMinute, stale);
 }
 
@@ -211,6 +225,7 @@ export interface LiveData {
   syncedAt: number | null;
   connection: Connection;
   failing?: boolean;
+  aliveAt?: number | null;
 }
 
 /** The page around the line: is the phone online, is the page visible (tests pass their own). */

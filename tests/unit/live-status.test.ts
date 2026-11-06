@@ -84,7 +84,32 @@ const TABLE: Row[] = [
     input: { syncedAt: T0, connection: 'offline', online: true, at: T0 + s(1) },
     state: 'reconnecting',
   },
-  { name: "the view's own fetch fails (dashboard stats)", input: { syncedAt: T0, connection: 'live', failing: true, at: T0 + s(1) }, state: 'reconnecting' },
+  {
+    name: "the view's own fetches failed past the lists' thresholds (dashboard stats: useStats().failing)",
+    input: { syncedAt: T0, connection: 'live', failing: true, at: T0 + s(1) },
+    state: 'reconnecting',
+  },
+  // The dashboard: its line counts from the last stats fetch (every 15 s), the 30 s rule from anything that landed.
+  {
+    name: 'dashboard: one stats poll missed (stats 42 s old), the lists synced 5 s ago',
+    input: { syncedAt: T0, aliveAt: T0 + s(37), connection: 'live', at: T0 + s(42) },
+    state: 'healthy',
+  },
+  {
+    name: 'dashboard: nothing at all landed for > 30 s (stats nor lists)',
+    input: { syncedAt: T0, aliveAt: T0 + s(10), connection: 'live', at: T0 + s(40) + 1 },
+    state: 'reconnecting',
+  },
+  {
+    name: 'dashboard: the lists synced long ago, the stats just now',
+    input: { syncedAt: T0 + s(55), aliveAt: T0, connection: 'live', at: T0 + s(60) },
+    state: 'healthy',
+  },
+  {
+    name: 'dashboard: before the first stats, the lists stopped landing > 30 s ago',
+    input: { syncedAt: null, aliveAt: T0, connection: 'live', at: T0 + STALE_AFTER_MS + 1 },
+    state: 'reconnecting',
+  },
   { name: 'the phone reports no connection', input: { syncedAt: T0, connection: 'offline', online: false, at: T0 + s(1) }, state: 'offline' },
   { name: 'no connection wins over failures and staleness', input: { syncedAt: T0, connection: 'error', online: false, at: T0 + min(5) }, state: 'offline' },
   { name: 'no connection before the first sync', input: { syncedAt: null, connection: 'offline', online: false, at: T0 }, state: 'offline' },
@@ -183,6 +208,13 @@ describe('liveLine: what the line shows and says', () => {
     expect(nextLiveChange({ syncedAt: T0, connection: 'live', online: false, now: T0 })).toBeNull();
     expect(nextLiveChange({ syncedAt: T0, connection: 'live', hidden: true, now: T0 })).toBeNull();
     expect(nextLiveChange({ syncedAt: null, connection: 'live', now: T0 })).toBeNull();
+    // The dashboard: the stale moment counts from whatever landed last (the stats or the lists' sync)…
+    expect(nextLiveChange({ syncedAt: T0, aliveAt: T0 + s(20), connection: 'live', now: T0 + s(25) })).toBe(T0 + s(20) + STALE_AFTER_MS + 1);
+    expect(nextLiveChange({ syncedAt: T0 + s(20), aliveAt: T0, connection: 'live', now: T0 + s(25) })).toBe(T0 + s(20) + STALE_AFTER_MS + 1);
+    // …the minute boundaries from the stats (the line's words)…
+    expect(nextLiveChange({ syncedAt: T0, aliveAt: T0 + s(59), connection: 'live', now: T0 + s(59) })).toBe(T0 + MINUTE_MS);
+    // …and before the first stats only the stale moment can change anything.
+    expect(nextLiveChange({ syncedAt: null, aliveAt: T0, connection: 'live', now: T0 + s(5) })).toBe(T0 + STALE_AFTER_MS + 1);
   });
 });
 

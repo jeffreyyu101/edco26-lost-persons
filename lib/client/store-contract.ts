@@ -37,6 +37,7 @@ import {
 } from './selectors';
 
 export {
+  CONNECTION_FAILURES,
   DRAFT_DEBOUNCE_MS,
   LEGACY_QUEUE_KEY,
   MUTATION_TIMEOUT_MS,
@@ -46,6 +47,7 @@ export {
   UNDO_MS,
 } from './constants';
 import { STATS_POLL_MS } from './constants';
+import type { StatsState } from './stats-poller';
 
 // ---------------------------------------------------------------------------------------------------
 // State
@@ -657,60 +659,45 @@ export function useDetail(id: string | null): DetailState {
  * Dashboard stats, polled every 15 s while `active` (A5). `updatedAt` (added in v2.2, the live indicator) is
  * this phone's clock when the last fetch succeeded. `refresh` (added in v2.2 afternoon, Refresh now) fetches at
  * once, joining a fetch already on its way, and resolves when it has settled; the next poll is 15 s after it.
+ * `error`: the last fetch failed. `failing` (added in the v2.2 afternoon review): fetches failed past the
+ * lists' thresholds (2 network failures or timeouts, or 3 server errors, in a row), the dashboard's
+ * Reconnecting. When the connection comes back after a failed fetch, it fetches at once. The poller
+ * (stats-poller.ts) loads with the dashboard, off the first-load path of `/` (v2.2 A25 budget).
  */
-export function useStats(active: boolean): {
-  stats: Stats | null;
-  error: boolean;
-  updatedAt: number | null;
-  refresh: () => Promise<void>;
-} {
-  const { actions } = useAppStore();
-  const [state, setState] = useState<{ stats: Stats | null; error: boolean; updatedAt: number | null }>({
-    stats: null,
-    error: false,
-    updatedAt: null,
-  });
+export function useStats(active: boolean): StatsState & { refresh: () => Promise<void> } {
+  const store = useAppStore();
+  const [state, setState] = useState<StatsState>(NO_STATS);
   const runRef = useRef<() => Promise<void>>(idle);
   const refresh = useCallback(() => runRef.current(), []);
   useEffect(() => {
     if (!active) return;
     let live = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let inFlight: Promise<void> | null = null;
-    const fetchOnce = () => {
-      inFlight ??= (async () => {
-        try {
-          const stats = await actions.fetchStats();
-          if (live) setState({ stats, error: false, updatedAt: Date.now() });
-        } catch {
-          if (live) setState((s) => ({ ...s, error: true }));
-        } finally {
-          inFlight = null;
-        }
-      })();
-      return inFlight;
-    };
-    const tick = async () => {
-      await fetchOnce();
-      if (live && !timer) timer = setTimeout(next, STATS_POLL_MS);
-    };
-    const next = () => {
-      timer = undefined;
-      void tick();
-    };
-    void tick();
-    runRef.current = () => {
-      if (timer) clearTimeout(timer);
-      timer = undefined;
-      return tick();
-    };
+    let stop: (() => void) | undefined;
+    import('./stats-poller').then(
+      ({ startStatsPoller, subscribeReconnect }) => {
+        if (!live) return;
+        const poller = startStatsPoller({
+          fetchStats: () => store.actions.fetchStats(),
+          onChange: setState,
+          subscribeReconnect: (onReconnect) => subscribeReconnect(store, onReconnect),
+          pollMs: STATS_POLL_MS,
+        });
+        runRef.current = poller.refresh;
+        stop = poller.stop;
+      },
+      // The chunk didn't load: "Can't reach the log · Try again" (which remounts this).
+      () => {
+        if (live) setState((s) => ({ ...s, error: true }));
+      },
+    );
     return () => {
       live = false;
-      if (timer) clearTimeout(timer);
+      stop?.();
       runRef.current = idle;
     };
-  }, [actions, active]);
+  }, [store, active]);
   return { ...state, refresh };
 }
+const NO_STATS: StatsState = { stats: null, updatedAt: null, error: false, failing: false };
 const idle = () => Promise.resolve();
 

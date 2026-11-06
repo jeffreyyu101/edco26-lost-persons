@@ -39,7 +39,7 @@ import {
   type AlertContext,
   type RaisedAlert,
 } from './alerts';
-import { DRAFT_DEBOUNCE_MS, LEGACY_QUEUE_KEY, MUTATION_TIMEOUT_MS, SYNC, UNDO_MS } from './constants';
+import { CONNECTION_FAILURES, DRAFT_DEBOUNCE_MS, LEGACY_QUEUE_KEY, MUTATION_TIMEOUT_MS, SYNC, UNDO_MS } from './constants';
 import { createBodyFromLegacyQueueItem, hasAnyDetail, toCreateBody } from './form-values';
 import { apiRequest, isDefinitive, isUncertain, type FetchLike, type HttpFailure, type HttpResult, type RequestOptions } from './http';
 import { navigate } from './nav';
@@ -895,13 +895,13 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       case 'network':
         failures += 1;
         netFailures += 1;
-        if (netFailures >= 2) setConnection('offline');
+        if (netFailures >= CONNECTION_FAILURES.network) setConnection('offline');
         break;
       case 'http5xx':
         failures += 1;
         httpFailures += 1;
         netFailures = 0;
-        if (httpFailures >= 3) setConnection('error');
+        if (httpFailures >= CONNECTION_FAILURES.http) setConnection('error');
         break;
       case 'http4xx':
         failures += 1;

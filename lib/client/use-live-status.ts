@@ -8,10 +8,11 @@ import { useAppStore, useEventTimezone, type StoreState } from './store-contract
 export interface LiveStatusOptions {
   /**
    * When the view's own data last arrived (the dashboard's last stats fetch, epoch ms on this phone). Leave it
-   * out for the store's last successful sync (the lists, the profile).
+   * out for the store's last successful sync (the lists, the profile). The store's last sync still counts for
+   * the 30 s rule (nothing landed at all), so one missed poll of the view's own never reads as Reconnecting.
    */
   syncedAt?: number | null;
-  /** The view's own fetch is failing (the dashboard's stats): Reconnecting. */
+  /** The view's own fetches failed past the lists' thresholds (useStats().failing): Reconnecting. */
   failing?: boolean;
   /** Starts the spoken sentence: "List updated just now.", "Dashboard updated 1 minute ago." */
   subject?: string;
@@ -28,7 +29,10 @@ export function useLiveStatus({ syncedAt, failing = false, subject = 'List' }: L
   const own = syncedAt !== undefined;
   const ownAt = syncedAt ?? null;
   const source = useMemo(() => {
-    const pick = (s: StoreState) => ({ syncedAt: own ? ownAt : s.lastSyncLocalAt, connection: s.connection, failing });
+    const pick = (s: StoreState) =>
+      own
+        ? { syncedAt: ownAt, aliveAt: s.lastSyncLocalAt, connection: s.connection, failing }
+        : { syncedAt: s.lastSyncLocalAt, connection: s.connection, failing };
     return createLiveSource({
       read: () => pick(store.getState()),
       readServer: () => pick(store.getServerState?.() ?? store.getState()),
