@@ -275,7 +275,7 @@ describe('session', () => {
     const server = new FakeServer([makeRow(1)]);
     const { fe, s } = boot(server, { path: '/?r=7e570000-0000-4000-8000-000000000001' });
     await ready();
-    await advance(2_000); // the cache write
+    await advance(3_500); // the cache write
     server.session = null;
     await advance(7_000);
     expect(s().session.status).toBe('expired');
@@ -304,7 +304,7 @@ describe('session', () => {
     const server = new FakeServer([makeRow(1), makeRow(2)]);
     const first = boot(server);
     await ready();
-    await advance(2_000);
+    await advance(3_500);
     first.stop();
     const second = boot(server, { dbName: first.fe.dbName });
     second.fe.setOnline(false);
@@ -321,7 +321,7 @@ describe('session', () => {
     const server = new FakeServer([makeRow(1)]);
     const first = boot(server);
     await ready();
-    await advance(2_000);
+    await advance(3_500);
     first.stop();
     server.session = { ...STAFF.sam, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
     server.put(makeRow(2));

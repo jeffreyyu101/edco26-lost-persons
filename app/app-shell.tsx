@@ -78,11 +78,7 @@ function ViewRouter() {
  * form put it under their own top bar, as in the mockups).
  */
 function ShellBanners() {
-  return (
-    <div className="lp-shell-banner" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
-      <ConnectionBanner placement="shell" />
-    </div>
-  );
+  return <ConnectionBanner placement="shell" />;
 }
 
 const selectPrompt = (s: StoreState) => s.outboxPrompt;

@@ -77,19 +77,21 @@ export function ConnectionBanner({ placement = 'view' }: ConnectionBannerProps) 
   }, [placement]);
 
   if (placement === 'shell' && placedByViews > 0) return null;
+  let banner: ReactNode = null;
   if (connection === 'offline') {
-    return (
+    banner = (
       <Banner tone="amber" icon="offline">
         Offline · {outbox.length} waiting to send
       </Banner>
     );
-  }
-  if (connection === 'error') {
-    return (
+  } else if (connection === 'error') {
+    banner = (
       <Banner tone="red" icon="error" action={{ label: 'Try again', onClick: actions.syncNow }}>
         Can&apos;t reach the log
       </Banner>
     );
   }
-  return null;
+  if (!banner) return null;
+  // The shell's copy sits at the very top of the page: clear the status bar / notch.
+  return placement === 'shell' ? <div className={styles.shellBanner}>{banner}</div> : banner;
 }

@@ -28,17 +28,18 @@ export function OutboxPromptDialog({ prompt, onAnswer }: OutboxPromptDialogProps
         <AlertDialog.Description size="2" color="gray">
           {prompt.sendAs ? `As ${prompt.sendAs}` : null}
         </AlertDialog.Description>
+        {/* Send is the safe choice (nothing is lost), so it is AlertDialog.Cancel and takes the initial focus. */}
         <div className={styles.dialogButtons}>
-          <AlertDialog.Cancel>
+          <AlertDialog.Action>
             <Button size="3" variant="soft" color="red" onClick={() => onAnswer(false)}>
               Discard
             </Button>
-          </AlertDialog.Cancel>
-          <AlertDialog.Action>
+          </AlertDialog.Action>
+          <AlertDialog.Cancel>
             <Button size="3" highContrast onClick={() => onAnswer(true)}>
               Send
             </Button>
-          </AlertDialog.Action>
+          </AlertDialog.Cancel>
         </div>
       </AlertDialog.Content>
     </AlertDialog.Root>

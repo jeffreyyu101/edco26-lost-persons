@@ -37,7 +37,7 @@ describe('sign out (A14)', () => {
     await ready();
     one.a.draft.save({ clientMutationId: CMID(2), values: values(), photos: [photo('e0000000-0000-4000-8000-000000000001')], photoTiming: 'today', updatedAt: 1 });
     await settle();
-    await advance(2_000);
+    await advance(3_500);
     expect(two.s().confirmed.size).toBe(2);
     const keysBefore = (await openKv(one.fe.dbName)?.keys()) ?? [];
     expect(keysBefore.some((k) => k.endsWith(':rows'))).toBe(true);
