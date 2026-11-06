@@ -27,6 +27,8 @@ const num = (v: unknown): number | null => {
   return null;
 };
 const reqNum = (v: unknown): number => num(v) ?? 0;
+/** Free text that may arrive as a number (an age saved before it became text): 24 → "24". */
+const text = (v: unknown): string | null => (typeof v === 'number' && Number.isFinite(v) ? String(v) : str(v));
 const id = (v: unknown): string => (typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '');
 
 // ---------------------------------------------------------------------------------------------------
@@ -46,7 +48,7 @@ export function mapRow(raw: unknown): RequestSummary {
     caseNumber: reqNum(r.case_number),
     firstName,
     lastName,
-    age: num(r.age),
+    age: text(r.age),
     gender: str(r.gender),
     heightBuild: str(r.height_build),
     hair: str(r.hair),

@@ -102,6 +102,21 @@ References: `references/mobbin-forms.png` with notes in `references/mobbin-forms
 - **Draft.** The form keeps its contents while open, as in Jeffrey's app, but without his explanation text.
 - **All of Jeffrey's intake fields are still there.**
 
+## New request: free text and everything open (Jeffrey, 2026-11-06 10:31)
+
+> "when submitting a new request, make all other fields free response - for example for age, they can put mid-20s, not just numbers. And then for more details, make that after the first missing persons and show automatically, then friends and family is at the bottom - that is truly optional. Make everything show automatically, not need a click to expand."
+
+This overrides the New request section above where they differ.
+
+- **Every person and contact field is free text.**
+  - **Age** takes any text up to 40 characters, such as "24" or "mid-20s". It is no longer a 0–120 number. Ages saved as numbers before the change read back as the same text ("24").
+  - **Gender** takes any text up to 40 characters. Male, Female and Other stay as quick-fill options, and existing values keep working.
+  - **Phone** stays text and is never rejected for its format. The ✓ for 10–15 digits is only a hint.
+  - **Unchanged:** the reporting post keeps its fixed list plus Other, and photo timing keeps Today / Not today.
+- **Order, all open, no tap to expand:** Reporting from → Missing person (photo, name or initials, age, gender, wearing, last seen) → More details (hair, height/build, identifying features, physical description, other notes) → Friend or family (name, phone, relation, contact notes), which is optional and last.
+- **Supersedes:** "the whole form fits on one phone screen with no scrolling" and "More details is one row at the bottom" (the form now scrolls), Age on the number keypad, Gender as a fixed Male / Female / Other choice, and Contact notes inside More details (it moves to Friend or family).
+- **Database:** `20261106000000_rework.sql` turns `patients.age` from a number into text, keeping every value, and drops the old 0–120 check. That step runs only while the column is still a number, so the file stays safe to paste again on production. Search matches the age text too ("mid-20s").
+
 ## Request profile (approved by Brian 2026-11-06) — `screens/profile.*`
 
 - **Opens when a request is tapped.** The top bar has a close button (×), the LP number and a ⋯ menu.

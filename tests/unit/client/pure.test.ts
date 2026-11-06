@@ -128,7 +128,7 @@ describe('alerts diff (spec §7 Alerts)', () => {
   });
 
   it('new requests by others alert only with the bell on; never my own creates', () => {
-    const fresh = makeRow(13, { firstName: 'T.', lastName: 'R.', age: 24, gender: 'Male', createdBy: STAFF.sam.staff, caseNumber: 1013 });
+    const fresh = makeRow(13, { firstName: 'T.', lastName: 'R.', age: '24', gender: 'Male', createdBy: STAFF.sam.staff, caseNumber: 1013 });
     expect(diffAlerts(new Map(), [fresh], ctx())).toEqual([]);
     expect(diffAlerts(new Map(), [fresh], ctx({ bell: true }))).toEqual([
       { kind: 'new_request', requestId: fresh.id, title: 'New request · LP-1013', subtitle: 'T.R. 24 M · FA 4', count: 1 },

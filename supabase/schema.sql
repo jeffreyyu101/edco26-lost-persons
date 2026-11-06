@@ -2,6 +2,8 @@
 create extension if not exists pgcrypto;
 create sequence if not exists public.patient_case_number_seq start 1001;
 
+-- patients.age is smallint here, as first deployed. supabase/migrations/20261106000000_rework.sql makes it free
+-- text ("mid-20s", every value kept: 24 -> '24') and drops its 0-120 CHECK; gender is free text too (2026-11-06).
 create table if not exists public.patients (
  id uuid primary key default gen_random_uuid(),
  client_mutation_id uuid unique,
