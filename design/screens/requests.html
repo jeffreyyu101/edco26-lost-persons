@@ -1,0 +1,326 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>v5 · Requests screen</title>
+<!-- v4 2026-11-06. All is the main view: one chronological list (Jeffrey). To check / Mine are role filters (Jeffrey).
+     A check has exactly two outcomes, "In medical" / "Not in medical" (Brian + Jeffrey). Nothing more is shared,
+     e.g. never "left" or "taken to hospital". "Bring friend to medical" and its follow-up question are removed.
+     Real @radix-ui/themes 3.3.0 components, loaded from CDN (needs internet). Synthetic data only. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@radix-ui/themes@3.3.0/styles.css">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+html.standalone{background:#0c0c0d}html.standalone body{margin:0;padding:16px}
+.radix-themes{--default-font-family:InterVariable,Inter,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;font-feature-settings:"cv11";-webkit-font-smoothing:antialiased}
+.radix-themes[data-is-root-theme]{min-height:0!important;height:100%;position:relative}
+.board{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:22px 16px;max-width:760px}
+.board figure{margin:0}.frame{height:760px;border-radius:30px;overflow:hidden;border:1px solid #2b2b30}
+figcaption{margin-top:8px;text-align:center;font:12px/1.3 system-ui;color:#8e8e96}
+.app{height:100%;display:flex;flex-direction:column;position:relative}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 16px 12px}
+.title{display:flex;align-items:center;gap:8px;min-width:0}
+.title .rt-Heading{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lens{padding:0 12px 12px}.lens .rt-SegmentedControlRoot{width:100%}
+.cnt{margin-left:5px;color:var(--gray-10);font-variant-numeric:tabular-nums}
+.live{flex:none;width:7px;height:7px;border-radius:50%;background:var(--green-9);box-shadow:0 0 0 3px var(--green-a4)}
+.scroll{flex:1;overflow:hidden;padding:4px 12px 90px;display:flex;flex-direction:column;gap:10px}
+.scroll>*{flex-shrink:0}
+.sh{display:flex;align-items:center;gap:6px;padding:6px 4px 0}
+.qh{display:flex;gap:12px;align-items:flex-start}
+.qn{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.l1,.l2{display:flex;align-items:center;gap:6px;min-width:0}
+.l1>:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.thumb{width:40px;height:40px;border-radius:var(--radius-3);flex:none;display:grid;place-items:center;overflow:hidden}
+.thumb.photo{background:var(--gray-a5);color:var(--gray-11);place-items:end center}
+.thumb.none{background:var(--gray-a2);color:var(--gray-8);box-shadow:inset 0 0 0 1px var(--gray-a4)}
+.qd{margin:10px 0 12px;color:var(--gray-11);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.qa{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.qa .wide{grid-column:span 2}
+.fresh{outline:1.5px solid var(--focus-8);outline-offset:-1px;border-radius:var(--radius-4)}
+.fresh.blue{outline-color:var(--blue-8)}.fresh.green{outline-color:var(--green-8)}
+.stat{display:flex;align-items:center;gap:8px;margin:12px 0 14px}
+.stepper{display:grid;grid-template-columns:repeat(4,1fr)}
+.st{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px}
+.st:not(:last-child)::after{content:"";position:absolute;top:4px;left:calc(50% + 8px);right:calc(-50% + 8px);height:1.5px;background:var(--gray-a5)}
+.st.done::after{background:var(--gray-10)}
+.dot{width:10px;height:10px;border-radius:50%;box-shadow:inset 0 0 0 1.5px var(--gray-a7)}
+.st.done .dot{background:var(--gray-10);box-shadow:none}
+.st.cur .dot{background:var(--tone);box-shadow:0 0 0 3px color-mix(in srgb,var(--tone) 28%,transparent)}
+.st.pend .dot{background:none;box-shadow:inset 0 0 0 1.5px var(--tone)}
+.lb{font-size:11px;line-height:1;color:var(--gray-10);white-space:nowrap}
+.st.cur .lb,.st.pend .lb{color:var(--gray-12);font-weight:500}
+.toast{position:absolute;top:10px;left:10px;right:10px;z-index:10;display:flex;gap:12px;align-items:center;padding:12px;border-radius:var(--radius-5);background:var(--color-panel-solid);box-shadow:var(--shadow-5)}
+.toast .ic{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;flex:none}
+.toast .tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.snack{position:absolute;left:12px;right:12px;bottom:24px;z-index:10;display:flex;align-items:center;gap:10px;padding:10px 10px 10px 14px;border-radius:var(--radius-4);background:var(--gray-12);color:var(--gray-1);box-shadow:var(--shadow-5)}
+.snack .undo{border:0;background:none;color:var(--gray-1);font:inherit;font-weight:600;font-size:14px;padding:6px 8px}
+.scrim{position:absolute;inset:0;background:var(--black-a8);z-index:8}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:9;background:var(--color-panel-solid);border-radius:22px 22px 0 0;padding:8px 16px 28px;box-shadow:var(--shadow-6)}
+.handle{width:36px;height:5px;border-radius:3px;background:var(--gray-a6);margin:0 auto 16px}
+.opts{border-radius:var(--radius-4);background:var(--gray-a3);overflow:hidden;margin:16px 0 12px}
+.opt{display:flex;align-items:center;gap:12px;min-height:60px;padding:0 14px}
+.opt+.opt{border-top:1px solid var(--gray-a4)}
+.opt .tx{flex:1;display:flex;flex-direction:column;gap:2px}
+.fab{position:absolute!important;right:16px;bottom:24px;box-shadow:var(--shadow-5);z-index:5}
+.sp{flex:1}
+.filters{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 12px 12px}
+.fchip{display:flex;align-items:center;gap:10px;padding:8px 10px 8px 12px;border-radius:var(--radius-4);border:0;background:none;box-shadow:inset 0 0 0 1px var(--gray-a5);color:var(--gray-12);font:inherit;text-align:left;cursor:pointer}
+.fchip>svg{color:var(--gray-10)}
+.fchip .ft{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+.fchip .fl{font-size:14px;font-weight:500;line-height:1.2}
+.fchip .fc{margin-left:6px;color:var(--gray-10);font-weight:400;font-variant-numeric:tabular-nums}
+.fchip .fr{font-size:11.5px;line-height:1.2;color:var(--gray-10)}
+.fchip .fx{display:flex;opacity:.7}
+.fchip.on{background:var(--gray-12);color:var(--gray-1);box-shadow:none}
+.fchip.on>svg,.fchip.on .fc,.fchip.on .fr{color:inherit;opacity:.7}
+.cc{display:flex;align-items:center;gap:12px}
+.cc .thumb{width:36px;height:36px}
+.who{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--green-11)}
+.vbar{position:relative;display:flex;align-items:center;gap:8px;padding:0 12px 10px;border-bottom:1px solid var(--gray-a3)}
+.vsw{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 9px 0 11px;border-radius:var(--radius-3);border:0;background:var(--gray-a3);color:var(--gray-12);font:inherit;font-size:15px;font-weight:500;cursor:pointer}
+.vsw svg{color:var(--gray-11)}
+.vsw .vc{color:var(--gray-10);font-weight:400;font-variant-numeric:tabular-nums}
+.vsw.open{background:var(--gray-a5)}
+.vmenu{position:absolute;top:40px;left:12px;width:276px;z-index:20;background:var(--color-panel-solid);border-radius:var(--radius-4);box-shadow:var(--shadow-5);padding:6px}
+.vitem{display:flex;align-items:center;gap:10px;min-height:46px;padding:6px 10px;border-radius:var(--radius-2)}
+.vitem.on{background:var(--gray-a3)}
+.vic{width:30px;height:30px;border-radius:var(--radius-2);display:grid;place-items:center;background:var(--gray-a3);color:var(--gray-11);flex:none}
+.vtx{flex:1;display:flex;flex-direction:column}
+.vchk{width:16px;display:flex;color:var(--gray-12)}
+.vsep{border-top:1px solid var(--gray-a4);margin:6px 4px}
+.lh{display:flex;align-items:center;gap:6px;padding:6px 16px 8px;border-bottom:1px solid var(--gray-a3)}
+.row.muted{opacity:.55}
+.meta{font-size:12px;color:var(--gray-10);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.flat{flex:1;overflow:hidden}
+.gh{display:flex;align-items:center;gap:8px;height:34px;padding:0 16px;background:var(--gray-a2);border-bottom:1px solid var(--gray-a3)}
+.flat .gh:not(:first-child){border-top:1px solid var(--gray-a3)}
+.row{display:flex;gap:10px;padding:10px 16px 11px}
+.row+.row{border-top:1px solid var(--gray-a3)}
+.row .g{padding-top:3px;display:flex}
+.rm{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.id,.t,.ph{font-size:12px;color:var(--gray-10);font-variant-numeric:tabular-nums}
+.ph{display:inline-flex;align-items:center;gap:3px}
+.t{min-width:24px;text-align:right}.t.amber{color:var(--amber-11)}.t.red{color:var(--red-11)}
+.desc{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--gray-11);font-size:13px}
+</style>
+<script type="importmap">{"imports":{
+"react":"https://esm.sh/react@18.3.1",
+"react-dom":"https://esm.sh/react-dom@18.3.1",
+"react-dom/client":"https://esm.sh/react-dom@18.3.1/client",
+"@radix-ui/themes":"https://esm.sh/@radix-ui/themes@3.3.0?deps=react@18.3.1,react-dom@18.3.1",
+"htm":"https://esm.sh/htm@3.1.1"}}</script>
+</head><body><div id="b"></div>
+<script type="module">
+import React from 'react';
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
+import htm from 'htm';
+import { Theme, Flex, Text, Heading, Badge, IconButton, Button, SegmentedControl, Avatar, Card } from '@radix-ui/themes';
+if (location.protocol === 'file:' || location.protocol.startsWith('http')) document.documentElement.classList.add('standalone');
+const h = htm.bind(React.createElement);
+const svg = (p, s = 16) => h`<svg width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style=${{ flex: 'none' }} dangerouslySetInnerHTML=${{ __html: p }} />`;
+const P = {
+  steth: '<path d="M11 2v2"/><path d="M5 2v2"/><path d="M5 3H4a2 2 0 0 0-2 2v4a6 6 0 0 0 12 0V5a2 2 0 0 0-2-2h-1"/><path d="M8 15a6 6 0 0 0 12 0v-3"/><circle cx="20" cy="10" r="2"/>',
+  tent: '<path d="M3.5 21 14 3"/><path d="M20.5 21 10 3"/><path d="M15.5 21 12 15l-3.5 6"/><path d="M2 21h20"/>',
+  inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  list: '<path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/>',
+  search: '<circle cx="11" cy="11" r="7.5"/><path d="m20.5 20.5-4.2-4.2"/>',
+  bellOn: '<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/><path d="M22 8c0-2.3-.8-4.3-2-6"/><path d="M4 2C2.8 3.7 2 5.7 2 8"/>',
+  bellOff: '<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M17 17H4a1 1 0 0 1-.74-1.673C4.59 13.956 6 12.499 6 8a6 6 0 0 1 .258-1.742"/><path d="m2 2 20 20"/><path d="M8.668 3.01A6 6 0 0 1 18 8c0 2.687.77 4.653 1.707 6.05"/>',
+  plus: '<path d="M5 12h14M12 5v14"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  walk: '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  recheck: '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
+  chev: '<path d="m6 9 6 6 6-6"/>',
+  chevR: '<path d="m9 18 6-6-6-6"/>',
+  cam: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/>',
+  bust: '<circle cx="12" cy="10" r="5"/><path d="M2 26a10 9 0 0 1 20 0"/>',
+};
+
+// ---- status language (one place) ----
+const pie = (f) => { const a = f * 2 * Math.PI, x = 7 + 3.25 * Math.sin(a), y = 7 - 3.25 * Math.cos(a); return `M7 7L7 3.75A3.25 3.25 0 ${f > 0.5 ? 1 : 0} 1 ${x.toFixed(2)} ${y.toFixed(2)}Z`; };
+const STEPS = ['Logged', 'Checked', 'In medical', 'Reunited'];
+const ST = {
+  new: { label: 'Waiting for check', c: 'var(--blue-9)', color: 'blue', f: 0, step: 1, pend: true },
+  // Brian 2026-11-06: "Not in medical" is the answer, full stop. No recheck.
+  notfound: { label: 'Not in medical', c: 'var(--amber-9)', color: 'amber', mark: 'x', step: 2, steps: ['Logged', 'Checked', 'Not in medical'] },
+  // Reunions always happen at Main Med.
+  found: { label: 'In medical · friend coming', c: 'var(--green-9)', color: 'green', f: 0.75, step: 2 },
+  closed: { label: 'Closed', c: 'var(--gray-9)', done: true, step: 3 },
+};
+const glyph = (k, s = 14) => { const t = ST[k]; return h`<svg width=${s} height=${s} viewBox="0 0 14 14" aria-hidden="true" style=${{ flex: 'none' }}>${t.done
+  ? h`<circle cx="7" cy="7" r="6.25" fill=${t.c}/><path d="M4.4 7.2l1.8 1.8 3.5-3.6" fill="none" stroke="var(--color-panel-solid)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>`
+  : t.mark === 'x'
+  ? h`<circle cx="7" cy="7" r="6.25" fill=${t.c}/><path d="M5 5l4 4M9 5l-4 4" stroke="var(--color-panel-solid)" strokeWidth="1.6" strokeLinecap="round"/>`
+  : h`<circle cx="7" cy="7" r="5.75" fill="none" stroke=${t.c} strokeWidth="1.5"/>${t.f ? h`<path d=${pie(t.f)} fill=${t.c}/>` : null}`}</svg>`; };
+const ago = (m) => (m < 1 ? 'now' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h`);
+const heat = (m) => (m >= 20 ? 'red' : m >= 10 ? 'amber' : 'gray');
+
+// ---- synthetic requests ----
+const R = {
+  1010: { id: 'LP-1010', nm: 'B.W.', age: 23, sx: 'F', post: 'FA 4', d: 'Neon green bikini top, white platform boots, red bandana', m: 24, ph: 0 },
+  1012: { id: 'LP-1012', nm: 'Kayla Martinez', age: 19, sx: 'F', post: 'FA 3', d: 'Pink cowboy hat, silver fringe top, braids. Last seen Kinetic Field rail.', m: 12, ph: 1, f: 'Jess T.' },
+  1013: { id: 'LP-1013', nm: 'T.R.', age: 24, sx: 'M', post: 'FA 4', d: 'Red hoodie, blond buzz cut, green wristband', m: 1, ph: 0 },
+  1009: { id: 'LP-1009', nm: 'A.N.', age: 21, sx: 'F', post: 'FA 3', d: 'Light-up butterfly wings, black shorts', m: 25, ph: 0 },
+  1004: { id: 'LP-1004', nm: 'S.L.', age: 20, sx: 'F', post: 'FA 3', d: 'Green bucket hat, mesh top', m: 0, ph: 1, f: 'Maya R.' },
+  1007: { id: 'LP-1007', nm: 'Jordan Diaz', age: 22, sx: 'M', post: 'FA 4', d: 'Kandi to elbows, white tank, sleeve tattoo', m: 0, ph: 0 },
+  1005: { id: 'LP-1005', nm: 'M.P.', age: 26, sx: 'M', post: 'FA 3', d: 'Gold sequin jacket, round glasses', m: 64, ph: 2 },
+};
+
+// ---- shared pieces ----
+const thumb = (r) => r.ph
+  ? h`<div className="thumb photo" role="img" aria-label=${`${r.ph} photo`}>${svg(P.bust, 34)}</div>`
+  : h`<div className="thumb none" role="img" aria-label="No photo">${svg(P.user, 18)}</div>`;
+const Who = ({ r }) => h`<div className="qn">
+  <div className="l1"><${Text} size="3" weight="medium">${r.nm}<//><${Text} size="2" color="gray">${r.age} ${r.sx}<//></div>
+  <${Text} size="1" color="gray">${r.id} · ${r.post}<//></div>`;
+const Wait = ({ m, icon = P.clock, label }) => h`<${Badge} size="1" variant="soft" color=${heat(m)} aria-label=${label}>${svg(icon, 12)}${ago(m)}<//>`;
+
+function Top({ bell, me }) {
+  return h`<div className="top">
+    <div className="title"><${Heading} size="3" weight="medium">Is my friend in medical?<//><span className="live" role="img" aria-label="Live"></span></div>
+    <${Flex} align="center" gap="4" flexShrink="0">
+      <${IconButton} variant="ghost" color="gray" aria-label="Search">${svg(P.search, 18)}<//>
+      <${IconButton} variant=${bell ? 'soft' : 'ghost'} color="gray" highContrast=${bell} aria-label=${bell ? 'New-request alerts on' : 'New-request alerts off'} aria-pressed=${bell}>${svg(bell ? P.bellOn : P.bellOff, 18)}<//>
+      <${Avatar} size="2" radius="full" variant="solid" color="gray" highContrast fallback=${me}/>
+    <//>
+  </div>`;
+}
+// Jeffrey 01:03: All is the main view (one chronological list). To check and My requests are secondary, role-specific
+// views. Brian: use a real view switcher, not two buttons. The list title is the switcher (like Mail or Linear views).
+// Task-first, how staff actually think (Brian): a nurse wants what's pending, front of house wants what they sent.
+// No role names.
+const VIEWS = {
+  all: { title: 'All requests', n: 21, icon: 'list' },
+  check: { title: 'Pending', n: 4, icon: 'inbox' },
+  mine: { title: 'My requests', n: 3, icon: 'user' },
+};
+const ViewItem = ({ k, v }) => h`<div className=${'vitem' + (v === k ? ' on' : '')} role="menuitemradio" aria-checked=${v === k}>
+  <span className="vic">${svg(P[VIEWS[k].icon], 17)}</span>
+  <div className="vtx"><${Text} size="2" weight="medium">${VIEWS[k].title}<//></div>
+  <${Text} size="2" color="gray">${VIEWS[k].n}<//>
+  <span className="vchk">${v === k ? svg(P.check, 16) : null}</span>
+</div>`;
+const ViewMenu = ({ v }) => h`<div className="vmenu" role="menu" aria-label="Show requests">
+  <${ViewItem} k="all" v=${v}/>
+  <div className="vsep"></div>
+  <${ViewItem} k="check" v=${v}/><${ViewItem} k="mine" v=${v}/>
+</div>`;
+function ViewBar({ v, open }) {
+  const cur = VIEWS[v];
+  return h`<div className="vbar">
+    <button className=${'vsw' + (open ? ' open' : '')} aria-haspopup="menu" aria-expanded=${!!open} aria-label=${`Showing ${cur.title}. Change`}>
+      ${svg(P[cur.icon], 16)}<span>${cur.title}</span><span className="vc">${cur.n}</span>${svg(P.chev, 15)}
+    </button>
+    <span className="sp"></span>
+    ${v === 'all' ? h`<${Text} size="1" color="gray">Newest first<//>` : h`<${IconButton} size="1" variant="ghost" color="gray" aria-label="Back to all requests">${svg(P.x, 15)}<//>`}
+    ${open ? h`<${ViewMenu} v=${v}/>` : null}
+  </div>`;
+}
+const Fab = () => h`<${Button} className="fab" size="3" radius="full" highContrast>${svg(P.plus, 16)} New request<//>`;
+const Sh = ({ label, n, k }) => h`<div className="sh">${k ? glyph(k) : null}<${Text} size="2" weight="medium">${label}<//><${Text} size="2" color="gray">${n}<//></div>`;
+const Shell = ({ dark, children }) => h`<${Theme} appearance=${dark ? 'dark' : 'light'} accentColor="gray" grayColor="gray" radius="medium"><div className="app">${children}</div><//>`;
+
+// ---- All (default): one chronological log, newest first ----
+const CLOSED = { reunited: 'Reunited', discharged: 'Discharged', cancelled: 'Cancelled' };
+const LOG = [
+  ['11:02', R[1013], 'new'], ['10:58', R[1012], 'new'], ['10:47', R[1010], 'new'], ['10:44', R[1009], 'notfound'],
+  ['10:31', R[1007], 'found'], ['10:20', R[1005], 'found'], ['10:12', R[1004], 'found'],
+  ['9:58', { id: 'LP-1003', nm: 'C.H.', age: 25, sx: 'M', post: 'FA 4' }, 'closed', 'reunited'],
+  ['9:41', { id: 'LP-1002', nm: 'Dani V.', age: 20, sx: 'F', post: 'FA 3' }, 'closed', 'discharged'],
+  ['9:30', { id: 'LP-1001', nm: 'R.K.', age: 31, sx: 'M', post: 'Base' }, 'closed', 'cancelled'],
+];
+function LogRow({ t, r, k, cl }) {
+  const label = k === 'closed' ? CLOSED[cl] : k === 'new' ? 'Waiting for check' : ST[k].label;
+  return h`<div className=${'row' + (k === 'closed' ? ' muted' : '')}><span className="g">${glyph(k)}</span><div className="rm">
+    <div className="l1"><${Text} size="2" weight="medium">${r.nm}<//><${Text} size="2" color="gray">${r.age} ${r.sx}<//><span className="sp"></span><span className="t">${t}</span></div>
+    <div className="l2"><${Text} size="1" weight="medium" color=${ST[k].color}>${label}<//><span className="meta">· ${r.post} · ${r.id}</span></div>
+  </div></div>`;
+}
+const All = ({ dark, open }) => h`<${Shell} dark=${dark}>
+  <${Top} bell=${false} me="DK"/><${ViewBar} v="all" open=${open}/>
+  <div className="flat">${LOG.map(([t, r, k, cl]) => h`<${LogRow} key=${r.id} t=${t} r=${r} k=${k} cl=${cl}/>`)}</div>
+  <${Fab}/>
+<//>`;
+
+// ---- To check: the liaison's queue, oldest first. Two outcomes on the card: Not in medical / In medical ----
+function QCard({ r, recheck, fresh }) {
+  return h`<${Card} size="2" className=${fresh ? 'fresh' : ''}>
+    <div className="qh">${thumb(r)}<${Who} r=${r}/>
+      ${recheck ? h`<${Wait} m=${r.m} icon=${P.recheck} label=${`Last checked ${r.m} minutes ago`}/>` : h`<${Wait} m=${r.m} label=${`Waiting ${r.m} minutes`}/>`}</div>
+    <${Text} as="p" size="2" className="qd">${r.d}<//>
+    <div className="qa">
+      <${Button} size="2" variant="soft" color="gray">${svg(P.x, 15)}Not in medical<//>
+      <${Button} size="2" color="green">${svg(P.check, 15)}In medical<//>
+    </div>
+  <//>`;
+}
+// Marked "In medical": medical sees the friend is on the way, then taps Reunited when they meet.
+function ComingCard({ r, fm }) {
+  return h`<${Card} size="1"><div className="cc">${thumb(r)}
+    <div className="qn"><div className="l1"><${Text} size="2" weight="medium">${r.nm}<//><${Text} size="2" color="gray">${r.age} ${r.sx}<//></div>
+      <span className="who">${svg(P.walk, 12)}${r.f} · from ${r.post} · ${ago(fm)}</span></div>
+    <${Button} size="2" variant="soft" color="gray" highContrast>${svg(P.check, 14)}Reunited<//></div><//>`;
+}
+const ToCheck = ({ dark, toast, undo, children }) => h`<${Shell} dark=${dark}>
+  <${Top} bell=${true} me="RC"/><${ViewBar} v="check"/>
+  <div className="scroll">
+    <${Sh} k="found" label="Friend coming" n=${undo ? 2 : 1}/>
+    ${undo ? h`<${ComingCard} r=${R[1012]} fm=${0}/>` : null}<${ComingCard} r=${R[1004]} fm=${3}/>
+    <${Sh} k="new" label="Waiting for check" n=${undo ? 2 : 3}/>
+    <${QCard} r=${R[1010]}/>${undo ? null : h`<${QCard} r=${R[1012]}/>`}<${QCard} r=${R[1013]} fresh=${toast}/>
+  </div>
+  ${undo ? h`<div className="snack" role="status"><${Text} size="2">LP-1012 · In medical<//><span className="sp"></span><button className="undo">Undo</button></div>` : children ? null : h`<${Fab}/>`}
+  ${toast ? h`<div className="toast" role="status">
+    <div className="ic" style=${{ background: 'var(--gray-a4)', color: 'var(--gray-12)' }}>${svg(P.bellOn, 17)}</div>
+    <div className="tx"><${Text} size="2" weight="medium">New request · LP-1013<//><${Text} size="1" color="gray">T.R. 24 M · FA 4<//></div>
+    <${Button} size="1" variant="soft" color="gray" highContrast>View<//></div>` : null}
+  ${children}
+<//>`;
+
+
+// ---- Mine: the requester's tracker, newest update first ----
+function Stepper({ k }) {
+  const t = ST[k], steps = t.steps || STEPS;
+  return h`<div className="stepper" aria-label=${t.label} style=${{ gridTemplateColumns: `repeat(${steps.length},1fr)` }}>${steps.map((s, i) => {
+    const cls = i < t.step ? 'done' : i === t.step ? (t.pend ? 'pend' : 'cur') : '';
+    return h`<div key=${s} className=${'st ' + cls} style=${{ '--tone': t.c }}><span className="dot"></span><span className="lb">${s}</span></div>`;
+  })}</div>`;
+}
+function MCard({ r, k, fresh }) {
+  const t = ST[k];
+  const right = k === 'new' ? h`<${Wait} m=${r.m} label=${`Waiting ${r.m} minutes`}/>`
+    : h`<${Text} size="1" color="gray">${ago(r.m)}<//>`;
+  return h`<${Card} size="2" className=${fresh ? `fresh ${t.color}` : ''}>
+    <div className="qh">${thumb(r)}<${Who} r=${r}/>${right}</div>
+    <div className="stat">${glyph(k, 15)}<${Text} size="2" weight="medium" color=${t.color}>${t.label}<//></div>
+    <${Stepper} k=${k}/>
+  <//>`;
+}
+const TOASTS = {
+  found: { bg: 'var(--green-a4)', fg: 'var(--green-11)', icon: P.check, title: 'LP-1004 · S.L. is in medical', sub: 'Bring the friend to Main Med' },
+};
+const Mine = ({ dark, toast }) => {
+  const t = TOASTS[toast];
+  return h`<${Shell} dark=${dark}>
+    <${Top} bell=${false} me="DK"/><${ViewBar} v="mine"/>
+    <div className="scroll">
+      <${MCard} r=${R[1004]} k="found" fresh/><${MCard} r=${R[1009]} k="notfound"/>
+      <${MCard} r=${R[1012]} k="new"/>
+    </div>
+    <${Fab}/>
+    <div className="toast" role="status">
+      <div className="ic" style=${{ background: t.bg, color: t.fg }}>${svg(t.icon, 18)}</div>
+      <div className="tx"><${Text} size="2" weight="medium">${t.title}<//><${Text} size="1" color="gray">${t.sub}<//></div>
+      <${Button} size="1" variant="soft" color="gray" highContrast>View<//></div>
+  <//>`;
+};
+
+const Board = () => h`<div className="board">
+  <figure><div className="frame"><${All} dark/></div><figcaption>All requests · main view, newest first</figcaption></figure>
+  <figure><div className="frame"><${All} open/></div><figcaption>Tap the list title · switch view</figcaption></figure>
+  <figure><div className="frame"><${ToCheck} dark toast/></div><figcaption>Pending · what needs checking</figcaption></figure>
+  <figure><div className="frame"><${Mine} toast="found"/></div><figcaption>My requests · what I sent</figcaption></figure>
+</div>`;
+flushSync(() => createRoot(document.getElementById('b')).render(h`<${Board}/>`));
+</script></body></html>

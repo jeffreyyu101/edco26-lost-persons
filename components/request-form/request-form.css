@@ -1,0 +1,576 @@
+/* New request / Edit / Needs-attention editor. Ported from design/screens/new-request.html (v3) and the
+   post picker in design/screens/states.html. Every class is prefixed lp-rf- (this file is global CSS loaded
+   with the form's chunk). Inputs stay at 16 px (iOS zoom); sticky bars respect the safe areas. */
+
+/* Full-screen view above the shell (no z-index: Radix dialogs and the toast host, later in the DOM, stay
+   above it; the shell's own banners, earlier in the DOM, stay below). The body is the only scroller, so the
+   whole form scrolls whenever it doesn't fit (keyboard up, large text, short phones). */
+.lp-rf {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-background);
+  color: var(--gray-12);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+.lp-rf-nav {
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  box-sizing: border-box;
+  padding: calc(14px + env(safe-area-inset-top)) 16px 6px;
+}
+.lp-rf-nav > :first-child {
+  justify-self: start;
+}
+.lp-rf-nav > :last-child {
+  justify-self: end;
+}
+/* The mockup's title is Text size 3 (16 / 24 px); a Heading keeps the h1 for screen readers. */
+.lp-rf-nav .lp-rf-title {
+  margin: 0;
+  line-height: var(--line-height-3);
+  letter-spacing: var(--letter-spacing-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lp-rf-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.lp-rf-body {
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  box-sizing: border-box;
+  padding: 0 14px 20px;
+  display: flex;
+  flex-direction: column;
+}
+.lp-rf-body > * {
+  flex-shrink: 0;
+}
+
+/* Banners under the top bar (offline) and inside the form (notices) */
+.lp-rf-bar {
+  flex: none;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  box-sizing: border-box;
+  padding: 0 14px;
+}
+.lp-rf-off {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 4px;
+  padding: 9px 12px;
+  border-radius: var(--radius-3);
+  background: var(--amber-a3);
+  /* Step 12, as in every amber banner (components/ui/Banner.tsx): step 11 on the step-3 tint is ~4.2:1 in
+     light mode, under WCAG AA's 4.5:1 for 13 px text. */
+  color: var(--amber-12);
+  font-size: 13px;
+  font-weight: 500;
+}
+.lp-rf-notice {
+  margin: 4px 0 2px;
+}
+.lp-rf-notice .lp-banner {
+  margin: 0 !important;
+}
+.lp-rf-theirs {
+  margin: 6px 0 2px;
+  padding: 2px 12px;
+  border-radius: var(--radius-3);
+  box-shadow: inset 0 0 0 1px var(--amber-a5);
+}
+.lp-rf-their {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 0;
+  font-size: 13px;
+}
+.lp-rf-their + .lp-rf-their {
+  border-top: 1px solid var(--gray-a3);
+}
+.lp-rf-their-k {
+  width: 92px;
+  flex: none;
+  color: var(--gray-11);
+}
+.lp-rf-their-v {
+  flex: 1;
+  min-width: 0;
+  color: var(--gray-12);
+  overflow-wrap: anywhere;
+}
+.lp-rf-their-v[data-empty] {
+  color: var(--gray-11);
+}
+
+/* "Reporting from" — first, full width */
+.lp-rf-loc {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 54px;
+  padding: 0 14px;
+  margin: 6px 0 0;
+  border: 0;
+  border-radius: var(--radius-4);
+  background: var(--gray-a3);
+  color: var(--gray-12);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.lp-rf-loc:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+.lp-rf-loc[data-empty] {
+  background: var(--amber-a3);
+  box-shadow: inset 0 0 0 1.5px var(--amber-a7);
+}
+.lp-rf-loc[data-invalid] {
+  box-shadow: inset 0 0 0 1.5px var(--red-a8);
+}
+.lp-rf-pin {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--gray-12);
+  color: var(--gray-1);
+  flex: none;
+}
+.lp-rf-loc[data-empty] .lp-rf-pin {
+  background: var(--amber-9);
+  color: var(--amber-contrast);
+}
+.lp-rf-lv {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.lp-rf-lv > :last-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lp-rf-chev {
+  color: var(--gray-10);
+  display: flex;
+  flex: none;
+}
+
+/* Group labels and groups */
+.lp-rf-lbl {
+  padding: 11px 4px 6px;
+}
+.lp-rf-grp {
+  border-radius: var(--radius-4);
+  background: var(--gray-a2);
+  box-shadow: inset 0 0 0 1px var(--gray-a4);
+  overflow: hidden;
+}
+.lp-rf-grp > * + * {
+  border-top: 1px solid var(--gray-a4);
+}
+
+/* One row: label left, value right */
+.lp-rf-r {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 12px 0 14px;
+}
+.lp-rf-r[data-top] {
+  align-items: flex-start;
+}
+.lp-rf-r[data-top] .lp-rf-k {
+  padding-top: 13px;
+}
+.lp-rf-k {
+  width: 74px;
+  flex: none;
+  font-size: 14px;
+  color: var(--gray-11);
+}
+.lp-rf-k[data-wide] {
+  width: 104px;
+}
+.lp-rf-in {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  border: 0;
+  outline: 0;
+  margin: 0;
+  background: transparent;
+  color: var(--gray-12);
+  font: inherit;
+  font-size: 16px;
+  padding: 11px 0;
+  border-radius: 0;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.lp-rf-in::placeholder {
+  color: var(--gray-9);
+  opacity: 1;
+}
+textarea.lp-rf-in {
+  resize: none;
+  line-height: 1.35;
+  padding: 12px 0 10px;
+  overflow: hidden;
+  display: block;
+}
+.lp-rf-in[aria-invalid='true'] {
+  color: var(--red-11);
+}
+.lp-rf-ok {
+  color: var(--green-10);
+  display: flex;
+  flex: none;
+}
+.lp-rf-err {
+  display: block;
+  padding: 0 12px 9px 14px;
+  margin-top: -4px;
+  font-size: 12px;
+  color: var(--red-11);
+}
+.lp-rf-err[data-indent] {
+  padding-left: 98px;
+}
+
+/* Focus: the row (or the Last seen container) gets the mockup's inset ring */
+.lp-rf-field:focus-within,
+.lp-rf-ls[data-focus] {
+  box-shadow: inset 0 0 0 1.5px var(--gray-a8);
+  border-radius: var(--radius-4);
+}
+.lp-rf-sugg {
+  display: flex;
+  flex-wrap: wrap;
+  /* Rows 44 px apart, so each 24 px chip's 44 px tap area (.lp-hit) never reaches into the next row. */
+  gap: 20px 6px;
+  padding: 10px 12px 12px 14px;
+}
+.lp-rf-chip {
+  touch-action: manipulation;
+}
+
+/* ID-style person card: portrait photo slot + Name / Age / Gender */
+.lp-rf-pcard {
+  display: flex;
+}
+.lp-rf-pc {
+  flex: 1;
+  min-width: 0;
+}
+.lp-rf-pc > * + * {
+  border-top: 1px solid var(--gray-a4);
+}
+.lp-rf-seg {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+}
+.lp-rf-slotw {
+  flex: none;
+  position: relative;
+  width: 76px;
+  height: 104px;
+  margin: 14px 0 14px 14px;
+  align-self: center;
+}
+.lp-rf-slot {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-3);
+  display: grid;
+  place-items: center;
+  color: var(--gray-11);
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--gray-a6);
+  overflow: hidden;
+  cursor: pointer;
+  font: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+.lp-rf-slot:focus-visible,
+.lp-rf-when:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+.lp-rf-slot[data-has] {
+  background: var(--gray-a5);
+  box-shadow: none;
+}
+.lp-rf-slot[data-readonly] {
+  cursor: default;
+}
+.lp-rf-slot img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.lp-rf-cnt {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--gray-12);
+  color: var(--gray-1);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+/* The Today / Not today tag. The button covers the bottom of the slot so the target is bigger than the
+   15 px tag drawn inside it. */
+.lp-rf-when {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 38px;
+  padding: 0 4px 4px;
+  border: 0;
+  border-radius: 0 0 var(--radius-3) var(--radius-3);
+  background: transparent;
+  display: flex;
+  align-items: flex-end;
+  cursor: pointer;
+  font: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+.lp-rf-when[disabled] {
+  cursor: default;
+}
+.lp-rf-when > span {
+  display: block;
+  width: 100%;
+  border-radius: 4px;
+  background: var(--black-a9);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 500;
+  text-align: center;
+  line-height: 15px;
+  white-space: nowrap;
+}
+
+/* Duplicate hint chip */
+.lp-rf-dup {
+  align-self: flex-start;
+  margin-top: 8px;
+}
+
+/* More details */
+.lp-rf-more {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px 0 14px;
+  margin: 10px 0 0;
+  border: 0;
+  border-radius: var(--radius-4);
+  background: transparent;
+  color: var(--gray-11);
+  box-shadow: inset 0 0 0 1px var(--gray-a4);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.lp-rf-more[aria-expanded='true'] {
+  box-shadow: none;
+  min-height: 0;
+  padding: 11px 4px 6px;
+  margin: 0;
+  font-weight: 500;
+}
+.lp-rf-more:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+.lp-rf-sp {
+  flex: 1;
+}
+
+/* Sticky bottom bar */
+.lp-rf-foot {
+  flex: none;
+  position: relative;
+  z-index: 3;
+  background: var(--color-background);
+  box-shadow: 0 -1px 0 var(--gray-a4);
+}
+.lp-rf-foot-in {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  box-sizing: border-box;
+  padding: 12px 14px max(26px, env(safe-area-inset-bottom));
+}
+.lp-rf-foot-in > .rt-Button:last-child {
+  flex: 1;
+}
+
+/* Post picker sheet (states.html) */
+.lp-rf-opts {
+  margin-top: 12px;
+}
+.lp-rf-opt {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 0 14px;
+  color: var(--gray-12);
+  font-size: 15px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.lp-rf-opt > svg {
+  color: var(--gray-10);
+  flex: none;
+}
+.lp-rf-opt .lp-rf-ck {
+  color: var(--gray-12);
+  display: flex;
+}
+.lp-rf-opt:has(.lp-rf-radio:focus-visible) {
+  box-shadow: inset 0 0 0 2px var(--focus-8);
+  border-radius: var(--radius-4);
+}
+.lp-rf-radio {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+.lp-rf-where {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  margin: 0;
+  padding: 12px 0;
+  background: transparent;
+  color: var(--gray-12);
+  font: inherit;
+  font-size: 16px;
+}
+.lp-rf-where::placeholder {
+  color: var(--gray-9);
+  opacity: 1;
+}
+
+/* Photo manager sheet */
+.lp-rf-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 14px 0 4px;
+}
+.lp-rf-tile {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  border-radius: var(--radius-3);
+  overflow: hidden;
+  background: var(--gray-a3);
+}
+.lp-rf-tile img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.lp-rf-tile-x {
+  position: absolute !important;
+  top: 6px;
+  right: 6px;
+}
+.lp-rf-add {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-3);
+  background: transparent;
+  color: var(--gray-11);
+  box-shadow: inset 0 0 0 1.5px var(--gray-a6);
+  cursor: pointer;
+  font: inherit;
+}
+.lp-rf-add:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+.lp-rf-timing {
+  margin-top: 12px;
+}
+
+/* Hidden file input (opened from the slot button) */
+.lp-rf-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.lp-rf-loading {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  color: var(--gray-11);
+}

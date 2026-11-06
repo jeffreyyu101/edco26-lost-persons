@@ -1,0 +1,89 @@
+'use client';
+// Small client hooks for the list views.
+import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import { useActions, useConnection } from '@/lib/client/store-contract';
+import type { SettableStatus, StatusKind } from '@/lib/domain';
+
+/** `flag`, but only once it has stayed true for `delayMs` (no flicker for fast background polls). */
+export function useDelayedFlag(flag: boolean, delayMs: number): boolean {
+  const [late, setLate] = useState(false);
+  useEffect(() => {
+    if (!flag) return;
+    const timer = setTimeout(() => setLate(true), delayMs);
+    return () => {
+      clearTimeout(timer);
+      setLate(false);
+    };
+  }, [flag, delayMs]);
+  return flag && late;
+}
+
+// Scroll positions of the list views, by history depth and view, for this page load. Going back from a
+// profile restores the list where it was; switching views starts at the top (or where that view was).
+const positions = new Map<string, number>();
+
+function historyDepth(): number {
+  const state = (window.history.state ?? {}) as { lpDepth?: unknown };
+  return typeof state.lpDepth === 'number' ? state.lpDepth : 0;
+}
+
+/** Restores and remembers the window scroll for a list view once its data is on screen. */
+export function useScrollMemory(viewKey: string, ready: boolean): void {
+  useLayoutEffect(() => {
+    if (!ready) return;
+    const key = `${historyDepth()}|${viewKey}`;
+    window.scrollTo(0, positions.get(key) ?? 0);
+    let frame = 0;
+    const onScroll = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        positions.set(key, window.scrollY);
+      });
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [viewKey, ready]);
+}
+
+/**
+ * iOS only opens the keyboard for a focus() made inside the tap itself, and the search field mounts a
+ * moment later (a new view). Focusing a throwaway input during the tap opens the keyboard; the search
+ * field then takes focus from it on mount and the keyboard stays up.
+ */
+export function primeKeyboard(): void {
+  if (typeof document === 'undefined') return;
+  const proxy = document.createElement('input');
+  proxy.type = 'text';
+  proxy.setAttribute('aria-hidden', 'true');
+  proxy.tabIndex = -1;
+  proxy.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;font-size:16px;border:0;padding:0;pointer-events:none;';
+  document.body.appendChild(proxy);
+  proxy.focus({ preventScroll: true });
+  setTimeout(() => proxy.remove(), 1_000);
+}
+
+/**
+ * A status tap from a list card (Not in medical / In medical / Reunited). The store owns the overlay, the
+ * Undo snackbar and every failure toast. Offline (status changes are not queued in v1) the buttons look
+ * disabled and a tap explains why instead.
+ */
+export function useStatusTap(): { offline: boolean; tap: (id: string, to: SettableStatus, kind: StatusKind) => void } {
+  const actions = useActions();
+  const { connection } = useConnection();
+  const offline = connection === 'offline';
+  const tap = useCallback(
+    (id: string, to: SettableStatus, kind: StatusKind) => {
+      if (offline) {
+        actions.showToast({ tone: 'amber', icon: 'cloud-off', title: 'Needs a connection', durationMs: 3_000 });
+        return;
+      }
+      void actions.setStatus(id, to, kind);
+    },
+    [actions, offline],
+  );
+  return { offline, tap };
+}

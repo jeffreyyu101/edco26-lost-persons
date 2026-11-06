@@ -1,0 +1,386 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { OutboxItem, RequestSummary } from '@/lib/api-types';
+import {
+  EMPTY_FORM_VALUES,
+  canSend,
+  createBodyFromLegacyQueueItem,
+  formErrorsFromField,
+  formValuesFromCreateBody,
+  formValuesFromRequest,
+  hasAnyDetail,
+  parseAge,
+  toCreateBody,
+  toPatch,
+  type RequestFormValues,
+} from '@/lib/client/form-values';
+import { goBack, hrefFor, navigate, parseView, viewToParams, type View } from '@/lib/client/nav';
+import {
+  filterAll,
+  highlightRanges,
+  mineRows,
+  pendingGroups,
+  searchRequests,
+  sortNewestFirst,
+  viewCounts,
+  visibleOutbox,
+} from '@/lib/client/selectors';
+import { createStubStore } from '@/lib/client/store-stub';
+import { STUB_SESSION, stubRows } from '@/lib/client/stub-data';
+import { parsePostFilterKey, postFilterKey, postFilterLabel, postShort } from '@/lib/domain';
+import { createRequestSchema, requestPatchSchema } from '@/lib/validation';
+
+const NOW = Date.parse('2026-11-07T03:10:00Z');
+const rows = stubRows(NOW);
+const byCase = (n: number) => rows.find((r) => r.caseNumber === n) as RequestSummary;
+const ID = '5eed0000-0000-4000-8000-000000001012';
+const CMID = '0b5a3c2e-8d4f-4a1b-9c7e-2f6d8a1b3c4d';
+
+describe('nav (A22)', () => {
+  const p = (s: string) => parseView(new URLSearchParams(s));
+
+  it('parses every view', () => {
+    expect(p('')).toEqual({ name: 'all', status: null, post: null });
+    expect(p('view=pending')).toEqual({ name: 'pending' });
+    expect(p('view=mine')).toEqual({ name: 'mine' });
+    expect(p('status=Checked+%E2%80%93+Not+Found')).toEqual({ name: 'all', status: 'Checked – Not Found', post: null });
+    expect(p('post=FA+3')).toEqual({ name: 'all', status: null, post: 'FA 3' });
+    expect(p('post=FA+3&open=1')).toEqual({ name: 'all', status: null, post: 'FA 3', open: true });
+    expect(p('q=pink')).toEqual({ name: 'search', q: 'pink' });
+    expect(p('q=')).toEqual({ name: 'search', q: '' });
+    expect(p('new=1')).toEqual({ name: 'new' });
+    expect(p(`r=${ID}`)).toEqual({ name: 'profile', id: ID });
+    expect(p(`r=${ID}&edit=friend`)).toEqual({ name: 'edit', id: ID, section: 'friend' });
+    expect(p('dashboard=1')).toEqual({ name: 'dashboard' });
+    expect(p(`outbox=${CMID}`)).toEqual({ name: 'outbox', mutationId: CMID });
+  });
+
+  it('ignores unknown or invalid params and applies precedence', () => {
+    expect(p('foo=bar')).toEqual({ name: 'all', status: null, post: null });
+    // ?open= only qualifies a post filter (a dashboard bar); alone, or with any other value, it is ignored.
+    expect(p('open=1')).toEqual({ name: 'all', status: null, post: null });
+    expect(p('post=Base&open=yes')).toEqual({ name: 'all', status: null, post: 'Base' });
+    expect(p('status=Bogus')).toEqual({ name: 'all', status: null, post: null });
+    expect(p('r=not-a-uuid')).toEqual({ name: 'all', status: null, post: null });
+    expect(p(`r=${ID}&edit=everything`)).toEqual({ name: 'profile', id: ID });
+    expect(p(`new=1&r=${ID}`)).toEqual({ name: 'new' });
+    expect(p(`outbox=${CMID}&new=1`)).toEqual({ name: 'outbox', mutationId: CMID });
+    expect(p('view=pending&q=x')).toEqual({ name: 'search', q: 'x' });
+  });
+
+  it('round-trips views through URLs', () => {
+    const views: View[] = [
+      { name: 'all', status: null, post: null },
+      { name: 'all', status: 'Found – Awaiting Reunion', post: 'FA 4' },
+      { name: 'all', status: null, post: 'FA 4 – Oasis', open: true },
+      { name: 'pending' },
+      { name: 'mine' },
+      { name: 'search', q: 'pink hat' },
+      { name: 'new' },
+      { name: 'profile', id: ID },
+      { name: 'edit', id: ID, section: 'person' },
+      { name: 'dashboard' },
+      { name: 'outbox', mutationId: CMID },
+    ];
+    for (const v of views) {
+      const href = hrefFor(viewToParams(v));
+      expect(parseView(new URL(href, 'https://x').searchParams), href).toEqual(v);
+    }
+    expect(hrefFor({})).toBe('/');
+  });
+});
+
+describe('nav history state (Next.js replaceState patch)', () => {
+  // Every entry Next.js creates carries its own markers. Its patched replaceState treats data that already
+  // has `__NA` as Next-internal and skips the router update, so the view would never change.
+  const NEXT_STATE = { __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: 'x' } };
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+  const fakeHistory = (state: Record<string, unknown> | null) => {
+    const history = { state, pushState: vi.fn(), replaceState: vi.fn(), back: vi.fn() };
+    vi.stubGlobal('window', { history });
+    return history;
+  };
+
+  it('replace passes a fresh state object (never a copy carrying __NA), keeping the depth', () => {
+    const history = fakeHistory({ ...NEXT_STATE, lpDepth: 2 });
+    navigate({ q: 'Kayla' }, { replace: true });
+    expect(history.replaceState).toHaveBeenCalledWith({ lpDepth: 2 }, '', '/?q=Kayla');
+    const data = history.replaceState.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect('__NA' in data || '_N' in data).toBe(false);
+  });
+
+  it('push passes a fresh state object with depth + 1', () => {
+    const history = fakeHistory({ ...NEXT_STATE, lpDepth: 1 });
+    navigate({ r: ID });
+    expect(history.pushState).toHaveBeenCalledWith({ lpDepth: 2 }, '', `/?r=${ID}`);
+  });
+
+  it('goBack on a deep link (depth 0) replaces with the fallback through the same fresh-state path', () => {
+    const history = fakeHistory({ ...NEXT_STATE });
+    goBack({});
+    expect(history.back).not.toHaveBeenCalled();
+    expect(history.replaceState).toHaveBeenCalledWith({ lpDepth: 0 }, '', '/');
+    const inApp = fakeHistory({ ...NEXT_STATE, lpDepth: 1 });
+    goBack({});
+    expect(inApp.back).toHaveBeenCalledTimes(1);
+    expect(inApp.replaceState).not.toHaveBeenCalled();
+  });
+});
+
+describe('selectors', () => {
+  it('sorts All newest first and filters by status / post', () => {
+    const sorted = sortNewestFirst(rows);
+    expect(sorted[0]?.caseNumber).toBe(1013);
+    expect(sorted.at(-1)?.caseNumber).toBe(993);
+    expect(filterAll(rows, { status: 'Found – Awaiting Reunion', post: null }).map((r) => r.caseNumber).sort()).toEqual([1004, 1005, 1007]);
+    expect(filterAll(rows, { status: null, post: 'Other:info booth' }).map((r) => r.caseNumber)).toEqual([997]);
+  });
+
+  it('filters by post key: an Other location named like a fixed post, or a legacy value, is its own post', () => {
+    const at = (n: number, reportingLocation: string, otherLocation: string | null): RequestSummary => ({
+      ...byCase(1013),
+      id: `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
+      caseNumber: n,
+      reportingLocation,
+      otherLocation,
+      postShort: postShort(reportingLocation, otherLocation),
+    });
+    const base = at(1, 'Base', null);
+    const otherBase = at(2, 'Other', 'Base');
+    const otherBaseCase = at(3, 'Other', ' base ');
+    const fa3 = at(4, 'FA 3 – Kinetic', null);
+    const legacyFa3 = at(5, 'FA 3', null);
+    const list = [base, otherBase, otherBaseCase, fa3, legacyFa3];
+    // The old postShort match would have put 1 and 2 (and 4 and 5) under one bar.
+    expect(new Set(list.map((r) => r.postShort)).size).toBe(3);
+    const ids = (post: string) => filterAll(list, { status: null, post }).map((r) => r.caseNumber);
+    expect(ids(postFilterKey('Base', null))).toEqual([1]);
+    expect(ids(postFilterKey('Other', 'Base'))).toEqual([2, 3]);
+    expect(ids(postFilterKey('FA 3 – Kinetic', null))).toEqual([4]);
+    expect(ids(postFilterKey('FA 3', null))).toEqual([5]);
+    // Each key survives the URL round trip (?post=) unchanged.
+    for (const r of list) {
+      const key = postFilterKey(r.reportingLocation, r.otherLocation);
+      const view = parseView(new URLSearchParams(hrefFor({ post: key }).slice(2)));
+      expect(view).toEqual({ name: 'all', status: null, post: key.trim() });
+    }
+    // Labels never read like another post.
+    expect(postFilterLabel('Base', null)).toBe('Base');
+    expect(postFilterLabel('Other', 'Base')).toBe('Other · Base');
+    expect(postFilterLabel('FA 3 – Kinetic', null)).toBe('FA 3 – Kinetic');
+    expect(postFilterLabel('FA 3', null)).toBe('FA 3');
+    expect(postFilterLabel('Other', '  ')).toBe('Other');
+    expect(parsePostFilterKey(postFilterKey('Other', 'Gate 9'))).toEqual({ reportingLocation: 'Other', otherLocation: 'Gate 9' });
+  });
+
+  it('groups Pending: friend coming then waiting, oldest first', () => {
+    const g = pendingGroups(rows);
+    expect(g.friendComing.map((r) => r.caseNumber)).toEqual([1005, 1004, 1007]);
+    expect(g.waiting.map((r) => r.caseNumber)).toEqual([1010, 1011, 1012, 1013]);
+  });
+
+  it('My requests = phone ids ∪ canonical creator, newest update first', () => {
+    const mine = mineRows(rows, new Set([byCase(1013).id]), 'dana kim · dispatch');
+    expect(mine.map((r) => r.caseNumber)).toEqual([1013, 1004, 1012, 1009, 1002, 1000, 994]);
+  });
+
+  it('hides outbox items that are already confirmed (A6)', () => {
+    const item = (mutationId: string, createdAt: number) => ({ mutationId, createdAt }) as OutboxItem;
+    const confirmed = new Map(rows.map((r) => [r.id, r]));
+    const sent = { ...byCase(1013), clientMutationId: CMID };
+    confirmed.set(sent.id, sent);
+    const shown = visibleOutbox([item(CMID, 1), item('a', 2), item('b', 3)], confirmed);
+    expect(shown.map((o) => o.mutationId)).toEqual(['b', 'a']);
+    expect(viewCounts(rows, shown, new Set(), STUB_SESSION.staff)).toEqual({ all: 23, pending: 7, mine: 8 });
+  });
+
+  it('searches names, clothing, hair, posts and LP numbers', () => {
+    expect(searchRequests(rows, 'pink').map((h) => [h.row.caseNumber, h.field])).toEqual([
+      [1012, 'clothing'],
+      [998, 'clothing'],
+    ]);
+    expect(searchRequests(rows, 'LP-1012').map((h) => h.row.caseNumber)).toEqual([1012]);
+    expect(searchRequests(rows, '1012')[0]?.ranges).toEqual([[3, 7]]);
+    expect(searchRequests(rows, 'kayla')[0]?.field).toBe('name');
+    expect(searchRequests(rows, 'info booth').map((h) => [h.row.caseNumber, h.field])).toEqual([[997, 'lastSeen']]);
+    expect(searchRequests(rows, '   ')).toEqual([]);
+    expect(highlightRanges('Pink hat, pink boots', 'PINK')).toEqual([[0, 4], [10, 14]]);
+  });
+});
+
+describe('form values', () => {
+  it('parses age', () => {
+    expect(parseAge('')).toBeNull();
+    expect(parseAge(' 19 ')).toBe(19);
+    expect(parseAge('121')).toBe('invalid');
+    expect(parseAge('1.5')).toBe('invalid');
+  });
+
+  it('enables Send once any detail (a photo counts) and a post are set', () => {
+    expect(canSend(EMPTY_FORM_VALUES)).toBe(false);
+    expect(canSend({ ...EMPTY_FORM_VALUES, name: 'T.R.' })).toBe(false); // no post
+    expect(canSend({ ...EMPTY_FORM_VALUES, name: 'T.R.', reportingLocation: 'FA 4 – Oasis' })).toBe(true);
+    expect(canSend({ ...EMPTY_FORM_VALUES, reportingLocation: 'FA 4 – Oasis' }, 1)).toBe(true);
+    expect(canSend({ ...EMPTY_FORM_VALUES, reportingLocation: 'FA 4 – Oasis' })).toBe(false);
+    expect(canSend({ ...EMPTY_FORM_VALUES, name: 'x', reportingLocation: 'Other' })).toBe(false);
+    expect(canSend({ ...EMPTY_FORM_VALUES, name: 'x', reportingLocation: 'Other', otherLocation: 'Gate' })).toBe(true);
+    expect(canSend({ ...EMPTY_FORM_VALUES, name: 'x', age: '200', reportingLocation: 'Base' })).toBe(false);
+    expect(hasAnyDetail({ ...EMPTY_FORM_VALUES, contactPhone: '407' })).toBe(true);
+  });
+
+  it('builds a create body the server schema accepts', () => {
+    const body = toCreateBody(
+      { ...EMPTY_FORM_VALUES, name: '  Kayla  Martinez ', age: '19', gender: 'Female', reportingLocation: 'FA 3 – Kinetic', otherLocation: 'stale', clothing: ' Pink hat ' },
+      CMID,
+    );
+    expect(body).toMatchObject({ clientMutationId: CMID, name: 'Kayla Martinez', age: 19, gender: 'Female', otherLocation: null, clothing: 'Pink hat', hair: null });
+    expect(createRequestSchema.safeParse(body).success).toBe(true);
+  });
+
+  it('sends only changed keys when editing', () => {
+    const base = formValuesFromRequest(byCase(1012));
+    expect(base.name).toBe('Kayla Martinez');
+    expect(toPatch(base, { ...base })).toBeNull();
+    expect(toPatch(base, { ...base, hair: '  ' })).toEqual({ hair: null });
+    expect(toPatch(base, { ...base, name: 'Kayla  Martinez' })).toBeNull();
+    const patch = toPatch(base, { ...base, reportingLocation: 'Other', otherLocation: 'Gate', age: '20' });
+    expect(patch).toEqual({ age: 20, reportingLocation: 'Other', otherLocation: 'Gate' });
+    expect(requestPatchSchema.safeParse(patch).success).toBe(true);
+  });
+
+  it('formValuesFromCreateBody is the inverse of toCreateBody (needs-attention editor prefill)', () => {
+    const typed: RequestFormValues = {
+      ...EMPTY_FORM_VALUES,
+      name: '  Kayla   Martinez ',
+      age: '19',
+      gender: 'Female',
+      reportingLocation: 'Other',
+      otherLocation: ' Info booth ',
+      clothing: ' Pink hat ',
+      lastSeen: 'kineticFIELD rail',
+      contactPhone: '(407) 555-0142',
+    };
+    const body = toCreateBody(typed, CMID);
+    const back = formValuesFromCreateBody(body);
+    expect(back).toEqual({
+      ...EMPTY_FORM_VALUES,
+      name: 'Kayla Martinez',
+      age: '19',
+      gender: 'Female',
+      reportingLocation: 'Other',
+      otherLocation: 'Info booth',
+      clothing: 'Pink hat',
+      lastSeen: 'kineticFIELD rail',
+      contactPhone: '(407) 555-0142',
+    });
+    // Round trip is stable: the same body again.
+    expect(toCreateBody(back, CMID)).toEqual(body);
+    // A non-Other post never keeps an other location; an invalid post reads as unchosen.
+    expect(formValuesFromCreateBody({ clientMutationId: CMID, reportingLocation: 'Base', otherLocation: 'x' }).otherLocation).toBe('');
+    expect(formValuesFromCreateBody({ clientMutationId: CMID, reportingLocation: 'FA 3' as 'Base' }).reportingLocation).toBe('');
+  });
+
+  it('maps a server-rejected field onto the form (needs-attention editor, A39)', () => {
+    expect(formErrorsFromField('otherLocation', 'Say where (Other post)')).toEqual({ otherLocation: 'Say where (Other post)' });
+    expect(formErrorsFromField('contactPhone', 'Too long')).toEqual({ contactPhone: 'Too long' });
+    expect(formErrorsFromField('lastName', 'Too long')).toEqual({ name: 'Too long' });
+    expect(formErrorsFromField('expectedVersion', 'Bad')).toEqual({});
+    expect(formErrorsFromField('clientMutationId', 'Bad')).toEqual({});
+    expect(formErrorsFromField(undefined, 'Bad')).toEqual({});
+    expect(formErrorsFromField('', 'Bad')).toEqual({});
+    // Only the form's own keys: nothing inherited from Object.prototype.
+    expect(formErrorsFromField('toString', 'Bad')).toEqual({});
+    const item: Pick<OutboxItem, 'lastError'> = {
+      lastError: { code: 'invalid', message: 'Say where (Other post)', status: 422, field: 'otherLocation' },
+    };
+    expect(formErrorsFromField(item.lastError?.field, item.lastError?.message ?? '')).toEqual({ otherLocation: 'Say where (Other post)' });
+  });
+
+  it('joins a legacy first_name / last_name into name', () => {
+    const legacyPayload = { clientMutationId: CMID, reportingLocation: 'FA 4 – Oasis', first_name: 'Lena', last_name: 'O.' } as unknown as Parameters<typeof formValuesFromCreateBody>[0];
+    expect(formValuesFromCreateBody(legacyPayload).name).toBe('Lena O.');
+  });
+
+  it("converts Jeffrey's legacy queue items (edc_pending_queue) to a create body", () => {
+    const item = {
+      client_mutation_id: CMID,
+      first_name: 'Paul',
+      last_name: 'G.',
+      age: 30,
+      gender: 'Male',
+      reporting_location: 'FA 3 – Kinetic',
+      other_location: 'stale',
+      clothing: ' Black tee ',
+      last_seen: '',
+      contact_phone: '407 555 0100',
+      height_build: 'Tall',
+    };
+    const body = createBodyFromLegacyQueueItem(item);
+    expect(body).toEqual({
+      clientMutationId: CMID,
+      reportingLocation: 'FA 3 – Kinetic',
+      otherLocation: null,
+      name: 'Paul G.',
+      age: 30,
+      gender: 'Male',
+      clothing: 'Black tee',
+      lastSeen: null,
+      hair: null,
+      heightBuild: 'Tall',
+      identifyingFeatures: null,
+      physicalDescription: null,
+      additionalNotes: null,
+      contactName: null,
+      contactPhone: '407 555 0100',
+      contactRelationship: null,
+      contactNotes: null,
+    });
+    expect(createRequestSchema.safeParse(body).success).toBe(true);
+    expect(formValuesFromCreateBody(body!).name).toBe('Paul G.');
+    // Only a first name; Other keeps its location; a bad age / gender becomes null.
+    expect(createBodyFromLegacyQueueItem({ client_mutation_id: CMID, first_name: 'X.Y.', last_name: '', reporting_location: 'Other', other_location: 'Gate', age: null, gender: '' })).toMatchObject({
+      name: 'X.Y.',
+      otherLocation: 'Gate',
+      age: null,
+      gender: null,
+    });
+    expect(createBodyFromLegacyQueueItem({ client_mutation_id: CMID, reporting_location: 'Base', age: 1.5 })?.age).toBeNull();
+    // Nothing to deduplicate on → not importable.
+    expect(createBodyFromLegacyQueueItem({ first_name: 'A' })).toBeNull();
+    expect(createBodyFromLegacyQueueItem('nope')).toBeNull();
+    expect(createBodyFromLegacyQueueItem(null)).toBeNull();
+  });
+});
+
+describe('stub store', () => {
+  it('follows the domain rules: transitions, idempotent repeat, undo, creator checks', async () => {
+    const store = createStubStore({ eventTimezone: 'America/New_York', now: NOW });
+    const { actions } = store;
+    const id = byCase(1012).id;
+
+    const answered = await actions.setStatus(id, 'Found – Awaiting Reunion', 'answer');
+    expect(answered).toMatchObject({ ok: true, changed: true });
+    expect(store.getState().snackbar?.message).toBe('LP-1012 · In medical');
+
+    const repeat = await actions.setStatus(id, 'Found – Awaiting Reunion', 'answer');
+    expect(repeat).toMatchObject({ ok: true, changed: false });
+
+    const undone = await actions.undo(store.getState().snackbar!.id);
+    expect(undone).toMatchObject({ ok: true, request: { status: 'Added' } });
+
+    expect(await actions.setStatus(id, 'Reunited – Closed', 'reunite')).toMatchObject({ ok: false, reason: 'invalid' });
+    expect(await actions.cancel(byCase(1013).id)).toMatchObject({ ok: false, reason: 'forbidden' });
+    expect(await actions.cancel(id)).toMatchObject({ ok: true, changed: true, request: { status: 'Cancelled' } });
+
+    const created = await actions.create({
+      values: { ...EMPTY_FORM_VALUES, name: 'TEST-1a-1', reportingLocation: 'Base' },
+      clientMutationId: CMID,
+      photos: [],
+      photoTiming: 'today',
+    });
+    expect(created).toMatchObject({ outcome: 'sent', request: { caseNumber: 1014, name: 'TEST-1a-1' } });
+    const again = await actions.create({ values: EMPTY_FORM_VALUES, clientMutationId: CMID, photos: [], photoTiming: 'today' });
+    expect(again).toMatchObject({ outcome: 'sent', request: { caseNumber: 1014 } });
+  });
+});

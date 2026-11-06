@@ -1,0 +1,235 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Draft · Small screens and states</title>
+<!-- Draft 2026-11-06. The small screens left after the four main ones: account menu, post picker, search, photo
+     viewer, turning on alerts, and empty / offline / error states. Same tokens and pieces as the main screens.
+     Real @radix-ui/themes 3.3.0 components, loaded from CDN (needs internet). Synthetic data only. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@radix-ui/themes@3.3.0/styles.css">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+html.standalone{background:#0c0c0d}html.standalone body{margin:0;padding:16px}
+.radix-themes{--default-font-family:InterVariable,Inter,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;font-feature-settings:"cv11";-webkit-font-smoothing:antialiased}
+.radix-themes[data-is-root-theme]{min-height:0!important;height:100%;position:relative}
+.board{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:22px 16px;max-width:760px}
+.board figure{margin:0}.frame{height:640px;border-radius:30px;overflow:hidden;border:1px solid #2b2b30}
+figcaption{margin-top:8px;text-align:center;font:12px/1.3 system-ui;color:#8e8e96}
+.app{height:100%;display:flex;flex-direction:column;position:relative}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 16px 12px}
+.title{display:flex;align-items:center;gap:8px;min-width:0}
+.title .rt-Heading{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.live{flex:none;width:7px;height:7px;border-radius:50%;background:var(--green-9);box-shadow:0 0 0 3px var(--green-a4)}
+.live.off{background:var(--amber-9);box-shadow:0 0 0 3px var(--amber-a4)}
+.vbar{display:flex;align-items:center;gap:8px;padding:0 12px 10px;border-bottom:1px solid var(--gray-a3)}
+.vsw{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 9px 0 11px;border-radius:var(--radius-3);background:var(--gray-a3);color:var(--gray-12);font-size:15px;font-weight:500}
+.vsw svg{color:var(--gray-11)}.vc{color:var(--gray-10);font-weight:400}
+.sp{flex:1}
+.flat{flex:1;overflow:hidden}
+.row{display:flex;gap:10px;padding:10px 16px 11px}
+.row+.row{border-top:1px solid var(--gray-a3)}
+.row .g{padding-top:3px;display:flex}
+.rm{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.l1,.l2{display:flex;align-items:center;gap:6px;min-width:0}
+.t{font-size:12px;color:var(--gray-10);font-variant-numeric:tabular-nums}
+.meta{font-size:12px;color:var(--gray-10);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.desc{font-size:13px;color:var(--gray-11);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+mark{background:var(--amber-a5);color:inherit;border-radius:3px;padding:0 1px}
+.fab{position:absolute!important;right:16px;bottom:24px;box-shadow:var(--shadow-5);z-index:5}
+.scrim{position:absolute;inset:0;background:var(--black-a8);z-index:8}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:9;background:var(--color-panel-solid);border-radius:22px 22px 0 0;padding:8px 16px 28px;box-shadow:var(--shadow-6)}
+.handle{width:36px;height:5px;border-radius:3px;background:var(--gray-a6);margin:0 auto 14px}
+.grp{border-radius:var(--radius-4);background:var(--gray-a2);box-shadow:inset 0 0 0 1px var(--gray-a4);overflow:hidden}
+.grp>*+*{border-top:1px solid var(--gray-a4)}
+.opt{display:flex;align-items:center;gap:12px;min-height:48px;padding:0 14px;color:var(--gray-12);font-size:15px}
+.opt svg{color:var(--gray-10)}.opt .ck{color:var(--gray-12)}
+.opt input{flex:1;border:0;outline:0;background:transparent;color:var(--gray-12);font:inherit;font-size:16px}
+.menu{position:absolute;top:58px;right:12px;width:262px;z-index:20;background:var(--color-panel-solid);border-radius:var(--radius-4);box-shadow:var(--shadow-5);padding:6px}
+.mhead{display:flex;gap:10px;align-items:center;padding:8px 10px}
+.msep{height:1px;background:var(--gray-a4);margin:6px 4px}
+.mitem{display:flex;gap:10px;align-items:center;min-height:40px;padding:0 10px;border-radius:var(--radius-2);font-size:14px;color:var(--gray-12)}
+.mitem svg{color:var(--gray-10)}
+.mfoot{padding:6px 10px 6px}
+.search{display:flex;align-items:center;gap:10px;padding:14px 12px 10px}
+.sfield{flex:1;display:flex;align-items:center;gap:8px;height:38px;padding:0 10px;border-radius:var(--radius-3);background:var(--gray-a3);color:var(--gray-12);font-size:16px;box-shadow:inset 0 0 0 1.5px var(--gray-a7)}
+.sfield svg{color:var(--gray-10)}
+.cnt{padding:2px 16px 8px;border-bottom:1px solid var(--gray-a3)}
+.viewer{height:100%;background:#000;color:#fff;display:flex;flex-direction:column}
+.vtop{display:flex;align-items:center;justify-content:space-between;padding:14px 14px 0}
+.vbtn{width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.14);display:grid;place-items:center;color:#fff}
+.vimg{flex:1;margin:16px 0;background:#2a2a2e;display:grid;place-items:end center;color:#5a5a62;overflow:hidden}
+.vbot{display:flex;align-items:center;gap:10px;padding:0 16px 30px}
+.vchip{padding:4px 10px;border-radius:999px;background:rgba(255,255,255,.14);font-size:13px;font-weight:500}
+.dots{display:flex;gap:6px;justify-content:center;padding-bottom:14px}.dots i{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.35)}.dots i.on{background:#fff}
+.steps{display:flex;flex-direction:column;gap:2px;margin:16px 0}
+.step{display:flex;align-items:center;gap:12px;min-height:46px}
+.sicon{width:34px;height:34px;border-radius:var(--radius-3);display:grid;place-items:center;background:var(--gray-a3);color:var(--gray-12);flex:none}
+.bnr{display:flex;align-items:center;gap:8px;margin:0 12px 8px;padding:9px 12px;border-radius:var(--radius-3);font-size:13px;font-weight:500}
+.bnr.amber{background:var(--amber-a3);color:var(--amber-11)}
+.queued{color:var(--gray-10)}
+.center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:0 32px 80px;text-align:center}
+.bigic{width:56px;height:56px;border-radius:50%;display:grid;place-items:center;background:var(--gray-a3);color:var(--gray-11)}
+</style>
+<script type="importmap">{"imports":{
+"react":"https://esm.sh/react@18.3.1",
+"react-dom":"https://esm.sh/react-dom@18.3.1",
+"react-dom/client":"https://esm.sh/react-dom@18.3.1/client",
+"@radix-ui/themes":"https://esm.sh/@radix-ui/themes@3.3.0?deps=react@18.3.1,react-dom@18.3.1",
+"htm":"https://esm.sh/htm@3.1.1"}}</script>
+</head><body><div id="b"></div>
+<script type="module">
+import React from 'react';
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
+import htm from 'htm';
+import { Theme, Flex, Text, Heading, Button, IconButton, Avatar, SegmentedControl } from '@radix-ui/themes';
+if (location.protocol === 'file:' || location.protocol.startsWith('http')) document.documentElement.classList.add('standalone');
+const h = htm.bind(React.createElement);
+const svg = (p, s = 16) => h`<svg width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style=${{ flex: 'none' }} dangerouslySetInnerHTML=${{ __html: p }} />`;
+const P = {
+  x: '<path d="M18 6 6 18M6 6l12 12"/>', check: '<path d="M20 6 9 17l-5-5"/>', chev: '<path d="m6 9 6 6 6-6"/>',
+  search: '<circle cx="11" cy="11" r="7.5"/><path d="m20.5 20.5-4.2-4.2"/>',
+  bellOn: '<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/><path d="M22 8c0-2.3-.8-4.3-2-6"/><path d="M4 2C2.8 3.7 2 5.7 2 8"/>',
+  bellOff: '<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M17 17H4a1 1 0 0 1-.74-1.673C4.59 13.956 6 12.499 6 8a6 6 0 0 1 .258-1.742"/><path d="m2 2 20 20"/><path d="M8.668 3.01A6 6 0 0 1 18 8c0 2.687.77 4.653 1.707 6.05"/>',
+  plus: '<path d="M5 12h14M12 5v14"/>', list: '<path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>',
+  chart: '<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
+  download: '<path d="M12 15V3"/><path d="m7 10 5 5 5-5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>',
+  out: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
+  pin: '<path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>',
+  bust: '<circle cx="12" cy="10" r="5"/><path d="M2 26a10 9 0 0 1 20 0"/>',
+  share: '<path d="M12 2v13"/><path d="m16 6-4-4-4 4"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>',
+  plusSq: '<rect width="18" height="18" x="3" y="3" rx="4"/><path d="M8 12h8"/><path d="M12 8v8"/>',
+  cloudOff: '<path d="m2 2 20 20"/><path d="M5.782 5.782A7 7 0 0 0 9 19h8.5a4.5 4.5 0 0 0 1.307-.193"/><path d="M21.532 16.5A4.5 4.5 0 0 0 17.5 10h-1.79A7.008 7.008 0 0 0 10 5.07"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  plug: '<path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/>',
+  refresh: '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
+};
+const pie = (f) => { const a = f * 2 * Math.PI, x = 7 + 3.25 * Math.sin(a), y = 7 - 3.25 * Math.cos(a); return `M7 7L7 3.75A3.25 3.25 0 ${f > 0.5 ? 1 : 0} 1 ${x.toFixed(2)} ${y.toFixed(2)}Z`; };
+const ST = {
+  new: { label: 'Waiting for check', c: 'var(--blue-9)', color: 'blue', f: 0 },
+  notfound: { label: 'Not in medical', c: 'var(--amber-9)', color: 'amber', mark: 'x' },
+  found: { label: 'In medical · friend coming', c: 'var(--green-9)', color: 'green', f: 0.75 },
+  queued: { label: 'Waiting to send', c: 'var(--gray-9)', f: 0, dashed: true },
+};
+const glyph = (k, s = 14) => { const t = ST[k]; return h`<svg width=${s} height=${s} viewBox="0 0 14 14" aria-hidden="true" style=${{ flex: 'none' }}>${t.mark === 'x'
+  ? h`<circle cx="7" cy="7" r="6.25" fill=${t.c}/><path d="M5 5l4 4M9 5l-4 4" stroke="var(--color-panel-solid)" strokeWidth="1.6" strokeLinecap="round"/>`
+  : h`<circle cx="7" cy="7" r="5.75" fill="none" stroke=${t.c} strokeWidth="1.5" strokeDasharray=${t.dashed ? '2.2 2' : null}/>${t.f ? h`<path d=${pie(t.f)} fill=${t.c}/>` : null}`}</svg>`; };
+
+const Shell = ({ dark, children }) => h`<${Theme} appearance=${dark ? 'dark' : 'light'} accentColor="gray" grayColor="gray" radius="medium"><div className="app">${children}</div><//>`;
+const Top = ({ me = 'DK', bell, offline }) => h`<div className="top">
+  <div className="title"><${Heading} size="3" weight="medium">Is my friend in medical?<//><span className=${'live' + (offline ? ' off' : '')} role="img" aria-label=${offline ? 'Offline' : 'Live'}></span></div>
+  <${Flex} align="center" gap="4" flexShrink="0">
+    <${IconButton} variant="ghost" color="gray" aria-label="Search">${svg(P.search, 18)}<//>
+    <${IconButton} variant=${bell ? 'soft' : 'ghost'} color="gray" highContrast=${bell} aria-label="New-request alerts">${svg(bell ? P.bellOn : P.bellOff, 18)}<//>
+    <${Avatar} size="2" radius="full" variant="solid" color="gray" highContrast fallback=${me}/>
+  <//></div>`;
+const ViewBar = ({ n = 21 }) => h`<div className="vbar"><span className="vsw">${svg(P.list, 16)}<span>All requests</span><span className="vc">${n}</span>${svg(P.chev, 15)}</span><span className="sp"></span><${Text} size="1" color="gray">Newest first<//></div>`;
+const Row = ({ t, nm, age, k, post, id, label }) => h`<div className="row"><span className="g">${glyph(k)}</span><div className="rm">
+  <div className="l1"><${Text} size="2" weight="medium">${nm}<//><${Text} size="2" color="gray">${age}<//><span className="sp"></span><span className="t">${t}</span></div>
+  <div className="l2"><${Text} size="1" weight="medium" color=${ST[k].color}>${label || ST[k].label}<//><span className="meta">· ${post} · ${id}</span></div></div></div>`;
+const LIST = h`
+  <${Row} t="11:02" nm="T.R." age="24 M" k="new" post="FA 4" id="LP-1013"/>
+  <${Row} t="10:58" nm="Kayla Martinez" age="19 F" k="new" post="FA 3" id="LP-1012"/>
+  <${Row} t="10:47" nm="B.W." age="23 F" k="new" post="FA 4" id="LP-1010"/>
+  <${Row} t="10:44" nm="A.N." age="21 F" k="notfound" post="FA 3" id="LP-1009"/>
+  <${Row} t="10:31" nm="Jordan Diaz" age="22 M" k="found" post="FA 4" id="LP-1007"/>
+  <${Row} t="10:20" nm="M.P." age="26 M" k="found" post="FA 3" id="LP-1005"/>`;
+const Fab = () => h`<${Button} className="fab" size="3" radius="full" highContrast>${svg(P.plus, 16)} New request<//>`;
+
+// 1. Account menu (avatar)
+const AccountMenu = ({ dark }) => h`<${Shell} dark=${dark}><${Top}/><${ViewBar}/><div className="flat">${LIST}</div><${Fab}/>
+  <div className="menu" role="menu">
+    <div className="mhead"><${Avatar} size="3" radius="full" variant="solid" color="gray" highContrast fallback="DK"/><div><${Text} as="div" size="3" weight="medium">Dana Kim<//><${Text} as="div" size="2" color="gray">Dispatch<//></div></div>
+    <div className="msep"></div>
+    <div className="mitem">${svg(P.sun, 16)}<span className="sp">Theme</span>
+      <${SegmentedControl.Root} size="1" defaultValue=${dark ? 'dark' : 'light'}><${SegmentedControl.Item} value="light">Light<//><${SegmentedControl.Item} value="dark">Dark<//><${SegmentedControl.Item} value="auto">Auto<//><//></div>
+    <div className="mitem" role="menuitem">${svg(P.chart, 16)}Dashboard</div>
+    <div className="mitem" role="menuitem">${svg(P.download, 16)}Export CSV</div>
+    <div className="msep"></div>
+    <div className="mitem" role="menuitem">${svg(P.out, 16)}Sign out</div>
+    <div className="msep"></div>
+    <${Text} as="div" size="1" color="gray" className="mfoot">Built by Jeffrey Yu<//>
+  </div><//>`;
+
+// 2. Post picker ("Reporting from"). Other reveals a field.
+const POSTS = ['FA 3 – Kinetic', 'FA 4 – Oasis', 'Command', 'Base'];
+const PostPicker = ({ dark }) => h`<${Shell} dark=${dark}>
+  <div className="top"><${Button} variant="ghost" color="gray">Cancel<//><${Text} size="3" weight="medium">New request<//><span style=${{ width: 56 }}></span></div>
+  <div className="flat"></div>
+  <div className="scrim"></div>
+  <div className="sheet" role="dialog" aria-label="Reporting from">
+    <div className="handle"></div>
+    <${Heading} size="4" weight="medium" mb="3">Reporting from<//>
+    <div className="grp">
+      ${POSTS.map((p) => h`<div key=${p} className="opt" role="radio" aria-checked="false">${svg(P.pin, 17)}<span className="sp">${p}</span></div>`)}
+      <div className="opt" role="radio" aria-checked="true">${svg(P.pin, 17)}<span className="sp">Other</span><span className="ck">${svg(P.check, 17)}</span></div>
+      <div className="opt"><span style=${{ width: 17 }}></span><input defaultValue="Info booth" placeholder="Where?" aria-label="Other location"/></div>
+    </div>
+    <${Button} size="3" highContrast mt="4" style=${{ width: '100%' }}>Done<//>
+  </div><//>`;
+
+// 3. Search: matches names, descriptions, last seen and LP numbers.
+const SRow = ({ nm, age, k, id, pre, hit, post }) => h`<div className="row"><span className="g">${glyph(k)}</span><div className="rm">
+  <div className="l1"><${Text} size="2" weight="medium">${nm}<//><${Text} size="2" color="gray">${age}<//><span className="sp"></span><span className="t">${id}</span></div>
+  <div className="desc">${pre}<mark>${hit}</mark>${post}</div>
+  <div className="l2"><${Text} size="1" weight="medium" color=${ST[k].color}>${ST[k].label}<//></div></div></div>`;
+const Search = ({ dark }) => h`<${Shell} dark=${dark}>
+  <div className="search"><div className="sfield">${svg(P.search, 16)}<span className="sp">pink</span>${svg(P.x, 15)}</div><${Button} variant="ghost" color="gray">Cancel<//></div>
+  <div className="cnt"><${Text} size="1" color="gray">2 results<//></div>
+  <div className="flat">
+    <${SRow} nm="Kayla Martinez" age="19 F" k="new" id="LP-1012" pre="" hit="Pink" post=" cowboy hat, silver fringe top, braids"/>
+    <${SRow} nm="J.H." age="27 F" k="found" id="LP-0998" pre="Black tank, " hit="pink" post=" hair, glitter on face"/>
+  </div><//>`;
+
+// 4. Photo viewer
+const Viewer = () => h`<${Theme} appearance="dark" accentColor="gray" grayColor="gray"><div className="viewer">
+  <div className="vtop"><span className="vbtn" role="button" aria-label="Close">${svg(P.x, 16)}</span><${Text} size="2" weight="medium">1 of 2<//><span style=${{ width: 34 }}></span></div>
+  <div className="vimg" role="img" aria-label="Photo 1 of Kayla Martinez">${svg(P.bust, 300)}</div>
+  <div className="dots"><i className="on"></i><i></i></div>
+  <div className="vbot"><span className="vchip">Today</span><${Text} size="2" style=${{ color: 'rgba(255,255,255,.65)' }}>Dana Kim · 11:01<//></div>
+</div><//>`;
+
+// 5. Turning on alerts. On iPhone, web alerts only work once the app is on the Home Screen.
+const Alerts = ({ dark }) => h`<${Shell} dark=${dark}><${Top}/><${ViewBar}/><div className="flat">${LIST}</div>
+  <div className="scrim"></div>
+  <div className="sheet" role="dialog" aria-label="Turn on alerts">
+    <div className="handle"></div>
+    <${Flex} align="center" gap="3"><span className="sicon" style=${{ width: 40, height: 40, borderRadius: 20 }}>${svg(P.bellOn, 20)}</span><${Heading} size="4" weight="medium">Turn on alerts<//><//>
+    <div className="steps">
+      <div className="step"><span className="sicon">${svg(P.share, 18)}</span><${Text} size="3">Tap <b>Share</b><//></div>
+      <div className="step"><span className="sicon">${svg(P.plusSq, 18)}</span><${Text} size="3">Add to Home Screen<//></div>
+      <div className="step"><span className="sicon">${svg(P.bellOn, 18)}</span><${Text} size="3">Open it there and tap the bell<//></div>
+    </div>
+    <${Button} size="3" highContrast style=${{ width: '100%' }}>Got it<//>
+  </div><//>`;
+
+// 6. Empty
+const Empty = ({ dark }) => h`<${Shell} dark=${dark}><${Top}/><${ViewBar} n=${0}/>
+  <div className="center"><span className="bigic">${svg(P.inbox, 24)}</span><${Text} size="3" weight="medium">No requests yet<//></div><${Fab}/><//>`;
+
+// 7. Offline: requests saved on the phone show as waiting to send.
+const Offline = ({ dark }) => h`<${Shell} dark=${dark}><${Top} offline/>
+  <div className="bnr amber" role="status">${svg(P.cloudOff, 16)}Offline · 2 waiting to send</div>
+  <${ViewBar}/>
+  <div className="flat">
+    <${Row} t="11:09" nm="P.G." age="30 M" k="queued" post="FA 3" id="Not sent"/>
+    <${Row} t="11:07" nm="Lena O." age="18 F" k="queued" post="FA 3" id="Not sent"/>
+    ${LIST}
+  </div><${Fab}/><//>`;
+
+// 8. Can't reach the server
+const LoadError = ({ dark }) => h`<${Shell} dark=${dark}><${Top} offline/><${ViewBar} n="–"/>
+  <div className="center"><span className="bigic">${svg(P.plug, 24)}</span><${Text} size="3" weight="medium">Can't reach the log<//>
+    <${Button} size="3" variant="soft" color="gray" highContrast>${svg(P.refresh, 16)}Try again<//></div><${Fab}/><//>`;
+
+const Board = () => h`<div className="board">
+  <figure><div className="frame"><${AccountMenu} dark/></div><figcaption>Avatar · theme, dashboard, CSV export, sign out</figcaption></figure>
+  <figure><div className="frame"><${PostPicker}/></div><figcaption>Reporting from · Other asks where</figcaption></figure>
+  <figure><div className="frame"><${Search} dark/></div><figcaption>Search · names, descriptions, LP numbers</figcaption></figure>
+  <figure><div className="frame"><${Viewer}/></div><figcaption>Photo · swipe between, tap × to close</figcaption></figure>
+  <figure><div className="frame"><${Alerts}/></div><figcaption>Alerts on iPhone · Home Screen first</figcaption></figure>
+  <figure><div className="frame"><${Empty} dark/></div><figcaption>Empty</figcaption></figure>
+  <figure><div className="frame"><${Offline}/></div><figcaption>Offline · saved requests wait to send</figcaption></figure>
+  <figure><div className="frame"><${LoadError} dark/></div><figcaption>Can't reach the server</figcaption></figure>
+</div>`;
+flushSync(() => createRoot(document.getElementById('b')).render(h`<${Board}/>`));
+</script></body></html>

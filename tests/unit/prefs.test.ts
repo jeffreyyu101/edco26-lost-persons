@@ -1,0 +1,154 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  DEFAULT_PREFS,
+  PREF_STORAGE_KEYS,
+  clearRememberedIdentity,
+  readPrefs,
+  setBell,
+  setBellIntroSeen,
+  setLastPost,
+  setThemePref,
+  subscribePrefs,
+  writePref,
+  writeRememberedIdentity,
+} from '@/lib/client/prefs';
+import { createStubStore } from '@/lib/client/store-stub';
+import { THEME_STORAGE_KEY } from '@/lib/theme';
+
+// A minimal browser: localStorage, <html> class list and the storage event.
+function fakeBrowser() {
+  const data = new Map<string, string>();
+  const localStorage = {
+    getItem: (k: string) => data.get(k) ?? null,
+    setItem: (k: string, v: string) => void data.set(k, String(v)),
+    removeItem: (k: string) => void data.delete(k),
+  };
+  const classes = new Set<string>();
+  const documentElement = {
+    classList: { add: (c: string) => void classes.add(c), remove: (...cs: string[]) => cs.forEach((c) => classes.delete(c)) },
+    style: { colorScheme: '' },
+  };
+  const listeners = new Set<(e: { key: string | null }) => void>();
+  const window = {
+    localStorage,
+    matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
+    addEventListener: (type: string, fn: (e: { key: string | null }) => void) => type === 'storage' && listeners.add(fn),
+    removeEventListener: (type: string, fn: (e: { key: string | null }) => void) => type === 'storage' && listeners.delete(fn),
+  };
+  vi.stubGlobal('window', window);
+  vi.stubGlobal('document', { documentElement });
+  return { data, classes, documentElement, fire: (key: string | null) => listeners.forEach((l) => l({ key })), listeners };
+}
+
+describe('prefs (remembered on this phone)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('reads the defaults on the server (no window)', () => {
+    expect(readPrefs()).toEqual(DEFAULT_PREFS);
+    expect(() => writeRememberedIdentity('Dana Kim', 'Medical')).not.toThrow();
+    expect(() => setThemePref('dark')).not.toThrow();
+  });
+
+  describe('in a browser', () => {
+    let browser: ReturnType<typeof fakeBrowser>;
+    beforeEach(() => {
+      browser = fakeBrowser();
+    });
+
+    it('starts at the defaults', () => {
+      expect(readPrefs()).toEqual(DEFAULT_PREFS);
+    });
+
+    it('remembers the name and canonical team for sign-in, and Change clears them', () => {
+      writeRememberedIdentity('  Dana   Kim ', 'dispatch');
+      expect(readPrefs()).toMatchObject({ rememberedName: 'Dana Kim', rememberedTeam: 'GC/HX - Dispatch' });
+      expect(JSON.parse(browser.data.get(PREF_STORAGE_KEYS.identity)!)).toEqual({ name: 'Dana Kim', team: 'GC/HX - Dispatch' });
+      writeRememberedIdentity('Sam Lee', 'Info booth');
+      expect(readPrefs()).toMatchObject({ rememberedName: 'Sam Lee', rememberedTeam: 'Info booth' });
+      clearRememberedIdentity();
+      expect(readPrefs()).toMatchObject({ rememberedName: null, rememberedTeam: null });
+      // Invalid input forgets rather than storing half an identity.
+      writeRememberedIdentity('Sam Lee', 'Medical');
+      writeRememberedIdentity('S', 'Medical');
+      expect(readPrefs().rememberedName).toBeNull();
+    });
+
+    it('ignores corrupt or tampered stored values', () => {
+      browser.data.set(PREF_STORAGE_KEYS.identity, '{not json');
+      browser.data.set(PREF_STORAGE_KEYS.lastPost, JSON.stringify({ reportingLocation: 'FA 9', otherLocation: null }));
+      browser.data.set(PREF_STORAGE_KEYS.bell, 'yes');
+      browser.data.set(THEME_STORAGE_KEY, 'purple');
+      expect(readPrefs()).toEqual(DEFAULT_PREFS);
+      browser.data.set(PREF_STORAGE_KEYS.identity, JSON.stringify({ name: 'Dana Kim' }));
+      expect(readPrefs().rememberedName).toBeNull();
+    });
+
+    it('remembers the last post (Other needs its location) and the bell flags', () => {
+      setLastPost({ reportingLocation: 'FA 4 – Oasis', otherLocation: 'ignored' });
+      expect(readPrefs().lastPost).toEqual({ reportingLocation: 'FA 4 – Oasis', otherLocation: null });
+      setLastPost({ reportingLocation: 'Other', otherLocation: ' Info booth ' });
+      expect(readPrefs().lastPost).toEqual({ reportingLocation: 'Other', otherLocation: 'Info booth' });
+      setLastPost({ reportingLocation: 'Other', otherLocation: '' });
+      expect(readPrefs().lastPost).toEqual({ reportingLocation: 'Other', otherLocation: 'Info booth' });
+      setLastPost(null);
+      expect(readPrefs().lastPost).toBeNull();
+
+      setBell(true);
+      setBellIntroSeen(true);
+      expect(readPrefs()).toMatchObject({ bell: true, bellIntroSeen: true });
+      setBell(false);
+      expect(readPrefs().bell).toBe(false);
+      expect(browser.data.has(PREF_STORAGE_KEYS.bell)).toBe(false);
+    });
+
+    it('theme: one source of truth shared with the pre-paint script, applied on write', () => {
+      setThemePref('dark');
+      expect(browser.data.get(THEME_STORAGE_KEY)).toBe('dark');
+      expect(browser.classes.has('dark')).toBe(true);
+      expect(readPrefs().theme).toBe('dark');
+      setThemePref('auto');
+      expect(browser.data.has(THEME_STORAGE_KEY)).toBe(false);
+      expect(browser.classes.has('light')).toBe(true);
+      expect(readPrefs().theme).toBe('auto');
+    });
+
+    it('writePref keeps the remembered name and team as a pair', () => {
+      writePref('rememberedName', 'Dana Kim');
+      expect(readPrefs().rememberedName).toBeNull(); // no team yet
+      writeRememberedIdentity('Dana Kim', 'Medical');
+      writePref('rememberedTeam', 'GC/HX - Base');
+      expect(readPrefs()).toMatchObject({ rememberedName: 'Dana Kim', rememberedTeam: 'GC/HX - Base' });
+      writePref('rememberedTeam', null);
+      expect(readPrefs()).toMatchObject({ rememberedName: null, rememberedTeam: null });
+    });
+
+    it('the store starts from storage and setPref writes through (theme applied by the store, not the screen)', () => {
+      writeRememberedIdentity('Dana Kim', 'Medical');
+      setThemePref('dark');
+      const store = createStubStore({ eventTimezone: 'America/New_York' });
+      expect(store.getState().prefs).toMatchObject({ theme: 'dark', rememberedName: 'Dana Kim', rememberedTeam: 'Medical', bell: false });
+      store.actions.setPref('theme', 'light');
+      store.actions.setPref('bell', true);
+      store.actions.setPref('bellIntroSeen', true);
+      store.actions.setPref('lastPost', { reportingLocation: 'Base', otherLocation: null });
+      expect(browser.data.get(THEME_STORAGE_KEY)).toBe('light');
+      expect(browser.classes.has('light')).toBe(true);
+      expect(readPrefs()).toEqual({ ...store.getState().prefs });
+    });
+
+    it('notifies about changes made in another tab', () => {
+      const seen: boolean[] = [];
+      const off = subscribePrefs((p) => seen.push(p.bell));
+      browser.data.set(PREF_STORAGE_KEYS.bell, '1');
+      browser.fire(PREF_STORAGE_KEYS.bell);
+      browser.fire('unrelated-key');
+      browser.fire(null); // localStorage.clear()
+      off();
+      browser.fire(PREF_STORAGE_KEYS.bell);
+      expect(seen).toEqual([true, true]);
+      expect(browser.listeners.size).toBe(0);
+    });
+  });
+});

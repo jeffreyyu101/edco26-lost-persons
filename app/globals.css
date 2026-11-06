@@ -1,0 +1,66 @@
+/* Global tokens shared by every screen (mockups: design/screens/*.html). Component CSS lives with the
+   components; keep this file small. */
+
+.radix-themes {
+  --default-font-family: 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-feature-settings: 'cv11';
+  -webkit-font-smoothing: antialiased;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 16 px inputs stop iOS from zooming on focus. */
+input,
+textarea,
+select {
+  font-size: 16px;
+}
+
+/* A tap target of at least 44 × 44 px (spec §7 Accessibility) for a control drawn smaller, without changing
+   its layout: a transparent ::before, centred on the control, grows each side that is under 44 px and
+   leaves bigger sides alone. Percent insets resolve against the control itself (position: relative), so
+   one rule fits every size. The control's own ::after (Radix classic variant) is untouched. */
+.lp-hit {
+  position: relative;
+}
+.lp-hit::before {
+  content: '';
+  position: absolute;
+  inset: min(0px, calc((100% - 44px) / 2));
+}
+
+/* Solid colour buttons (In medical, the red confirms) at 4.5:1 or more in both themes (spec §7). Radix
+   solid is white on step 9, which is 3.2:1 on green-9 and 3.9:1 on red-9. Step 11 is the accessible
+   shade of each scale: deep in light mode (white text) and bright in dark mode (dark text). Disabled
+   buttons keep the Radix disabled look. */
+.lp-solid-accent:not([data-disabled]) {
+  background-color: var(--accent-11);
+  color: #fff;
+}
+.dark .lp-solid-accent:not([data-disabled]) {
+  color: var(--gray-1);
+}
+
+/* The EDC Orlando logo is black; invert it in dark mode (the Ground Control logo stays full colour). */
+.dark .lp-logo-edc {
+  filter: invert(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

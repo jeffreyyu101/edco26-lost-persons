@@ -1,55 +1,123 @@
-# EDC Orlando 2026 — Lost Person Coordination
+# Is my friend in medical? — EDC Orlando 2026
 
-A mobile-first Next.js MVP for a small event operations team (about 10 staff) to coordinate lost-person inquiries and reunifications. The app stores identification and contact information only. Do not enter medical records, diagnoses, medications, treatment details, or clinical notes. This project is not represented as HIPAA-compliant.
+A phone-first web app for Ground Control / Headliner Experience (GC/HX) staff at EDC Orlando, Nov 6–8 2026.
+Front-of-house staff at FA 3 and FA 4 log a missing person and the friend looking for them. The medical
+liaison at Main Med checks the charts and answers **In medical** or **Not in medical**. When the answer is
+In medical, the friend is walked to Main Med, and medical taps **Reunited**.
 
-## Run locally
+The app stores identifying and contact details only. Never enter medical records, diagnoses, medications or
+clinical notes. It is not represented as HIPAA compliant. Use synthetic data for every test.
 
-Requires Node.js and npm. Install packages and start the development server:
+- The engineering contract is [`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md).
+- Product decisions are in [`design/DECISIONS.md`](design/DECISIONS.md), and the visual spec is in [`design/screens/`](design/screens/).
+- Deploying, the production migration and the morning checklist are in [`HANDOFF.md`](HANDOFF.md).
+
+## Stack
+
+- Next.js 16.4 (App Router, `proxy.ts`) and React 19.3, in strict TypeScript.
+- Radix Themes 3.3, lucide icons, and Inter (self-hosted).
+- Supabase (Postgres and a private Storage bucket), reached **only from the server** with the secret key.
+  Every write is a `lp_*` SQL function, so each change and its audit row commit together.
+- Tests use vitest (unit and integration) and Playwright (Chromium with the iPhone 14 profile, and WebKit).
+
+Node 22.12 or newer is required.
+
+## Environment variables
+
+Copy [`.env.example`](.env.example) to `.env.local` for a manual run against a real project, and set the same
+names in Vercel. They are validated when the server first uses them, and a missing one fails with a clear
+message.
+
+| Variable | Required | Notes |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | yes | The project URL. Used by the server only (the name is kept from the existing Vercel env). A trailing `/rest/v1/` is stripped. |
+| `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY` | yes | Server-only. Never give it a `NEXT_PUBLIC_` prefix. |
+| `SESSION_SECRET` | yes | 32 characters or more. Changing it signs everyone out. |
+| `APP_SHARED_PASSWORD_HASH_B64` or `APP_SHARED_PASSWORD` | one of them | The event password, as a base64 bcrypt hash or as plain text. If both are set, the hash wins. |
+| `EVENT_TIMEZONE` | no | Defaults to `America/New_York`. Every displayed time and the CSV use it. |
+
+To make a password hash without writing the password into a file:
+
+```bash
+node -e "const b=require('bcryptjs'); console.log(Buffer.from(b.hashSync(process.argv[1], 12)).toString('base64'))" 'THE-EVENT-PASSWORD'
+```
+
+Never commit `.env.local` or any other `.env*` file. The only exceptions are `.env.example` (placeholders)
+and `.env.test`, which holds local-only values that work against `127.0.0.1` and nothing else.
+
+## Database
+
+### Migration chain
+
+`supabase/migrations/` holds the local chain. The Supabase CLI applies it in this order:
+
+| File | What it is | Production |
+|---|---|---|
+| `20261101000000_baseline_local_only.sql` | A copy of `supabase/schema.sql`, the production baseline. | **Never paste.** Already applied. |
+| `20261105000001_add_last_seen.sql` | Jeffrey's `last_seen` column. | Already applied (verified 2026-11-05). |
+| `20261105000002_update_locations_and_statuses.sql` | Jeffrey's location and status CHECK update. | Not needed: the rework covers it whether or not it ran. |
+| `20261106000000_rework.sql` | Row versions, the touch trigger, thumbnails, login limits and every `lp_*` function the app calls. | **The one file to paste**, before deploying this app. See [`HANDOFF.md`](HANDOFF.md). |
+
+Without `20261106000000_rework.sql`, every API route fails, because each one calls an `lp_*` function. The
+file is one transaction, is safe to run twice, and starts with a dry-run note.
+
+### Photos
+
+Photos live in a **private** Storage bucket named `patient-photos` (JPEG, PNG or WebP). The app uploads a
+full image of up to 1600 px and a 320 px thumbnail. Pages load them through `/api/photos/:id`, which checks
+the session and redirects to a signed URL that lasts 120 s. Never make the bucket public.
+
+## Run it locally
 
 ```bash
 npm ci
-npm run dev
+npx playwright install chromium webkit   # once, for the end-to-end tests
+supabase start                           # the local stack (project lp-local, Postgres 17)
+npm run db:reset                         # migrations + synthetic seed + seed photos (local only)
+npm run build:test                       # production build with .env.test
+npm run start:test                       # http://127.0.0.1:3100
 ```
 
-Open the local URL printed by Next.js, usually `http://localhost:3000`. `npm run dev` is for local development; it does not publish the app or make it accessible to other staff. The app connects to the Supabase project configured in `.env.local`.
-
-## Environment
-
-Copy `.env.example` to `.env.local` and set these values privately:
-
-- `NEXT_PUBLIC_SUPABASE_URL` — Supabase project URL. The server also normalizes a URL ending in `/rest/v1/`.
-- `SUPABASE_SECRET_KEY` — server-only Supabase secret key. The legacy `SUPABASE_SERVICE_ROLE_KEY` name is also accepted. Never add a `NEXT_PUBLIC_` prefix.
-- `APP_SHARED_PASSWORD_HASH_B64` — base64-encoded bcrypt hash of the shared event password.
-- `SESSION_SECRET` — random secret with at least 32 characters.
-
-`.env.local` is ignored by Git. Never commit it or share its contents. Generate a password hash without writing the password into source files:
-
-```bash
-node -e "const b=require('bcryptjs'); console.log(Buffer.from(b.hashSync(process.argv[1], 12)).toString('base64'))" 'YOUR_NEW_EVENT_PASSWORD'
-```
-
-## Supabase setup
-
-The initial database schema is in [`supabase/schema.sql`](supabase/schema.sql). It includes patients, audit events, and patient photo metadata with RLS enabled and no browser-access policies. Create a **private** Storage bucket named `patient-photos`, restricted to JPEG/PNG/WebP and 5 MB. The server checks the staff session and issues 60-second signed photo URLs.
-
-The existing Supabase project is already configured. Do not rerun the initial schema against it. The `last_seen` migration in [`supabase/migrations/20261105_add_last_seen.sql`](supabase/migrations/20261105_add_last_seen.sql) was applied and verified on 2026-11-05. Before deploying the current workflow update, run [`supabase/migrations/20261105_update_locations_and_statuses.sql`](supabase/migrations/20261105_update_locations_and_statuses.sql) in the Supabase SQL Editor; it updates allowed locations and statuses. The app no longer uses requester check-in or search-attempt flows; legacy tables may remain in the project.
-
-## Current product behavior
-
-- Shared password login, HTTP-only signed 12-hour session cookie, staff-entered display name (not verified identity), and department selection stored in the session: GC/HX Dispatch, GC/HX Special Operations/Med Transpo, GC/HX Base, Prevent, or Other.
-- Shared patient log with search/filter, CSV export, 15-second refresh, manual refresh, and open-profile refresh.
-- Patient profile with intake location/time, current workflow stage, and a dated dot-line timeline backed by `audit_events`.
-- Seven statuses with dot-separated display labels. Status changes stay as a draft and save on profile close; conflicting updates are detected. Unusual transitions are muted but selectable and show a warning.
-- Private photo upload/viewing; maximum three active photos per patient.
-- New inquiries can be queued in browser local storage while offline. Existing edits and status changes are online-only. Reporting location preference is remembered per staff name for the browser session. Command and Base are available as reporting locations.
-
-See [`HANDOFF.md`](HANDOFF.md) for the current PRD, known limitations, and prioritized readiness checklist.
+`.env.test` points at the local stack. Every script and test helper refuses to run unless the Supabase URL is
+`127.0.0.1` or `localhost`, and none of them read `.env.local`. `npm run dev` also serves on port 3100
+(`PORT` changes it), but it needs a `.env.local`.
 
 ## Checks
 
-```bash
-npm test
-npm run build
-```
+| Command | What it runs |
+|---|---|
+| `npm run typecheck` | `next typegen`, then `tsc --noEmit` |
+| `npm run lint` | ESLint, with no warnings allowed |
+| `npm test` | Unit tests (vitest, no network or database) |
+| `npm run test:int` | Integration tests: every route, the SQL functions, concurrency, login limits and the migration, against the local stack through a production build on `PORT` (default 3100). If nothing listens there, the harness starts `next start` itself. Run `npm run build:test` first. |
+| `npm run test:e2e` | Playwright on the production build: sign-in, lists, the two-phone flow (log → Pending → In medical → alert), profile, edit and conflicts, dashboard, CSV, offline and lie-fi queueing, the service-worker update, the first-load JS budget, and accessibility (axe-core WCAG 2.1 A/AA in light and dark, plus 44 px tap targets). Run `npm run build:test` first. |
+| `node scripts/smoke-csp.mjs` | The production CSP and nonce in Chromium and WebKit: `/signin` hydrates with no violations, `/` redirects without a session, and with one the list, a profile and Back work. Needs the production build running on `PORT`. `npm run test:e2e` runs it too (`tests/e2e/smoke.spec.ts`). |
+| `npm run db:verify-migration` | Applies the rework migration twice to the local database and to an upgrade fixture built from Jeffrey's original schema, then smoke-tests the functions. |
+| `node scripts/load-test.mjs` | 30 simulated phones polling for 2 minutes against a running local production build (see the file header). |
 
-The current automated tests cover Supabase URL normalization only. Manual workflow and mobile-device checks remain necessary.
+End-to-end runs take a lock (`/tmp/lp-e2e.lock`), so two suites never share the local stack at once. Every
+spec signs in through `POST /api/session` once per identity and reuses that session (`storageState`).
+Integration tests close the requests they create when each file ends, so nothing they leave shows in
+Pending.
+
+## How it behaves
+
+- **Sign-in.** Step 1 is your name and team, and step 2 is the event password. The phone remembers step 1.
+  Sessions last 12 hours from the last use, and 36 hours at most. Too many wrong passwords from one place
+  pauses sign-in for a while.
+- **One page, several views.** All requests (newest first), Pending (Friend coming, then Waiting for check),
+  My requests (with a progress line), Search, New request, the profile, Edit and the dashboard. Views are URL
+  parameters on `/`, so Back and shared links work.
+- **Live.** The list syncs every 6 s while the app is open (60 s in the background). Tap the live dot to sync
+  now. Offline and "can't reach the log" show as banners.
+- **Answers.** Not in medical, In medical, Reunited and Change answer each offer Undo for 6 s. Two people
+  giving the same answer is harmless. A change made by someone else shows as "Updated by someone else".
+- **Alerts** appear only while the app is open: changes to your requests by someone else, and new requests
+  when the bell is on. There are no lock-screen notifications.
+- **Offline.** A new request (with its photos) is saved on the phone first and sent when the signal is back.
+  Answers, edits and adding photos to an existing request need a connection.
+- **Dashboard.** Open counts, answer times and open requests by post. Tiles and legend rows open the list
+  filtered by status; a post bar opens that post's open requests (the rows it counts), and clearing the
+  Open chip shows every request at the post.
+- **Export CSV** (avatar menu or dashboard) downloads every request. It holds personal details, so treat the
+  file as sensitive.
