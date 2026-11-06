@@ -3,9 +3,11 @@
 // old CHECKs), with smoke checks. Wraps scripts/verify-migration.sh (LOCAL ONLY; it has its own host
 // guard). Afterwards PostgREST must have reloaded its schema before other tests run.
 // Then the free-text age (2026-11-06): smallint → text on a scratch copy of production as it is today
-// (rework already applied once), pasted twice.
+// (rework already applied once), pasted twice. And patients.medical_location (Pending v8, 2026-11-06
+// afternoon) on a scratch copy built with the rework file as the F1 release shipped it (commit 7291a7b).
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -42,6 +44,8 @@ describe('20261106000000_rework.sql', () => {
 
   it('the app database has the rework objects', () => {
     expect(psql("select count(*) from information_schema.columns where table_name = 'patients' and column_name in ('row_version', 'last_seen')")).toBe('2');
+    // Where medical has the patient (Pending v8): nullable text, no default.
+    expect(psql("select data_type || '/' || is_nullable || '/' || coalesce(column_default, 'none') from information_schema.columns where table_schema = 'public' and table_name = 'patients' and column_name = 'medical_location'")).toBe('text/YES/none');
     expect(psql("select count(*) from information_schema.columns where table_name = 'patient_photos' and column_name = 'thumb_path'")).toBe('1');
     expect(psql("select tgname from pg_trigger where tgrelid = 'public.patients'::regclass and tgname = 'lp_patients_touch'")).toBe('lp_patients_touch');
     // Mutating RPCs carry the function-level timeouts (A7).
@@ -121,5 +125,82 @@ describe('20261106000000_rework.sql: age smallint → text on a database that al
                   from pg_proc p where p.proname in ('lp_clean_fields', 'lp_create_request', 'lp_update_fields', 'lp_row', 'lp_sync', 'lp_detail', 'lp_stats')`)).toBe('true/false/false');
     expect(() => sqlIn(`set role service_role;
       select lp_update_fields(id, json_build_object('age', repeat('x', 41))::jsonb, row_version, 'T · Medical') from patients where first_name = 'TEST-server-2'`)).toThrow(/field_too_long/);
+  }, 120_000);
+});
+
+/**
+ * Production before Pending v8: the rework file as the F1 release shipped it (commit 7291a7b: no
+ * medical_location anywhere) applied on the baseline, with rows written through those functions. The new file,
+ * pasted twice, must add the column once, keep the values set in between, and leave every call the build that
+ * is live now makes working exactly as before (it never sends the field; its server maps lp_row through an
+ * allowlist, so the extra key is ignored).
+ */
+describe('20261106000000_rework.sql: medical_location on production as it is before Pending v8', () => {
+  const FIXTURE = 'lp_location_fixture';
+  const RELEASED = '7291a7b';
+  const fixtureUrl = () => `${dbUrl().replace(/\/[^/]*$/, '')}/${FIXTURE}`;
+  const sqlIn = (sql: string) =>
+    execFileSync('psql', [fixtureUrl(), '-v', 'ON_ERROR_STOP=1', '-q', '-At', '-c', sql], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+  const applyPath = (path: string) => {
+    const r = spawnSync('psql', [fixtureUrl(), '-v', 'ON_ERROR_STOP=1', '-q', '-f', path], { encoding: 'utf8' });
+    expect(r.status, r.stderr).toBe(0);
+  };
+  const REWORK = 'supabase/migrations/20261106000000_rework.sql';
+  const column = () =>
+    sqlIn("select coalesce(string_agg(data_type || '/' || is_nullable, ','), 'missing') from information_schema.columns where table_schema = 'public' and table_name = 'patients' and column_name = 'medical_location'");
+  let scratch: string | null = null;
+
+  afterAll(() => {
+    psql(`drop database if exists ${FIXTURE}`);
+    if (scratch) rmSync(scratch, { recursive: true, force: true });
+  });
+
+  it('adds the column once, keeps the values on a second paste, and the live build keeps working', () => {
+    psql(`drop database if exists ${FIXTURE}`);
+    psql(`create database ${FIXTURE}`);
+    scratch = mkdtempSync(join(tmpdir(), 'lp-location-'));
+    const released = join(scratch, 'rework-f1.sql');
+    const releasedSql = execFileSync('git', ['show', `${RELEASED}:${REWORK}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+    expect(releasedSql).not.toContain('medical_location');
+    writeFileSync(released, releasedSql);
+    for (const file of readdirSync(join(ROOT, 'supabase/migrations')).filter((f) => f.endsWith('.sql')).sort()) {
+      applyPath(file.startsWith('20261106000000') ? released : join(ROOT, 'supabase/migrations', file));
+    }
+    // Rows the live build wrote through the released functions.
+    sqlIn(`set role service_role;
+      select lp_create_request('{"client_mutation_id":"00000000-0000-4000-8000-0000000000f1","reporting_location":"Base","first_name":"TEST-loc-1"}', 'T · Medical');
+      select lp_create_request('{"client_mutation_id":"00000000-0000-4000-8000-0000000000f2","reporting_location":"Command","first_name":"TEST-loc-2"}', 'T · Medical');`);
+    expect(column()).toBe('missing');
+
+    applyPath(join(ROOT, REWORK));
+    expect(column()).toBe('text/YES');
+    expect(sqlIn("select count(*) from patients where medical_location is not null")).toBe('0');
+    // Set through the new lp_update_fields, then paste the file again: nothing is lost.
+    expect(sqlIn(`set role service_role;
+      select lp_update_fields(id, '{"medical_location": "Chair 14"}', row_version, 'T · Medical') -> 'row' ->> 'medical_location'
+      from patients where first_name = 'TEST-loc-1'`)).toBe('Chair 14');
+    applyPath(join(ROOT, REWORK));
+    expect(column()).toBe('text/YES');
+    expect(sqlIn("select string_agg(first_name || '=' || coalesce(medical_location, 'null'), ' ' order by first_name) from patients where first_name like 'TEST-loc-%'"))
+      .toBe('TEST-loc-1=Chair 14 TEST-loc-2=null');
+
+    // What the live build calls, unchanged: an edit without the field, an answer, sync. The location stays.
+    expect(sqlIn(`set role service_role;
+      select (lp_update_fields(id, '{"clothing": "TEST red hoodie", "age": 24}', row_version, 'T · Medical') -> 'row') ->> 'medical_location'
+      from patients where first_name = 'TEST-loc-1'`)).toBe('Chair 14');
+    expect(sqlIn(`set role service_role;
+      select lp_set_status(id, row_version, 'Found – Awaiting Reunion', 'T · Medical', 'answer') -> 'row' ->> 'status'
+      from patients where first_name = 'TEST-loc-1'`)).toBe('Found – Awaiting Reunion');
+    expect(sqlIn(`set role service_role;
+      select string_agg((r ->> 'first_name') || ':' || coalesce(r ->> 'medical_location', 'null') || ':' || (r ? 'medical_location')::text, ' ' order by r ->> 'first_name')
+      from jsonb_array_elements(lp_sync(null) -> 'rows') r`)).toBe('TEST-loc-1:Chair 14:true TEST-loc-2:null:true');
+    // The audit trail of the location edit is an ordinary patient_updated row.
+    expect(sqlIn(`select string_agg(previous_value::text || ' -> ' || new_value::text, ' | ' order by occurred_at)
+      from audit_events a join patients p on p.id = a.patient_id
+      where p.first_name = 'TEST-loc-1' and a.action_type = 'patient_updated' and a.new_value ? 'medical_location'`))
+      .toBe('{"medical_location": null} -> {"medical_location": "Chair 14"}');
   }, 120_000);
 });

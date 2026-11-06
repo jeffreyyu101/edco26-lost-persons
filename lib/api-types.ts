@@ -67,6 +67,13 @@ export interface RequestSummary {
   name: string;
   /** domain.postShort(reportingLocation, otherLocation). */
   postShort: string;
+  // Added 2026-11-06 afternoon (Pending v8, Dani + Brian)
+  /**
+   * Where medical has the patient ("Chair 14"), free text ≤ 60, or null. Set with PATCH {medicalLocation}
+   * once they are in medical; kept until someone edits it. Optional because rows cached on a phone before
+   * this field existed (and a server from before it) do not carry it: read it as `row.medicalLocation ?? null`.
+   */
+  medicalLocation?: string | null;
 }
 
 export interface PhotoInfo {

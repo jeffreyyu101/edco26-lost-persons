@@ -10,7 +10,9 @@
 //                Change answer only, never Reopen (domain primaryActions / menuActions go by status).
 //   header       portrait + photo count, name, age · gender, post · who logged it
 //   status block status colour (grey for every closed status, Not in medical included); wait badge while
-//                Waiting; "Rae Chen · 11:10 · Maya R. heading to Main Med" while In medical; who and when for
+//                Waiting; while In medical only "Rae Chen · 11:10 AM" (who answered, when), then where medical
+//                has them: a pin, "Chair 14" and a pencil, or "+ Location" (Pending v8, 2026-11-06 afternoon;
+//                the location editor is a sheet on the phone, a popover in the desk pane); who and when for
 //                the other answers
 //   details      Missing person / Friend or family, filled fields only, each with Edit; Phone has Call
 //   photos       tiles → full-screen viewer; Add tile (needs a connection) until there are 3
@@ -21,7 +23,7 @@
 //   cancel       red, creator-only (canonical created_by match, A18), while Waiting, confirm Keep / Cancel
 //   conflict     "Updated by someone else" when another person's change arrives while it is open
 import { AlertDialog, Badge, Button, DropdownMenu, Heading, IconButton, Skeleton, Text, VisuallyHidden } from '@radix-ui/themes';
-import { Camera, Check, ChevronDown, Clock, CloudOff, Ellipsis, Pencil, Phone, RotateCcw, Trash2, Undo2, X } from 'lucide-react';
+import { Camera, Check, ChevronDown, Clock, CloudOff, Ellipsis, MapPin, Pencil, Phone, Plus, RotateCcw, Trash2, Undo2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { Banner, ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -66,7 +68,9 @@ import { AddPhotosSheet, type PhotoPick } from './AddPhotos';
 import { AuditTrail, AuditTrailSkeleton } from './AuditTrail';
 import { buildAuditTrail, statusOrigin, type StatusOrigin } from './audit-trail';
 import { Bust } from './Bust';
+import { primeKeyboard } from '@/components/list/hooks';
 import { changeAnswerChoices } from './change-answer';
+import { LocationEditor } from './LocationEditor';
 import { PhotoViewer, photoUrl } from './PhotoViewer';
 import s from './profile.module.css';
 
@@ -88,6 +92,7 @@ const NEEDS_CONNECTION = 'Needs a connection';
 const NO_NAME = 'Name not provided';
 
 const close = () => goBack({});
+const nameOf = (row: RequestSummary) => row.name.trim() || NO_NAME;
 
 export function ProfileView({ id, presentation = 'page' }: ProfileViewProps) {
   const panel = presentation === 'panel';
@@ -365,7 +370,16 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
           </div>
         </div>
 
-        <StatusBlock row={row} origin={origin} originLoading={!detail && detailLoading} now={now} timeZone={timeZone} />
+        <StatusBlock
+          row={row}
+          origin={origin}
+          originLoading={!detail && detailLoading}
+          now={now}
+          timeZone={timeZone}
+          offline={offline}
+          panel={panel}
+          onNeedsConnection={() => actions.showToast({ tone: 'amber', icon: 'cloud-off', title: NEEDS_CONNECTION, durationMs: 3_000 })}
+        />
 
         <Details row={row} />
 
@@ -585,15 +599,22 @@ function StatusBlock({
   originLoading,
   now,
   timeZone,
+  offline,
+  panel,
+  onNeedsConnection,
 }: {
   row: RequestSummary;
   origin: StatusOrigin | null;
   originLoading: boolean;
   now: number;
   timeZone: string;
+  offline: boolean;
+  panel: boolean;
+  onNeedsConnection: () => void;
 }) {
   const meta = statusMeta(row.status);
   const waiting = row.status === STATUS.waiting;
+  const inMedical = isInMedical(row.status);
   let sub: ReactNode = null;
   let badge: ReactNode = null;
   if (waiting) {
@@ -609,28 +630,83 @@ function StatusBlock({
       </Badge>
     );
   } else if (isStatus(row.status)) {
+    // Who answered and when, nothing else (Brian, 2026-11-06 afternoon: the "heading to Main Med" line went).
     const o = origin ?? fallbackOrigin(row);
     const parts = o ? [o.staffName, formatListTime(o.at, now, timeZone)].filter(Boolean) : [];
-    if (isInMedical(row.status)) parts.push(`${row.contactName?.trim() || 'Friend'} heading to Main Med`);
     if (parts.length > 0) sub = parts.join(' · ');
     else if (originLoading) sub = <Skeleton height="12px" width="45%" style={{ marginTop: 2 }} />;
   }
   return (
-    <div className={s.status} data-tone={meta.tone} data-testid="status-block">
-      <StatusGlyph status={row.status} size={18} />
-      <div className={s.sx}>
-        {/* Step 12 of the status colour on its step-3 tint: step 11 is ~4.3:1 there (spec §7). */}
-        <Text size="3" weight="medium" color={meta.tone} highContrast={meta.tone !== 'gray'}>
-          {meta.label}
-        </Text>
-        {sub ? (
-          <Text as="div" size="1" color="gray">
-            {sub}
+    <div className={s.statusBox} data-tone={meta.tone} data-testid="status-block">
+      <div className={s.status}>
+        <StatusGlyph status={row.status} size={18} />
+        <div className={s.sx}>
+          {/* Step 12 of the status colour on its step-3 tint: step 11 is ~4.3:1 there (spec §7). */}
+          <Text size="3" weight="medium" color={meta.tone} highContrast={meta.tone !== 'gray'}>
+            {meta.label}
           </Text>
-        ) : null}
+          {sub ? (
+            <Text as="div" size="1" color="gray">
+              {sub}
+            </Text>
+          ) : null}
+        </div>
+        {badge}
       </div>
-      {badge}
+      {inMedical ? <LocationRow row={row} offline={offline} panel={panel} onNeedsConnection={onNeedsConnection} /> : null}
     </div>
+  );
+}
+
+/**
+ * Where medical has them, under the In medical status (pending-v8.html "The request"): a pin, the location
+ * (18/650) and a pencil, or a quiet "+ Location". The whole row is the button that edits it.
+ */
+function LocationRow({ row, offline, panel, onNeedsConnection }: { row: RequestSummary; offline: boolean; panel: boolean; onNeedsConnection: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const button = useRef<HTMLButtonElement>(null);
+  const location = (row.medicalLocation ?? '').trim();
+  return (
+    <>
+      <button
+        ref={button}
+        type="button"
+        className={location ? s.locRow : `${s.locRow} ${s.locEmpty}`}
+        aria-label={location ? `${location}, edit location` : 'Add location'}
+        aria-disabled={offline || undefined}
+        data-disabled={offline ? '' : undefined}
+        data-testid="location-row"
+        onClick={() => {
+          if (offline) {
+            onNeedsConnection();
+            return;
+          }
+          // iOS opens the keyboard only for a focus made during the tap: the sheet's field takes it over.
+          if (!panel) primeKeyboard();
+          setEditing(true);
+        }}
+      >
+        {location ? (
+          <>
+            <MapPin size={16} aria-hidden className={s.locPin} />
+            <span className={s.locValue}>{location}</span>
+            <Pencil size={15} aria-hidden className={s.locEdit} />
+          </>
+        ) : (
+          <>
+            <Plus size={16} aria-hidden className={s.locPin} />
+            <span className={s.locAdd}>Location</span>
+          </>
+        )}
+      </button>
+      <LocationEditor
+        target={editing ? { id: row.id, name: nameOf(row), mode: 'edit', initial: location } : null}
+        desk={panel}
+        anchor={button}
+        returnFocus={() => button.current}
+        onClose={() => setEditing(false)}
+      />
+    </>
   );
 }
 

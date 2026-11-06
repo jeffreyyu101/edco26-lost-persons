@@ -139,7 +139,9 @@ test('renders from the request, answers, changes the answer, reunites, reopens a
   await page.getByRole('button', { name: 'In medical', exact: true }).click();
   await expect(profileStatus(page, 'Found – Awaiting Reunion')).toBeVisible();
   await expect(statusBlock(page)).toContainText('In medical · friend coming');
-  await expect(statusBlock(page)).toContainText('Maya R. heading to Main Med');
+  // Who answered and when, then where medical has them (Pending v8): no "heading to Main Med" line.
+  await expect(statusBlock(page)).not.toContainText('heading');
+  await expect(statusBlock(page).getByTestId('location-row')).toHaveAccessibleName('Add location');
   await expect(auditItems(page).first()).toContainText('Waiting for check');
   await expect(auditItems(page).first()).toContainText('In medical');
   await expect(auditItems(page).first()).toContainText(`${FRONT.staffName} · Dispatch`);

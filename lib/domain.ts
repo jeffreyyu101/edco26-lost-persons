@@ -440,6 +440,8 @@ export const LIMITS = {
   age: 40,
   /** Free text since 2026-11-06 (Jeffrey); GENDERS are quick-fill options. */
   gender: 40,
+  /** Where medical has the patient ("Chair 14"), free text (Dani + Brian, 2026-11-06 afternoon). */
+  medicalLocation: 60,
 } as const;
 
 /** The old numeric age range. The server no longer enforces it: age is free text (LIMITS.age). */
@@ -490,6 +492,8 @@ export const FIELD_COLUMNS = {
   contactNotes: 'contact_notes',
   firstName: 'first_name',
   lastName: 'last_name',
+  /** Set from Pending and the request once medical has the patient; never part of the request form. */
+  medicalLocation: 'medical_location',
 } as const;
 
 export type EditableField = keyof typeof FIELD_COLUMNS;
@@ -537,6 +541,7 @@ export const FIELD_LABELS = {
   contactPhone: 'Phone',
   contactRelationship: 'Relation',
   contactNotes: 'Contact notes',
+  medicalLocation: 'Location',
 } as const;
 export type DisplayField = keyof typeof FIELD_LABELS;
 

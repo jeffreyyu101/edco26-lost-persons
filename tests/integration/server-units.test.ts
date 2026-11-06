@@ -52,6 +52,21 @@ describe('mappers', () => {
     expect(editChanges({ age: 24, hair: null }, { age: '24', hair: 'Red' })).toEqual({ previous: { hair: null }, next: { hair: 'Red' } });
     expect(editChanges({ age: 24 }, { age: 'mid-20s' })).toEqual({ previous: { age: 24 }, next: { age: 'mid-20s' } });
   });
+
+  it('medical location (Pending v8): patch → medical_location; mapRow reads it, null when absent or not text', () => {
+    expect(patchPayload(requestPatchSchema.parse({ medicalLocation: '  Chair 14 ' }))).toEqual({ medical_location: 'Chair 14' });
+    expect(patchPayload(requestPatchSchema.parse({ medicalLocation: '' }))).toEqual({ medical_location: null });
+    expect(mapRow({ medical_location: 'Bed 3 · triage' }).medicalLocation).toBe('Bed 3 · triage');
+    // A database without the column yet (the file not pasted) maps to null, never undefined.
+    expect(mapRow({}).medicalLocation).toBeNull();
+    expect(mapRow({ medical_location: 14 }).medicalLocation).toBeNull();
+    expect(REQUEST_SUMMARY_KEYS).toContain('medicalLocation');
+    // An edit audit of it reads back as the medicalLocation field ("Edited Location").
+    expect(editChanges({ medical_location: null }, { medical_location: 'Chair 14' })).toEqual({
+      previous: { medicalLocation: null },
+      next: { medicalLocation: 'Chair 14' },
+    });
+  });
 });
 
 describe('audit normalisation', () => {

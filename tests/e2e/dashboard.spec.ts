@@ -160,7 +160,9 @@ test('open counts move by the deltas of this test, and tiles and bars open All f
   await page.goBack();
   await page.getByTestId('tile-open').click();
   await expect(page).toHaveURL(/\?view=pending$/);
-  await expect(page.locator(`[data-request-id="${row.id}"]`).first()).toBeVisible();
+  // Pending v8 shows one queue at a time on a phone: the In medical request is under Friend coming.
+  await page.getByRole('tab', { name: /^Friend coming/ }).click();
+  await expect(page.locator(`[data-testid="friend-coming-card"] [data-request-id="${row.id}"]`)).toBeVisible();
   await page.goBack();
   // Regression: the bar opens the open requests it counts (?open=1), so the chip's count is the bar's.
   const fa4Bar = page.getByRole('button', { name: /^FA 4 – Oasis \d+ open$/ });

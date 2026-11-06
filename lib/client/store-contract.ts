@@ -239,6 +239,13 @@ export interface StoreActions {
   create(input: CreateInput): Promise<CreateResult>;
   /** Edit: only changed keys, with the version captured when editing started (A10). */
   updateFields(id: string, patch: RequestPatch, baseVersion: number, opts?: MutationOptions): Promise<MutationResult>;
+  /**
+   * (Added 2026-11-06 afternoon, Pending v8.) Where medical has the patient ("Chair 14"), or null to clear.
+   * Queued behind the request's other mutations (the In medical tap that opened the location sheet), sent
+   * with the version current when it runs, and resent once on a 409 (one field the person just typed: the
+   * latest value wins). An Undo still on screen for the request stays usable: a location is not a status.
+   */
+  setMedicalLocation(id: string, location: string | null, opts?: MutationOptions): Promise<MutationResult>;
   /** Creator only, while Waiting. */
   cancel(id: string, opts?: MutationOptions): Promise<MutationResult>;
   /** Photos for an existing request (needs a connection in v1). */

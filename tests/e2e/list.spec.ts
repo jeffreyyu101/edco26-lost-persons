@@ -12,7 +12,9 @@ import { syncRows } from './helpers/sync';
 // All"), with log option B and the header declutter (2026-11-06): the large title is the view menu, the
 // number column, Created with AM/PM, Updated "—" until something changes, every closed request folded
 // into "Archived N" (Brian, 2026-11-06), Alerts in the avatar menu, and no live dot unless the connection is
-// down; and Jeffrey's brand card (2026-11-06 10:31) over All, Pending and My requests. Runs against
+// down; and Jeffrey's brand card (2026-11-06 10:31) over All requests only (Pending v8, Brian 2026-11-06
+// afternoon: Pending and My requests open with their large title; Pending is To check | Friend coming,
+// tests/e2e/pending-v8.spec.ts has the rest). Runs against
 // the real store and API on the local stack. Every row is synthetic and unique to this run (TEST-L-<tag>);
 // nothing is truncated or reset, and the requests a test opened are closed after it.
 
@@ -154,7 +156,7 @@ async function setTheme(page: Page, theme: 'light' | 'dark') {
   await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 10_000 });
 }
 
-test('brand card over All, Pending and My requests: logos, event, the big title, the credit; dark in both themes; not on Search', async ({ page }) => {
+test('brand card over All requests: logos, event, the big title, the credit; dark in both themes; not on Pending, My requests or Search', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 10_000 });
   const card = brand(page);
@@ -226,13 +228,12 @@ test('brand card over All, Pending and My requests: logos, event, the big title,
   await expect(page.getByRole('button', { name: 'Search' })).toBeInViewport();
   await expect(page.getByTestId('account-trigger')).toBeInViewport();
 
-  // Pending and My requests open with it too, above their title.
+  // Pending and My requests open with just their large title (Pending v8), at the top of the page.
   for (const url of ['/?view=pending', '/?view=mine']) {
     await page.goto(url);
     await expect(page.getByTestId('view-switcher')).toBeVisible();
-    await expect(brand(page), url).toBeVisible();
-    const box = (await brand(page).boundingBox())!;
-    expect((await page.getByTestId('view-switcher').boundingBox())!.y, url).toBeGreaterThan(box.y + box.height);
+    await expect(brand(page), url).toHaveCount(0);
+    expect((await page.getByTestId('view-switcher').boundingBox())!.y, url).toBeLessThan(40);
   }
 
   // Search keeps its own bar, with no card.
@@ -478,7 +479,7 @@ test('view switcher: Pending and My requests with counts, the same large title, 
   await page.getByRole('menuitemradio', { name: /^Pending \d+$/ }).click();
   await expect(page).toHaveURL(/\?view=pending$/);
   await expect(checkCard(page, r.id)).toBeVisible();
-  await expect(checkCard(page, r.id)).toContainText(`${lp(r)} · FA 3`);
+  await expect(checkCard(page, r.id)).toContainText(`FA 3 · ${lp(r)}`);
   await expect(page.getByRole('heading', { level: 1, name: /^Pending \d+, change view$/ })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Back to all requests' })).toHaveCount(0);
 
@@ -527,18 +528,29 @@ test('Pending: In medical → Friend coming, Undo, then Reunited closes it (grey
   const r = await createRequest(page);
   await page.goto('/?view=pending');
   await expect(checkCard(page, r.id)).toBeVisible({ timeout: 10_000 });
+  const tab = (name: RegExp) => page.getByRole('tab', { name });
 
+  // In medical saves at once, then asks where they are (Skip saves nothing more).
   await checkCard(page, r.id).getByRole('button', { name: 'In medical', exact: true }).click();
-  await expect(comingCard(page, r.id)).toBeVisible();
-  await expect(comingCard(page, r.id)).toContainText(`${TAG} Friend · from FA 3`);
   await expect(checkCard(page, r.id)).toHaveCount(0);
+  const sheet = page.getByRole('dialog', { name: `${TAG} P${seq} is in medical` });
+  await expect(sheet).toBeVisible();
+  await sheet.getByRole('button', { name: 'Skip' }).click();
+  await expect(sheet).toHaveCount(0);
+  await tab(/^Friend coming/).click();
+  await expect(comingCard(page, r.id)).toBeVisible();
+  await expect(comingCard(page, r.id)).toContainText(`${TAG} Friend · on the way`);
+  await expect(comingCard(page, r.id)).not.toContainText('from FA 3');
 
   await expect(page.getByText(`${lp(r)} · In medical`)).toBeVisible();
   await page.getByRole('button', { name: 'Undo' }).click();
-  await expect(checkCard(page, r.id)).toBeVisible();
   await expect(comingCard(page, r.id)).toHaveCount(0);
+  await tab(/^To check/).click();
+  await expect(checkCard(page, r.id)).toBeVisible();
 
   await checkCard(page, r.id).getByRole('button', { name: 'In medical', exact: true }).click();
+  await sheet.getByRole('button', { name: 'Skip' }).click();
+  await tab(/^Friend coming/).click();
   await expect(comingCard(page, r.id)).toBeVisible();
   await comingCard(page, r.id).getByRole('button', { name: 'Reunited' }).click();
   await expect(comingCard(page, r.id)).toHaveCount(0);
@@ -651,9 +663,16 @@ test('front of house logs a request with a photo; the liaison sees it in Pending
 
     // B sees it in Pending within 8 s of the save (one poll), and answers In medical.
     await expect(checkCard(page, id!)).toBeVisible({ timeout: Math.max(1_000, 8_000 - (Date.now() - savedAt)) });
-    await expect(checkCard(page, id!)).toContainText(`${lpText} · FA 4`);
+    await expect(checkCard(page, id!)).toContainText(`FA 4 · ${lpText}`);
     await checkCard(page, id!).getByRole('button', { name: 'In medical', exact: true }).click();
+    // Where medical has them: saved from the sheet, shown on the Friend coming card.
+    const locationForm = page.getByTestId('location-form');
+    await expect(locationForm).toBeVisible();
+    await page.getByRole('textbox', { name: 'Location' }).fill('Chair 7');
+    await locationForm.getByRole('button', { name: 'Save' }).click();
+    await page.getByRole('tab', { name: /^Friend coming/ }).click();
     await expect(comingCard(page, id!)).toBeVisible();
+    await expect(comingCard(page, id!).getByTestId('location-chip')).toHaveAccessibleName('Chair 7, edit location');
 
     // A, back on the list, is alerted on its next poll: their own request moved to In medical.
     const toast = a.locator('.lp-toast').filter({ hasText: new RegExp(`${lpText} · .+ is in medical`) });
