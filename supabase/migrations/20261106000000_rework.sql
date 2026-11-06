@@ -852,6 +852,19 @@ begin
     return pg_catalog.jsonb_build_object('changed', false, 'row', public.lp_row(v_row));
   end if;
 
+  -- Merged display fields are audited whole: a name change records both first_name and last_name,
+  -- a post change records both reporting_location and other_location (the trail shows "Name" / "Post").
+  if v_changes ? 'first_name' or v_changes ? 'last_name' then
+    v_changes := pg_catalog.jsonb_build_object(
+      'first_name', coalesce(v_changes -> 'first_name', v_current -> 'first_name'),
+      'last_name', coalesce(v_changes -> 'last_name', v_current -> 'last_name')) || v_changes;
+  end if;
+  if v_changes ? 'reporting_location' or v_changes ? 'other_location' then
+    v_changes := pg_catalog.jsonb_build_object(
+      'reporting_location', coalesce(v_changes -> 'reporting_location', v_current -> 'reporting_location'),
+      'other_location', coalesce(v_changes -> 'other_location', v_current -> 'other_location')) || v_changes;
+  end if;
+
   v_merged := pg_catalog.jsonb_populate_record(v_row, v_changes);
 
   if (v_changes ? 'first_name' or v_changes ? 'last_name')

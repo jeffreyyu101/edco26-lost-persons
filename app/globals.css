@@ -1,0 +1,41 @@
+/* Global tokens shared by every screen (mockups: design/screens/*.html). Component CSS lives with the
+   components; keep this file small. */
+
+.radix-themes {
+  --default-font-family: 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-feature-settings: 'cv11';
+  -webkit-font-smoothing: antialiased;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 16 px inputs stop iOS from zooming on focus. */
+input,
+textarea,
+select {
+  font-size: 16px;
+}
+
+/* The EDC Orlando logo is black; invert it in dark mode (the Ground Control logo stays full colour). */
+.dark .lp-logo-edc {
+  filter: invert(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

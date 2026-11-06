@@ -1,0 +1,308 @@
+// Wire types between the server (app/api/**) and the client (spec §6, v2.1 A1). Types only.
+// FROZEN after Phase 1a: later phases may ADD types or optional fields, never change existing ones.
+//
+// Shape rule (A1): the database RPCs return snake_case JSON. The server maps it to these camelCase
+// types through an EXPLICIT allowlist (legacy columns never leak through) and adds the derived fields.
+import type { EditableField, Gender, PhotoTiming, PhotoTimingAny, StatusKind, StatusValue } from './domain';
+import type { CreateRequestBody, RequestPatch } from './validation';
+
+/**
+ * An ISO 8601 timestamp from the database clock, e.g. "2026-11-06T23:10:04.123456+00:00" (microsecond
+ * precision). Cursors (`serverTime`, `next.at`) must be sent back VERBATIM — never round-trip them through
+ * `Date`, which drops the microseconds.
+ */
+export type IsoDateTime = string;
+
+// ---------------------------------------------------------------------------------------------------
+// Requests
+// ---------------------------------------------------------------------------------------------------
+
+/** Every known `patients` column, camelCased (A1), plus rowVersion / photo fields and derived fields. */
+export interface RequestSummary {
+  // Identity
+  id: string;
+  clientMutationId: string | null;
+  caseNumber: number;
+  firstName: string | null;
+  lastName: string | null;
+  // Person
+  age: number | null;
+  /** Male / Female / Other, or a legacy free-text value, or null. */
+  gender: Gender | (string & {}) | null;
+  heightBuild: string | null;
+  hair: string | null;
+  identifyingFeatures: string | null;
+  physicalDescription: string | null;
+  lastSeen: string | null;
+  clothing: string | null;
+  additionalNotes: string | null;
+  // Post
+  /** A PostValue, or a legacy value. */
+  reportingLocation: string;
+  otherLocation: string | null;
+  // Contact
+  contactName: string | null;
+  contactPhone: string | null;
+  contactRelationship: string | null;
+  contactNotes: string | null;
+  // Status and audit
+  /** A Status, or a legacy value: always render through domain.statusMeta(). */
+  status: StatusValue;
+  /** Attribution string "Name · Team" (Jeffrey's format). */
+  createdBy: string;
+  updatedBy: string;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+  foundAt: IsoDateTime | null;
+  reunionStartedAt: IsoDateTime | null;
+  closedAt: IsoDateTime | null;
+  // Added fields
+  rowVersion: number;
+  firstPhotoId: string | null;
+  photoCount: number;
+  // Derived (server mapper)
+  /** domain.joinName(firstName, lastName); "" when neither is set. */
+  name: string;
+  /** domain.postShort(reportingLocation, otherLocation). */
+  postShort: string;
+}
+
+export interface PhotoInfo {
+  id: string;
+  timing: PhotoTimingAny;
+  createdAt: IsoDateTime;
+  /** Attribution string of who added it. */
+  uploadedBy: string;
+  /** False for legacy photos; GET /api/photos/:id?size=thumb then serves the full image. */
+  hasThumb: boolean;
+}
+
+/** Values in an `edit` audit entry: camelCase field → value (only the changed fields). */
+export type AuditFieldValues = Partial<Record<EditableField, string | number | null>>;
+
+interface AuditBase {
+  id: string;
+  at: IsoDateTime;
+  /** Attribution string "Name · Team"; display with domain.parseStaff(). */
+  staff: string;
+  notes: string | null;
+}
+
+/**
+ * One audit-trail entry with the action normalised (A1). Mapping rules for the server
+ * (audit_events.action_type → action):
+ *   patient_created                    → created  (next: post; Jeffrey's full-row new_value works too)
+ *   status_changed                     → status   (previous.status from previous_value.status — present in
+ *                                         both the new format and Jeffrey's full-row blobs; next.kind is
+ *                                         null for legacy events)
+ *   patient_updated                    → edit     (new format: the changed keys. Jeffrey's format: new_value
+ *                                         is the patch and previous_value the full old row — keep only
+ *                                         editable keys present in new_value whose value differs)
+ *   photo_uploaded                     → photo
+ *   cancelled                          → cancelled
+ *   medical_search, outcome not_found  → legacy_search_not_found   ("Not in medical")
+ *   medical_search_found               → legacy_search_found       ("In medical")
+ *   check_completed                    → legacy_check              ("Not in medical (rechecked)")
+ *   anything else                      → other (shown generically; never dropped from the trail)
+ * snake_case keys are converted with domain.FIELD_COLUMNS; unknown keys are dropped.
+ */
+export type AuditEvent =
+  | (AuditBase & {
+      action: 'created';
+      previous: null;
+      next: { reportingLocation: string | null; otherLocation: string | null };
+    })
+  | (AuditBase & {
+      action: 'status';
+      previous: { status: StatusValue | null };
+      next: { status: StatusValue; kind: StatusKind | null };
+    })
+  | (AuditBase & { action: 'edit'; previous: AuditFieldValues; next: AuditFieldValues })
+  | (AuditBase & { action: 'photo'; previous: null; next: { photoId: string | null; timing: PhotoTimingAny | null } })
+  | (AuditBase & { action: 'cancelled'; previous: { status: StatusValue | null }; next: { status: 'Cancelled' } })
+  | (AuditBase & { action: 'legacy_search_not_found'; previous: null; next: { status: 'Checked – Not Found' } })
+  | (AuditBase & { action: 'legacy_search_found'; previous: null; next: { status: 'Found – Awaiting Reunion' } })
+  | (AuditBase & { action: 'legacy_check'; previous: { status: StatusValue | null }; next: { status: 'Checked – Not Found' } })
+  | (AuditBase & { action: 'other'; previous: null; next: { actionType: string } });
+
+export type AuditAction = AuditEvent['action'];
+
+/** GET /api/requests/:id. Photos and audit are both oldest first (the profile shows the audit newest first). */
+export interface RequestDetail extends RequestSummary {
+  photos: PhotoInfo[];
+  audit: AuditEvent[];
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Mutation envelopes (A1): `request` is always the full RequestSummary built by SQL lp_row.
+// ---------------------------------------------------------------------------------------------------
+
+/** POST /api/requests → 201 when created, 200 when it already existed (same clientMutationId). */
+export interface CreateResponse {
+  created: boolean;
+  request: RequestSummary;
+}
+
+/** POST /api/requests/:id/status, PATCH /api/requests/:id, POST /api/requests/:id/cancel. */
+export interface ChangeResponse {
+  /** False for an idempotent repeat (already in that state / nothing changed). No Undo then (A11). */
+  changed: boolean;
+  request: RequestSummary;
+}
+
+/** POST /api/requests/:id/photos → 201 when created, 200 for a retry with the same photoId. */
+export interface PhotoResponse {
+  created: boolean;
+  photo: PhotoInfo;
+  request: RequestSummary;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Sync
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * GET /api/sync?since=<iso>&reconcile=0|1&afterAt=<iso>&afterId=<uuid>&limit=<n>, or ?ids=<uuid,…> (≤200).
+ * Keyset-paged on (updatedAt, id) (A7). The client loops while `hasMore`, passing `next.at` / `next.id`
+ * as afterAt / afterId with the SAME `since`, and keeps the FIRST page's `serverTime` as its new cursor,
+ * advancing it only after every page is applied.
+ */
+export interface SyncResponse {
+  serverTime: IsoDateTime;
+  rows: RequestSummary[];
+  hasMore: boolean;
+  next: { at: IsoDateTime; id: string } | null;
+  /** With reconcile=1: [id, rowVersion] for every row. */
+  versions?: Array<[string, number]>;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Stats (GET /api/stats → lp_stats(), spec §8 + A21)
+// ---------------------------------------------------------------------------------------------------
+
+export interface Stats {
+  open: { waiting: number; inMedical: number };
+  notInMedical: number;
+  reunited: number;
+  discharged: number;
+  cancelled: number;
+  total: number;
+  longestWait: {
+    id: string;
+    caseNumber: number;
+    reportingLocation: string;
+    otherLocation: string | null;
+    postShort: string;
+    minutes: number;
+  } | null;
+  /** Mean minutes from logged to first answer, over answers in the last 2 hours; null if none. */
+  avgAnswerMinutes: number | null;
+  /** The 4 fixed posts always (count may be 0), then one entry per other location with open rows. */
+  byPost: Array<{ reportingLocation: string; otherLocation: string | null; postShort: string; count: number }>;
+  /** The 5 most recently updated requests. */
+  recent: Array<{ id: string; caseNumber: number; name: string | null; status: StatusValue; postShort: string; updatedAt: IsoDateTime }>;
+  serverTime: IsoDateTime;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Session
+// ---------------------------------------------------------------------------------------------------
+
+/** GET /api/session (POST returns the same without being required to include expiresAt). */
+export interface SessionInfo {
+  staffName: string;
+  /** Canonical team value, or the custom "Other team" text. */
+  team: string;
+  /** Attribution string "staffName · team". */
+  staff: string;
+  expiresAt: IsoDateTime;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * Every failure is `{error: {code, message, id?}}` (spec §6). HTTP status by code:
+ *   bad_request 400 · unauthorized 401 · forbidden 403 (creator-only) · bad_origin 403 · not_found 404 ·
+ *   too_large 413 · unsupported_media 415 · conflict 409 · invalid 422 · photo_limit 422 ·
+ *   rate_limited 429 · unavailable 503 (generic message + error id)
+ */
+export type ApiErrorCode =
+  | 'bad_request'
+  | 'unauthorized'
+  | 'forbidden'
+  | 'bad_origin'
+  | 'not_found'
+  | 'too_large'
+  | 'unsupported_media'
+  | 'conflict'
+  | 'invalid'
+  | 'photo_limit'
+  | 'rate_limited'
+  | 'unavailable';
+
+export interface ApiError {
+  error: {
+    code: ApiErrorCode;
+    /** Safe to show; never contains request data. */
+    message: string;
+    /** Correlates with the server log line (503s always carry one). */
+    id?: string;
+    /** For `invalid`: the offending field (camelCase), when known. */
+    field?: string;
+    /** For `conflict`: the row's current status (from the P0409 HINT). */
+    currentStatus?: string;
+    /** For `rate_limited`: seconds until a retry is allowed (also sent as Retry-After). */
+    retryAfterSeconds?: number;
+  };
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Outbox (A13: every create is an outbox job, persisted in IndexedDB before it is sent)
+// ---------------------------------------------------------------------------------------------------
+
+export interface OutboxPhoto {
+  /** Client UUID; the upload is idempotent on it. */
+  photoId: string;
+  /** Compressed full image (JPEG, ≤ 2.5 MB). */
+  blob: Blob;
+  /** Compressed thumbnail (JPEG, ≤ 320 px). */
+  thumbBlob: Blob;
+  timing: PhotoTiming;
+  /** Checkpoint: the server confirmed this photo (or it was definitively rejected and reported). */
+  acked: boolean;
+  /** Set when the server definitively rejected this photo (the job still completes, with a toast). */
+  rejected?: boolean;
+}
+
+export type OutboxState =
+  /** Waiting for its turn / its next retry. */
+  | 'pending'
+  /** The single worker is sending it now. */
+  | 'sending'
+  /** The create got a definitive 4xx: the user can open it, fix it and resend (same mutationId), or discard. */
+  | 'needs_attention';
+
+export interface OutboxItem {
+  /** = payload.clientMutationId. Stable for the life of the job, including resends after edits. */
+  mutationId: string;
+  payload: CreateRequestBody;
+  photos: OutboxPhoto[];
+  /** Checkpoint: the server id once the create succeeded (photos may still be uploading). */
+  serverId: string | null;
+  caseNumber: number | null;
+  state: OutboxState;
+  attempts: number;
+  /** Epoch ms on this device (scheduling only). Backoff 5 s, 15 s, 60 s, then every 2 min. */
+  nextAttemptAt: number | null;
+  lastError: { code: ApiErrorCode | 'network' | 'timeout'; message: string; status: number | null } | null;
+  /** Who saved it on this phone. The server attributes it to whoever is signed in when it sends. */
+  operator: { staffName: string; team: string; staff: string };
+  /** Epoch ms on this device (display only: "Waiting to send" rows sort on it). */
+  createdAt: number;
+  /** 'legacy' = imported from Jeffrey's localStorage['edc_pending_queue']. */
+  source: 'app' | 'legacy';
+}
+
+export type { CreateRequestBody, RequestPatch };
