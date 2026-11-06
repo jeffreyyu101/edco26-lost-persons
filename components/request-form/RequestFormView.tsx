@@ -36,6 +36,7 @@ import {
   type AppStore,
   type CreateResult,
   type DraftPhoto,
+  type MutationResult,
   type RequestDraft,
   type StoreState,
   type ToastItem,
@@ -177,6 +178,8 @@ function NewRequest() {
   const closed = useRef(false);
   // A non-empty draft was saved during this visit (so emptying the form clears it).
   const saved = useRef(false);
+  // A second tap before the first re-render must not send twice.
+  const inFlight = useRef(false);
   const latest = useRef<NewState | null>(null);
   useEffect(() => {
     latest.current = form;
@@ -269,7 +272,8 @@ function NewRequest() {
   };
 
   const submit = async () => {
-    if (busy || !canSend(form.values, form.photos.length) || (offline && !durable)) return;
+    if (inFlight.current || !canSend(form.values, form.photos.length) || (offline && !durable)) return;
+    inFlight.current = true;
     setBusy(true);
     setFailure(null);
     let result: CreateResult;
@@ -279,6 +283,7 @@ function NewRequest() {
       result = { outcome: 'not_saved', message: "Couldn't save — check signal and try again" };
     }
     if (result.outcome === 'not_saved') {
+      inFlight.current = false;
       setBusy(false);
       setFailure(result.message);
       return;
@@ -388,6 +393,7 @@ function EditForm({ id, section, row }: { id: string; section: EditSection; row:
   const [confirmCancel, setConfirmCancel] = useState(false);
   // Remounts the form after a review so "More details" opens when the latest data needs it.
   const [revision, setRevision] = useState(0);
+  const inFlight = useRef(false);
 
   const close = () => goBack({ r: id });
 
@@ -401,20 +407,27 @@ function EditForm({ id, section, row }: { id: string; section: EditSection; row:
   };
 
   const save = async () => {
-    if (busy || offline) return;
+    if (inFlight.current || offline) return;
     const patch = toPatch(form.base, form.values);
     if (!patch) {
       close();
       return;
     }
     if (!canSaveEdit(form.base, form.values)) return;
+    inFlight.current = true;
     setBusy(true);
     setFailure(null);
-    const result = await actions.updateFields(id, patch, form.baseVersion);
+    let result: MutationResult;
+    try {
+      result = await actions.updateFields(id, patch, form.baseVersion);
+    } catch {
+      result = { ok: false, reason: 'failed', message: "Couldn't save — check signal and try again" };
+    }
     if (result.ok) {
       close();
       return;
     }
+    inFlight.current = false;
     setBusy(false);
     switch (result.reason) {
       case 'conflict': {
@@ -442,15 +455,14 @@ function EditForm({ id, section, row }: { id: string; section: EditSection; row:
   // Someone else saved while this was open (and no 409 review is showing yet).
   const movedOn = row.rowVersion !== form.baseVersion && !busy;
 
-  const notice = (
-    <EditNotice
-      review={review}
-      failure={failure}
-      offline={offline}
-      movedOn={movedOn && review === null}
-      onReview={() => startReview(row)}
-    />
-  );
+  // null when there is nothing to say, so the form adds no empty notice row.
+  const notice = editNotice({
+    review,
+    failure,
+    offline,
+    movedOn: movedOn && review === null,
+    onReview: () => startReview(row),
+  });
 
   return (
     <>
@@ -488,7 +500,7 @@ function EditForm({ id, section, row }: { id: string; section: EditSection; row:
 
 const NO_PHOTOS: readonly DraftPhoto[] = Object.freeze([]);
 
-function EditNotice({
+function editNotice({
   review,
   failure,
   offline,
@@ -500,7 +512,7 @@ function EditNotice({
   offline: boolean;
   movedOn: boolean;
   onReview: () => void;
-}) {
+}): ReactNode {
   const parts: ReactNode[] = [];
   if (offline) {
     parts.push(
@@ -559,17 +571,30 @@ function OutboxEditor({ mutationId }: { mutationId: string }) {
   const selector = useCallback((s: StoreState) => s.outbox.find((o) => o.mutationId === mutationId) ?? null, [mutationId]);
   const item = useStoreSelector(selector);
   const hydrated = useStoreSelector(selectHydrated);
+  // The job was shown once: if it then leaves the outbox (sent, discarded here or in another tab), close.
+  const [seen, setSeen] = useState(false);
+  if (item && !seen) setSeen(true);
+  const leaving = useRef(false);
+  const leave = useCallback(() => {
+    if (leaving.current) return;
+    leaving.current = true;
+    goBack({});
+  }, []);
+  useEffect(() => {
+    if (seen && !item) leave();
+  }, [seen, item, leave]);
+
   if (!item) {
     return (
       <FormFrame title="Not sent">
-        {hydrated ? <EmptyState icon="search" title="Request not found" action={{ label: 'Back', onClick: () => goBack({}) }} /> : null}
+        {hydrated && !seen ? <EmptyState icon="search" title="Request not found" action={{ label: 'Back', onClick: leave }} /> : null}
       </FormFrame>
     );
   }
-  return <OutboxForm item={item} />;
+  return <OutboxForm item={item} onLeave={leave} />;
 }
 
-function OutboxForm({ item }: { item: OutboxItem }) {
+function OutboxForm({ item, onLeave }: { item: OutboxItem; onLeave: () => void }) {
   const { actions } = useAppStore();
   const id = item.mutationId;
   // What the server rejected: errors show on fields until they are edited.
@@ -578,6 +603,8 @@ function OutboxForm({ item }: { item: OutboxItem }) {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const inFlight = useRef(false);
   const photos = useMemo<DraftPhoto[]>(
     () => item.photos.map((p) => ({ photoId: p.photoId, blob: p.blob, thumbBlob: p.thumbBlob, width: 0, height: 0 })),
     [item.photos],
@@ -591,31 +618,36 @@ function OutboxForm({ item }: { item: OutboxItem }) {
   const unplaced = needsAttention && item.lastError && Object.keys(serverErrors).length === 0 ? item.lastError.message : null;
 
   const submit = async () => {
-    if (busy) return;
+    if (inFlight.current) return;
     if (!needsAttention) {
       actions.outbox.retry(id);
-      goBack({});
+      onLeave();
       return;
     }
     if (!canSend(values, photos.length)) return;
+    inFlight.current = true;
     setBusy(true);
     setFailure(null);
     try {
       await actions.outbox.update(id, toCreateBody(values, id));
       actions.outbox.resend(id);
-      goBack({});
+      onLeave();
     } catch {
+      inFlight.current = false;
       setBusy(false);
       setFailure("Couldn't save on this phone — try again");
     }
   };
 
   const discard = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     try {
       await actions.outbox.discard(id);
-      goBack({});
+      onLeave();
     } catch {
+      inFlight.current = false;
       setBusy(false);
       setFailure("Couldn't discard — try again");
     }
@@ -647,7 +679,7 @@ function OutboxForm({ item }: { item: OutboxItem }) {
         submitLabel={needsAttention ? 'Resend' : 'Send now'}
         submitDisabled={needsAttention ? !canSend(values, photos.length) || Object.keys(errors).length > 0 : item.state === 'sending'}
         onSubmit={() => void submit()}
-        onCancel={() => goBack({})}
+        onCancel={() => (toPatch(rejected, values) ? setConfirmLeave(true) : onLeave())}
         onDiscard={needsAttention ? () => setConfirmDiscard(true) : undefined}
         readOnly={!needsAttention}
       />
@@ -658,6 +690,15 @@ function OutboxForm({ item }: { item: OutboxItem }) {
         keepLabel="Keep"
         confirmLabel="Discard"
         onConfirm={() => void discard()}
+      />
+      {/* Leaving keeps the job as it was; only the edits made here are dropped. */}
+      <Confirm
+        open={confirmLeave}
+        onOpenChange={setConfirmLeave}
+        title="Discard changes?"
+        keepLabel="Keep editing"
+        confirmLabel="Discard"
+        onConfirm={onLeave}
       />
     </>
   );

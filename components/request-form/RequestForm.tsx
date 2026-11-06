@@ -109,8 +109,9 @@ const TAP_SLOP_PX = 10;
 
 export function RequestForm(props: RequestFormProps) {
   const { mode, section, values, errors = {}, busy } = props;
-  const readOnly = !!props.readOnly;
-  const locked = busy || readOnly;
+  // Nothing changes while a send is in flight: whatever is typed then would be lost when the draft clears.
+  const readOnly = !!props.readOnly || busy;
+  const locked = readOnly;
   const onChange = (next: RequestFormValues) => {
     if (!readOnly) props.onChange(next);
   };
@@ -351,7 +352,7 @@ export function RequestForm(props: RequestFormProps) {
                         value={values.gender}
                         onValueChange={(v) => set('gender', v as Gender)}
                         aria-label="Gender"
-                        disabled={readOnly}
+                        disabled={!!props.readOnly}
                       >
                         {GENDERS.map((g) => (
                           <SegmentedControl.Item
