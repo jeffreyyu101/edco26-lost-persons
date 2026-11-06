@@ -1,26 +1,30 @@
-// Request form rules (components/request-form/form-logic.ts): validation mapping, changed-keys diff,
-// the 409 review, the duplicate hint, chip append, photo intake and the create-outcome toasts.
-// Synthetic data only.
+// Request form rules (components/request-form/form-logic.ts): sections, free-text age and gender (the
+// gender chips), validation mapping, changed-keys diff, the 409 review, the duplicate hint, chip append,
+// photo intake, the keyboard helpers and ids. Synthetic data only.
 import { describe, expect, it, vi } from 'vitest';
 import type { RequestSummary } from '@/lib/api-types';
 import { EMPTY_FORM_VALUES, formValuesFromRequest, toPatch, type RequestFormValues } from '@/lib/client/form-values';
 import { LIMITS, STATUS, isUuid } from '@/lib/domain';
 import {
+  GENDER_CHIPS,
+  KEYBOARD_MIN_PX,
   MORE_FIELDS,
   canSaveEdit,
   changedKeys,
   findDuplicate,
+  genderAfterChip,
+  genderChipFor,
+  keyboardOpen,
   lastSeenWithChip,
   legacyPostOf,
   moreFieldsFor,
-  moreStartsOpen,
   nameKey,
   newUuid,
   onlyOutsideFormChanged,
   photoIntake,
   rebaseOnConflict,
+  revealDelta,
   sameDuplicate,
-  sanitizeAge,
   visibleErrors,
 } from '@/components/request-form/form-logic';
 
@@ -68,34 +72,58 @@ function row(patch: Partial<RequestSummary> = {}): RequestSummary {
 }
 
 describe('sections and More details', () => {
-  it('shows every More field for create / all, the person ones for person, none for friend', () => {
+  it('More details holds the person extras, in order, with the person (all, person) and not for friend', () => {
+    expect(MORE_FIELDS).toEqual(['hair', 'heightBuild', 'identifyingFeatures', 'physicalDescription', 'additionalNotes']);
     expect(moreFieldsFor('all')).toEqual(MORE_FIELDS);
-    expect(moreFieldsFor('person')).toEqual(['hair', 'heightBuild', 'identifyingFeatures', 'physicalDescription', 'additionalNotes']);
+    expect(moreFieldsFor('person')).toEqual(MORE_FIELDS);
     expect(moreFieldsFor('friend')).toEqual([]);
   });
 
-  it('opens More details when one of its fields holds text in that section', () => {
-    expect(moreStartsOpen(v(), 'all')).toBe(false);
-    expect(moreStartsOpen(v({ hair: '  ' }), 'all')).toBe(false);
-    expect(moreStartsOpen(v({ hair: 'Blond' }), 'person')).toBe(true);
-    expect(moreStartsOpen(v({ contactNotes: 'Call after 11' }), 'all')).toBe(true);
-    // Contact notes live in the Friend group for the friend section, not behind More details.
-    expect(moreStartsOpen(v({ contactNotes: 'Call after 11' }), 'person')).toBe(false);
+  it('contact notes belong to Friend or family, never to More details', () => {
+    expect(MORE_FIELDS).not.toContain('contactNotes');
+  });
+});
+
+describe('free-text age and gender', () => {
+  it('offers Male, Female and Other as quick fills', () => {
+    expect(GENDER_CHIPS).toEqual(['Male', 'Female', 'Other']);
+  });
+
+  it('turns on the chip the typed gender matches, ignoring case and outer spaces', () => {
+    expect(genderChipFor('Female')).toBe('Female');
+    expect(genderChipFor('  male ')).toBe('Male');
+    expect(genderChipFor('OTHER')).toBe('Other');
+    expect(genderChipFor('Non-binary')).toBeNull();
+    expect(genderChipFor('Fem')).toBeNull();
+    expect(genderChipFor('')).toBeNull();
+  });
+
+  it('a chip writes its word, replacing what was typed; tapping the chip that is on clears it', () => {
+    expect(genderAfterChip('', 'Female')).toBe('Female');
+    expect(genderAfterChip('Non-binary', 'Other')).toBe('Other');
+    expect(genderAfterChip('Male', 'Female')).toBe('Female');
+    expect(genderAfterChip('Female', 'Female')).toBe('');
+    expect(genderAfterChip('female', 'Female')).toBe('');
+  });
+
+  it('never flags an age or a gender on the phone, and saves an edit with any age text', () => {
+    for (const age of ['mid-20s', '24', '121', 'early 30s', '18–21', '~40']) {
+      expect(visibleErrors(undefined, v({ age }), null)).toEqual({});
+    }
+    expect(visibleErrors(undefined, v({ gender: 'Non-binary' }), null)).toEqual({});
+    const base = v({ name: 'TEST-F Kayla', age: '24', reportingLocation: 'FA 3 – Kinetic' });
+    expect(canSaveEdit(base, { ...base, age: 'mid-20s' })).toBe(true);
+    expect(canSaveEdit(base, { ...base, gender: 'Non-binary' })).toBe(true);
+    expect(changedKeys(base, { ...base, age: ' mid-20s ', gender: 'Female' })).toEqual(['age', 'gender']);
   });
 });
 
 describe('validation mapping', () => {
-  it('keeps digits only in Age, at most 3', () => {
-    expect(sanitizeAge('19')).toBe('19');
-    expect(sanitizeAge(' ~2O yrs')).toBe('2');
-    expect(sanitizeAge('1234')).toBe('123');
-    expect(sanitizeAge('')).toBe('');
-  });
-
-  it('flags an age outside 0–120', () => {
-    expect(visibleErrors(undefined, v({ age: '121' }), null)).toEqual({ age: '0–120' });
-    expect(visibleErrors(undefined, v({ age: '120' }), null)).toEqual({});
-    expect(visibleErrors(undefined, v({ age: '0' }), null)).toEqual({});
+  it('shows a server error on age while the rejected text is unchanged', () => {
+    const rejected = v({ age: 'mid-20s' });
+    const errors = { age: 'Must be 40 characters or fewer' };
+    expect(visibleErrors(errors, rejected, rejected)).toEqual(errors);
+    expect(visibleErrors(errors, { ...rejected, age: '25' }, rejected)).toEqual({});
   });
 
   it('shows a server error only while the rejected value is unchanged', () => {
@@ -119,7 +147,8 @@ describe('validation mapping', () => {
     expect(canSaveEdit(base, base)).toBe(false);
     expect(canSaveEdit(base, { ...base, name: '  TEST-F   Kayla ' })).toBe(false); // same after normalising
     expect(canSaveEdit(base, { ...base, hair: 'Blond' })).toBe(true);
-    expect(canSaveEdit(base, { ...base, hair: 'Blond', age: '200' })).toBe(false);
+    // Age is free text: nothing typed there blocks saving the rest.
+    expect(canSaveEdit(base, { ...base, hair: 'Blond', age: '200' })).toBe(true);
     expect(canSaveEdit(base, { ...base, reportingLocation: 'Other', otherLocation: '' })).toBe(false);
     expect(canSaveEdit(base, { ...base, reportingLocation: 'Other', otherLocation: 'Gate 2' })).toBe(true);
     // A legacy post ('' in the form) does not block editing other fields.
@@ -301,6 +330,27 @@ describe('photo intake (max 3)', () => {
     expect(photoIntake(2, 2)).toEqual({ take: 1, dropped: 1 });
     expect(photoIntake(3, 1)).toEqual({ take: 0, dropped: 1 });
     expect(photoIntake(1, 0)).toEqual({ take: 0, dropped: 0 });
+  });
+});
+
+describe('the on-screen keyboard', () => {
+  it('counts a keyboard only when the visual viewport is clearly shorter at no zoom', () => {
+    expect(keyboardOpen(844, 844, 1)).toBe(false);
+    expect(keyboardOpen(844, 844 - KEYBOARD_MIN_PX, 1)).toBe(false); // URL bar, accessory strip
+    expect(keyboardOpen(844, 508, 1)).toBe(true); // iPhone 14 keyboard
+    expect(keyboardOpen(844, 400, 2)).toBe(false); // pinch zoom, no keyboard
+  });
+
+  it('scrolls the focused row into view with a margin, never past its top', () => {
+    const view = { top: 60, bottom: 440 };
+    // Already in view.
+    expect(revealDelta(view, { top: 100, bottom: 200 }, 12)).toBe(0);
+    // Below the keyboard edge: down just enough to show its bottom.
+    expect(revealDelta(view, { top: 420, bottom: 500 }, 12)).toBe(72);
+    // Above the top: up to show its top.
+    expect(revealDelta(view, { top: 20, bottom: 80 }, 12)).toBe(-52);
+    // Taller than the view (Last seen with its chips on a short screen): its top lands at the top.
+    expect(revealDelta(view, { top: 300, bottom: 900 }, 12)).toBe(228);
   });
 });
 

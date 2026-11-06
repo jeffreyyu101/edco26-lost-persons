@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  FIELD_COLUMNS,
+  LIMITS,
   STATUS,
   STATUSES,
   STATUS_META,
@@ -48,7 +50,7 @@ function sqlBlock(marker: string): string {
 describe('statuses', () => {
   it('labels, tones and glyphs match the spec table', () => {
     expect(STATUS_META[STATUS.waiting]).toMatchObject({ label: 'Waiting for check', tone: 'blue', glyph: 'waiting', bucket: 'open' });
-    expect(STATUS_META[STATUS.notInMedical]).toMatchObject({ label: 'Not in medical', tone: 'amber', glyph: 'notInMedical', bucket: 'answered' });
+    expect(STATUS_META[STATUS.notInMedical]).toMatchObject({ label: 'Not in medical', tone: 'gray', glyph: 'notInMedical', bucket: 'closed' });
     expect(STATUS_META[STATUS.inMedical]).toMatchObject({ label: 'In medical · friend coming', shortLabel: 'In medical', tone: 'green', glyph: 'inMedical', bucket: 'open' });
     expect(STATUS_META[STATUS.reunited]).toMatchObject({ label: 'Reunited', tone: 'gray', glyph: 'closed', bucket: 'closed' });
     expect(STATUS_META[STATUS.discharged]).toMatchObject({ label: 'Discharged', tone: 'gray', glyph: 'closed', bucket: 'closed' });
@@ -283,6 +285,35 @@ describe('names', () => {
     expect(ageGender(null, 'Male')).toBe('M');
     expect(ageGender(0, null)).toBe('0');
     expect(ageGender(null, null)).toBe('');
+  });
+
+  it('free-text age and gender (Jeffrey, 2026-11-06)', () => {
+    expect(ageGender('mid-20s', 'Female')).toBe('mid-20s F');
+    expect(ageGender(' 24 ', 'Male')).toBe('24 M');
+    expect(ageGender('0', null)).toBe('0');
+    expect(ageGender('   ', 'Female')).toBe('F');
+    expect(ageGender('', null)).toBe('');
+    // Typed gender: the common words still shorten; anything else is left to the profile, which shows it whole.
+    for (const g of ['male', ' MALE ', 'm', 'Man']) expect(genderShort(g), g).toBe('M');
+    for (const g of ['female', 'F', 'woman', ' Female ']) expect(genderShort(g), g).toBe('F');
+    for (const g of ['Non-binary', 'Other', 'unsure', '', '  ']) expect(genderShort(g), g).toBe('');
+    expect(ageGender('early 30s', 'Non-binary')).toBe('early 30s');
+  });
+
+  it('lp_clean_fields enforces exactly the LIMITS (age and gender are free text, ≤40)', () => {
+    expect(LIMITS.age).toBe(40);
+    expect(LIMITS.gender).toBe(40);
+    const start = MIGRATION.indexOf('v_limit := case v_key');
+    expect(start, 'the lp_clean_fields limit table').toBeGreaterThan(0);
+    const block = MIGRATION.slice(start, MIGRATION.indexOf('end;', start));
+    const sql = Object.fromEntries([...block.matchAll(/when '([a-z_]+)' then (\d+)/g)].map((m) => [m[1], Number(m[2])]));
+    for (const [field, limit] of Object.entries(LIMITS)) {
+      const column = field === 'name' ? 'first_name' : FIELD_COLUMNS[field as keyof typeof FIELD_COLUMNS];
+      expect(sql[column], field).toBe(limit);
+    }
+    // No value list for gender any more, and no numeric range for age.
+    expect(MIGRATION).not.toMatch(/'Male', 'Female', 'Other'/);
+    expect(MIGRATION).not.toMatch(/field:age'/);
   });
 });
 

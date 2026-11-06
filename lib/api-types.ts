@@ -3,7 +3,7 @@
 //
 // Shape rule (A1): the database RPCs return snake_case JSON. The server maps it to these camelCase
 // types through an EXPLICIT allowlist (legacy columns never leak through) and adds the derived fields.
-import type { EditableField, Gender, PhotoTiming, PhotoTimingAny, StatusKind, StatusValue } from './domain';
+import type { EditableField, PhotoTiming, PhotoTimingAny, StatusKind, StatusValue } from './domain';
 import type { CreateRequestBody, RequestPatch } from './validation';
 
 /**
@@ -27,9 +27,10 @@ export interface RequestSummary {
   firstName: string | null;
   lastName: string | null;
   // Person
-  age: number | null;
-  /** Male / Female / Other, or a legacy free-text value, or null. */
-  gender: Gender | (string & {}) | null;
+  /** Free text as typed ("24", "mid-20s"), or null. Ages saved as numbers before 2026-11-06 read back as text ("24"). */
+  age: string | null;
+  /** Free text (Male / Female / Other are the form's quick-fill options), or null. */
+  gender: string | null;
   heightBuild: string | null;
   hair: string | null;
   identifyingFeatures: string | null;
@@ -207,6 +208,13 @@ export interface Stats {
   } | null;
   /** Mean minutes from logged to first answer, over answers in the last 2 hours; null if none. */
   avgAnswerMinutes: number | null;
+  /**
+   * v2.2 (dashboard Performance, Jeffrey 2026-11-06). Mean minutes from the In medical answer to Reunited, over
+   * reunions in the last 2 hours; null if none.
+   */
+  avgReuniteMinutes: number | null;
+  /** v2.2. Requests logged in the last 60 minutes (any status). */
+  loggedLastHour: number;
   /**
    * The 4 fixed posts always (count may be 0), then one entry per other location with open rows: Other
    * grouped by otherLocation (case-insensitive), and a legacy post value (e.g. 'FA 3') as itself. The counts

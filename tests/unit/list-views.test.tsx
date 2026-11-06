@@ -5,26 +5,35 @@ import { Theme } from '@radix-ui/themes';
 import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { BRAND_CREDIT_FOR, BRAND_CREDIT_NAMES, BRAND_KICKER } from '@/components/list/BrandCard';
 import { AllView, MineView, PendingView, SearchView } from '@/components/list/ListViews';
 import { switcherLabel } from '@/components/list/ViewSwitcher';
 import {
   NO_NAME,
+  archivedFoldLabel,
   cardDescription,
   highlightParts,
+  isClosed,
   isFresh,
+  logNumber,
+  logNumberRanges,
+  logRowLabel,
   mineFreshTone,
+  narrowStatusLabel,
   minutesPhrase,
   outboxDisplay,
   queuedStepper,
   resultCount,
   outboxRowLabel,
-  rowLabel,
   searchDisplay,
-  searchRowLabel,
+  searchLogLabel,
   snippet,
+  statusPhrase,
   statusSince,
   stepperModel,
+  updatedSince,
 } from '@/components/list/list-helpers';
+import { formatCreatedTime } from '@/lib/format';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { filterAll, mineRows, pendingGroups, searchRequests, sortNewestFirst } from '@/lib/client/selectors';
 import { StoreContext, createServerState, type AppStore, type StoreState } from '@/lib/client/store-contract';
@@ -166,10 +175,9 @@ describe('list helpers', () => {
     expect(minutesPhrase(0)).toBe('less than a minute');
     expect(minutesPhrase(1)).toBe('1 minute');
     expect(minutesPhrase(125)).toBe('2 hours');
-    expect(rowLabel(byCase(1012), '10:58')).toBe('Kayla Martinez, 19 F, 10:58. Waiting for check, FA 3, LP-1012.');
   });
 
-  it('row names start with the visible text, in the order shown (WCAG 2.5.3)', () => {
+  it('names start with the visible text where the label repeats it (WCAG 2.5.3)', () => {
     // axe's label-content-name-mismatch: the visible words must be a contiguous run of the name's words.
     const words = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim().split(' ').filter(Boolean);
     const startsWith = (name: string, visible: string) => {
@@ -177,14 +185,50 @@ describe('list helpers', () => {
       const v = words(visible);
       return v.every((w, i) => n[i] === w);
     };
-    const r = byCase(1012);
-    expect(startsWith(rowLabel(r, '10:58'), `${r.name} 19 F 10:58 Waiting for check · FA 3 · LP-1012`)).toBe(true);
     const d = outboxDisplay(outboxItem());
-    expect(startsWith(outboxRowLabel(d, '11:02'), `${d.name} ${d.ageGender} 11:02 Waiting to send · FA 3 · Not sent`)).toBe(true);
-    expect(startsWith(searchRowLabel(r, '…pink braids'), `${r.name} 19 F LP-1012 …pink braids Waiting for check`)).toBe(true);
-    expect(startsWith(searchRowLabel(r, ''), `${r.name} 19 F LP-1012 Waiting for check`)).toBe(true);
+    expect(outboxRowLabel(d, '11:02 PM')).toBe('TEST-L Queued, 30 M, 11:02 PM. Waiting to send, FA 3, Not sent.');
+    expect(startsWith(outboxRowLabel(d, '11:02 PM'), `${d.name} ${d.ageGender} 11:02 PM`)).toBe(true);
     expect(switcherLabel('Pending', 4)).toBe('Pending 4, change view');
     expect(switcherLabel('All requests', null)).toBe('All requests, change view');
+    expect(startsWith(archivedFoldLabel(6), 'Archived 6')).toBe(true);
+  });
+
+  it('updatedSince: the logger\'s own photos are part of logging; any other write is an update', () => {
+    const base = { ...byCase(1013), rowVersion: 0, photoCount: 0, updatedBy: byCase(1013).createdBy };
+    // Nothing written since: the timestamps decide (equal on insert).
+    expect(updatedSince(base)).toBe(base.updatedAt);
+    // Logged with 2 photos: the 2 uploads by the creator are not an update.
+    expect(updatedSince({ ...base, rowVersion: 2, photoCount: 2 })).toBeNull();
+    // A third write (an edit) is.
+    expect(updatedSince({ ...base, rowVersion: 3, photoCount: 2 })).toBe(base.updatedAt);
+    // Someone else's photo is.
+    expect(updatedSince({ ...base, rowVersion: 1, photoCount: 1, updatedBy: 'Sam Ortiz · Medical' })).toBe(base.updatedAt);
+    // Once answered, it is always updated.
+    expect(updatedSince({ ...base, status: STATUS.inMedical, rowVersion: 1, photoCount: 1 })).toBe(base.updatedAt);
+  });
+
+  it('log rows: a full sentence per row, the bare number, the Archived fold name', () => {
+    expect(logRowLabel(byCase(1013), '11:02 PM', 'updated 2 minutes ago')).toBe('LP-1013, T.R., Waiting for check, created 11:02 PM, updated 2 minutes ago');
+    expect(logRowLabel(byCase(1004), 'Thu 9:58 PM', 'not updated yet')).toBe('LP-1004, S.L., In medical, friend coming, created Thu 9:58 PM, not updated yet');
+    expect(logRowLabel({ ...byCase(1009), name: '' }, '10:44 PM', 'updated 6 minutes ago')).toBe('LP-1009, No name, Not in medical, created 10:44 PM, updated 6 minutes ago');
+    expect(searchLogLabel(byCase(1012), '10:58 PM', 'not updated yet', '…pink braids')).toBe('LP-1012, Kayla Martinez, Waiting for check, created 10:58 PM, not updated yet. …pink braids');
+    expect(statusPhrase(STATUS.legacyBringFriend)).toBe('In medical, friend coming');
+    expect(logNumber(998)).toBe('998');
+    // Search ranges in "LP-0998" / "LP-1012" map onto the bare number.
+    expect(logNumberRanges(1012, [[3, 7]])).toEqual([[0, 4]]);
+    expect(logNumberRanges(1012, [[3, 5]])).toEqual([[0, 2]]);
+    expect(logNumberRanges(998, [[4, 7]])).toEqual([[0, 3]]);
+    expect(logNumberRanges(998, [[0, 2]])).toEqual([]);
+    expect(archivedFoldLabel(1)).toBe('Archived 1 request');
+    expect(archivedFoldLabel(6)).toBe('Archived 6 requests');
+    // On a narrow phone only the long open label gets shorter, so the name keeps its room (review fix).
+    expect(narrowStatusLabel(STATUS.waiting)).toBe('Waiting');
+    for (const st of [STATUS.inMedical, STATUS.legacyBringFriend, STATUS.notInMedical, STATUS.reunited, STATUS.discharged, STATUS.cancelled, 'Some legacy value']) {
+      expect(narrowStatusLabel(st)).toBeNull();
+    }
+    // Not in medical is closed and grey everywhere, the stepper included.
+    expect(stepperModel(STATUS.notInMedical).color).toBe('var(--gray-9)');
+    expect(isClosed(STATUS.notInMedical)).toBe(true);
   });
 });
 
@@ -276,24 +320,263 @@ const render = (store: AppStore, node: ReactNode) =>
   );
 
 describe('list views render', () => {
-  it('All: outbox items on top, then newest first; closed rows dimmed; no skeleton with data', () => {
+  const idOf = (n: number) => `5eed0000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  /** The opening tag of the element carrying data-request-id for LP-n (its class and attributes). */
+  const rowTag = (html: string, n: number) => {
+    const at = html.indexOf(`data-request-id="${idOf(n)}"`);
+    if (at < 0) return '';
+    return html.slice(html.lastIndexOf('<', at), html.indexOf('>', at) + 1);
+  };
+  /**
+   * What a screen reader says for LP-n's row (it has no aria-label): its content minus everything marked
+   * aria-hidden, which leaves the one screen-reader-only sentence.
+   */
+  const spoken = (html: string, n: number) => {
+    const at = html.indexOf(`data-request-id="${idOf(n)}"`);
+    const button = html.slice(html.indexOf('>', at) + 1, html.indexOf('</button>', at));
+    // Each aria-hidden cell is a top-level child of the row: drop it with everything inside it.
+    let out = button;
+    for (;;) {
+      const start = out.search(/<span [^>]*aria-hidden="true"[^>]*>/);
+      if (start < 0) break;
+      let depth = 0;
+      let i = start;
+      const tag = /<\/?span\b[^>]*>/g;
+      tag.lastIndex = start;
+      for (let m = tag.exec(out); m; m = tag.exec(out)) {
+        depth += m[0].startsWith('</') ? -1 : 1;
+        if (depth === 0) {
+          i = m.index + m[0].length;
+          break;
+        }
+      }
+      out = out.slice(0, start) + out.slice(i);
+    }
+    return out
+      .replace(/<[^>]+>/g, '')
+      .replace(/&#x27;/g, "'")
+      .replace(/&amp;/g, '&')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+  /** LP-n's cell in one column, as HTML (cells hold no nested data-col). */
+  const cellHtml = (html: string, n: number, col: string) => {
+    const at = html.indexOf(`data-request-id="${idOf(n)}"`);
+    const button = html.slice(at, html.indexOf('</button>', at));
+    const start = button.indexOf(`data-col="${col}"`);
+    if (start < 0) return null;
+    const cell = button.slice(button.indexOf('>', start) + 1);
+    // The cell ends where the next column starts.
+    const end = cell.search(/<span [^>]*data-col="/);
+    return end < 0 ? cell : cell.slice(0, end);
+  };
+  const text = (cell: string) =>
+    cell
+      .replace(/<svg[^]*?<\/svg>/g, '')
+      .replace(/<[^>]+>/g, '')
+      .replace(/<!-- -->/g, '')
+      .trim();
+  /**
+   * What LP-n's row shows in one column from 400 px up: the cell's text without the screen-reader-only words
+   * and without the narrow-phone label.
+   */
+  const shown = (html: string, n: number, col: string) => {
+    const cell = cellHtml(html, n, col);
+    if (cell === null) return null;
+    return text(cell.replace(/<span class="[^"]*vh[^"]*">[^<]*<\/span>/g, '').replace(/<span class="[^"]*stNarrow[^"]*">[^<]*<\/span>/g, ''));
+  };
+  /** The status label LP-n's row shows under 400 px instead ("Waiting"), or null when it keeps its label. */
+  const narrow = (html: string, n: number) => {
+    const cell = cellHtml(html, n, 'status') ?? '';
+    const m = /<span class="[^"]*stNarrow[^"]*">([^<]*)<\/span>/.exec(cell);
+    if (!m) return null;
+    // Narrow and wide labels come as a pair, so CSS can show exactly one of them.
+    expect(cell).toMatch(/<span class="[^"]*stWide[^"]*">[^<]+<\/span>/);
+    return m[1];
+  };
+
+  it('All (option B): queued on top, open rows newest first, every closed one folded into "Archived N"', () => {
     const store = storeWith((s) => ({ ...s, outbox: [outboxItem(), outboxItem({ mutationId: '1b5a3c2e-8d4f-4a1b-9c7e-2f6d8a1b3c4d', state: 'needs_attention', createdAt: NOW - 120_000 })] }));
     const html = render(store, <AllView status={null} post={null} />);
     expect(html).toContain('data-testid="request-list"');
+    expect(html).not.toContain('list-skeleton');
+    // The large title is the view menu; no "Newest first", no separate ×, no bell, no live dot.
+    expect(html).toContain('All requests');
+    expect(html).toMatch(/aria-label="All requests \d+, change view"/);
+    expect(html).not.toContain('Newest first');
+    expect(html).not.toContain('Back to all requests');
+    expect(html).not.toContain('New-request alerts');
+    expect(html).not.toContain('live-dot');
+    expect(html).not.toContain('connection-indicator');
+    // One quiet column header. "Created" and "Updated" are one pair over both time columns, so the wider
+    // "Updated" never sizes its column on its own (review fix: it took the names' room).
+    const cols = html.slice(html.indexOf('data-testid="log-columns"'));
+    expect(cols).toMatch(/^[^]*?>#<[^]*?>Friend<[^]*?>Status<[^]*?>Created<[^]*?>Updated</);
+    expect(cols).toMatch(/^[^]*?<span class="[^"]*c45[^"]*"><span>Created<\/span><span>Updated<\/span><\/span>/);
+
     const queued = html.indexOf('Waiting to send');
     const attention = html.indexOf('Needs attention');
-    const first = html.indexOf('data-request-id="5eed0000-0000-4000-8000-000000001013"');
-    expect(queued).toBeGreaterThan(0);
+    expect(queued).toBeGreaterThan(html.indexOf('data-testid="log-columns"'));
     expect(attention).toBeGreaterThan(queued);
-    expect(first).toBeGreaterThan(attention);
-    expect(html).toContain('Not sent');
-    expect(html).not.toContain('list-skeleton');
-    // C.H. (LP-1003, Reunited) is dimmed; T.R. (Waiting) is not.
-    const row = (n: number) => html.slice(html.indexOf(`data-request-id="5eed0000-0000-4000-8000-00000000${n}"`) - 200, html.indexOf(`data-request-id="5eed0000-0000-4000-8000-00000000${n}"`));
-    expect(row(1003)).toMatch(/muted/);
-    expect(row(1013)).not.toMatch(/muted/);
-    expect(html).toContain('All requests');
-    expect(html).toContain('Newest first');
+    // Open rows: Waiting (blue) and In medical (green), newest first, after the queued ones.
+    const open = [1013, 1012, 1011, 1010, 1007, 1004, 1005];
+    const at = open.map((n) => html.indexOf(`data-request-id="${idOf(n)}"`));
+    expect(at[0]).toBeGreaterThan(attention);
+    for (let i = 1; i < at.length; i++) expect(at[i]).toBeGreaterThan(at[i - 1]!);
+    // Every closed one (Not in medical included) is folded: not rendered, counted in the fold.
+    const all = [...store.getState().confirmed.values()];
+    const closed = all.filter((r) => statusMeta(r.status).bucket === 'closed');
+    expect(closed.map((r) => r.caseNumber)).toEqual(expect.arrayContaining([1009, 1008, 1006, 1003, 1002, 1001]));
+    for (const r of closed) expect(html).not.toContain(`data-request-id="${r.id}"`);
+    const fold = html.slice(html.indexOf('data-testid="closed-fold"') - 300, html.indexOf('data-testid="closed-fold"') + 600);
+    expect(fold).toContain('aria-expanded="false"');
+    expect(fold).toContain(`aria-label="Archived ${closed.length} requests"`);
+    expect(fold).toMatch(new RegExp(`>Archived</span> <span[^>]*>${closed.length}</span>`));
+    expect(fold).not.toContain('>Closed<');
+    expect(html.indexOf('data-testid="closed-fold"')).toBeGreaterThan(at.at(-1)!);
+  });
+
+  it('All: the Archived fold opens in place (from prefs), greyed rows newest first in the same grid', () => {
+    const store = storeWith((s) => ({ ...s, prefs: { ...s.prefs, closedExpanded: true } }));
+    const html = render(store, <AllView status={null} post={null} />);
+    const fold = html.indexOf('data-testid="closed-fold"');
+    const group = html.indexOf('data-testid="closed-rows"');
+    expect(html.slice(fold - 300, fold)).toContain('aria-expanded="true"');
+    expect(group).toBeGreaterThan(fold);
+    expect(html.slice(html.lastIndexOf('<div', group), group)).toContain('aria-label="Archived requests"');
+    // Newest created first: 38, 45, 65, 70, 82 and 93 minutes ago, then yesterday's.
+    const closed = [1009, 1008, 1003, 1006, 1002, 1001, 1000];
+    const at = closed.map((n) => html.indexOf(`data-request-id="${idOf(n)}"`));
+    expect(at[0]).toBeGreaterThan(group);
+    for (let i = 1; i < at.length; i++) expect(at[i]).toBeGreaterThan(at[i - 1]!);
+    // Greyed: Not in medical and Reunited rows carry the closed style; open rows do not.
+    expect(rowTag(html, 1009)).toContain('data-closed');
+    expect(rowTag(html, 1003)).toContain('data-closed');
+    expect(rowTag(html, 1013)).not.toContain('data-closed');
+  });
+
+  it('All, Pending and My requests open with the brand card, above the sticky bar; Search does not', () => {
+    const store = storeWith((s) => ({ ...s, myIds: new Set([...s.confirmed.keys()]) }));
+    const views = [
+      ['All', <AllView key="all" status={null} post={null} />],
+      ['Pending', <PendingView key="pending" />],
+      ['My requests', <MineView key="mine" />],
+    ] as const;
+    for (const [name, node] of views) {
+      const html = render(store, node);
+      const card = html.indexOf('data-testid="brand-card"');
+      const title = html.indexOf('data-testid="view-switcher"');
+      expect(card, name).toBeGreaterThan(0);
+      // The first thing in the view: before the view's root has anything else in it, and before the title.
+      expect(html.slice(0, card), name).not.toContain('data-testid="view-switcher"');
+      expect(html.indexOf('data-testid="brand-card"', card + 1), name).toBe(-1);
+      expect(card, name).toBeLessThan(title);
+      // The card's own markup: up to the sticky bar's <header>, which follows it directly.
+      const header = html.indexOf('<header', card);
+      expect(header, name).toBeLessThan(title);
+      const brand = html.slice(html.lastIndexOf('<div', card), header).replace(/<!-- -->/g, '');
+      expect(brand, name).toMatch(/<\/p><\/div><div class="[^"]*sticky[^"]*">$/);
+      // The real logos, sized up front (no shift when they load), EDC first, a divider, Ground Control.
+      expect(brand, name).toMatch(/<img [^>]*src="\/logos\/edc-orlando.png" alt="EDC Orlando" width="194" height="132"/);
+      expect(brand, name).toMatch(/<img [^>]*src="\/logos\/ground-control.png" alt="Ground Control" width="313" height="120"/);
+      expect(brand.indexOf('edc-orlando.png'), name).toBeLessThan(brand.indexOf('ground-control.png'));
+      // Event kicker (capitals come from CSS), the big title with "in medical?" in its own span, the credit.
+      expect(brand, name).toContain(`>${BRAND_KICKER}</p>`);
+      expect(BRAND_KICKER).toBe('Event operations · November 6–8, 2026');
+      expect(brand, name).toMatch(/>Is my friend <span class="[^"]*accent[^"]*">in medical\?<\/span><\/p>/);
+      expect(`${BRAND_CREDIT_NAMES} for ${BRAND_CREDIT_FOR}`).toBe('Jeffrey & Brian for Ground Control / Headliner Experience');
+      // On a phone the credit breaks before "for" (CSS), so the card's height never depends on the font.
+      expect(brand, name).toMatch(/>Built by <b>Jeffrey &amp; Brian<\/b> <span class="[^"]*creditFor[^"]*">for Ground Control \/ Headliner Experience<\/span><\/p>/);
+      // Decoration is hidden from screen readers; the card adds no heading (the view menu title stays the h1).
+      expect(brand, name).toMatch(/class="[^"]*orbit[^"]*" aria-hidden="true"/);
+      expect(brand, name).not.toMatch(/<h[1-6][\s>]/);
+      expect(html.match(/<h1[\s>]/g)?.length, name).toBe(1);
+    }
+    // Search keeps its own bar (the field takes over the header), with no brand card.
+    expect(render(store, <SearchView q="" />)).not.toContain('brand-card');
+    expect(render(store, <SearchView q="pink" />)).not.toContain('brand-card');
+  });
+
+  it('the brand card is there before any data (skeletons and the error state), so nothing moves when rows load', () => {
+    const loading = render(storeWith((s) => ({ ...s, hasData: false, hydrated: false })), <AllView status={null} post={null} />);
+    expect(loading).toContain('list-skeleton');
+    expect(loading.indexOf('data-testid="brand-card"')).toBeGreaterThan(0);
+    expect(loading.indexOf('data-testid="brand-card"')).toBeLessThan(loading.indexOf('list-skeleton'));
+    const failed = render(storeWith((s) => ({ ...s, hasData: false, hydrated: true, connection: 'error' })), <PendingView />);
+    expect(failed).toContain('Can&#x27;t reach the log');
+    expect(failed).toContain('data-testid="brand-card"');
+  });
+
+  it('only All archives: Pending lists no closed request; My requests shows the reporter theirs, unfolded', () => {
+    const store = storeWith((s) => ({ ...s, myIds: new Set([...s.confirmed.keys()]), prefs: { ...s.prefs, closedExpanded: false } }));
+    const pending = render(store, <PendingView />);
+    expect(pending).not.toContain('data-testid="closed-fold"');
+    for (const r of store.getState().confirmed.values()) {
+      if (statusMeta(r.status).bucket === 'closed') expect(pending).not.toContain(`data-request-id="${r.id}"`);
+    }
+    // My requests: no Archived fold, and Not in medical (LP-1009) and Reunited (LP-1003) are on the page.
+    const mine = render(store, <MineView />);
+    expect(mine).not.toContain('data-testid="closed-fold"');
+    expect(mine).not.toContain('Archived');
+    expect(mine).toContain(`data-request-id="${idOf(1009)}"`);
+    expect(mine).toContain(`data-request-id="${idOf(1003)}"`);
+  });
+
+  it('All rows: number, name, status, created with AM/PM, updated as "—" or a compact age; full-sentence names', () => {
+    const now = Date.now();
+    const store = storeWith((s) => s);
+    const html = render(store, <AllView status={null} post={null} />);
+    const row = (n: number) => store.getState().confirmed.get(idOf(n))!;
+    // T.R. (LP-1013) was logged a minute ago and never changed: "—".
+    const tr = row(1013);
+    const created = formatCreatedTime(tr.createdAt, now, 'America/New_York');
+    expect(created).toMatch(/^(\w{3} )?\d{1,2}:\d{2} (AM|PM)$/);
+    // The row's name is its content (no aria-label, so it always says what is shown): one sentence.
+    expect(rowTag(html, 1013)).not.toContain('aria-label');
+    expect(spoken(html, 1013)).toBe(logRowLabel(tr, created, 'not updated yet'));
+    expect(spoken(html, 1013)).toBe(`LP-1013, T.R., Waiting for check, created ${created}, not updated yet`);
+    // What it shows: the bare number, the name, the blue status, the created time, "—".
+    expect(shown(html, 1013, 'number')).toBe('1013');
+    expect(shown(html, 1013, 'name')).toBe('T.R.');
+    expect(shown(html, 1013, 'status')).toBe('Waiting for check');
+    // Under 400 px it reads "Waiting" (the name keeps its room); the sentence above still says it in full.
+    expect(narrow(html, 1013)).toBe('Waiting');
+    expect(shown(html, 1013, 'created')).toBe(created);
+    expect(shown(html, 1013, 'updated')).toBe('—');
+    expect(html.slice(html.indexOf(`data-request-id="${idOf(1013)}"`))).toMatch(/^[^]*?data-col="status" data-tone="blue"/);
+    // Jordan Diaz (LP-1007) moved to In medical 2 minutes ago: green, "2m" (or 1m/3m at a minute edge).
+    expect(spoken(html, 1007)).toMatch(/^LP-1007, Jordan Diaz, In medical, friend coming, created \S+ (AM|PM), updated [123] minutes? ago$/);
+    expect(shown(html, 1007, 'status')).toBe('In medical');
+    expect(narrow(html, 1007)).toBeNull();
+    expect(shown(html, 1007, 'updated')).toMatch(/^[123]m$/);
+    expect(html.slice(html.indexOf(`data-request-id="${idOf(1007)}"`))).toMatch(/^[^]*?data-col="status" data-tone="green"/);
+    // Kayla Martinez (LP-1012) was logged with 2 photos and edited since: updated.
+    expect(shown(html, 1012, 'updated')).toMatch(/^\d+m$/);
+  });
+
+  it('search rows: the matched text under the name is part of the spoken sentence', () => {
+    const now = Date.now();
+    const store = storeWith((s) => s);
+    const html = render(store, <SearchView q="ferris" />);
+    const df = store.getState().confirmed.get(idOf(1011))!;
+    const created = formatCreatedTime(df.createdAt, now, 'America/New_York');
+    expect(shown(html, 1011, 'match')).toBe('Ferris wheel line');
+    expect(spoken(html, 1011)).toBe(searchLogLabel(df, created, 'not updated yet', 'Ferris wheel line'));
+  });
+
+  it('All filtered (status, post, open): one list, closed rows greyed in place, no fold, no queued rows', () => {
+    const store = storeWith((s) => ({ ...s, outbox: [outboxItem()] }));
+    const html = render(store, <AllView status={null} post="FA 3 – Kinetic" />);
+    expect(html).not.toContain('data-testid="closed-fold"');
+    expect(html).not.toContain('Waiting to send');
+    // LP-1009 (Not in medical) and LP-1002 (Discharged) are at FA 3: listed in place, greyed.
+    expect(html).toContain(`data-request-id="${idOf(1009)}"`);
+    expect(rowTag(html, 1009)).toContain('data-closed');
+    expect(rowTag(html, 1012)).not.toContain('data-closed');
+    expect(html.indexOf(`data-request-id="${idOf(1012)}"`)).toBeLessThan(html.indexOf(`data-request-id="${idOf(1009)}"`));
+    const byStatus = render(store, <AllView status={STATUS.notInMedical} post={null} />);
+    expect(byStatus).not.toContain('data-testid="closed-fold"');
+    expect(rowTag(byStatus, 1009)).toContain('data-closed');
   });
 
   it('All from a dashboard bar (post + open) shows an Open chip and a post chip with the open count', () => {
@@ -331,15 +614,49 @@ describe('list views render', () => {
     expect(html).toContain('Can&#x27;t reach the log');
   });
 
-  it('the offline banner sits between the header and the view bar', () => {
+  it('offline: a badge on the avatar in the header, and the banner between the header and the log', () => {
     const store = storeWith((s) => ({ ...s, connection: 'offline', outbox: [outboxItem()] }));
     const html = render(store, <AllView status={null} post={null} />);
-    const header = html.indexOf('Is my friend in medical?');
+    const title = html.indexOf('data-testid="view-switcher"');
+    const avatar = html.indexOf('data-testid="account-trigger"');
+    const indicator = html.indexOf('data-testid="connection-indicator"');
     const banner = html.indexOf('Offline · <!-- -->1<!-- --> waiting to send');
-    const bar = html.indexOf('data-testid="view-switcher"');
-    expect(header).toBeGreaterThan(0);
-    expect(banner).toBeGreaterThan(header);
-    expect(bar).toBeGreaterThan(banner);
+    const cols = html.indexOf('data-testid="log-columns"');
+    expect(title).toBeGreaterThan(0);
+    expect(indicator).toBeGreaterThan(avatar);
+    expect(avatar).toBeGreaterThan(title);
+    const badge = html.slice(html.lastIndexOf('<span', indicator), indicator + 60);
+    expect(badge).toContain('role="img"');
+    expect(badge).toContain('data-state="offline"');
+    expect(badge).toContain('aria-label="Offline"');
+    expect(banner).toBeGreaterThan(indicator);
+    expect(cols).toBeGreaterThan(banner);
+    // Can't reach the log: the badge turns red; live: nothing at all.
+    const error = render(storeWith((s) => ({ ...s, connection: 'error' })), <PendingView />);
+    expect(error).toMatch(/data-state="error"[^>]*aria-label="Can&#x27;t reach the log"|aria-label="Can&#x27;t reach the log"[^>]*data-state="error"/);
+    expect(render(storeWith((s) => s), <PendingView />)).not.toContain('connection-indicator');
+  });
+
+  it('Pending and My requests use the same large title, with no separate ×', () => {
+    const pending = render(storeWith((s) => s), <PendingView />);
+    expect(pending).toMatch(/aria-label="Pending 7, change view"/);
+    expect(pending).not.toContain('Back to all requests');
+    const mine = render(storeWith((s) => s), <MineView />);
+    expect(mine).toMatch(/aria-label="My requests \d+, change view"/);
+  });
+
+  it('My requests: Not in medical is closed, greyed, in the Closed area after the open requests', () => {
+    // Every stub row is "mine" for this check (created by the signed-in staff).
+    const store = storeWith((s) => ({ ...s, myIds: new Set([...s.confirmed.keys()]) }));
+    const html = render(store, <MineView />);
+    const area = html.indexOf('data-testid="mine-closed"');
+    expect(area).toBeGreaterThan(0);
+    const card = (n: number) => html.indexOf(`data-request-id="${idOf(n)}"`);
+    for (const n of [1013, 1012, 1007, 1004]) expect(card(n)).toBeLessThan(area);
+    for (const n of [1009, 1008, 1003, 1001]) expect(card(n)).toBeGreaterThan(area);
+    // The Not in medical card is dimmed like every closed card.
+    const tag = html.slice(html.lastIndexOf('data-testid="mine-card"', card(1009)) - 300, card(1009));
+    expect(tag).toMatch(/dimCard/);
   });
 
   it('Pending: Friend coming cards (friend, post, time) then Waiting for check cards with both answers', () => {

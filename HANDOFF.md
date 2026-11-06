@@ -1,10 +1,10 @@
 # Handoff: "Is my friend in medical?" rebuild
 
-Updated: 2026-11-06. Branch `rework/ui`. The PR to `main` is titled "Rebuild: Is my friend in medical? (EDC
-Orlando 2026)".
+Updated: 2026-11-06 (morning, v2.5). **Production is live at https://edco26-lost-persons.vercel.app**, deployed
+on 2026-11-06 from `main`.
 
-This replaces the 2026-11-05 PRD. [`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md) is now the engineering
-contract, and [`design/DECISIONS.md`](design/DECISIONS.md) holds the product decisions. Setup and checks are
+[`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md) is the engineering contract (§17 holds the 2026-11-06 morning
+amendments), and [`design/DECISIONS.md`](design/DECISIONS.md) holds the product decisions. Setup and checks are
 in [`README.md`](README.md). Never paste secrets or real people's details into prompts, issues, commits or
 screenshots.
 
@@ -21,17 +21,51 @@ screenshots.
 - **Offline-safe new requests.** Each one is saved on the phone (IndexedDB) before it is sent, with its
   photos, and is retried until the server has it. A service worker keeps the app opening with no signal.
 - **Security.** A per-request CSP nonce, same-origin checks on every write, a signed HttpOnly session cookie,
-  sign-in rate limits per name and per IP, a private photo bucket with 120 s signed URLs, no PII in logs, and
-  CSV formula-injection guards.
+  sign-in rate limits per name and per IP, a private photo bucket with 120 s signed URLs, and no PII in logs.
 - **Jeffrey's old routes are gone** (`/api/login`, `/api/logout`, `/api/patients/**`). Every working feature
   was kept or moved (spec §12).
 
-## Jeffrey: the production migration
+### 2026-11-06 morning (v2.5, Brian + Jeffrey)
 
-Paste **only** [`supabase/migrations/20261106000000_rework.sql`](supabase/migrations/20261106000000_rework.sql).
-The other files in that folder are the local chain: the baseline and both 2026-11-05 files are already in
-production, or are covered by the rework file. Apply it **before** deploying this app. The old app keeps
-working after the migration, so the order is safe.
+- **Not in medical is closed** and grey everywhere. Only Waiting for check (blue) and In medical · friend
+  coming (green) are open.
+- **All requests is log option B:** open requests first, every closed one folded into one "Closed N" row. The
+  LP number ("1013") is the leftmost column; each row shows its created time ("11:02 PM", or "Thu 11:02 PM"
+  for an earlier day) and when it last changed ("now", "2m", "1h", "3d", or "—").
+- **The dashboard is Jeffrey's global view:** status tiles, Open by post, Recently updated, then Performance
+  (longest wait, time to answer, time to reunite, logged in the last hour).
+- **The app no longer exports a CSV** (the button and its API route are gone). At the end of the event
+  Jeffrey runs [`docs/export.sql`](docs/export.sql) in the Supabase SQL editor and downloads the results.
+- **Header:** the view switcher is the large page title, the bell moved into the avatar menu, the live dot
+  shows only when offline or reconnecting, and "Newest first" is gone.
+- **New request is fully open** in Jeffrey's order (post, missing person, more details, then friend or family
+  last and optional). **Age and gender are free text** ("mid-20s", "Non-binary"; Male / Female / Other are
+  quick-fill chips), and search matches the age text. This needs the migration re-run below.
+
+## The production migration
+
+[`supabase/migrations/20261106000000_rework.sql`](supabase/migrations/20261106000000_rework.sql) is the only
+file production needs. The other files in that folder are the local chain: the baseline and both
+2026-11-05 files are already in production, or are covered by the rework file.
+
+- **Applied to production on 2026-11-06** through the Supabase Management API, with a dry run (ending in
+  `rollback;`) first, then the commit run.
+- **It must be re-applied on production before this build deploys** (release `release/f1`). Two changes
+  need it:
+  - `lp_stats` now also returns `avgReuniteMinutes` and `loggedLastHour` (the new dashboard reads both).
+  - `patients.age` becomes free text ("mid-20s"; step 1b), its 0–120 CHECK is dropped, and
+    `lp_clean_fields` takes free-text age and gender (at most 40 characters each). Every stored age is kept
+    as its text (24 → `'24'`).
+
+  The integrator does this, with the same dry run, then commit. **Order: migration first, then deploy.**
+  The new build sends text ages, which the old `lp_clean_fields` refuses, and its dashboard needs the two
+  new stats fields. The build that is live now keeps working on the migrated database: it sends whole-number
+  ages, which are stored as their text, and reads them back as numbers. The extra stats fields change nothing
+  for it. The file is one transaction, keeps its preflight, and is safe to re-run on a database that already
+  has every `lp_*` function and a text `age`. `lp_stats` is `create or replace`, and step 1b prints
+  `patients.age: already text, unchanged.` on a second run.
+
+By hand, in the Supabase dashboard:
 
 1. Supabase dashboard → SQL Editor, as the default `postgres` role.
 2. **Dry run.** Paste the whole file. Change the last line from `commit;` to `rollback;`, then run it. It must
@@ -40,7 +74,10 @@ working after the migration, so the order is safe.
 3. **Commit.** Paste the file again, unchanged (ending in `commit;`), and run it. It is one transaction, so a
    failure leaves the database as it was, and running it a second time is harmless.
 4. **Check.** `select proname from pg_proc where proname like 'lp\_%' order by 1;` lists the `lp_*`
-   functions (among them `lp_sync`, `lp_create_request`, `lp_set_status` and `lp_stats`).
+   functions (among them `lp_sync`, `lp_create_request`, `lp_set_status` and `lp_stats`), and
+   `select lp_stats() ? 'avgReuniteMinutes', lp_stats() ? 'loggedLastHour';` returns `true | true`, and
+   `select format_type(atttypid, atttypmod) from pg_attribute where attrelid = 'public.patients'::regclass and attname = 'age';`
+   returns `text`.
 5. **Storage.** Confirm the `patient-photos` bucket is still **private**.
 
 If the preflight stops it ("Preflight failed: …"), the SQL editor is pointed at the wrong project or the
@@ -52,9 +89,10 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
   `SUPABASE_SECRET_KEY` (or `SUPABASE_SERVICE_ROLE_KEY`) stay the same. Set `SESSION_SECRET` (32 characters
   or more) and keep `APP_SHARED_PASSWORD_HASH_B64`. `EVENT_TIMEZONE` defaults to `America/New_York`. All
   of them are listed in `.env.example`.
-- **Region.** Pin Functions to the region of the Supabase project (Project Settings → Functions → Function
-  Region; for example `iad1` for a Supabase project in `us-east-1`). Almost every request reads or writes
-  the database, so a cross-country region adds that latency to every tap and poll.
+- **Region.** Pin Functions to the region closest to the Supabase project (Project Settings → Functions →
+  Function Region). The Vercel project is on `iad1` (Washington, D.C.) and the Supabase project is in
+  `us-east-2` (Ohio), so **`cle1` (Cleveland) is closer**. Almost every request reads or writes the database,
+  so the distance is added to every tap and poll.
 - **Fluid compute.** Turn it on (Project Settings → Functions). Polls are short and mostly wait on Postgres,
   so sharing instances keeps cold starts and cost down.
 - **Invocation budget.** About 30 phones polling every 6 s comes to about 5 requests a second, and about
@@ -71,12 +109,15 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 - [ ] Keychain fills the password on sign-in step 2.
 - [ ] A Home Screen app signs in on its own and keeps its own saved requests, separate from the Safari tab.
 - [ ] With the mute switch on, an alert still shows its toast (silently).
-- [ ] Export CSV from the Home Screen app opens in a new tab.
-- [ ] Redeploy on Vercel with an old tab open: "Update ready · Reload" appears.
+- [ ] At the end, run `docs/export.sql` in the SQL editor and download the results (Query 1, then Query 2;
+      the steps are at the top of the file).
+- [ ] Redeploy on Vercel with an old tab open: "Update ready · Reload" appears. It shows only once the phone
+  has cached the whole new build, which needs `/sw-manifest.json` on the deploy (written by `next build`).
 - [ ] Airplane mode in the middle of a send: it says "Saved on this phone" and sends once the signal is back,
       exactly once.
 - [ ] Lie-fi (one bar): a new request queues after about 10 s and sends later.
-- [ ] Jeffrey's dry run of the migration finishes, then the commit run.
+- [ ] The re-run of the migration on production **before** this build deploys (lp_stats + age → text): dry
+      run, then commit (see above).
 - [ ] Several staff sign in at once behind the venue Wi-Fi (one shared IP).
 
 ## Known limits
@@ -91,7 +132,8 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 - **Sign-in limits:** 10 wrong passwords per name and IP, and 100 per IP, in 15 minutes. A whole team behind
   one venue IP shares the 100.
 - **A Home Screen app and the Safari tab are separate.** Each has its own sign-in, saved requests and queue.
-- **The CSV holds personal details.** Don't leave it on shared devices.
+- **There is no export in the app.** The end-of-event files come from `docs/export.sql`. They hold names and
+  phone numbers: don't leave them on shared devices.
 - **Up to three photos per request.** Photos from Jeffrey's app with no timing show "Timing unknown".
 - **Legacy rows.** Rows with an old post (for example `FA 3`) or an old status stay readable and editable,
   and appear as their own bar on the dashboard. On the dashboard, an Other location shows as "Other · Gate 9",

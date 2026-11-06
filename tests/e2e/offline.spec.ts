@@ -226,6 +226,131 @@ test('a new service worker waiting shows "Update ready · Reload"; Reload hands 
   await expect(page.getByTestId('request-list')).toBeVisible();
 });
 
+/**
+ * A phone still on an earlier deploy's worker: `older` installs and takes over first (from a page that is
+ * not the app, so nothing registers this build's worker yet). Loading `/` then registers this build's
+ * worker, which installs over it and waits, as after a real deploy: "Update ready".
+ */
+async function loadOnOlderWorker(page: Page, older: string) {
+  await page.goto('/icons/icon-192.png');
+  await page.evaluate(async (v) => {
+    await navigator.serviceWorker.register(`/sw.js?v=${v}`, { scope: '/' });
+    await navigator.serviceWorker.ready;
+  }, older);
+  await loadOfflineReady(page);
+  expect(await controllerUrl(page)).toContain(`v=${older}`);
+  await expect(updateToast(page)).toBeVisible({ timeout: 30_000 });
+}
+
+/** Taps Reload and waits until a fresh document, controlled by this build's worker, has hydrated. */
+async function reloadIntoUpdate(page: Page, older: string) {
+  await page.evaluate(() => {
+    (window as unknown as { lpBeforeUpdate?: boolean }).lpBeforeUpdate = true;
+  });
+  await updateToast(page).getByRole('button', { name: 'Reload' }).click();
+  await expect.poll(() => controllerUrl(page), { timeout: 30_000 }).toMatch(/\/sw\.js\?v=/);
+  await expect.poll(() => controllerUrl(page), { timeout: 30_000 }).not.toContain(`v=${older}`);
+  // Nothing in memory from before: every chunk the page needs now comes through the new worker.
+  await expect
+    .poll(() => page.evaluate(() => !(window as unknown as { lpBeforeUpdate?: boolean }).lpBeforeUpdate).catch(() => false), { timeout: 30_000 })
+    .toBe(true);
+  await expect(page.locator('html')).toHaveAttribute('data-hydrated', 'true');
+}
+
+const cacheNames = (page: Page) => page.evaluate(() => caches.keys()).catch(() => [] as string[]);
+
+/** Every /_next/static file of this build (public/sw-manifest.json, written by `next build`). */
+async function buildAssets(page: Page): Promise<string[]> {
+  const res = await page.request.get('/sw-manifest.json');
+  expect(res.status()).toBe(200);
+  return ((await res.json()) as { assets: string[] }).assets;
+}
+
+test('an update applied with no signal reloads from its own cache and opens every view', async ({ page, context, browserName }) => {
+  test.setTimeout(120_000);
+  const older = `e2e-older-${RUN}-offline`;
+  await loadOnOlderWorker(page, older);
+
+  // "Update ready" means the waiting worker already holds the whole build, view chunks included.
+  const assets = await buildAssets(page);
+  const missing = await page.evaluate(async (urls) => {
+    const waiting = (await navigator.serviceWorker.getRegistration())?.waiting;
+    if (!waiting) return ['(no waiting worker)'];
+    const cache = await caches.open(`lp-${new URL(waiting.scriptURL).searchParams.get('v')}`);
+    const out: string[] = [];
+    for (const url of ['/', '/signin', ...urls]) if (!(await cache.match(url))) out.push(url);
+    return out;
+  }, assets);
+  expect(missing).toEqual([]);
+
+  // The signal drops before the user taps Reload.
+  await context.setOffline(true);
+  if (browserName === 'chromium') {
+    // The HTTP cache keeps every chunk this browser loaded (immutable): empty it, so only the service
+    // worker can answer. (WebKit has no equivalent; the cache check above covers it.)
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('Network.clearBrowserCache');
+    await cdp.detach();
+  }
+  await reloadIntoUpdate(page, older);
+  await expect(page.getByTestId('request-list')).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: /^Offline · 0 waiting to send$/ })).toBeVisible();
+  await page.getByRole('button', { name: 'New request' }).click();
+  await expect(submit(page)).toHaveText('Save offline');
+  await page.goto('/?dashboard=1');
+  await expect(page.getByTestId('dashboard')).toBeVisible();
+  await context.setOffline(false);
+});
+
+test('activating an update keeps the old cache while an older tab is open, then lets it go', async ({ page, context }) => {
+  test.setTimeout(120_000);
+  const older = `e2e-older-${RUN}-retain`;
+  await loadOnOlderWorker(page, older);
+  const olderTab = await context.newPage();
+  await loadOfflineReady(olderTab);
+
+  await reloadIntoUpdate(page, older);
+  await expect(page.getByTestId('request-list')).toBeVisible();
+  const newCache = `lp-${new URL(await controllerUrl(page)).searchParams.get('v')}`;
+
+  // The older tab still runs what it loaded: its cache stays.
+  expect(await cacheNames(page)).toEqual(expect.arrayContaining([`lp-${older}`, newCache]));
+  await page.reload();
+  await expect(page.getByTestId('request-list')).toBeVisible();
+  expect(await cacheNames(page)).toContain(`lp-${older}`);
+
+  // Once no tab from before is left, the next navigation deletes it.
+  await olderTab.close();
+  await expect
+    .poll(
+      async () => {
+        await page.reload();
+        await expect(page.getByTestId('request-list')).toBeVisible();
+        return cacheNames(page);
+      },
+      { timeout: 30_000 },
+    )
+    .not.toContain(`lp-${older}`);
+  expect(await cacheNames(page)).toContain(newCache);
+});
+
+test('the build manifest lists every file / and /signin load, and the server has each one', async ({ page, playwright, baseURL }) => {
+  const res = await page.request.get('/sw-manifest.json');
+  expect(res.status()).toBe(200);
+  const { assets } = (await res.json()) as { assets: string[] };
+  const listed = new Set(assets);
+  // The next/dynamic view chunks are in it too: far more files than the shell names.
+  const shellHtml = await (await page.request.get('/')).text();
+  const signedOut = await playwright.request.newContext({ baseURL });
+  const signInHtml = await (await signedOut.get('/signin')).text();
+  await signedOut.dispose();
+  const referenced = [...new Set([...(shellHtml + signInHtml).matchAll(/\/_next\/static\/[^"'\\) ]+/g)].map((m) => m[0].split('?')[0] as string))];
+  expect(referenced.length).toBeGreaterThan(3);
+  for (const url of referenced) expect(listed.has(url), url).toBe(true);
+  expect(assets.length).toBeGreaterThan(referenced.length);
+  for (const url of assets) expect((await page.request.get(url)).status(), url).toBe(200);
+});
+
 test('Reload is refused while a new request has unsent details', async ({ page }) => {
   await loadOfflineReady(page);
   await page.getByRole('button', { name: 'New request' }).click();

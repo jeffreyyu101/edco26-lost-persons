@@ -10,9 +10,12 @@
 --   It is safe to run twice: every step is idempotent and the whole file is one transaction, so a
 --   failure part-way leaves the database exactly as it was.
 --
--- What it does (no existing column or constraint is altered, except the NOT VALID re-add in step 2):
+-- What it does (no existing column or constraint is altered, except the NOT VALID re-add in step 2 and
+-- the age conversion in step 1b):
 --   0. Preflight: the production tables and the client_mutation_id unique key must exist.
 --   1. patients.row_version (optimistic concurrency and sync) and patients.last_seen (if missing).
+--   1b. patients.age becomes free text ("mid-20s"), only while it is not text yet: its CHECK is dropped and
+--      every value is kept as its text (24 → '24').
 --   2. Replaces the reporting_location / status CHECK only when it lacks a needed value (or a value rows
 --      already hold), NOT VALID. Values already in the table stay allowed, so legacy rows stay editable.
 --   3. lp_touch() BEFORE UPDATE trigger: updated_at = clock_timestamp(), row_version + 1.
@@ -102,6 +105,51 @@ $preflight$;
 -- -----------------------------------------------------------------------------------------------------
 alter table public.patients add column if not exists row_version bigint not null default 0;
 alter table public.patients add column if not exists last_seen text;
+
+-- -----------------------------------------------------------------------------------------------------
+-- 1b. Age is free text (Jeffrey, 2026-11-06 10:31: "for age, they can put mid-20s, not just numbers").
+--     Runs only while patients.age is not text (Jeffrey's baseline: smallint with a 0–120 CHECK), so a
+--     re-run changes nothing. Every CHECK that reads age is dropped first (`age between 0 and 120` cannot
+--     apply to text), then USING age::text keeps every value (24 → '24', null stays null). The rewrite
+--     holds an ACCESS EXCLUSIVE lock only while it runs (bounded by the timeouts above). The app's schema
+--     has no index, view or default on age; if one existed, the ALTER would fail and the whole file roll
+--     back (the dry run shows it). The lp_* functions are recreated against the new row type in step 6.
+--     Paste this BEFORE deploying an app that sends text ages: the previous lp_clean_fields refuses them,
+--     while the previous app keeps working on this one (it sends numbers, stored as text).
+-- -----------------------------------------------------------------------------------------------------
+do $age$
+declare
+  v_type text;
+  v_con name;
+  v_dropped text[] := '{}';
+begin
+  select pg_catalog.format_type(a.atttypid, a.atttypmod) into v_type
+  from pg_catalog.pg_attribute a
+  where a.attrelid = 'public.patients'::regclass and a.attname = 'age' and not a.attisdropped;
+
+  if v_type = 'text' then
+    raise notice 'patients.age: already text, unchanged.';
+    return;
+  end if;
+
+  for v_con in
+    select c.conname
+    from pg_catalog.pg_constraint c
+    join pg_catalog.pg_attribute a
+      on a.attrelid = c.conrelid and a.attname = 'age' and not a.attisdropped
+    where c.conrelid = 'public.patients'::regclass and c.contype = 'c' and a.attnum = any (c.conkey)
+    order by c.conname
+  loop
+    execute pg_catalog.format('alter table public.patients drop constraint %I', v_con);
+    v_dropped := v_dropped || v_con::text;
+  end loop;
+
+  alter table public.patients alter column age type text using age::text;
+
+  raise notice 'patients.age: % → text, every value kept. CHECKs dropped: %',
+    v_type, coalesce(nullif(pg_catalog.array_to_string(v_dropped, ', '), ''), 'none');
+end
+$age$;
 
 -- -----------------------------------------------------------------------------------------------------
 -- 2. Locations and statuses (in case 20261105_update_locations_and_statuses never ran in production).
@@ -295,7 +343,8 @@ drop function if exists public.lp_cancel(uuid, bigint, text);
 drop function if exists public.lp_add_photo(uuid, uuid, text, text, text, text);
 drop function if exists public.lp_login_begin(text, text);
 drop function if exists public.lp_login_finish(bigint, boolean);
-drop function if exists public.lp_stats();
+-- lp_stats is not dropped: it is `create or replace`d below (same signature and return type since the first
+-- production run), so a re-run never removes it, and its grants carry over.
 drop function if exists public.lp_detail(uuid);
 
 -- lp_canon_staff: canonical form of an attribution string "Name · Team", for creator checks.
@@ -423,7 +472,9 @@ $fn$;
 -- lp_clean_fields: validate and normalise editable request fields from JSON. Internal helper.
 --   * Only whitelisted keys (spec §4 editable fields + reporting_location, other_location). Others → P0422.
 --   * Text values must be JSON strings or null; blank strings become null.
---   * age: a JSON integer 0–120, or null. gender: Male / Female / Other, or null.
+--   * age and gender are free text (Jeffrey, 2026-11-06 10:31): "mid-20s", "24", "Non-binary", ≤40
+--     characters each. age also takes a JSON number (a request queued by an older client), stored as its
+--     text (24 → '24').
 --   * Length limits per spec §4. reporting_location, when present, must be a valid post (never null).
 -- Returns the cleaned object with exactly the keys given (create requires reporting_location).
 create function public.lp_clean_fields(p jsonb, p_partial boolean)
@@ -438,7 +489,6 @@ declare
   v_key text;
   v_val jsonb;
   v_text text;
-  v_num numeric;
   v_limit integer;
 begin
   if p is null or pg_catalog.jsonb_typeof(p) <> 'object' then
@@ -461,30 +511,15 @@ begin
       when 'contact_relationship' then 120
       when 'contact_phone' then 40
       when 'other_location' then 80
-      when 'gender' then 10
+      when 'age' then 40
+      when 'gender' then 40
       when 'reporting_location' then 40
-      when 'age' then 0
       else null
     end;
 
     if v_limit is null then
       raise exception using errcode = 'P0422', message = 'unknown_field',
         detail = pg_catalog.format('field:%s', pg_catalog.left(v_key, 60));
-    end if;
-
-    if v_key = 'age' then
-      if pg_catalog.jsonb_typeof(v_val) = 'null' then
-        v_out := v_out || pg_catalog.jsonb_build_object('age', null);
-      elsif pg_catalog.jsonb_typeof(v_val) = 'number' then
-        v_num := (v_val #>> '{}')::numeric;
-        if v_num <> pg_catalog.trunc(v_num) or v_num < 0 or v_num > 120 then
-          raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:age';
-        end if;
-        v_out := v_out || pg_catalog.jsonb_build_object('age', v_num::integer);
-      else
-        raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:age';
-      end if;
-      continue;
     end if;
 
     if pg_catalog.jsonb_typeof(v_val) = 'null' then
@@ -494,16 +529,14 @@ begin
       if pg_catalog.btrim(v_text, E' \t\r\n') = '' then
         v_text := null;
       end if;
+    elsif v_key = 'age' and pg_catalog.jsonb_typeof(v_val) = 'number' then
+      v_text := v_val #>> '{}';
     else
       raise exception using errcode = 'P0422', message = 'invalid_field', detail = pg_catalog.format('field:%s', v_key);
     end if;
 
     if v_text is not null and pg_catalog.char_length(v_text) > v_limit then
       raise exception using errcode = 'P0422', message = 'field_too_long', detail = pg_catalog.format('field:%s', v_key);
-    end if;
-
-    if v_key = 'gender' and v_text is not null and v_text not in ('Male', 'Female', 'Other') then
-      raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:gender';
     end if;
 
     if v_key = 'reporting_location'
@@ -1210,16 +1243,19 @@ begin
 end
 $fn$;
 
--- lp_stats: everything the dashboard needs (spec §8 + A21). camelCase keys, passed through by the server.
+-- lp_stats: everything the dashboard needs (spec §8 + A21 + A49). camelCase keys, passed through by the server.
 --   open {waiting, inMedical (legacy Bring friend counts as In medical)}; notInMedical, reunited,
---   discharged, cancelled and total over all rows; longestWait; avgAnswerMinutes; byPost; recent.
+--   discharged, cancelled and total over all rows; loggedLastHour (rows created in the last 60 minutes,
+--   any status); longestWait; avgAnswerMinutes; avgReuniteMinutes; byPost; recent.
 --   byPost: the 4 fixed posts always (count may be 0), then one entry per other location with open rows
 --   (Other grouped by other_location, legacy post values as themselves); the counts sum to open.
 --   postShort here must match postShort() in lib/domain.ts.
 --   STABLE (read-only): every statement below reads the same snapshot, so open, byPost, longestWait and
 --   recent always agree with each other even while requests change. A VOLATILE function would take a new
 --   snapshot per statement.
-create function public.lp_stats()
+--   create or replace (not drop + create): re-running this file on a database that already has lp_stats()
+--   replaces it in place, inside the one transaction.
+create or replace function public.lp_stats()
 returns jsonb
 language plpgsql
 stable
@@ -1233,6 +1269,7 @@ declare
   v_counts jsonb;
   v_longest jsonb;
   v_avg numeric;
+  v_avg_reunite numeric;
   v_by_post jsonb;
   v_recent jsonb;
 begin
@@ -1245,7 +1282,8 @@ begin
     'reunited', pg_catalog.count(*) filter (where status = 'Reunited – Closed'),
     'discharged', pg_catalog.count(*) filter (where status = 'Found – Discharged'),
     'cancelled', pg_catalog.count(*) filter (where status = 'Cancelled'),
-    'total', pg_catalog.count(*)
+    'total', pg_catalog.count(*),
+    'loggedLastHour', pg_catalog.count(*) filter (where created_at > v_now - interval '60 minutes')
   ) into v_counts
   from public.patients;
 
@@ -1292,6 +1330,40 @@ begin
   from first_answer f
   join public.patients p on p.id = f.patient_id
   where f.occurred_at > v_now - interval '2 hours';
+
+  -- Time to reunite (A49). One reunion per request: a request that is Reunited now, at its latest
+  -- status_changed into Reunited – Closed, when that happened in the last 2 hours. It is measured from the
+  -- latest In medical answer before it: a status_changed out of Added or Checked – Not Found into Found –
+  -- Awaiting Reunion or legacy Bring friend to medical (so Change answer restarts the clock, while an Undo
+  -- of Reunited or a Reopen, which leave a closed status, do not), or a legacy medical_search_found. A
+  -- reunion with no such answer before it is left out. Mean in minutes, 1 decimal; null when there is none.
+  with reunions as (
+    select distinct on (e.patient_id) e.patient_id, e.occurred_at
+    from public.audit_events e
+    join public.patients p on p.id = e.patient_id
+    where e.action_type = 'status_changed'
+      and e.new_value ->> 'status' = 'Reunited – Closed'
+      and p.status = 'Reunited – Closed'
+      and e.occurred_at > v_now - interval '2 hours'
+    order by e.patient_id, e.occurred_at desc
+  )
+  select pg_catalog.round((pg_catalog.avg(extract(epoch from (r.occurred_at - a.occurred_at))) / 60)::numeric, 1)
+    into v_avg_reunite
+  from reunions r
+  cross join lateral (
+    select e.occurred_at
+    from public.audit_events e
+    where e.patient_id = r.patient_id
+      and e.occurred_at <= r.occurred_at
+      and (
+        (e.action_type = 'status_changed'
+         and e.previous_value ->> 'status' in ('Added', 'Checked – Not Found')
+         and e.new_value ->> 'status' in ('Found – Awaiting Reunion', 'Bring friend to medical'))
+        or e.action_type = 'medical_search_found'
+      )
+    order by e.occurred_at desc
+    limit 1
+  ) as a;
 
   select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
            'reportingLocation', x.loc, 'otherLocation', x.other, 'postShort', x.short, 'count', x.n)
@@ -1349,6 +1421,7 @@ begin
   return v_counts || pg_catalog.jsonb_build_object(
     'longestWait', v_longest,
     'avgAnswerMinutes', v_avg,
+    'avgReuniteMinutes', v_avg_reunite,
     'byPost', v_by_post,
     'recent', v_recent,
     'serverTime', v_now

@@ -225,17 +225,29 @@ describe('form values', () => {
     expect(canSend({ ...EMPTY_FORM_VALUES, reportingLocation: 'FA 4 – Oasis' })).toBe(false);
     expect(canSend({ ...EMPTY_FORM_VALUES, name: 'x', reportingLocation: 'Other' })).toBe(false);
     expect(canSend({ ...EMPTY_FORM_VALUES, name: 'x', reportingLocation: 'Other', otherLocation: 'Gate' })).toBe(true);
-    expect(canSend({ ...EMPTY_FORM_VALUES, name: 'x', age: '200', reportingLocation: 'Base' })).toBe(false);
+    // Age and gender are free text (Jeffrey, 2026-11-06): any text is a detail and never blocks Send.
+    expect(canSend({ ...EMPTY_FORM_VALUES, name: 'x', age: '200', reportingLocation: 'Base' })).toBe(true);
+    expect(canSend({ ...EMPTY_FORM_VALUES, age: 'mid-20s', reportingLocation: 'Base' })).toBe(true);
+    expect(canSend({ ...EMPTY_FORM_VALUES, gender: 'Non-binary', reportingLocation: 'Base' })).toBe(true);
+    expect(hasAnyDetail({ ...EMPTY_FORM_VALUES, gender: '  ' })).toBe(false);
     expect(hasAnyDetail({ ...EMPTY_FORM_VALUES, contactPhone: '407' })).toBe(true);
   });
 
   it('builds a create body the server schema accepts', () => {
     const body = toCreateBody(
-      { ...EMPTY_FORM_VALUES, name: '  Kayla  Martinez ', age: '19', gender: 'Female', reportingLocation: 'FA 3 – Kinetic', otherLocation: 'stale', clothing: ' Pink hat ' },
+      { ...EMPTY_FORM_VALUES, name: '  Kayla  Martinez ', age: ' 19 ', gender: 'Female', reportingLocation: 'FA 3 – Kinetic', otherLocation: 'stale', clothing: ' Pink hat ' },
       CMID,
     );
-    expect(body).toMatchObject({ clientMutationId: CMID, name: 'Kayla Martinez', age: 19, gender: 'Female', otherLocation: null, clothing: 'Pink hat', hair: null });
+    expect(body).toMatchObject({ clientMutationId: CMID, name: 'Kayla Martinez', age: '19', gender: 'Female', otherLocation: null, clothing: 'Pink hat', hair: null });
     expect(createRequestSchema.safeParse(body).success).toBe(true);
+  });
+
+  it('sends age and gender as the text typed, trimmed, blank as null', () => {
+    const typed = { ...EMPTY_FORM_VALUES, name: 'T.R.', age: ' mid-20s ', gender: ' Non-binary ', reportingLocation: 'Base' as const };
+    const body = toCreateBody(typed, CMID);
+    expect(body).toMatchObject({ age: 'mid-20s', gender: 'Non-binary' });
+    expect(createRequestSchema.safeParse(body).success).toBe(true);
+    expect(toCreateBody({ ...typed, age: '  ', gender: '' }, CMID)).toMatchObject({ age: null, gender: null });
   });
 
   it('sends only changed keys when editing', () => {
@@ -245,8 +257,22 @@ describe('form values', () => {
     expect(toPatch(base, { ...base, hair: '  ' })).toEqual({ hair: null });
     expect(toPatch(base, { ...base, name: 'Kayla  Martinez' })).toBeNull();
     const patch = toPatch(base, { ...base, reportingLocation: 'Other', otherLocation: 'Gate', age: '20' });
-    expect(patch).toEqual({ age: 20, reportingLocation: 'Other', otherLocation: 'Gate' });
+    expect(patch).toEqual({ age: '20', reportingLocation: 'Other', otherLocation: 'Gate' });
     expect(requestPatchSchema.safeParse(patch).success).toBe(true);
+    // Free text, compared after trimming; clearing sends null.
+    const words = toPatch(base, { ...base, age: 'early 20s', gender: 'Non-binary' });
+    expect(words).toEqual({ age: 'early 20s', gender: 'Non-binary' });
+    expect(requestPatchSchema.safeParse(words).success).toBe(true);
+    expect(toPatch({ ...base, age: 'mid-20s' }, { ...base, age: ' mid-20s ' })).toBeNull();
+    expect(toPatch({ ...base, gender: 'Female' }, { ...base, gender: '' })).toEqual({ gender: null });
+  });
+
+  it('prefills edit with the age and gender text as saved, including free-text genders', () => {
+    const row = { ...byCase(1012), age: 'mid-20s', gender: 'Non-binary' };
+    expect(formValuesFromRequest(row)).toMatchObject({ age: 'mid-20s', gender: 'Non-binary' });
+    expect(formValuesFromRequest({ ...row, age: null, gender: null })).toMatchObject({ age: '', gender: '' });
+    // A row cached on the phone before age became text still holds a number.
+    expect(formValuesFromRequest({ ...row, age: 24 as unknown as string }).age).toBe('24');
   });
 
   it('formValuesFromCreateBody is the inverse of toCreateBody (needs-attention editor prefill)', () => {
@@ -338,6 +364,8 @@ describe('form values', () => {
     });
     expect(createRequestSchema.safeParse(body).success).toBe(true);
     expect(formValuesFromCreateBody(body!).name).toBe('Paul G.');
+    // A numeric age (legacy, or a job queued before age became text) reads back as its text.
+    expect(formValuesFromCreateBody(body!)).toMatchObject({ age: '30', gender: 'Male' });
     // Only a first name; Other keeps its location; a bad age / gender becomes null.
     expect(createBodyFromLegacyQueueItem({ client_mutation_id: CMID, first_name: 'X.Y.', last_name: '', reporting_location: 'Other', other_location: 'Gate', age: null, gender: '' })).toMatchObject({
       name: 'X.Y.',

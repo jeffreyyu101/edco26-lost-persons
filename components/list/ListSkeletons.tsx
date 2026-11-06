@@ -8,34 +8,36 @@ const Sk = ({ w, h = 12, r }: { w: string; h?: number; r?: string }) => (
   <Skeleton width={w} height={`${h}px`} style={r ? { borderRadius: r } : undefined} />
 );
 
-// Varied widths so the skeleton reads like text, not a grid of identical bars.
-const WIDTHS: ReadonlyArray<readonly [string, string]> = [
-  ['46%', '22%'],
-  ['60%', '30%'],
-  ['38%', '26%'],
-  ['52%', '34%'],
-  ['44%', '20%'],
-  ['56%', '28%'],
-  ['40%', '24%'],
+// Varied name and status widths so the skeleton reads like the log, not a grid of identical bars.
+const LOG_WIDTHS: ReadonlyArray<readonly [string, string]> = [
+  ['44%', '96px'],
+  ['70%', '96px'],
+  ['38%', '96px'],
+  ['52%', '64px'],
+  ['46%', '64px'],
+  ['60%', '72px'],
+  ['40%', '64px'],
 ];
 
+/**
+ * All requests (log option B): one-line rows in the log's columns, number · name · status glyph and label ·
+ * created · updated, each 48 px with the hairline inset from the name.
+ */
 export function AllSkeleton() {
   return (
-    <div aria-busy="true" aria-label="Loading requests" data-testid="list-skeleton">
-      {WIDTHS.map(([a, b], i) => (
-        <div key={i} className={s.skRow}>
-          <Sk w="14px" h={14} r="50%" />
-          <div className={s.skRm}>
-            <div className={s.skL}>
-              <Sk w={a} h={13} />
-              <span className={s.sp} />
-              <Sk w="34px" h={11} />
-            </div>
-            <div className={s.skL}>
-              <Sk w={b} h={10} />
-              <Sk w="22%" h={10} />
-            </div>
-          </div>
+    <div className={s.skLog} aria-busy="true" aria-label="Loading requests" data-testid="list-skeleton">
+      {LOG_WIDTHS.map(([name, status], i) => (
+        <div key={i} className={s.skLogRow}>
+          <Sk w="32px" h={11} />
+          <span className={s.skName}>
+            <Sk w={name} h={13} />
+          </span>
+          <span className={s.skStatus}>
+            <Sk w="14px" h={14} r="50%" />
+            <Sk w={status} h={10} />
+          </span>
+          <Sk w="48px" h={11} />
+          <Sk w="22px" h={11} />
         </div>
       ))}
     </div>

@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next';
+import { writeSwManifest } from './scripts/sw-manifest.mjs';
 
 // Security headers for every response, including API routes, static files and /sw.js.
 // The CSP (per-request nonce) and the auth redirects live in proxy.ts.
@@ -16,6 +17,20 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   // No next/image anywhere (spec §2): the optimizer would strip the session cookie.
   images: { unoptimized: true },
+  compiler: {
+    // public/sw-manifest.json: every /_next/static file of this build, which an updating service worker
+    // caches in full before it offers "Update ready" (public/sw.js, scripts/sw-manifest.mjs).
+    // On Vercel (restored Turbopack cache, "modifyConfig") the client chunks are not on disk yet at this point, so
+    // a miss here only warns; `npm run build` writes the manifest again after `next build` finishes and fails
+    // the build there if it still finds no chunks.
+    runAfterProductionCompile: async (metadata) => {
+      try {
+        await writeSwManifest(metadata);
+      } catch (error) {
+        console.warn(`${error instanceof Error ? error.message : String(error)} (retried after next build)`);
+      }
+    },
+  },
   async headers() {
     return [
       { source: '/:path*', headers: securityHeaders },
@@ -26,6 +41,11 @@ const nextConfig: NextConfig = {
           { key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' },
           { key: 'Service-Worker-Allowed', value: '/' },
         ],
+      },
+      {
+        // Read by an installing worker; always the live deploy's list.
+        source: '/sw-manifest.json',
+        headers: [{ key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' }],
       },
       {
         source: '/manifest.webmanifest',

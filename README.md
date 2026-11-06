@@ -34,7 +34,7 @@ message.
 | `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY` | yes | Server-only. Never give it a `NEXT_PUBLIC_` prefix. |
 | `SESSION_SECRET` | yes | 32 characters or more. Changing it signs everyone out. |
 | `APP_SHARED_PASSWORD_HASH_B64` or `APP_SHARED_PASSWORD` | one of them | The event password, as a base64 bcrypt hash or as plain text. If both are set, the hash wins. |
-| `EVENT_TIMEZONE` | no | Defaults to `America/New_York`. Every displayed time and the CSV use it. |
+| `EVENT_TIMEZONE` | no | Defaults to `America/New_York`. Every displayed time uses it. |
 
 To make a password hash without writing the password into a file:
 
@@ -56,10 +56,18 @@ and `.env.test`, which holds local-only values that work against `127.0.0.1` and
 | `20261101000000_baseline_local_only.sql` | A copy of `supabase/schema.sql`, the production baseline. | **Never paste.** Already applied. |
 | `20261105000001_add_last_seen.sql` | Jeffrey's `last_seen` column. | Already applied (verified 2026-11-05). |
 | `20261105000002_update_locations_and_statuses.sql` | Jeffrey's location and status CHECK update. | Not needed: the rework covers it whether or not it ran. |
-| `20261106000000_rework.sql` | Row versions, the touch trigger, thumbnails, login limits and every `lp_*` function the app calls. | **The one file to paste**, before deploying this app. See [`HANDOFF.md`](HANDOFF.md). |
+| `20261106000000_rework.sql` | Row versions, the touch trigger, thumbnails, login limits, free-text `age` (text since 2026-11-06) and every `lp_*` function the app calls. | **The one file production needs.** Applied 2026-11-06; apply it again (the v2.5 `lp_stats` change and `age` → text) **before** deploying this build. See [`HANDOFF.md`](HANDOFF.md). |
 
 Without `20261106000000_rework.sql`, every API route fails, because each one calls an `lp_*` function. The
-file is one transaction, is safe to run twice, and starts with a dry-run note.
+file is one transaction, is safe to run twice (also on a database that already has every `lp_*` function),
+and starts with a dry-run note.
+
+### End-of-event export
+
+The app has no export. [`docs/export.sql`](docs/export.sql) holds two read-only queries for the Supabase SQL
+editor: every request (one row each, by case number, times in New York) and the whole audit trail. Run each
+one and use "Download CSV" on the results; the steps are at the top of the file. The files hold names and
+phone numbers, so treat them as sensitive.
 
 ### Photos
 
@@ -89,8 +97,8 @@ npm run start:test                       # http://127.0.0.1:3100
 | `npm run typecheck` | `next typegen`, then `tsc --noEmit` |
 | `npm run lint` | ESLint, with no warnings allowed |
 | `npm test` | Unit tests (vitest, no network or database) |
-| `npm run test:int` | Integration tests: every route, the SQL functions, concurrency, login limits and the migration, against the local stack through a production build on `PORT` (default 3100). If nothing listens there, the harness starts `next start` itself. Run `npm run build:test` first. |
-| `npm run test:e2e` | Playwright on the production build: sign-in, lists, the two-phone flow (log → Pending → In medical → alert), profile, edit and conflicts, dashboard, CSV, offline and lie-fi queueing, the service-worker update, the first-load JS budget, and accessibility (axe-core WCAG 2.1 A/AA in light and dark, plus 44 px tap targets). Run `npm run build:test` first. |
+| `npm run test:int` | Integration tests: every route, the SQL functions, concurrency, login limits, the migration and `docs/export.sql` (run read-only), against the local stack through a production build on `PORT` (default 3100). If nothing listens there, the harness starts `next start` itself. Run `npm run build:test` first. |
+| `npm run test:e2e` | Playwright on the production build: sign-in, lists, the two-phone flow (log → Pending → In medical → alert), profile, edit and conflicts, dashboard, offline and lie-fi queueing, the service-worker update, the first-load JS budget, and accessibility (axe-core WCAG 2.1 A/AA in light and dark, plus 44 px tap targets). Run `npm run build:test` first. |
 | `node scripts/smoke-csp.mjs` | The production CSP and nonce in Chromium and WebKit: `/signin` hydrates with no violations, `/` redirects without a session, and with one the list, a profile and Back work. Needs the production build running on `PORT`. `npm run test:e2e` runs it too (`tests/e2e/smoke.spec.ts`). |
 | `npm run db:verify-migration` | Applies the rework migration twice to the local database and to an upgrade fixture built from Jeffrey's original schema, then smoke-tests the functions. |
 | `node scripts/load-test.mjs` | 30 simulated phones polling for 2 minutes against a running local production build (see the file header). |
@@ -105,19 +113,24 @@ Pending.
 - **Sign-in.** Step 1 is your name and team, and step 2 is the event password. The phone remembers step 1.
   Sessions last 12 hours from the last use, and 36 hours at most. Too many wrong passwords from one place
   pauses sign-in for a while.
-- **One page, several views.** All requests (newest first), Pending (Friend coming, then Waiting for check),
-  My requests (with a progress line), Search, New request, the profile, Edit and the dashboard. Views are URL
-  parameters on `/`, so Back and shared links work.
-- **Live.** The list syncs every 6 s while the app is open (60 s in the background). Tap the live dot to sync
-  now. Offline and "can't reach the log" show as banners.
-- **Answers.** Not in medical, In medical, Reunited and Change answer each offer Undo for 6 s. Two people
-  giving the same answer is harmless. A change made by someone else shows as "Updated by someone else".
+- **One page, several views.** All requests, Pending (Friend coming, then Waiting for check), My requests
+  (with a progress line), Search, New request, the profile, Edit and the dashboard. Views are URL parameters
+  on `/`, so Back and shared links work. The view menu is the large page title ("All requests 13 ⌄").
+- **All requests.** Open requests (Waiting for check, In medical) come first, newest first; every closed one
+  (Not in medical, Reunited, Discharged, Cancelled) folds into one "Archived N" row. Each row shows the LP
+  number, the name, the status, when it was logged ("11:02 PM", or "Thu 11:02 PM" for an earlier day) and
+  when it last changed ("now", "2m", "1h", "3d", or "—").
+- **Live.** The list syncs every 6 s while the app is open (60 s in the background). A dot by the title shows
+  only while the app is offline or reconnecting. Offline and "can't reach the log" show as banners.
+- **Answers.** Not in medical, In medical, Reunited and Change answer each offer Undo for 10 s. Change answer
+  is a menu: the other answer, or Back to Waiting for check. Two people giving the same answer is harmless.
+  A change made by someone else shows as "Updated by someone else".
 - **Alerts** appear only while the app is open: changes to your requests by someone else, and new requests
-  when the bell is on. There are no lock-screen notifications.
+  when alerts are on (the bell, in the avatar menu). There are no lock-screen notifications.
 - **Offline.** A new request (with its photos) is saved on the phone first and sent when the signal is back.
   Answers, edits and adding photos to an existing request need a connection.
-- **Dashboard.** Open counts, answer times and open requests by post. Tiles and legend rows open the list
-  filtered by status; a post bar opens that post's open requests (the rows it counts), and clearing the
-  Open chip shows every request at the post.
-- **Export CSV** (avatar menu or dashboard) downloads every request. It holds personal details, so treat the
-  file as sensitive.
+- **Dashboard.** Status count tiles first, then Open by post, Recently updated, and Performance last (longest
+  wait, average time to answer and to reunite over the last 2 hours, and requests logged in the last hour).
+  Tiles open the list filtered by status; a post bar opens that post's open requests (the rows it counts),
+  and clearing the Open chip shows every request at the post.
+- **Export.** None in the app: see [End-of-event export](#end-of-event-export).

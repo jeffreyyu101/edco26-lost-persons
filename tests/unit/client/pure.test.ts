@@ -16,7 +16,7 @@ import {
   syncBackoffMs,
 } from '@/lib/client/outbox-logic';
 import { buildIdFrom, scriptSrcsFromHtml } from '@/lib/client/sw-client';
-import { mergeRows, overlayForPatch, replaceAll, sameRow, staleIds, summaryOf } from '@/lib/client/sync-merge';
+import { mergeRows, normalizeRow, overlayForPatch, replaceAll, sameRow, staleIds, summaryOf } from '@/lib/client/sync-merge';
 import { uuid } from '@/lib/client/uuid';
 import { STAFF, json, makeRow, testId } from './helpers/fake-server';
 
@@ -70,7 +70,24 @@ describe('monotonic merge (spec §7 Merge, A11)', () => {
       otherLocation: 'Gate 2',
       postShort: 'Gate 2',
     });
-    expect(overlayForPatch(row, { age: 30 })).toEqual({ age: 30 });
+    // A PATCH queued by a client from before age became text: its text, as the server stores it.
+    expect(overlayForPatch(row, { age: 30 })).toEqual({ age: '30' });
+    expect(overlayForPatch(row, { age: ' mid-20s ' })).toEqual({ age: 'mid-20s' });
+  });
+
+  it('a row holding a numeric age (cached before age became text) is kept with its age as text', () => {
+    const numeric = { ...a1, age: 24 as unknown as string };
+    expect(normalizeRow(numeric)).toEqual({ ...a1, age: '24' });
+    expect(normalizeRow(a1)).toBe(a1);
+    // Loading the cache into an empty store, a delta sync, a full fetch: confirmed only ever holds text.
+    expect(mergeRows(new Map(), [numeric])?.get(a1.id)?.age).toBe('24');
+    expect(replaceAll(new Map(), [numeric], new Set()).get(a1.id)?.age).toBe('24');
+    // Equal version, same content once normalised: identity kept (no needless re-render).
+    const stored = map({ ...a1, age: '24' });
+    expect(mergeRows(stored, [numeric])).toBeNull();
+    expect(replaceAll(stored, [numeric], new Set()).get(a1.id)).toBe(stored.get(a1.id));
+    // Not a finite number (a corrupted cache): no age rather than "NaN".
+    expect(normalizeRow({ ...a1, age: Number.NaN as unknown as string }).age).toBeNull();
   });
 
   it('strips photos and audit from a detail', () => {
@@ -128,7 +145,7 @@ describe('alerts diff (spec §7 Alerts)', () => {
   });
 
   it('new requests by others alert only with the bell on; never my own creates', () => {
-    const fresh = makeRow(13, { firstName: 'T.', lastName: 'R.', age: 24, gender: 'Male', createdBy: STAFF.sam.staff, caseNumber: 1013 });
+    const fresh = makeRow(13, { firstName: 'T.', lastName: 'R.', age: '24', gender: 'Male', createdBy: STAFF.sam.staff, caseNumber: 1013 });
     expect(diffAlerts(new Map(), [fresh], ctx())).toEqual([]);
     expect(diffAlerts(new Map(), [fresh], ctx({ bell: true }))).toEqual([
       { kind: 'new_request', requestId: fresh.id, title: 'New request · LP-1013', subtitle: 'T.R. 24 M · FA 4', count: 1 },

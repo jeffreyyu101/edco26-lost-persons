@@ -104,6 +104,70 @@ async function audit(page: Page, view: string): Promise<Audit> {
 
 const clean = (a: Audit): Audit => ({ view: a.view, axe: [], small: [], overlaps: [] });
 
+/**
+ * Text on the brand card (components/list/BrandCard.tsx) lies on a gradient with two glows and faint rings,
+ * which axe can only mark "needs review". So this measures it: the card is captured with its text made
+ * transparent, and each run of text is compared with every pixel behind its line box. Returns one line per
+ * run under 4.5:1 (the bar for small text, applied to the title too).
+ */
+async function brandContrast(page: Page): Promise<string[]> {
+  const card = page.getByTestId('brand-card');
+  const layout = await card.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const runs: Array<{ text: string; color: string; x: number; y: number; w: number; h: number }> = [];
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const text = (n.textContent ?? '').trim();
+      if (!text) continue;
+      const range = document.createRange();
+      range.selectNodeContents(n);
+      const color = getComputedStyle(n.parentElement!).color;
+      for (const r of Array.from(range.getClientRects())) runs.push({ text, color, x: r.left - box.left, y: r.top - box.top, w: r.width, h: r.height });
+    }
+    return { width: box.width, runs };
+  });
+  expect(layout.runs.length).toBeGreaterThanOrEqual(5);
+  const hide = await page.addStyleTag({ content: '[data-testid="brand-card"] * { color: transparent !important; }' });
+  const png = await card.screenshot({ animations: 'disabled' });
+  await hide.evaluate((el) => (el as Element).remove());
+  return page.evaluate(
+    async ({ data, width, runs }) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${data}`;
+      await img.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(img, 0, 0);
+      const scale = img.width / width;
+      const channel = (v: number) => {
+        const c = v / 255;
+        return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      };
+      const luminance = (r: number, g: number, b: number) => 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+      const out: string[] = [];
+      for (const run of runs) {
+        const [r, g, b] = (run.color.match(/[\d.]+/g) ?? []).map(Number) as [number, number, number];
+        const text = luminance(r, g, b);
+        const x0 = Math.max(0, Math.floor(run.x * scale));
+        const y0 = Math.max(0, Math.floor(run.y * scale));
+        const x1 = Math.min(img.width, Math.ceil((run.x + run.w) * scale));
+        const y1 = Math.min(img.height, Math.ceil((run.y + run.h) * scale));
+        const px = ctx.getImageData(x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0)).data;
+        let worst = Infinity;
+        for (let i = 0; i < px.length; i += 4) {
+          const back = luminance(px[i]!, px[i + 1]!, px[i + 2]!);
+          worst = Math.min(worst, (Math.max(text, back) + 0.05) / (Math.min(text, back) + 0.05));
+        }
+        if (worst < 4.5) out.push(`"${run.text}" ${run.color}: ${worst.toFixed(2)}:1`);
+      }
+      return out;
+    },
+    { data: png.toString('base64'), width: layout.width, runs: layout.runs },
+  );
+}
+
 for (const theme of ['light', 'dark'] as const) {
   test.describe(`${theme} theme`, () => {
     test.beforeEach(async ({ page }) => {
@@ -166,12 +230,25 @@ for (const theme of ['light', 'dark'] as const) {
         // ---- Lists, header, menus and sheets
         await visit('/', 'All', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
 
+        // The brand card: every text at 4.5:1 or more against every pixel behind it (axe can't judge
+        // text on its gradient). The card is dark in both themes, so both runs measure the same card.
+        await expect
+          .poll(() => page.getByTestId('brand-card').evaluate((el) => [...el.querySelectorAll('img')].every((img) => img.complete && img.naturalWidth > 0)))
+          .toBe(true);
+        expect.soft(await brandContrast(page), `brand card (${theme})`).toEqual([]);
+
+        // Log option B: the closed requests open in place under "Archived N", greyed (contrast, spec §7).
+        await page.getByTestId('closed-fold').click();
+        await expect(page.getByTestId('closed-rows')).toBeVisible();
+        results.push(await audit(page, 'All, Archived open'));
+        await page.getByTestId('closed-fold').click();
+
         await page.getByTestId('account-trigger').click();
         await expect(page.getByRole('dialog', { name: 'Account' })).toBeVisible();
         results.push(await audit(page, 'account menu'));
-        await page.keyboard.press('Escape');
 
-        await page.getByRole('button', { name: 'New-request alerts' }).click();
+        // The Alerts switch in the avatar menu (it replaced the header bell).
+        await page.getByRole('dialog', { name: 'Account' }).getByRole('switch', { name: 'Alerts' }).click();
         const bell = page.getByRole('dialog', { name: 'Alerts are on' });
         await expect(bell).toBeVisible();
         // Named and described by the visible heading and line, each in the sheet once (no hidden copy that
@@ -223,7 +300,7 @@ for (const theme of ['light', 'dark'] as const) {
         await visit('/?view=pending', 'Pending (before offline)', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
         await context.setOffline(true);
         try {
-          await expect(page.getByTestId('live-dot')).toHaveAttribute('data-state', 'off', { timeout: 15_000 });
+          await expect(page.getByTestId('connection-indicator')).toHaveAttribute('data-state', 'offline', { timeout: 15_000 });
           results.push(await audit(page, 'Pending offline'));
         } finally {
           await context.setOffline(false);

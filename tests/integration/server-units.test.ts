@@ -1,66 +1,13 @@
-// Pure server helpers (no HTTP server needed): CSV escaping with every injection prefix, the allowlist
-// mappers and legacy audit normalisation, error mapping, Origin / IP / body helpers, magic bytes, logging.
+// Pure server helpers (no HTTP server needed): the allowlist mappers and legacy audit normalisation, error
+// mapping, Origin / IP / body helpers, magic bytes, logging. (The CSV export left the app in v2.5, A50.)
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { buildCsv, csvCell, csvFilename, needsFormulaGuard } from '@/lib/server/csv';
 import { ApiFailure, fieldFromDetail, isDefinitiveRejection, mapDbError, snakeToCamel } from '@/lib/server/errors';
 import { assertSameOrigin, clientIp, expectedOrigins, readBodyLimited } from '@/lib/server/http';
 import { logRequest, newErrorId } from '@/lib/server/log';
 import { REQUEST_SUMMARY_KEYS, createPayload, editChanges, mapAudit, mapPhoto, mapRow, mapSync, patchPayload } from '@/lib/server/mappers';
-import { photoPaths, sniffImage } from '@/lib/server/photos';
+import { contentHash, isObjectAlreadyExists, photoPaths, sniffImage } from '@/lib/server/photos';
 import { createRequestSchema, requestPatchSchema } from '@/lib/validation';
-
-describe('CSV injection guard', () => {
-  it.each([
-    ['=1+1', true],
-    ['+1', true],
-    ['-1', true],
-    ['@SUM(A1)', true],
-    ['＝1', true],
-    ['＋1', true],
-    ['－1', true],
-    ['＠x', true],
-    [' =1', true],
-    [' 　=1', true],
-    ['\u0007=1', true],
-    ['\u200b@x', true],
-    ['\ufeff=1', true],
-    ['\t=1', true],
-    ['\tplain', true],
-    ['\rplain', true],
-    ['\nplain', true],
-    ['plain', false],
-    ['a=b', false],
-    ['Blue - red', false],
-    ['', false],
-    ['(407) 555-0100', false],
-    ['  plain', false],
-  ])('%j → guarded %s', (value, guarded) => {
-    expect(needsFormulaGuard(value)).toBe(guarded);
-    expect(csvCell(value)).toBe(`"${guarded ? "'" : ''}${value.replace(/"/g, '""')}"`);
-  });
-
-  it('quotes everything and doubles quotes; null / numbers', () => {
-    expect(csvCell('He said "hi"')).toBe('"He said ""hi"""');
-    expect(csvCell(null)).toBe('""');
-    expect(csvCell(undefined)).toBe('""');
-    expect(csvCell(22)).toBe('"22"');
-    expect(csvCell('=x"y')).toBe('"\'=x""y"');
-  });
-
-  it('builds BOM + header + rows newest first with CRLF, times in the event timezone', () => {
-    const base = mapRow({ id: 'a', case_number: 1, reporting_location: 'FA 4 – Oasis', status: 'Found – Awaiting Reunion', created_at: '2026-11-07T03:10:00+00:00', updated_at: '2026-11-07T03:10:00+00:00' });
-    const older = { ...base, id: 'b', caseNumber: 2, createdAt: '2026-11-06T03:10:00+00:00' };
-    const csv = buildCsv([older, base], 'America/New_York');
-    expect(csv.startsWith('\ufeff"Case number","Name"')).toBe(true);
-    const lines = csv.slice(1).split('\r\n');
-    expect(lines).toHaveLength(4); // header, 2 rows, trailing empty
-    expect(lines[1]).toContain('"LP-0001"');
-    expect(lines[1]).toContain('"In medical · friend coming"');
-    expect(lines[1]).toContain('"2026-11-06 22:10"');
-    expect(lines[2]).toContain('"LP-0002"');
-    expect(csvFilename(new Date('2026-11-07T03:30:00Z'), 'America/New_York')).toBe('lost-persons-2026-11-06.csv');
-  });
-});
 
 describe('mappers', () => {
   it('mapRow: exactly the RequestSummary keys; legacy columns dropped; derived fields', () => {
@@ -86,9 +33,24 @@ describe('mappers', () => {
 
   it('create / patch payloads: name split at the last space, camel → snake, omitted keys omitted', () => {
     const create = createRequestSchema.parse({ clientMutationId: '5eed0000-0000-4000-8000-000000000001', reportingLocation: 'Base', name: ' Mary  Ann Lee ', age: 3, hair: '' });
-    expect(createPayload(create)).toEqual({ client_mutation_id: '5eed0000-0000-4000-8000-000000000001', reporting_location: 'Base', other_location: null, first_name: 'Mary Ann', last_name: 'Lee', age: 3, hair: null });
+    expect(createPayload(create)).toEqual({ client_mutation_id: '5eed0000-0000-4000-8000-000000000001', reporting_location: 'Base', other_location: null, first_name: 'Mary Ann', last_name: 'Lee', age: '3', hair: null });
     const patch = requestPatchSchema.parse({ name: 'Dana', contactPhone: null });
     expect(patchPayload(patch)).toEqual({ first_name: 'Dana', last_name: null, contact_phone: null });
+  });
+
+  it('free-text age and gender (2026-11-06): payloads carry text; mapRow reads an age stored as a number as text', () => {
+    const create = createRequestSchema.parse({ clientMutationId: '5eed0000-0000-4000-8000-000000000001', reportingLocation: 'Base', age: ' mid-20s ', gender: ' Non-binary ' });
+    expect(createPayload(create)).toMatchObject({ age: 'mid-20s', gender: 'Non-binary' });
+    expect(patchPayload(requestPatchSchema.parse({ age: 24, gender: '' }))).toEqual({ age: '24', gender: null });
+    expect(mapRow({ age: 'mid-20s', gender: 'woman' })).toMatchObject({ age: 'mid-20s', gender: 'woman' });
+    expect(mapRow({ age: '24' }).age).toBe('24');
+    expect(mapRow({ age: 24 }).age).toBe('24');
+    expect(mapRow({ age: 0 }).age).toBe('0');
+    expect(mapRow({ age: null }).age).toBeNull();
+    expect(mapRow({ age: { x: 1 } }).age).toBeNull();
+    // Jeffrey's blobs hold age as a number, new ones as text: equal values are not a change.
+    expect(editChanges({ age: 24, hair: null }, { age: '24', hair: 'Red' })).toEqual({ previous: { hair: null }, next: { hair: 'Red' } });
+    expect(editChanges({ age: 24 }, { age: 'mid-20s' })).toEqual({ previous: { age: 24 }, next: { age: 'mid-20s' } });
   });
 });
 
@@ -231,7 +193,35 @@ describe('photos and logging', () => {
     expect(sniffImage(new Uint8Array(Buffer.from('GIF89a')))).toBeNull();
     expect(sniffImage(new Uint8Array(Buffer.from('<svg')))).toBeNull();
     expect(sniffImage(new Uint8Array())).toBeNull();
-    expect(photoPaths('p', 'f')).toEqual({ full: 'p/f.jpg', thumb: 'p/f_thumb.jpg' });
+  });
+
+  it('object paths are content-addressed: a path names exactly one content (A44)', () => {
+    const a = new Uint8Array([0xff, 0xd8, 0xff, 1, 2, 3]);
+    const b = new Uint8Array([0xff, 0xd8, 0xff, 1, 2, 4]);
+    const hashA = createHash('sha256').update(a).digest('hex');
+    const hashB = createHash('sha256').update(b).digest('hex');
+    expect(contentHash(a)).toBe(hashA);
+    expect(photoPaths('p', 'f', a, b)).toEqual({ full: `p/f-${hashA}.jpg`, thumb: `p/f-${hashB}_thumb.jpg` });
+    expect(photoPaths('p', 'f', a, null)).toEqual({ full: `p/f-${hashA}.jpg`, thumb: null });
+    // Same bytes → same path (retries find their objects); other bytes → another path (never overwritten).
+    expect(photoPaths('p', 'f', a.slice(), null).full).toBe(photoPaths('p', 'f', a, null).full);
+    expect(photoPaths('p', 'f', b, null).full).not.toBe(photoPaths('p', 'f', a, null).full);
+    expect(contentHash(a.subarray(3))).toBe(contentHash(new Uint8Array([1, 2, 3])));
+    // Within lp_add_photo's 200-character limit for real ids.
+    const uuid = '00000000-0000-4000-8000-000000000000';
+    const longest = photoPaths(uuid, uuid, a, a).thumb as string;
+    expect(longest.length).toBeLessThanOrEqual(200);
+  });
+
+  it('classifies "object already exists" (upsert: false) (A44)', () => {
+    // Local storage answers HTTP 400 with statusCode "409"; hosted storage may answer HTTP 409.
+    expect(isObjectAlreadyExists({ status: 400, statusCode: '409' })).toBe(true);
+    expect(isObjectAlreadyExists({ status: 409, statusCode: '409' })).toBe(true);
+    expect(isObjectAlreadyExists({ status: 409 })).toBe(true);
+    expect(isObjectAlreadyExists({ status: 400, statusCode: '404' })).toBe(false);
+    expect(isObjectAlreadyExists({ status: 500, statusCode: '500' })).toBe(false);
+    expect(isObjectAlreadyExists({})).toBe(false);
+    expect(isObjectAlreadyExists(null)).toBe(false);
   });
 
   it('log lines carry only route, status, codes, error id and timing — sanitised', () => {

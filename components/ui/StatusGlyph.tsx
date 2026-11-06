@@ -1,5 +1,5 @@
 // The status glyph, ported exactly from the mockups (design/screens/*.html `glyph()`): a 14×14 viewBox.
-//   waiting       empty ring, blue        notInMedical  filled circle with ×, amber
+//   waiting       empty ring, blue        notInMedical  filled circle with ×, grey (closed, v2.2)
 //   inMedical     ring with a ¾ pie, green closed      filled check, grey
 //   queued        dashed ring, grey        logged       empty ring, gray-10
 // FINAL (Phase 1a): props are frozen; C may refine styling only.
@@ -8,7 +8,8 @@ import { statusMeta, type GlyphKind, type StatusValue } from '@/lib/domain';
 
 const COLOR: Readonly<Record<GlyphKind, string>> = {
   waiting: 'var(--blue-9)',
-  notInMedical: 'var(--amber-9)',
+  // v2.2 (Jeffrey, 2026-11-06): Not in medical is closed and greyed out like Reunited / Discharged / Cancelled.
+  notInMedical: 'var(--gray-9)',
   inMedical: 'var(--green-9)',
   closed: 'var(--gray-9)',
   queued: 'var(--gray-9)',

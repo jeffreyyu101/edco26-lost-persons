@@ -411,7 +411,7 @@ function EditForm({ id, section, row }: { id: string; section: EditSection; row:
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
-  // Remounts the form after a review so "More details" opens when the latest data needs it.
+  // Remounts the form after a review, so it starts fresh on the latest data (focus, chips, scroll).
   const [revision, setRevision] = useState(0);
   const inFlight = useRef(false);
 

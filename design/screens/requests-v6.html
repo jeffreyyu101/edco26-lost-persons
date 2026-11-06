@@ -1,0 +1,197 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>v6 · All requests, decluttered</title>
+<!-- v6 exploration 2026-11-06 (Brian: cut visual clutter on All requests, progressive disclosure for first-time users).
+     Folds in Jeffrey 09:11–09:12: LP number is the leftmost "numbering" column; each row shows created + last updated;
+     "Not in medical" counts as closed and is greyed out. Shared by A/B/C: the view switcher is the page title (the long
+     app name leaves the header), the bell moves into the avatar menu, the live dot only appears when offline, and
+     "Newest first" goes. Real @radix-ui/themes 3.3.0 from CDN. Synthetic data only. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@radix-ui/themes@3.3.0/styles.css">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+body{margin:0}
+.radix-themes{--default-font-family:InterVariable,Inter,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;font-feature-settings:"cv11";-webkit-font-smoothing:antialiased}
+.radix-themes[data-is-root-theme]{min-height:0!important;height:100%;position:relative}
+.board{display:grid;grid-template-columns:repeat(2,390px);gap:26px 18px;justify-content:center;zoom:.89}
+.board figure{margin:0}.frame{height:780px;border-radius:30px;overflow:hidden;border:1px solid var(--border,#2b2b30)}
+figcaption{margin-top:9px;text-align:center;font:500 14px/1.3 var(--font-sans,system-ui);color:var(--foreground,#e4e4e7)}
+figcaption span{display:block;font-weight:400;font-size:13px;color:var(--muted-foreground,#8e8e96);margin-top:2px}
+.app{height:100%;display:flex;flex-direction:column;position:relative;overflow:hidden}
+.sp{flex:1}
+.fab{position:absolute!important;right:16px;bottom:24px;box-shadow:var(--shadow-5);z-index:5}
+/* ---- current (v5) ---- */
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 16px 12px}
+.title{display:flex;align-items:center;gap:8px;min-width:0}
+.title .rt-Heading{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.live{flex:none;width:7px;height:7px;border-radius:50%;background:var(--green-9);box-shadow:0 0 0 3px var(--green-a4)}
+.vbar{display:flex;align-items:center;gap:8px;padding:0 12px 10px;border-bottom:1px solid var(--gray-a3)}
+.vsw{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 9px 0 11px;border-radius:var(--radius-3);border:0;background:var(--gray-a3);color:var(--gray-12);font:inherit;font-size:15px;font-weight:500}
+.vsw svg{color:var(--gray-11)}.vsw .vc{color:var(--gray-10);font-weight:400}
+.row{display:flex;gap:10px;padding:10px 16px 11px}.row+.row{border-top:1px solid var(--gray-a3)}
+.row .g{padding-top:3px;display:flex}.rm{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.l1,.l2{display:flex;align-items:center;gap:6px;min-width:0}
+.t{font-size:12px;color:var(--gray-10);font-variant-numeric:tabular-nums}
+.meta{font-size:12px;color:var(--gray-10);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row.muted .rm>*{opacity:.6}
+/* ---- v6 ---- */
+.top6{display:flex;align-items:center;gap:6px;padding:20px 12px 12px 16px}
+.ttl{display:inline-flex;align-items:center;gap:7px;border:0;background:none;padding:0;color:var(--gray-12);font:inherit;font-size:22px;font-weight:600;letter-spacing:-.015em;cursor:pointer}
+.ttl svg{color:var(--gray-10);margin-top:2px}
+.tc{font-weight:400;color:var(--gray-10);font-variant-numeric:tabular-nums}
+.grid{display:grid;grid-template-columns:38px minmax(0,1fr) 121px 44px 50px;column-gap:6px;align-items:center;padding:0 12px 0 14px}
+.grid.nost{grid-template-columns:38px minmax(0,1fr) 44px 50px}
+.colh{height:30px;font-size:11px;white-space:nowrap;color:var(--gray-10);border-bottom:1px solid var(--gray-a4)}
+.colh .rt{text-align:right}
+.r6{height:47px;border-bottom:1px solid var(--gray-a3)}
+.num{white-space:nowrap;font-size:13px;color:var(--gray-11);font-variant-numeric:tabular-nums}
+.nm{font-size:14px;font-weight:500;color:var(--gray-12);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stt{display:flex;align-items:center;gap:5px;font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;color:var(--gray-10)}
+.stt.blue{color:var(--blue-11)}.stt.green{color:var(--green-11)}
+.tm{font-size:12.5px;text-align:right;color:var(--gray-11);font-variant-numeric:tabular-nums;white-space:nowrap}
+.tm.none{color:var(--gray-8)}
+.r6.closed .num,.r6.closed .nm,.r6.closed .tm{color:var(--gray-9)}
+.r6.closed .nm{font-weight:400}.r6.closed .stt{font-weight:400;color:var(--gray-9)}
+.fold{display:flex;align-items:center;gap:10px;height:50px;padding:0 16px;border:0;border-bottom:1px solid var(--gray-a3);background:none;width:100%;font:inherit;color:var(--gray-11);font-size:14px;cursor:pointer;text-align:left}
+.fold .n{color:var(--gray-10);font-variant-numeric:tabular-nums}
+.fold svg.chv{color:var(--gray-10)}
+.sec{display:flex;align-items:center;gap:7px;height:38px;padding:8px 16px 0;font-size:13px;font-weight:500;color:var(--gray-12)}
+.sec .n{color:var(--gray-10);font-weight:400;font-variant-numeric:tabular-nums}
+</style>
+<script type="importmap">{"imports":{
+"react":"https://esm.sh/react@18.3.1",
+"react-dom":"https://esm.sh/react-dom@18.3.1",
+"react-dom/client":"https://esm.sh/react-dom@18.3.1/client",
+"@radix-ui/themes":"https://esm.sh/@radix-ui/themes@3.3.0?deps=react@18.3.1,react-dom@18.3.1",
+"htm":"https://esm.sh/htm@3.1.1"}}</script>
+</head><body><div id="b"></div>
+<script type="module">
+import React from 'react';
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
+import htm from 'htm';
+import { Theme, Flex, Text, Heading, IconButton, Button, Avatar } from '@radix-ui/themes';
+const h = htm.bind(React.createElement);
+const svg = (p, s = 16, cls) => h`<svg className=${cls} width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style=${{ flex: 'none' }} dangerouslySetInnerHTML=${{ __html: p }} />`;
+const P = {
+  list: '<path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/>',
+  search: '<circle cx="11" cy="11" r="7.5"/><path d="m20.5 20.5-4.2-4.2"/>',
+  bellOff: '<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M17 17H4a1 1 0 0 1-.74-1.673C4.59 13.956 6 12.499 6 8a6 6 0 0 1 .258-1.742"/><path d="m2 2 20 20"/><path d="M8.668 3.01A6 6 0 0 1 18 8c0 2.687.77 4.653 1.707 6.05"/>',
+  plus: '<path d="M5 12h14M12 5v14"/>',
+  chev: '<path d="m6 9 6 6 6-6"/>',
+  chevR: '<path d="m9 18 6-6-6-6"/>',
+};
+
+// ---- status glyphs ----
+const pie = (f) => { const a = f * 2 * Math.PI, x = 7 + 3.25 * Math.sin(a), y = 7 - 3.25 * Math.cos(a); return `M7 7L7 3.75A3.25 3.25 0 ${f > 0.5 ? 1 : 0} 1 ${x.toFixed(2)} ${y.toFixed(2)}Z`; };
+// v6: only the two open states keep colour. Every closed state (Not in medical included) is the same grey.
+const S = {
+  new: { label: 'Waiting for check', color: 'blue', c: 'var(--blue-9)', ring: 0 },
+  found: { label: 'In medical', color: 'green', c: 'var(--green-9)', ring: 0.75 },
+  notfound: { label: 'Not in medical', mark: 'x' },
+  reunited: { label: 'Reunited', mark: 'check' },
+  discharged: { label: 'Discharged', mark: 'check' },
+  cancelled: { label: 'Cancelled', mark: 'dash' },
+};
+const isOpen = (k) => k === 'new' || k === 'found';
+const glyph = (k, s = 14, old) => {
+  const t = S[k];
+  if (old && k === 'notfound') return h`<svg width=${s} height=${s} viewBox="0 0 14 14" aria-hidden="true" style=${{ flex: 'none' }}><circle cx="7" cy="7" r="6.25" fill="var(--amber-9)"/><path d="M5 5l4 4M9 5l-4 4" stroke="var(--color-panel-solid)" strokeWidth="1.6" strokeLinecap="round"/></svg>`;
+  if (t.ring !== undefined) return h`<svg width=${s} height=${s} viewBox="0 0 14 14" aria-hidden="true" style=${{ flex: 'none' }}><circle cx="7" cy="7" r="5.75" fill="none" stroke=${t.c} strokeWidth="1.5"/>${t.ring ? h`<path d=${pie(t.ring)} fill=${t.c}/>` : null}</svg>`;
+  const mk = t.mark === 'x' ? h`<path d="M5 5l4 4M9 5l-4 4" stroke="var(--color-panel-solid)" strokeWidth="1.6" strokeLinecap="round"/>`
+    : t.mark === 'dash' ? h`<path d="M4.5 7h5" stroke="var(--color-panel-solid)" strokeWidth="1.6" strokeLinecap="round"/>`
+    : h`<path d="M4.4 7.2l1.8 1.8 3.5-3.6" fill="none" stroke="var(--color-panel-solid)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>`;
+  return h`<svg width=${s} height=${s} viewBox="0 0 14 14" aria-hidden="true" style=${{ flex: 'none' }}><circle cx="7" cy="7" r="6.25" fill="var(--gray-8)"/>${mk}</svg>`;
+};
+
+// ---- synthetic log, newest first. "now" is 11:04. upd = minutes since last update, null = never changed ----
+const D = [
+  { n: 1013, nm: 'T.R.', k: 'new', at: '11:02', upd: null, age: 24, sx: 'M', post: 'FA 4' },
+  { n: 1012, nm: 'Kayla Martinez', k: 'new', at: '10:58', upd: null, age: 19, sx: 'F', post: 'FA 3' },
+  { n: 1011, nm: 'D.F.', k: 'new', at: '10:51', upd: null, age: 28, sx: 'M', post: 'Command' },
+  { n: 1010, nm: 'B.W.', k: 'new', at: '10:47', upd: 9, age: 23, sx: 'F', post: 'FA 4' },
+  { n: 1009, nm: 'A.N.', k: 'notfound', at: '10:44', upd: 6, age: 21, sx: 'F', post: 'FA 3' },
+  { n: 1008, nm: 'N.G.', k: 'notfound', at: '10:36', upd: 12, age: 27, sx: 'M', post: 'FA 4' },
+  { n: 1007, nm: 'Jordan Diaz', k: 'found', at: '10:31', upd: 2, age: 22, sx: 'M', post: 'FA 4' },
+  { n: 1006, nm: 'L.W.', k: 'reunited', at: '10:24', upd: 9, age: 25, sx: 'F', post: 'Command' },
+  { n: 1005, nm: 'M.P.', k: 'found', at: '10:20', upd: 21, age: 26, sx: 'M', post: 'FA 3' },
+  { n: 1004, nm: 'S.L.', k: 'found', at: '10:12', upd: 25, age: 20, sx: 'F', post: 'FA 3' },
+  { n: 1003, nm: 'C.H.', k: 'reunited', at: '9:58', upd: 34, age: 25, sx: 'M', post: 'FA 4' },
+  { n: 1002, nm: 'Dani V.', k: 'discharged', at: '9:41', upd: 61, age: 20, sx: 'F', post: 'FA 3' },
+  { n: 1001, nm: 'R.K.', k: 'cancelled', at: '9:30', upd: 75, age: 31, sx: 'M', post: 'Base' },
+];
+const OPEN = D.filter((r) => isOpen(r.k));
+const CLOSED = D.filter((r) => !isOpen(r.k));
+const rel = (m) => (m == null ? '—' : m < 1 ? 'now' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h`);
+
+const Shell = ({ children }) => h`<${Theme} appearance="dark" accentColor="gray" grayColor="gray" radius="medium"><div className="app">${children}</div><//>`;
+const Fab = () => h`<${Button} className="fab" size="3" radius="full" highContrast>${svg(P.plus, 16)} New request<//>`;
+
+// ---- Now: v5 as built ----
+const OLD = { new: ['Waiting for check', 'blue'], found: ['In medical · friend coming', 'green'], notfound: ['Not in medical', 'amber'] };
+function OldRow({ r }) {
+  const closed = !OLD[r.k];
+  const [label, color] = OLD[r.k] ?? [S[r.k].label, 'gray'];
+  return h`<div className=${'row' + (closed ? ' muted' : '')}><span className="g">${glyph(r.k, 14, true)}</span><div className="rm">
+    <div className="l1"><${Text} size="2" weight="medium">${r.nm}<//><${Text} size="2" color="gray">${r.age} ${r.sx}<//><span className="sp"></span><span className="t">${r.at}</span></div>
+    <div className="l2"><${Text} size="1" weight="medium" color=${color}>${label}<//><span className="meta">· ${r.post} · LP-${r.n}</span></div>
+  </div></div>`;
+}
+const Now = () => h`<${Shell}>
+  <div className="top">
+    <div className="title"><${Heading} size="3" weight="medium">Is my friend in medical?<//><span className="live"></span></div>
+    <${Flex} align="center" gap="4" flexShrink="0">
+      <${IconButton} variant="ghost" color="gray">${svg(P.search, 18)}<//>
+      <${IconButton} variant="ghost" color="gray">${svg(P.bellOff, 18)}<//>
+      <${Avatar} size="2" radius="full" variant="solid" color="gray" highContrast fallback="DK"/>
+    <//>
+  </div>
+  <div className="vbar"><button className="vsw">${svg(P.list, 16)}<span>All requests</span><span className="vc">13</span>${svg(P.chev, 15)}</button><span className="sp"></span><${Text} size="1" color="gray">Newest first<//></div>
+  <div>${D.map((r) => h`<${OldRow} key=${r.n} r=${r}/>`)}</div>
+  <${Fab}/>
+<//>`;
+
+// ---- v6 shared ----
+const Top6 = ({ n }) => h`<div className="top6">
+  <button className="ttl" aria-haspopup="menu" aria-label=${`All requests, ${n}. Change view`}>All requests <span className="tc">${n}</span>${svg(P.chev, 18)}</button>
+  <span className="sp"></span>
+  <${IconButton} size="3" variant="ghost" color="gray" aria-label="Search">${svg(P.search, 19)}<//>
+  <${Avatar} size="2" radius="full" variant="solid" color="gray" highContrast fallback="DK"/>
+</div>`;
+const ColH = ({ st = true }) => h`<div className=${'grid colh' + (st ? '' : ' nost')} aria-hidden="true">
+  <span>#</span><span>Friend</span>${st ? h`<span>Status</span>` : null}<span className="rt">Created</span><span className="rt">Updated</span>
+</div>`;
+function Row({ r, st = true }) {
+  const t = S[r.k];
+  const sr = `LP-${r.n}, ${r.nm}, ${t.label}, created ${r.at}${r.upd == null ? '' : `, updated ${rel(r.upd)} ago`}`;
+  return h`<div className=${'grid r6' + (st ? '' : ' nost') + (isOpen(r.k) ? '' : ' closed')} role="link" aria-label=${sr}>
+    <span className="num">${r.n}</span>
+    <span className="nm">${r.nm}</span>
+    ${st ? h`<span className=${'stt ' + (t.color ?? '')}>${glyph(r.k)}${t.label}</span>` : null}
+    <span className="tm">${r.at}</span>
+    <span className=${'tm' + (r.upd == null ? ' none' : '')}>${rel(r.upd)}</span>
+  </div>`;
+}
+const Fold = ({ n }) => h`<button className="fold" aria-expanded="false">${glyph('reunited')}<span>Closed</span><span className="n">${n}</span><span className="sp"></span>${svg(P.chev, 16, 'chv')}</button>`;
+
+// A · one log, every row, closed greyed in place (Jeffrey's ask, literally)
+const A = () => h`<${Shell}><${Top6} n=${D.length}/><${ColH}/>${D.map((r) => h`<${Row} key=${r.n} r=${r}/>`)}<${Fab}/><//>`;
+// B · open requests first; every closed one folds into one row (progressive disclosure)
+const B = () => h`<${Shell}><${Top6} n=${D.length}/><${ColH}/>${OPEN.map((r) => h`<${Row} key=${r.n} r=${r}/>`)}<${Fold} n=${CLOSED.length}/><${Fab}/><//>`;
+// C · grouped by status: the section names the status, so rows drop it
+const Sec = ({ k, label, n }) => h`<div className="sec">${glyph(k)}<span>${label}</span><span className="n">${n}</span></div>`;
+const C = () => {
+  const w = OPEN.filter((r) => r.k === 'new'), f = OPEN.filter((r) => r.k === 'found');
+  return h`<${Shell}><${Top6} n=${D.length}/><${ColH} st=${false}/>
+    <${Sec} k="new" label="Waiting for check" n=${w.length}/>${w.map((r) => h`<${Row} key=${r.n} r=${r} st=${false}/>`)}
+    <${Sec} k="found" label="In medical · friend coming" n=${f.length}/>${f.map((r) => h`<${Row} key=${r.n} r=${r} st=${false}/>`)}
+    <div style=${{ height: 10 }}></div><${Fold} n=${CLOSED.length}/><${Fab}/><//>`;
+};
+
+const Fig = ({ cap, sub, children }) => h`<figure><div className="frame">${children}</div><figcaption>${cap}<span>${sub}</span></figcaption></figure>`;
+const Board = () => h`<div className="board">
+  <${Fig} cap="Now (v5)" sub="7 data points a row, 4 colours, 3 header icons"><${Now}/><//>
+  <${Fig} cap="A · One log" sub="Every row, closed greyed in place"><${A}/><//>
+  <${Fig} cap="B · Open first (recommended)" sub="Closed folds into one row"><${B}/><//>
+  <${Fig} cap="C · Grouped by status" sub="Sections name the status, rows don't"><${C}/><//>
+</div>`;
+flushSync(() => createRoot(document.getElementById('b')).render(h`<${Board}/>`));
+</script></body></html>

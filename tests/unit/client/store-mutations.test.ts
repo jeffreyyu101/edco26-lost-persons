@@ -2,6 +2,7 @@
 // serialisation, monotonic responses, Undo (only when changed, reverse transition with the returned
 // version, never retried), the A12 single resend on a 409, failures, edits and cancel.
 import { describe, expect, it } from 'vitest';
+import { UNDO_MS } from '@/lib/client/constants';
 import { COPY } from '@/lib/client/store-core';
 import { applyOverlay } from '@/lib/client/selectors';
 import { STATUS } from '@/lib/domain';
@@ -36,7 +37,7 @@ describe('setStatus', () => {
     expect(s().pending.size).toBe(0);
     expect(s().confirmed.get(R1.id)).toMatchObject({ status: STATUS.inMedical, rowVersion: 2 });
     expect(s().snackbar?.message).toBe('LP-1001 · In medical');
-    await advance(6_000);
+    await advance(UNDO_MS);
     expect(s().snackbar).toBeNull();
   });
 

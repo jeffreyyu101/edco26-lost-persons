@@ -128,7 +128,8 @@ export function viewCounts(
 
 // ---------------------------------------------------------------------------------------------------
 // Search (spec §8): case-insensitive over name, clothing, last seen, physical description, identifying
-// features, hair, post and the LP number ("1012" or "LP-1012").
+// features, hair, post and the LP number ("1012" or "LP-1012"), and the free-text age ("mid-20s"; not for
+// a query that reads as an LP number, so typing digits never lists everyone of that age).
 // ---------------------------------------------------------------------------------------------------
 
 export type SearchField =
@@ -139,7 +140,8 @@ export type SearchField =
   | 'physicalDescription'
   | 'identifyingFeatures'
   | 'hair'
-  | 'post';
+  | 'post'
+  | 'age';
 
 export interface SearchHit {
   row: RequestSummary;
@@ -160,6 +162,13 @@ export function highlightRanges(text: string, query: string): Array<[number, num
   return out;
 }
 
+/**
+ * A field's text for search. sync-merge normalises a cached numeric age to text on load; this also keeps a
+ * stray number (or any other non-string) from throwing in highlightRanges while the list renders.
+ */
+const searchableText = (value: unknown): string | null =>
+  typeof value === 'string' ? value : typeof value === 'number' ? String(value) : null;
+
 export function searchRequests(rows: readonly RequestSummary[], query: string): SearchHit[] {
   const q = query.trim();
   if (!q) return [];
@@ -177,7 +186,7 @@ export function searchRequests(rows: readonly RequestSummary[], query: string): 
         continue;
       }
     }
-    const fields: Array<[SearchField, string | null]> = [
+    const fields: Array<[SearchField, unknown]> = [
       ['name', row.name],
       ['clothing', row.clothing],
       ['lastSeen', row.lastSeen],
@@ -185,8 +194,11 @@ export function searchRequests(rows: readonly RequestSummary[], query: string): 
       ['identifyingFeatures', row.identifyingFeatures],
       ['hair', row.hair],
       ['post', `${row.postShort} · ${postFull(row.reportingLocation, row.otherLocation)}`],
+      // A row cached before age became text can still hold a number (24): searchableText reads it as "24".
+      ['age', caseNumber === null ? row.age : null],
     ];
-    for (const [field, text] of fields) {
+    for (const [field, value] of fields) {
+      const text = searchableText(value);
       if (!text) continue;
       const ranges = highlightRanges(text, q);
       if (ranges.length > 0) {
@@ -196,4 +208,38 @@ export function searchRequests(rows: readonly RequestSummary[], query: string): 
     }
   }
   return hits.sort((a, b) => time(b.row.createdAt) - time(a.row.createdAt) || b.row.caseNumber - a.row.caseNumber);
+}
+
+// ---------------------------------------------------------------------------------------------------
+// All requests, log option B (Brian + Jeffrey, 2026-11-06): open requests first, and every closed one
+// (Not in medical included) folded into one "Closed N" row.
+// ---------------------------------------------------------------------------------------------------
+
+export interface OpenClosed<T> {
+  /** Waiting for check, In medical (and legacy Bring friend). */
+  open: T[];
+  /** Not in medical, Reunited, Discharged, Cancelled and any unknown legacy status. */
+  closed: T[];
+}
+
+/** Splits requests into the open and closed buckets, keeping their order. */
+export function splitOpenClosed<T extends Pick<RequestSummary, 'status'>>(rows: readonly T[]): OpenClosed<T> {
+  const open: T[] = [];
+  const closed: T[] = [];
+  for (const row of rows) (statusBucket(row.status) === 'open' ? open : closed).push(row);
+  return { open, closed };
+}
+
+/** The unfiltered log: open requests, then the folded closed ones, each newest first by createdAt. */
+export function logSections(rows: readonly RequestSummary[]): OpenClosed<RequestSummary> {
+  return splitOpenClosed(sortNewestFirst(rows));
+}
+
+/** My requests: open first, then the closed ones (the finished area), each newest update first. */
+export function mineSections(
+  rows: readonly RequestSummary[],
+  myIds: ReadonlySet<string>,
+  sessionStaff: string | null,
+): OpenClosed<RequestSummary> {
+  return splitOpenClosed(mineRows(rows, myIds, sessionStaff));
 }

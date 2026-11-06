@@ -1,4 +1,5 @@
-// GET /api/stats (spec §8 Dashboard, A21, A31): lp_stats() is already camelCase (Stats).
+// GET /api/stats (spec §8 Dashboard, A21, A31, A48, A49): lp_stats() is already camelCase (Stats), including
+// avgReuniteMinutes and loggedLastHour since the v2.5 re-run of the rework migration.
 import type { Stats } from '@/lib/api-types';
 import { ApiFailure } from '@/lib/server/errors';
 import { json } from '@/lib/server/http';

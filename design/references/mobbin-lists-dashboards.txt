@@ -1,0 +1,115 @@
+**SCREEN 1: Request log**
+
+1. Linear Mobile, [Active issues](https://mobbin.com/screens/30ebc468-06c8-46dd-9503-e197e89a1e5c?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp)
+   Detail: the status glyph sits in a fixed leading column, so every title starts at the same x position. Only the glyph is coloured and all text stays neutral. Group headers ("In Progress", "Todo") are small grey medium-weight text with no rule or band, and rows have no dividers.
+   Image: https://mobbin.com/api/mcp/short/uVEsVFpA
+
+2. GitHub, [Issues list](https://mobbin.com/screens/630cfd05-032d-4407-a244-567ad40ad94e?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp)
+   Detail: relative time ("now", "9m", "40m") is right-aligned on the first line's baseline, in quiet grey, with no "ago". This is your last-updated column.
+   Image: https://mobbin.com/api/mcp/short/gYA9XNky
+
+3. GitHub, [Project view with Backlog / Done groups](https://mobbin.com/screens/6d1c0949-c31d-44e6-a2e0-fc334f0712e0?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp)
+   Detail: the group row reads "Done", then a count in a small grey circle, then a chevron pinned to the far right. That is your "Closed 6 ⌄" row. The view switcher is a small "Backlog ⌄" pill under the title.
+   Image: https://mobbin.com/api/mcp/short/EXLcpZVa
+
+4. Shopify, [Orders](https://mobbin.com/screens/ae89a0e6-84c6-4c57-820c-86066c76949a?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp)
+   Detail: "#1002" in semibold anchors the row. Everything else drops to one grey meta line joined by middle dots ("Sam Lee • 5 items • 12:31 PM"). Only the state that needs action (Unfulfilled) gets colour; settled states are grey pills.
+   Image: https://mobbin.com/api/mcp/short/wIq0hPcx
+
+5. Shopify, [Orders with the view menu open](https://mobbin.com/screens/ff016813-d7d7-4e02-b27d-4170390b6225?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp)
+   Detail: the large title plus a small chevron in the same colour is the whole switcher. The popover is a list of icon + label rows, and the current view is marked with a grey fill, not a checkmark or accent colour.
+   Image: https://mobbin.com/api/mcp/short/YDBjJ86T
+
+6. Attio, [My tasks](https://mobbin.com/screens/c45cd1e7-9589-42fd-8408-b8a6fe179a4b?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp)
+   Detail: a "My tasks ⌄" title menu over collapsible groups (Today 3, Upcoming 4, Completed 1), each count in a light grey rounded pill. Completed comes last with dimmed rows, and there's a floating add button bottom-right.
+   Image: https://mobbin.com/api/mcp/short/xzrWWVPQ
+
+7. Amie, [Work list with the "Hide 1 done" fold](https://mobbin.com/screens/8651d9b8-539c-4a87-af9a-53a2f492dc3a?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp)
+   Detail: the fold is plain grey text with no card or divider, and the done row below it drops to low-contrast text. The count sits next to the title in grey ("Work 4"), which is the model for "All requests 13".
+   Image: https://mobbin.com/api/mcp/short/8kt5Rm1M
+
+8. Things 3, [Logbook](https://mobbin.com/screens/627a2d8f-f5bb-408e-a724-c46b9e40a769?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp)
+   Detail: a short, fixed-width leading column ("today", "3/15") in a smaller semibold weight keeps every title on one left edge. This is the pattern for the leading case number. The secondary line is small grey text.
+   Image: https://mobbin.com/api/mcp/short/0B0lR65s
+
+**SCREEN 2: Operations dashboard**
+
+1. Shopify, [Live View with 2-column stat tiles](https://mobbin.com/screens/536183e5-410b-4895-9397-e6742282348f?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp)
+   Detail: the label sits on top in medium weight with the value under it in semibold. A small green "↗ 200%" delta follows the value inline. Tiles are white on a grey canvas with no border or shadow and a tight, even gutter.
+   Image: https://mobbin.com/api/mcp/short/tdYlvmy6
+
+2. Shopify, [Live View breakdowns (Sessions by location, New vs returning)](https://mobbin.com/screens/481e85c8-12d5-4d77-9217-b6e34cf3a42b?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp)
+   Detail: each bar has a small grey label above it, and the count is right-aligned just past the bar's end. The split bar has a legend of dot + label + count above it. Copy the structure for "Open by post" and the Open split bar, but not the cyan.
+   Image: https://mobbin.com/api/mcp/short/r7pC5xEC
+
+3. Stripe Dashboard, [Home "Today" strip](https://mobbin.com/screens/e345975a-5113-4ffd-8b71-1abc1481379e?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp)
+   Detail: three related counts (Gross Volume, Payments, Customers) share one bordered card with equal columns and one baseline, instead of three separate cards.
+   Image: https://mobbin.com/api/mcp/short/JLr2uyxD
+
+4. Substack, [Creator stats](https://mobbin.com/screens/f1eb1a2d-1718-40d7-bd68-7a1ac06d3a55?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp)
+   Detail: the most monochrome tile grid in the set. Grey label top-left, large value under it, borderless white tiles of equal height on light grey. Zero values are greyed out rather than hidden.
+   Image: https://mobbin.com/api/mcp/short/LutBkKZn
+
+5. Asana, [Project overview](https://mobbin.com/screens/905d6029-4f4a-4d8b-9d47-b4b300a364a8?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp)
+   Detail: a thin progress bar with its captions demoted to small grey text at each end ("83% complete" left, "6 total tasks" right), above grey-filled sub-tiles (Overdue 0 / Due 1). This is the model for the Open tile's split bar.
+   Image: https://mobbin.com/api/mcp/short/f4cJYdGd
+
+6. Jobber, [Business health](https://mobbin.com/screens/aaaa68ff-32f2-46f0-ba47-fe3ff66a4108?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp)
+   Detail: metrics as rows rather than tiles. The label is on the left in regular weight, the value right-aligned in bold, then a small delta chip, with hairline dividers. Use this for the Performance block.
+   Image: https://mobbin.com/api/mcp/short/QLxMKJ1p
+
+7. Mercury, [Home (Transactions / Accounts)](https://mobbin.com/screens/82e8f14d-9bf6-4956-bb4d-8d9306d167d3?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp)
+   Detail: the section header is the link ("Transactions ›"), with no separate "See all". Rows have an initials avatar, a muted status chip (Pending grey, Failed pink) and a right-aligned amount. This is "Recently updated".
+   Image: https://mobbin.com/api/mcp/short/Mqz8fUhk
+
+8. Mercury, [Balance with Money in / Money spent](https://mobbin.com/screens/7a717e40-6b9a-4dbc-a81c-b7da99d784cb?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp)
+   Detail: label-over-value pairs where only a small ↗ / ↘ glyph is coloured. The big number shows its cents smaller and raised. Use the same split for "24m": large digits, small unit.
+   Image: https://mobbin.com/api/mcp/short/W81Bl5nZ
+
+**8 POLISH MOVES**
+
+1. **Use one row component with fixed columns (Things, Linear).** Keep 16pt side margins.
+   - Case number: a 40pt leading column, 13pt medium, secondary grey.
+   - Name: flexible width, 15pt regular, primary colour, one line, truncated at the tail.
+   - Status: a 14pt glyph box plus a 13pt label.
+   - Created: a fixed 36pt column, right-aligned.
+   - Updated: a fixed 28pt column, right-aligned.
+
+   Reuse exactly this row under "Recently updated" on the dashboard.
+
+2. **Put colour in the glyph only (Linear, Shopify).** Use an 8–10pt dot or ring in blue or green, with the status label in neutral secondary text. Closed statuses get a grey ✓ glyph. Never tint row backgrounds or text.
+
+3. **Treat every number the same way (GitHub).** Use tabular figures everywhere (`.monospacedDigit()` or `font-variant-numeric: tabular-nums`) so 11:02 and 9:47 line up. Created time is secondary grey; updated time is a lighter tertiary grey. Relative times read "now / 2m / 1h / 3d", never "ago". Both sit on the name's baseline.
+
+4. **Let alignment carry the rhythm (Linear).** Rows are at least 44pt tall with no dividers between them. If you need one, use a 0.5pt hairline inset to start at the name column. Section headers are 13pt semibold, secondary colour, with 24pt above and 6pt below and no background band. Add bottom padding equal to the floating button's height plus 16pt so it never covers the last row.
+
+5. **Make Closed a plain row, not a card (GitHub, Attio, Amie).**
+   - "Closed" in 15pt medium secondary.
+   - The count in a grey capsule: 13pt, minimum width 20pt, 6pt horizontal padding.
+   - A 12pt semibold chevron pinned right that rotates on expand.
+   - Expanded closed rows render name and status in secondary grey.
+
+6. **Title as menu (Shopify, Amie).**
+   - "All requests" in 28pt bold, then "13" in 28pt regular tertiary grey (no badge), then a 13pt semibold chevron on the same baseline.
+   - Tapping opens a native menu listing each view with its count right-aligned.
+   - Search and avatar are 32pt icon buttons on the right.
+   - "New request" is a 50pt-tall capsule in the primary (black/white) fill with a 15pt semibold label.
+
+7. **Stat tiles in two tiers (Substack, Shopify, Stripe, Asana).**
+   - Layout: 2 columns, 8pt gutter, 12pt padding, 12pt corner radius. Use a secondary grouped fill on the grouped background, with no borders or shadows.
+   - Label: 13pt medium secondary on top, led by the status glyph on status tiles.
+   - Value: tabular, bottom-left. Open and Closed get 34pt semibold; the four status tiles get 22pt semibold at a fixed height.
+   - Open's split bar: 4pt tall, full inner width, 2pt gap between the blue and green segments, 2pt radius, 12pt from the tile's bottom.
+   - No legend: the Waiting and In medical tiles below already carry the matching glyph colours.
+
+8. **Bars and Performance stay quiet (Shopify, Jobber, Mercury).**
+   - "Open by post": each post gets a 13pt secondary label above a 6pt bar. Fill it in the primary label colour on a full-width faint grey track. Scale to the busiest post and sort descending. The count sits in a fixed 24pt right-aligned column.
+   - Performance: rows, not tiles, with 32pt of space above the section. Label on the left in 15pt regular secondary. Value on the right as 17pt semibold digits with the unit in 13pt secondary ("24" + "m"). Separate rows with inset hairlines.
+
+Mobbin returned nothing for Flighty or Square. The image links are Mobbin short links that expire after 30 days, so download any you want to keep.
+
+---
+
+**Your Mobbin AI usage is high this month**
+
+Usage is unlimited during beta. If your usage stays at this level, you may need to purchase more credits once limits take effect. [View usage and plan options](https://mobbin.com/settings/billing-and-usage?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp)

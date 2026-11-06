@@ -37,7 +37,6 @@ const ROUTES: Route[] = [
   { method: 'POST', path: `/api/requests/${SEED_ID}/cancel`, body: () => ({ expectedVersion: 0 }), mutation: true },
   { method: 'POST', path: `/api/requests/${SEED_ID}/photos`, body: photoForm, mutation: true },
   { method: 'GET', path: `/api/photos/${SEED_PHOTO}?size=thumb`, mutation: false },
-  { method: 'GET', path: '/api/export', mutation: false },
   { method: 'GET', path: '/api/stats', mutation: false },
 ];
 
@@ -109,12 +108,23 @@ describe('every route', () => {
 });
 
 describe('unknown API paths', () => {
-  it.each(['/api/login', '/api/logout', '/api/patients', `/api/patients/${SEED_ID}`, '/api/nope/deeper'])('%s → JSON 404', async (path) => {
+  // /api/export (the CSV) was removed in v2.5 (A50): it falls through to the unknown-route handler.
+  it.each(['/api/login', '/api/logout', '/api/patients', `/api/patients/${SEED_ID}`, '/api/nope/deeper', '/api/export'])('%s → JSON 404', async (path) => {
     for (const method of ['GET', 'POST']) {
       const res = await api(path, { method, cookie: await cookieFor(newStaff()) });
       expect(res.status).toBe(404);
       expect(res.body).toEqual({ error: { code: 'not_found', message: 'Not found' } });
       expect(res.headers.get('cache-control')).toBe('no-store');
+    }
+  });
+
+  it('GET /api/export is gone (A50): a JSON 404 with or without a session, never a CSV attachment', async () => {
+    for (const cookie of [null, await cookieFor(newStaff())]) {
+      const res = await api('/api/export', { cookie });
+      expect(res.status).toBe(404);
+      expect(res.headers.get('content-type')).toContain('application/json');
+      expect(res.headers.get('content-disposition')).toBeNull();
+      expect(res.body).toEqual({ error: { code: 'not_found', message: 'Not found' } });
     }
   });
 });
