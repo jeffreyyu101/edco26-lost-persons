@@ -571,7 +571,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 
   /** Focus / online / pageshow / visible / tap-the-dot: bursts coalesce into one poll. */
   const triggerSync = () => {
-    if (!running || state.session.status === 'expired') return;
+    if (!running || signingOut || state.session.status === 'expired') return;
     if (pollInFlight) {
       pollRerun = true;
       return;
@@ -1060,7 +1060,6 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     const e = requireEnv();
     let job = getJob(mutationId);
     if (!job) return 'next';
-    const wasQueued = job.attempts > 0 || job.source === 'legacy';
     patchJob(mutationId, { state: 'sending' });
     if (!job.serverId) {
       const existing = confirmedRowForJob(job, state.confirmed);
@@ -1074,7 +1073,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         if (res.ok && isRow(res.data.request)) {
           createdOk(mutationId, res.data.request);
           markLive();
-          if (wasQueued) showToast({ tone: 'green', icon: 'check', title: `${formatCaseNumber(res.data.request.caseNumber)} saved`, durationMs: 4_000 });
+          // Sent later by the worker (the direct path in create() toasts for itself).
+          showToast({ tone: 'green', icon: 'check', title: `${formatCaseNumber(res.data.request.caseNumber)} saved`, durationMs: 4_000 });
         } else if (!res.ok && res.kind === 'http' && res.status === 401) {
           patchJob(mutationId, { state: 'pending' });
           sessionExpired();
@@ -1329,7 +1329,6 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       return { outcome: 'queued', mutationId };
     };
     if (!e.online() || state.session.status === 'expired') return queued();
-    if (promptIds.length && state.outboxPrompt) refreshPrompt();
 
     directSends.add(mutationId);
     let res: HttpResult<CreateResponse>;
