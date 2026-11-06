@@ -460,8 +460,12 @@ test('photos open the full-screen viewer, and Add uploads another', async ({ pag
   await expect(viewer).toBeHidden();
   await expect(auditItems(page).first()).toContainText('Photo added');
 
-  // Add from the profile: pick, choose Not today, upload.
+  // Add from the profile: pick, skip the crop with Escape (the whole photo), choose Not today, upload.
   await page.getByLabel('Add photo').setInputFiles({ name: 'second.jpg', mimeType: 'image/jpeg', buffer: JPEG });
+  const crop = page.getByRole('dialog', { name: 'Crop photo' });
+  await expect(crop.getByRole('button', { name: 'Use photo' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(crop).toBeHidden();
   const sheet = page.getByRole('dialog', { name: 'Add photo' });
   await expect(sheet).toBeVisible();
   await sheet.getByRole('radio', { name: 'Not today' }).click();

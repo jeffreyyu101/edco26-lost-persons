@@ -1,5 +1,6 @@
 import { deflateSync } from 'node:zlib';
 import { expect, test, type APIRequestContext, type Page, type Route } from '@playwright/test';
+import { confirmCrop } from './helpers/photo';
 import { signedInAs } from './helpers/session';
 import { syncRows } from './helpers/sync';
 
@@ -146,6 +147,7 @@ test('offline: reload from the cached shell, open New request, queue with a phot
   await pickPost(page, 'FA 4 – Oasis');
   await personName(page).fill(name);
   await page.locator('input[type=file]').setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: syntheticPng() });
+  await confirmCrop(page);
   await expect(page.getByRole('button', { name: /^1 photo/ })).toBeVisible();
   await submit(page).click();
   await expect(page.getByText('Saved on this phone', { exact: true })).toBeVisible();

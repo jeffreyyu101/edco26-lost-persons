@@ -227,6 +227,19 @@ Approved by Brian at about 14:30, after real staff started at 12:30 PM ET. These
 - **Unchanged:** the offline / "Can't reach the log" banners and the offline badge on the avatar.
 - **Differs from the mockup:** the line's text is gray-11, not gray-10, for 4.5:1 in both themes (the accessibility pass above). When requests fail while the phone still reports a connection, the line says Reconnecting and the existing banner still says "Offline · N waiting to send". Brian should confirm that pairing. (Resolved by item 15: both now say Reconnecting.)
 
+### v2.2 #10 — Photos of a phone screen (Jeffrey, 2026-11-06 15:13) — `screens/photo-crop-*.png`
+
+Staff will often photograph the friend's or family member's **phone screen** showing a picture of the missing person. Jeffrey: *"it'll be blurry/not great quality but that's fine. If you can clean up the photo … when uploading without introducing connectivity issues or run into usage limits with Supabase and Vercel that would be great."* Engineering detail is in `docs/BUILD_SPEC.md` §17 A53.
+
+| # | Decision | Who and when |
+|---|---|---|
+| 10a | **Cleanup happens on the phone, before upload.** No extra request, no server or Supabase work, nothing new on Vercel. The upload is never bigger than the app made it before this change: the phone also makes the photo the old way and sends the cleaned one only if it is no bigger (at quality 0.82, else 0.76, else 0.72), else the plain area-averaged one if no bigger, else the old one. | Jeffrey's ask; Brian, 2026-11-06 |
+| 10b | **Every photo gets the same conservative cleanup, only where it measures a need:** an area-averaged downscale (softens the screen's pixel grid instead of turning it into moiré), auto levels (0.5 % clipped at each end, at most 1.5×, no skin channel pushed past 248), and a light unsharp mask on brightness, only for a soft photo. A sharp, well-exposed camera photo is left as it was. If cleanup fails or takes over 1 s, the plain photo is used. | Brian, 2026-11-06 |
+| 10c | **A quick crop step after every photo is taken or picked** (New request, and Add photo on a profile). The whole photo is selected, so one tap on **Use photo** keeps it as it was. Drag a corner (44 px targets) or draw a rectangle to cut away the bezel and the scene around the phone; **Retake** drops it and opens the camera again. No pinch, no rotate, no helper text: the dimmed area and the corner brackets show what is kept. Keyboard: Tab to a corner, arrows move it, Enter uses the photo, Escape keeps the whole photo. A tap on the scrim does nothing, so a photo is never added by accident. | Brian, 2026-11-06 |
+
+- **Unchanged:** EXIF and GPS are still stripped by re-encoding (and now the small Exif block Safari's own encoder adds is dropped too, so no upload carries any), orientation still comes from the photo, the full image is still at most 1600 px and 2.5 MB (well under Vercel's 4.5 MB body cap; the server still refuses over 3.9 MB), the thumbnail is still 320 px, new requests still queue offline with their photos, and three photos is still the limit.
+- **Not done:** straightening a photo taken at an angle (perspective), and removing moiré bands the camera already recorded (only the fine grid texture is averaged away). Both need much heavier processing.
+
 ### v2.2 afternoon (F1.2, 2026-11-06 about 16:20–16:35) — the Apple Mail model, built as `screens/f12-*.png`
 
 Brian found the line's ticking seconds ("Updated 6s ago", "7s ago", …) distracting, and chose the Apple Mail model: the line says how fresh the data is in minutes, and problems become a banner. Client only: no migration, no new environment variable. These override item 13 above.

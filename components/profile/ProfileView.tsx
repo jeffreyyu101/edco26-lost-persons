@@ -27,6 +27,8 @@
 import { AlertDialog, Badge, Button, DropdownMenu, Heading, IconButton, Skeleton, Text, VisuallyHidden } from '@radix-ui/themes';
 import { Camera, Check, ChevronDown, Clock, CloudOff, Ellipsis, MapPin, Pencil, Phone, Plus, RotateCcw, Trash2, Undo2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { CropSheet } from '@/components/photo/CropSheet';
+import { useCropQueue, type CropPick } from '@/components/photo/use-crop-queue';
 import { Banner, ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ProfileSkeleton } from '@/components/ui/Skeleton';
@@ -228,11 +230,9 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
     setAdd(null);
   }, []);
 
-  const onFiles = async (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.currentTarget.files ?? []);
-    event.currentTarget.value = '';
-    const room = MAX_PHOTOS - photoCount;
-    if (files.length === 0 || room <= 0) return;
+  // Each picked photo goes through the quick-crop step first (CropSheet, v2.2 #10), then is prepared.
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const prepareCropped = async (cropped: CropPick[]) => {
     const run = (addRun.current += 1);
     revoke(livePicks.current);
     livePicks.current = [];
@@ -240,9 +240,9 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
     const picks: PhotoPick[] = [];
     let unreadable = 0;
     // One at a time: decoding several camera photos at once can exhaust iOS memory.
-    for (const file of files.slice(0, room)) {
+    for (const { file, crop: cropRect } of cropped) {
       try {
-        const photo = await actions.preparePhoto(file);
+        const photo = await actions.preparePhoto(file, { crop: cropRect });
         if (addRun.current !== run) return;
         const pick = { photo, url: URL.createObjectURL(photo.thumbBlob) };
         picks.push(pick);
@@ -253,6 +253,16 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
     }
     if (addRun.current !== run) return;
     setAdd({ picks, unreadable, phase: 'ready', error: null });
+  };
+  const reopenPicker = useCallback(() => fileInput.current?.click(), []);
+  const crop = useCropQueue((picks) => void prepareCropped(picks), reopenPicker);
+
+  const onFiles = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.currentTarget.files ?? []);
+    event.currentTarget.value = '';
+    const room = MAX_PHOTOS - photoCount - crop.pending();
+    if (files.length === 0 || room <= 0) return;
+    crop.enqueue(files.slice(0, room));
   };
 
   const onAdd = async (timing: PhotoTiming) => {
@@ -440,12 +450,13 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
               <span>Add</span>
               <VisuallyHidden>
                 <input
+                  ref={fileInput}
                   type="file"
                   accept="image/*"
                   multiple
                   disabled={offline || add !== null}
                   aria-label={offline ? `Add photo (${NEEDS_CONNECTION.toLowerCase()})` : 'Add photo'}
-                  onChange={(e) => void onFiles(e)}
+                  onChange={onFiles}
                 />
               </VisuallyHidden>
             </label>
@@ -510,6 +521,8 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
           onClose={() => setViewerAt(null)}
         />
       ) : null}
+
+      <CropSheet item={crop.current} position={crop.position} onUse={crop.use} onRetake={crop.retake} />
 
       {add ? (
         <AddPhotosSheet

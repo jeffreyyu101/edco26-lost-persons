@@ -20,6 +20,7 @@ import type {
 } from '../api-types';
 import type { PhotoTiming, SettableStatus, StatusKind } from '../domain';
 import { DEFAULT_PREFS, type Prefs } from './prefs';
+import type { CropRect } from './crop';
 import type { RequestFormValues } from './form-values';
 import {
   type AllFilter,
@@ -186,6 +187,14 @@ export interface DraftPhoto {
   height: number;
 }
 
+/** How a picked photo is prepared (lib/client/image.ts). */
+export interface PreparePhotoOptions {
+  /** The quick crop, normalised to the photo as shown; omitted or null = the whole photo. */
+  crop?: CropRect | null;
+  /** On-device cleanup (levels, light sharpening, each only when measured as needed). Default on. */
+  enhance?: boolean;
+}
+
 export interface CreateInput {
   values: RequestFormValues;
   /** The draft's id; reused for every retry and resend. */
@@ -255,8 +264,11 @@ export interface StoreActions {
   cancel(id: string, opts?: MutationOptions): Promise<MutationResult>;
   /** Photos for an existing request (needs a connection in v1). */
   addPhotos(id: string, photos: DraftPhoto[], timing: PhotoTiming, opts?: MutationOptions): Promise<{ added: number; failed: number }>;
-  /** Decode via <img>, draw straight into target-size canvases, re-encode (EXIF stripped). */
-  preparePhoto(file: File): Promise<DraftPhoto>;
+  /**
+   * Decode via <img>, crop, area-average down to ≤ 1600 px, clean up on the phone when it helps, re-encode
+   * (EXIF stripped, never bigger than without the cleanup).
+   */
+  preparePhoto(file: File, options?: PreparePhotoOptions): Promise<DraftPhoto>;
 
   /** GET /api/requests/:id (use the useDetail hook in components). */
   fetchDetail(id: string): Promise<RequestDetail>;
