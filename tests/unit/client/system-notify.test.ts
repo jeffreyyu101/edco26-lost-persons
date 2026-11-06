@@ -138,7 +138,7 @@ describe('what a notification shows', () => {
 
   it('the other answers and changes read "LP-#### · <status>"', () => {
     for (const [status, title] of [
-      [STATUS.notInMedical, 'LP-1004 · Not in medical'],
+      [STATUS.notInMedical, 'LP-1004 · Not found in medical'],
       [STATUS.reunited, 'LP-1004 · Reunited'],
       [STATUS.waiting, 'LP-1004 · Waiting for check'],
       [STATUS.cancelled, 'LP-1004 · Cancelled'],
@@ -331,9 +331,9 @@ describe('the notifier', () => {
     expect(await system.showNotice(notice)).toBe(true);
     expect(f.shows).toHaveLength(1);
     // A newer change of the request replaces it (same tag).
-    expect(await system.showNotice({ ...notice, title: 'LP-1004 · Not in medical', key: `${notice.tag}:3` })).toBe(true);
+    expect(await system.showNotice({ ...notice, title: 'LP-1004 · Not found in medical', key: `${notice.tag}:3` })).toBe(true);
     expect(f.shows).toHaveLength(2);
-    expect(f.open.map((n) => n.title)).toEqual(['LP-1004 · Not in medical']);
+    expect(f.open.map((n) => n.title)).toEqual(['LP-1004 · Not found in medical']);
   });
 
   it('show(alert) builds the notification from the rows at call time (the store’s entry point)', async () => {

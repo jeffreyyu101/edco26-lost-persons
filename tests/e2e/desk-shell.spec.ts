@@ -608,7 +608,7 @@ test.describe('desktop 1440 × 900', () => {
     // Change answer: the other answer and Back to Waiting for check, each with its glyph, opening downwards.
     await change.click();
     const menu = page.getByTestId('change-answer-menu');
-    await expect(menu.getByRole('menuitem')).toHaveText(['Not in medical', 'Back to Waiting for check']);
+    await expect(menu.getByRole('menuitem')).toHaveText(['Not found', 'Back to Waiting for check']);
     expect((await menu.boundingBox())!.y).toBeGreaterThanOrEqual(cb.y + cb.height - 1);
     await page.keyboard.press('Escape');
     await expect(menu).toHaveCount(0);
@@ -796,11 +796,11 @@ test.describe('iPad portrait 820 × 1180 (touch)', () => {
     await page.goto(`/?r=${one!.id}`);
     const pane = page.getByTestId('desk-pane');
     const actions = pane.getByTestId('profile-actions');
-    await expect(actions.getByRole('button', { name: 'Not in medical' })).toBeVisible({ timeout: 15_000 });
+    await expect(actions.getByRole('button', { name: 'Not found', exact: true })).toBeVisible({ timeout: 15_000 });
     const status = (await pane.getByTestId('status-block').boundingBox())!;
     expect((await actions.boundingBox())!.y).toBeGreaterThanOrEqual(status.y + status.height);
-    await actions.getByRole('button', { name: 'Not in medical' }).click();
-    await expect(pane.getByTestId('status-block')).toContainText('Not in medical');
+    await actions.getByRole('button', { name: 'Not found', exact: true }).click();
+    await expect(pane.getByTestId('status-block')).toContainText('Not found in medical');
 
     // The list beside the sheet is too narrow for it: the bar sits at the foot of the sheet, inside it.
     const at = await snackPlacement(page);

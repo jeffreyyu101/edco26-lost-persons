@@ -82,7 +82,7 @@ describe('medicalLocation', () => {
     await setStatus(cleared, 'Reunited – Closed', 'reunite', cookie);
   });
 
-  it('kept until someone edits it: other edits, Undo back to Waiting, Not in medical and Reunited leave it', async () => {
+  it('kept until someone edits it: other edits, Undo back to Waiting, Not found in medical and Reunited leave it', async () => {
     const staff = newStaff();
     const cookie = await cookieFor(newStaff('Medical'));
     let r = await createRequest(staff);

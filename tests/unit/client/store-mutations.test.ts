@@ -169,7 +169,7 @@ describe('setStatus', () => {
     server.override = (req) => (req.path.endsWith('/status') ? g.wait().then(() => json(200, { changed: true, request: { ...R1, status: STATUS.inMedical, rowVersion: 2 } })) : undefined);
     const p = a.setStatus(R1.id, STATUS.inMedical, 'answer');
     await advance(0);
-    // Meanwhile a sync delivers version 3 (someone answered Not in medical after us).
+    // Meanwhile a sync delivers version 3 (someone answered Not found in medical after us).
     server.override = null;
     server.change(R1.id, { status: STATUS.inMedical });
     server.change(R1.id, { status: STATUS.notInMedical });

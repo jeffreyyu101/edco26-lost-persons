@@ -10,7 +10,7 @@ import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { photoPath } from '@/lib/client/api-paths';
 import { navigate } from '@/lib/client/nav';
-import { STATUS, ageGender, statusMeta, waitTone } from '@/lib/domain';
+import { ANSWER_LABEL, STATUS, ageGender, statusMeta, waitTone } from '@/lib/domain';
 import { formatCaseNumber, formatDuration, minutesSince } from '@/lib/format';
 import {
   cardDescription,
@@ -170,7 +170,9 @@ function Who({ name, ag, sub, nameId, subId }: { name: string; ag: string; sub: 
 
 export function Stepper({ model }: { model: StepperModel }) {
   return (
-    <div className={s.stepper} style={{ gridTemplateColumns: `repeat(${model.steps.length}, 1fr)` }}>
+    // Equal columns, except that no label is ever cut: a column is at least as wide as its label ("Not found in
+    // medical" on a 375 px phone).
+    <div className={s.stepper} style={{ gridTemplateColumns: `repeat(${model.steps.length}, minmax(max-content, 1fr))` }}>
       {model.steps.map((label, i) => {
         const step = i < model.current ? 'done' : i === model.current ? model.mode : 'todo';
         return (
@@ -221,7 +223,7 @@ export interface CheckCardProps {
 /**
  * To check: the photo when there is one, the name or initials (18/600) and age/sex, how long it has waited
  * (clock; amber from 10, red from 20), what they're wearing (2 lines), one quiet "FA 4 · LP-0010" line,
- * then Not in medical / In medical (44 px).
+ * then Not found / In medical (44 px).
  */
 export const CheckCard = memo(function CheckCard({ row, now, offline, onNotInMedical, onInMedical }: CheckCardProps) {
   const reasonId = useId();
@@ -264,7 +266,7 @@ export const CheckCard = memo(function CheckCard({ row, now, offline, onNotInMed
           onClick={() => onNotInMedical(row)}
         >
           <X size={16} strokeWidth={1.75} aria-hidden />
-          Not in medical
+          {ANSWER_LABEL.notFound}
         </Button>
         <Button
           size="3"
@@ -275,7 +277,7 @@ export const CheckCard = memo(function CheckCard({ row, now, offline, onNotInMed
           onClick={(e) => onInMedical(row, cardOf(e))}
         >
           <Check size={16} strokeWidth={2.25} aria-hidden />
-          In medical
+          {ANSWER_LABEL.inMedical}
         </Button>
       </div>
       {offline ? <VisuallyHidden id={reasonId}>Needs a connection</VisuallyHidden> : null}

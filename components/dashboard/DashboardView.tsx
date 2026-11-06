@@ -5,7 +5,7 @@
 //   title    ‹ Dashboard, large, with the line under it (v2.2 afternoon): "Updated just now" / "Updated 5 min
 //            ago" from the last stats fetch and Refresh now (fetches the stats at once); while fetches fail or
 //            the phone is offline, the Reconnecting / Offline banner under the header and "Last updated 3:42 PM".
-//   tiles    Open (blue/green split bar) and Closed, big; Waiting for check, In medical, Not in medical, Reunited
+//   tiles    Open (blue/green split bar) and Closed, big; Waiting for check, In medical, Not found in medical, Reunited
 //            (+ discharged · cancelled when either is non-zero). Status tiles open All filtered (A22); Open opens
 //            Pending, which lists exactly the open requests.
 //   posts    Open by post, busiest first: label over a 6 px bar, count in a fixed column. Opens ?post=&open=1 (A42).
@@ -151,14 +151,14 @@ function Tiles({ stats }: { stats: Stats }) {
       <Tile
         testId="tile-waiting"
         glyph={<StatusGlyph status={STATUS.waiting} />}
-        label="Waiting for check"
+        label={statusMeta(STATUS.waiting).shortLabel}
         value={waiting}
         onClick={() => show({ status: STATUS.waiting })}
       />
       <Tile
         testId="tile-in-medical"
         glyph={<StatusGlyph status={STATUS.inMedical} />}
-        label="In medical"
+        label={statusMeta(STATUS.inMedical).shortLabel}
         value={inMedical}
         onClick={() => show({ status: STATUS.inMedical })}
       />
@@ -167,7 +167,7 @@ function Tiles({ stats }: { stats: Stats }) {
         className={s.tileLate}
         testId="tile-not-in-medical"
         glyph={<StatusGlyph status={STATUS.notInMedical} />}
-        label="Not in medical"
+        label={statusMeta(STATUS.notInMedical).shortLabel}
         value={stats.notInMedical}
         // Same height as the Reunited tile beside it when that one has its second line.
         sub={sub ? <span className={`${s.sub} ${s.ghost}`} aria-hidden>{sub}</span> : null}
@@ -178,7 +178,7 @@ function Tiles({ stats }: { stats: Stats }) {
         className={s.tileLate}
         testId="tile-reunited"
         glyph={<StatusGlyph status={STATUS.reunited} />}
-        label="Reunited"
+        label={statusMeta(STATUS.reunited).shortLabel}
         value={stats.reunited}
         sub={
           sub ? (

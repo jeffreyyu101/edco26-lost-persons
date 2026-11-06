@@ -21,15 +21,15 @@ import { boot, finish, installStoreHooks, ready } from '../client/helpers/boot';
 import { FakeServer, makeRow } from '../client/helpers/fake-server';
 
 describe('changeAnswerChoices', () => {
-  it('In medical: Not in medical, then Back to Waiting for check', () => {
+  it('In medical: Not found, then Back to Waiting for check', () => {
     expect(changeAnswerChoices(STATUS.inMedical)).toEqual([
-      { to: STATUS.notInMedical, label: 'Not in medical', kind: 'change' },
+      { to: STATUS.notInMedical, label: 'Not found', kind: 'change' },
       { to: STATUS.waiting, label: 'Back to Waiting for check', kind: 'change' },
     ]);
     expect(BACK_TO_WAITING).toBe('Back to Waiting for check');
   });
 
-  it('Not in medical (closed and grey since v2.2): In medical, then Back to Waiting for check', () => {
+  it('Not found in medical (closed and grey since v2.2): In medical, then Back to Waiting for check', () => {
     expect(changeAnswerChoices(STATUS.notInMedical)).toEqual([
       { to: STATUS.inMedical, label: 'In medical', kind: 'change' },
       { to: STATUS.waiting, label: 'Back to Waiting for check', kind: 'change' },
@@ -38,7 +38,7 @@ describe('changeAnswerChoices', () => {
 
   it('legacy Bring friend: only the moves lp_set_status allows (it has no way back to Waiting)', () => {
     expect(canTransition(STATUS.legacyBringFriend, STATUS.waiting)).toBe(false);
-    expect(changeAnswerChoices(STATUS.legacyBringFriend)).toEqual([{ to: STATUS.notInMedical, label: 'Not in medical', kind: 'change' }]);
+    expect(changeAnswerChoices(STATUS.legacyBringFriend)).toEqual([{ to: STATUS.notInMedical, label: 'Not found', kind: 'change' }]);
   });
 
   it('nothing for Waiting, the closed statuses or an unknown legacy value', () => {
@@ -72,10 +72,10 @@ describe('Undo on every answer path (the real store)', () => {
 
   // [from, to, kind, snackbar text]: the profile buttons and Pending cards (answer, reunite) and the menu (change).
   const paths: Array<[string, SettableStatus, StatusKind, string]> = [
-    [STATUS.waiting, STATUS.notInMedical, 'answer', 'Not in medical'],
+    [STATUS.waiting, STATUS.notInMedical, 'answer', 'Not found in medical'],
     [STATUS.waiting, STATUS.inMedical, 'answer', 'In medical'],
     [STATUS.inMedical, STATUS.reunited, 'reunite', 'Reunited'],
-    [STATUS.inMedical, STATUS.notInMedical, 'change', 'Not in medical'],
+    [STATUS.inMedical, STATUS.notInMedical, 'change', 'Not found in medical'],
     [STATUS.inMedical, STATUS.waiting, 'change', 'Waiting for check'],
     [STATUS.notInMedical, STATUS.inMedical, 'change', 'In medical'],
     [STATUS.notInMedical, STATUS.waiting, 'change', 'Waiting for check'],
@@ -166,7 +166,7 @@ describe('the profile footer', () => {
     expect(bar).toContain('>Reunited<');
   });
 
-  it('Not in medical: Change answer only, as a menu button', () => {
+  it('Not found in medical: Change answer only, as a menu button', () => {
     const bar = footer(render(<ProfileView id={withStatus(STATUS.notInMedical).id} />));
     expect(bar).toContain('data-layout="one"');
     const [change, ...more] = buttons(bar);
@@ -180,8 +180,10 @@ describe('the profile footer', () => {
     expect(bar).toContain('data-layout="two"');
     expect(buttons(bar)).toHaveLength(2);
     expect(bar).not.toContain('aria-haspopup');
-    expect(bar).toContain('>Not in medical<');
+    expect(bar).toContain('>Not found<');
     expect(bar).toContain('>In medical<');
+    // The answer button is the short verb; the status it sets reads "Not found in medical".
+    expect(bar).not.toContain('Not found in medical');
   });
 
   it('in the desk pane: the same actions right after the status block, before the details, two equal halves', () => {

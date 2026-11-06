@@ -516,7 +516,7 @@ describe('alerts of a sync that fails half-way (regression)', () => {
     server.override = (req) => (req.path === '/api/sync' && req.query.get('ids') ? apiError(503, 'unavailable', 'Try again') : undefined);
     await advance(6_000);
     expect(server.requests('GET', '/api/sync').some((r) => r.query.get('ids'))).toBe(true);
-    expect(heard.map((e) => e.title)).toEqual(['LP-1004 · S.L. — not in medical']);
+    expect(heard.map((e) => e.title)).toEqual(['LP-1004 · S.L. — not found in medical']);
   });
 
   it('an out-of-date alert held back by a page that then times out never closes the newer toast', async () => {
@@ -543,7 +543,7 @@ describe('alerts of a sync that fails half-way (regression)', () => {
     await finish(a.fetchDetail(mine.id)); // the open profile refetches: shown at once
     const IN_MED = 'LP-1004 · S.L. is in medical';
     expect(s().toasts.map((t) => t.title)).toEqual([IN_MED]);
-    await advance(12_000); // page 2 times out: the held "not in medical" is out of date
+    await advance(12_000); // page 2 times out: the held "not found in medical" is out of date
     expect(s().toasts.map((t) => t.title)).toEqual([IN_MED]);
     await advance(30_000); // sticky, and nothing re-raises it
     expect(s().toasts.map((t) => t.title)).toEqual([IN_MED]);
@@ -589,7 +589,7 @@ describe('alert toasts follow the request (regression: stale "is in medical")', 
     expect(titles(s)).toEqual([IN_MED]);
     server.change(mine.id, { status: STATUS.notInMedical }); // Change answer
     await advance(6_000);
-    expect(titles(s)).toEqual(['LP-1004 · S.L. — not in medical']);
+    expect(titles(s)).toEqual(['LP-1004 · S.L. — not found in medical']);
     await advance(14_000);
     expect(titles(s)).toEqual([]);
     expect(s().confirmed.get(mine.id)?.status).toBe(STATUS.notInMedical);

@@ -77,7 +77,7 @@ const changeAnswer = (page: Page) => page.getByTestId('profile-actions').getByRo
 const undoButton = (page: Page) => page.getByRole('button', { name: 'Undo', exact: true });
 /** Let the menu's open animation (a slight scale-in) finish before measuring it. */
 const settle = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
-/** Change answer → one of its menu choices ("Not in medical", "In medical", "Back to Waiting for check"). */
+/** Change answer → one of its menu choices ("Not found", "In medical", "Back to Waiting for check"). */
 async function chooseChange(page: Page, choice: string) {
   await changeAnswer(page).click();
   const menu = page.getByRole('menu');
@@ -146,8 +146,8 @@ test('renders from the request, answers, changes the answer, reunites, reopens a
   await expect(auditItems(page).first()).toContainText('In medical');
   await expect(auditItems(page).first()).toContainText(`${FRONT.staffName} · Dispatch`);
 
-  // Change answer → Not in medical → Change answer → In medical.
-  await chooseChange(page, 'Not in medical');
+  // Change answer → Not found → Change answer → In medical.
+  await chooseChange(page, 'Not found');
   await expect(profileStatus(page, 'Checked – Not Found')).toBeVisible();
   await expect(statusBlock(page)).toContainText(FRONT.staffName);
   await chooseChange(page, 'In medical');
@@ -168,26 +168,26 @@ test('renders from the request, answers, changes the answer, reunites, reopens a
   await expect(statusBlock(page)).toContainText('Discharged');
 });
 
-test('Not in medical is closed and grey, and keeps exactly its actions: Change answer only', async ({ browser, page, baseURL }) => {
-  // v2.2 (Jeffrey, 2026-11-06): Not in medical counts as closed and is greyed out like Reunited, but it is
+test('Not found in medical is closed and grey, and keeps exactly its actions: Change answer only', async ({ browser, page, baseURL }) => {
+  // v2.2 (Jeffrey, 2026-11-06): Not found in medical counts as closed and is greyed out like Reunited, but it is
   // still answerable — no Reopen, no Mark discharged, no Cancel request (not even for the person who logged it).
   const origin = baseURL as string;
   const row = await createRequest(page, origin);
   await page.goto(`/?r=${row.id}`);
-  await page.getByRole('button', { name: 'Not in medical', exact: true }).click();
+  await page.getByRole('button', { name: 'Not found', exact: true }).click();
   await expect(profileStatus(page, 'Checked – Not Found')).toBeVisible();
 
   // Grey like the other closed states: grey tint, grey label, grey × glyph.
   await expect(statusBlock(page)).toHaveAttribute('data-tone', 'gray');
-  await expect(statusBlock(page).locator('[data-accent-color="gray"]', { hasText: 'Not in medical' })).toBeVisible();
+  await expect(statusBlock(page).locator('[data-accent-color="gray"]', { hasText: 'Not found in medical' })).toBeVisible();
   await expect(statusBlock(page).locator('svg[data-glyph="notInMedical"] circle')).toHaveAttribute('fill', 'var(--gray-9)');
   const tint = await statusBlock(page).evaluate((el) => getComputedStyle(el).backgroundColor);
-  // The audit trail's newest entry: the grey glyph on the timeline and in "Waiting for check → Not in medical".
+  // The audit trail's newest entry: the grey glyph on the timeline and in "Waiting for check → Not found in medical".
   const latest = auditItems(page).first();
-  await expect(latest).toContainText('Not in medical');
+  await expect(latest).toContainText('Not found in medical');
   await expect(latest.locator('svg[data-glyph="notInMedical"] circle')).toHaveCount(2);
   for (const circle of await latest.locator('svg[data-glyph="notInMedical"] circle').all()) await expect(circle).toHaveAttribute('fill', 'var(--gray-9)');
-  await expect(latest.locator('[data-accent-color="gray"]', { hasText: 'Not in medical' })).toBeVisible();
+  await expect(latest.locator('[data-accent-color="gray"]', { hasText: 'Not found in medical' })).toBeVisible();
 
   // Exactly one action: Change answer (its menu: In medical, Back to Waiting for check).
   const bar = page.getByTestId('profile-actions');
@@ -245,8 +245,8 @@ test('Change answer opens a menu: the other answer or Back to Waiting for check,
   await expect(menu).toBeVisible();
   // (The open menu is modal: the page behind it, the button included, is aria-hidden until it closes.)
   await expect(page.getByTestId('change-answer')).toHaveAttribute('aria-expanded', 'true');
-  await expect(menu.getByRole('menuitem')).toHaveText(['Not in medical', 'Back to Waiting for check']);
-  await expect(menu.getByRole('menuitem', { name: 'Not in medical' }).locator('svg[data-glyph="notInMedical"]')).toHaveCount(1);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Not found', 'Back to Waiting for check']);
+  await expect(menu.getByRole('menuitem', { name: 'Not found' }).locator('svg[data-glyph="notInMedical"]')).toHaveCount(1);
   await expect(menu.getByRole('menuitem', { name: 'Back to Waiting for check' }).locator('svg[data-glyph="waiting"]')).toHaveCount(1);
   // 44 px rows (axe on the open menu: the describe block below).
   await settle(page);
@@ -258,7 +258,7 @@ test('Change answer opens a menu: the other answer or Back to Waiting for check,
   await expect(profileStatus(page, 'Added')).toBeVisible();
   await expect(statusBlock(page)).toContainText('Waiting for check');
   await expect(page.getByTestId('wait-badge')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Not in medical', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Not found', exact: true })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'In medical', exact: true })).toBeEnabled();
   await expect(auditItems(page).first()).toContainText('In medical');
   await expect(auditItems(page).first()).toContainText('Waiting for check');
@@ -273,24 +273,24 @@ test('Change answer opens a menu: the other answer or Back to Waiting for check,
   await expect(auditItems(page).first()).toContainText('Undo');
   await expect(undoButton(page)).toHaveCount(0);
 
-  // In medical → Not in medical through the menu: Undo offered.
-  await chooseChange(page, 'Not in medical');
+  // In medical → Not found through the menu: Undo offered.
+  await chooseChange(page, 'Not found');
   await expect(profileStatus(page, 'Checked – Not Found')).toBeVisible();
-  await expect(page.getByText(`${lp} · Not in medical`)).toBeVisible();
+  await expect(page.getByText(`${lp} · Not found in medical`)).toBeVisible();
   await expect(undoButton(page)).toBeVisible();
 
-  // Not in medical (closed, grey) → its menu: In medical, then Back to Waiting for check.
+  // Not found in medical (closed, grey) → its menu: In medical, then Back to Waiting for check.
   await changeAnswer(page).click();
   await expect(page.getByRole('menu').getByRole('menuitem')).toHaveText(['In medical', 'Back to Waiting for check']);
   await page.getByRole('menuitem', { name: 'Back to Waiting for check' }).click();
   await expect(profileStatus(page, 'Added')).toBeVisible();
   await expect(page.getByText(`${lp} · Waiting for check`)).toBeVisible();
-  await expect(auditItems(page).first()).toContainText('Not in medical');
+  await expect(auditItems(page).first()).toContainText('Not found in medical');
   await expect(auditItems(page).first()).toContainText('Waiting for check');
   await undoButton(page).click();
   await expect(profileStatus(page, 'Checked – Not Found')).toBeVisible();
 
-  // Not in medical → In medical through the menu, then Reunited: both offer Undo.
+  // Not found in medical → In medical through the menu, then Reunited: both offer Undo.
   await chooseChange(page, 'In medical');
   await expect(profileStatus(page, 'Found – Awaiting Reunion')).toBeVisible();
   await expect(undoButton(page)).toBeVisible();
@@ -354,14 +354,14 @@ test.describe('the Change answer menu passes axe', () => {
   }
 });
 
-test('the Not in medical button on the profile offers Undo too', async ({ page, baseURL }) => {
+test('the Not found button on the profile offers Undo too', async ({ page, baseURL }) => {
   const origin = baseURL as string;
   const row = await createRequest(page, origin);
   await page.goto(`/?r=${row.id}`);
   const lp = await page.getByTestId('profile-case').innerText();
-  await page.getByRole('button', { name: 'Not in medical', exact: true }).click();
+  await page.getByRole('button', { name: 'Not found', exact: true }).click();
   await expect(profileStatus(page, 'Checked – Not Found')).toBeVisible();
-  await expect(page.getByText(`${lp} · Not in medical`)).toBeVisible();
+  await expect(page.getByText(`${lp} · Not found in medical`)).toBeVisible();
   await undoButton(page).click();
   await expect(profileStatus(page, 'Added')).toBeVisible();
   await expect(auditItems(page).first()).toContainText('Undo');
@@ -566,7 +566,7 @@ test('offline disables the answer buttons with "Needs a connection"', async ({ c
   await context.setOffline(true);
   await expect(page.getByTestId('profile-actions')).toContainText('Needs a connection');
   await expect(answer).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Not in medical', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Not found', exact: true })).toBeDisabled();
   await context.setOffline(false);
   await expect(answer).toBeEnabled({ timeout: 15_000 });
 });

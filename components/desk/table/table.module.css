@@ -33,9 +33,11 @@
   display: none;
 }
 
+/* With a request docked at 1024-1279 the status column still takes "Not found in medical" on one line, uncut
+   (the longest status, F2); the name gives way. */
 @media (min-width: 1024px) and (max-width: 1279.98px) {
   [data-pane] .table {
-    --tbl-cols: 48px minmax(0, 1fr) 140px 88px 56px;
+    --tbl-cols: 48px minmax(0, 1fr) 154px 88px 56px;
     --tbl-gap: 10px;
     --tbl-pad-l: 20px;
     --tbl-pad-r: 16px;

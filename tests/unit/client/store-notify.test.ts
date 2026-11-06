@@ -116,8 +116,8 @@ describe('alerts in the background are system notifications', () => {
     n.route = 'toast';
     server.change(mine.id, { status: STATUS.notInMedical });
     await advance(6_000);
-    expect(alertTitles(s)).toEqual(['LP-1004 · S.L. — not in medical']);
-    expect(heard.map((e) => e.title)).toEqual(['LP-1004 · S.L. — not in medical']);
+    expect(alertTitles(s)).toEqual(['LP-1004 · S.L. — not found in medical']);
+    expect(heard.map((e) => e.title)).toEqual(['LP-1004 · S.L. — not found in medical']);
     expect(n.shown).toHaveLength(1);
     expect(n.closed).toEqual([{ tag: mine.id, key: `${mine.id}:2` }]);
   });

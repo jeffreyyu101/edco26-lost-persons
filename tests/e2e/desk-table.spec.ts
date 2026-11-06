@@ -175,7 +175,8 @@ test.describe('desktop 1440 × 900', () => {
     await expect(main(page).getByTestId('closed-rows')).toBeVisible();
     await expect(row(page, closed.id)).toBeVisible();
     await expect(row(page, closed.id)).toHaveAttribute('data-closed', '');
-    await expect(cell(page, closed.id, 'status')).toHaveText('Not in medical');
+    // The desk has room for the full label (one line, never cut: see the 1024 px docked check).
+    await expect(cell(page, closed.id, 'status')).toHaveText('Not found in medical');
     expect(await order()).toMatchObject({ openFirst: true, closedAfter: true });
     await page.reload();
     await expect(row(page, closed.id)).toBeVisible({ timeout: 15_000 });
@@ -400,7 +401,8 @@ test.describe('iPad landscape 1180 × 820 (touch)', () => {
     expect(await shownColumns(page)).toEqual(FIVE_COLUMNS);
     await columnsLineUp(page, one!.id);
 
-    // Docked at 420 px: the main column is 700 px; the tighter grid keeps the status label whole.
+    // Docked at 420 px: the main column is 700 px; the tighter grid keeps the status label whole (the
+    // longest, "Not found in medical", too: F2).
     await row(page, one!.id).click();
     await expect(page.getByTestId('desk-pane')).toBeVisible();
     expect(await shownColumns(page)).toEqual(FIVE_COLUMNS);
@@ -431,6 +433,15 @@ test.describe('1024 × 768 with a request open', () => {
     expect(await shownColumns(page)).toEqual(FIVE_COLUMNS);
     await columnsLineUp(page, one!.id);
     for (const col of ['number', 'status', 'created', 'updated']) expect(await notCut(page, one!.id, col), col).toBe(true);
+
+    // The longest status (F2): "Not found in medical" on one line, uncut, in the same narrow column.
+    const nf = await notInMedical(page, (await createRequests(page, 1, tag))[0]!);
+    await page.goto(`/?status=${encodeURIComponent(NOT_IN_MEDICAL)}`);
+    await row(page, nf.id).click({ timeout: 15_000 });
+    await expect(page.getByTestId('desk-pane')).toBeVisible({ timeout: 15_000 });
+    await expect(cell(page, nf.id, 'status')).toHaveText('Not found in medical');
+    expect(await notCut(page, nf.id, 'status')).toBe(true);
+    expect((await cell(page, nf.id, 'status').boundingBox())!.height).toBeLessThan(24);
   });
 });
 

@@ -207,7 +207,7 @@ for (const theme of ['light', 'dark'] as const) {
         await page.getByRole('button', { name: 'Got it' }).click();
 
         await visit('/?view=pending', 'Pending', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
-        await page.locator(`[data-testid="check-card"]:has([data-request-id="${answerMe.id}"])`).getByRole('button', { name: 'Not in medical' }).click();
+        await page.locator(`[data-testid="check-card"]:has([data-request-id="${answerMe.id}"])`).getByRole('button', { name: 'Not found', exact: true }).click();
         await expect(page.getByRole('button', { name: 'Undo' })).toBeVisible();
         results.push(await audit(page, 'Pending + Undo snackbar'));
         // Pending v8: the Friend coming tab (location chips) and the location sheet.

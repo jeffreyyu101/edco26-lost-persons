@@ -1,7 +1,7 @@
 // The request's status block in Pending v8 (Brian, 2026-11-06 afternoon; design/screens/pending-v8.html
 // "The request"): In medical shows who answered and when, and nothing else (the "<friend> heading to Main
 // Med" line is gone), then where medical has them (a pin, the location and a pencil, or "+ Location").
-// Waiting, Not in medical and the closed states are unchanged. Server renders against the stub store.
+// Waiting, Not found in medical and the closed states are unchanged. Server renders against the stub store.
 import { Theme } from '@radix-ui/themes';
 import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
@@ -76,7 +76,7 @@ describe('the status block (Pending v8)', () => {
     expect(statusBlock(render(offline, <ProfileView id={stubId(1004)} />))).toMatch(/aria-disabled="true"[^>]*data-disabled=""[^>]*data-testid="location-row"/);
   });
 
-  it('Waiting, Not in medical and closed requests have no location row, even with one saved', () => {
+  it('Waiting, Not found in medical and closed requests have no location row, even with one saved', () => {
     for (const n of [1012, 1009, 1003]) {
       const s = store((r) => ({ ...r, medicalLocation: 'Chair 14' }), stubId(n));
       const block = statusBlock(render(s, <ProfileView id={stubId(n)} />));

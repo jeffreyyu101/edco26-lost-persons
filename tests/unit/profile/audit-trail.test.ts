@@ -95,9 +95,9 @@ describe('buildAuditTrail', () => {
     );
     expect(items.map((i) => (i.status ? `${i.status.fromLabel ?? ''}→${i.status.toLabel}` : i.title))).toEqual([
       'Check in completed',
-      'Not in medical→Not in medical (rechecked)',
+      'Not found in medical→Not found in medical (rechecked)',
       '→In medical',
-      '→Not in medical',
+      '→Not found in medical',
     ]);
     expect(items[0]?.who).toBe('Sam Ortiz');
     expect(items[1]?.who).toBe('Sam Ortiz · Prevent');
@@ -116,8 +116,8 @@ describe('buildAuditTrail', () => {
     );
     expect(items.map((i) => [i.status?.fromLabel ?? null, i.status?.toLabel, i.note])).toEqual([
       [null, 'Found – Transported', null],
-      ['Not in medical', 'Waiting for check', 'Undo'],
-      ['Waiting for check', 'Not in medical', null],
+      ['Not found in medical', 'Waiting for check', 'Undo'],
+      ['Waiting for check', 'Not found in medical', null],
       ['Cancelled', 'Waiting for check', 'Reopened'],
       ['Waiting for check', 'Cancelled', null],
     ]);

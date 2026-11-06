@@ -112,7 +112,7 @@ test.describe('phone', () => {
     const card = checkCard(page, waiting.id);
     await expect(card.getByTestId('card-photo')).toHaveCount(0);
     await expect(card).toContainText(`FA 3 · LP-${String(waiting.caseNumber).padStart(4, '0')}`);
-    for (const name of ['Not in medical', 'In medical']) {
+    for (const name of ['Not found', 'In medical']) {
       expect((await card.getByRole('button', { name, exact: true }).boundingBox())!.height).toBeCloseTo(44, 0);
     }
 
