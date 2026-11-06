@@ -215,3 +215,39 @@ describe('photo and id schemas', () => {
     expect(idParamsSchema.safeParse({ id: '1012' }).success).toBe(false);
   });
 });
+
+describe('text PostgreSQL cannot store (NUL, unpaired surrogates)', () => {
+  const base = { clientMutationId: CMID, reportingLocation: 'Base' as const };
+  const NUL = 'a\u0000b';
+  const LONE = ['\uD83D', 'x\uD83Dy', '\uDE00', 'x\uDE00', '\uD83D😀', '\uDE00\uD83D'];
+  const issue = (r: { success: boolean; error?: { issues: Array<{ path: PropertyKey[]; message: string }> } }) =>
+    r.error?.issues.map((i) => `${i.path.join('.')}: ${i.message}`);
+
+  it('refuses them in every request text field, with a clear message on that field', () => {
+    for (const bad of [NUL, ...LONE]) {
+      for (const key of ['name', 'clothing', 'lastSeen', 'hair', 'contactName', 'contactPhone', 'additionalNotes']) {
+        const r = createRequestSchema.safeParse({ ...base, [key]: bad });
+        expect(r.success, `${key}=${JSON.stringify(bad)}`).toBe(false);
+        expect(issue(r)).toContain(`${key}: Contains a character that cannot be saved`);
+        expect(requestPatchSchema.safeParse({ [key]: bad }).success).toBe(false);
+      }
+      expect(createRequestSchema.safeParse({ ...base, reportingLocation: 'Other', otherLocation: `Gate${bad}` }).success).toBe(false);
+      expect(updateRequestSchema.safeParse({ patch: { otherLocation: `Gate${bad}` }, expectedVersion: 0 }).success).toBe(false);
+    }
+  });
+
+  it('refuses them in the staff name and Other team', () => {
+    const r = signInSchema.safeParse({ staffName: 'Dana\u0000Kim', team: 'Medical', password: 'pw' });
+    expect(issue(r)).toContain('staffName: Name: contains a character that cannot be saved');
+    expect(signInSchema.safeParse({ staffName: 'Dana \uD83D', team: 'Medical', password: 'pw' }).success).toBe(false);
+    expect(signInSchema.safeParse({ staffName: 'Sam Lee', team: 'Other', otherTeam: 'Gate\u0000', password: 'pw' }).success).toBe(false);
+    expect(signInSchema.safeParse({ staffName: 'Sam Lee', team: 'Other', otherTeam: 'Gate \uDE00', password: 'pw' }).success).toBe(false);
+  });
+
+  it('still accepts paired surrogates (emoji) and other control-free text', () => {
+    const r = createRequestSchema.parse({ ...base, name: 'Kayla 😀', clothing: '🎧 pink hat\ttab', hair: 'é ñ 中' });
+    expect(r.name).toBe('Kayla 😀');
+    expect(r.clothing).toBe('🎧 pink hat\ttab');
+    expect(signInSchema.safeParse({ staffName: 'Dana 😀', team: 'Medical', password: 'pw' }).success).toBe(true);
+  });
+});

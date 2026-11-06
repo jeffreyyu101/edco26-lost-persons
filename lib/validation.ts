@@ -28,19 +28,28 @@ import {
 
 const codePoints = (s: string) => Array.from(s).length;
 
-/** Optional free text: trimmed, '' → null, at most `max` code points. */
+// PostgreSQL text and jsonb cannot hold NUL (22P05) or an unpaired UTF-16 surrogate (22P02), so every text
+// that reaches the database is checked here and refused with a fixable 422 instead of failing as a 503.
+// (No lookbehind: older Safari lacks it.)
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+const storable = (s: string) => !s.includes('\u0000') && !LONE_SURROGATE.test(s);
+const UNSTORABLE = 'Contains a character that cannot be saved';
+
+/** Optional free text: trimmed, '' → null, at most `max` code points, no NUL or unpaired surrogate. */
 export function optionalText(max: number) {
   return z
     .union([z.string(), z.null()])
     .transform((v) => (v === null ? null : v.trim() === '' ? null : v.trim()))
-    .refine((v) => v === null || codePoints(v) <= max, { message: `Must be ${max} characters or fewer` });
+    .refine((v) => v === null || codePoints(v) <= max, { message: `Must be ${max} characters or fewer` })
+    .refine((v) => v === null || storable(v), { message: UNSTORABLE });
 }
 
 /** The single Name field: whitespace collapsed (the server splits it at the last space). */
 const nameField = z
   .union([z.string(), z.null()])
   .transform((v) => (v === null ? null : v.trim().replace(/\s+/g, ' ') || null))
-  .refine((v) => v === null || codePoints(v) <= LIMITS.name, { message: `Must be ${LIMITS.name} characters or fewer` });
+  .refine((v) => v === null || codePoints(v) <= LIMITS.name, { message: `Must be ${LIMITS.name} characters or fewer` })
+  .refine((v) => v === null || storable(v), { message: UNSTORABLE });
 
 const ageField = z.union([z.number().int().min(AGE_MIN).max(AGE_MAX), z.null()]);
 
@@ -157,7 +166,8 @@ const staffText = (min: number, max: number, label: string) =>
     .string()
     .transform((v) => v.trim().replace(/\s+/g, ' '))
     .refine((v) => codePoints(v) >= min && codePoints(v) <= max, { message: `${label}: ${min}–${max} characters` })
-    .refine((v) => !STAFF_FORBIDDEN_CHARS.test(v), { message: `${label}: remove the "·" character` });
+    .refine((v) => !STAFF_FORBIDDEN_CHARS.test(v), { message: `${label}: remove the "·" character` })
+    .refine(storable, { message: `${label}: ${UNSTORABLE.toLowerCase()}` });
 
 /**
  * POST /api/session. `team` is a card value or "Other" with `otherTeam` (2–80 characters).
