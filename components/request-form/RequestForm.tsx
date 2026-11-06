@@ -120,6 +120,7 @@ export function RequestForm(props: RequestFormProps) {
   const [moreOpen, setMoreOpen] = useState(() => moreStartsOpen(values, section));
   const [lastSeenFocus, setLastSeenFocus] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const scrollToMore = useRef(false);
   const chipDown = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const outboxCount = useStoreSelector(selectOutboxCount);
@@ -128,10 +129,17 @@ export function RequestForm(props: RequestFormProps) {
 
   const moreFields = moreFieldsFor(section);
   const showMore = moreOpen || moreFields.some((k) => !!errors[k]);
+  // Opening "More details" scrolls just enough to show the new rows (never past their top).
   useEffect(() => {
     if (!showMore || !scrollToMore.current) return;
     scrollToMore.current = false;
-    moreRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    const scroller = scrollRef.current;
+    const group = moreRef.current;
+    if (!scroller || !group) return;
+    const view = scroller.getBoundingClientRect();
+    const box = group.getBoundingClientRect();
+    const delta = Math.min(box.bottom + 16 - view.bottom, box.top - 8 - view.top);
+    if (delta > 0) scroller.scrollBy({ top: delta, behavior: 'smooth' });
   }, [showMore]);
 
   const err = (key: keyof RequestFormValues) => errors[key];
@@ -204,6 +212,8 @@ export function RequestForm(props: RequestFormProps) {
       />
     );
 
+  // Without the photo slot (edit) the card is a plain group, so its rows get labels like the others.
+  const labelled = photoSlot === null;
   const phoneValid = isValidPhone(values.contactPhone);
   const title = props.title ?? DEFAULT_TITLE[mode];
 
@@ -228,7 +238,7 @@ export function RequestForm(props: RequestFormProps) {
         </div>
       ) : null}
 
-      <div className="lp-rf-scroll">
+      <div className="lp-rf-scroll" ref={scrollRef}>
         <form className="lp-rf-body" noValidate onSubmit={(e) => e.preventDefault()} onKeyDown={onFormKeyDown} aria-label={title}>
           {props.notice ? <div className="lp-rf-notice">{props.notice}</div> : null}
 
@@ -279,10 +289,15 @@ export function RequestForm(props: RequestFormProps) {
                   <div className="lp-rf-pc">
                     <div className="lp-rf-field">
                       <div className="lp-rf-r">
+                        {labelled ? (
+                          <label className="lp-rf-k" htmlFor={id('name')}>
+                            Name
+                          </label>
+                        ) : null}
                         <input
                           id={id('name')}
                           className="lp-rf-in"
-                          aria-label="Name"
+                          aria-label={labelled ? undefined : 'Name'}
                           placeholder="Name or initials, e.g. J.D."
                           autoComplete="off"
                           autoCorrect="off"
@@ -296,15 +311,20 @@ export function RequestForm(props: RequestFormProps) {
                           {...invalid('name')}
                         />
                       </div>
-                      {errLine('name', false)}
+                      {errLine('name', labelled)}
                     </div>
                     <div className="lp-rf-field">
                       <div className="lp-rf-r">
+                        {labelled ? (
+                          <label className="lp-rf-k" htmlFor={id('age')}>
+                            Age
+                          </label>
+                        ) : null}
                         <input
                           id={id('age')}
                           className="lp-rf-in"
-                          aria-label="Age"
-                          placeholder="Age"
+                          aria-label={labelled ? undefined : 'Age'}
+                          placeholder={labelled ? '' : 'Age'}
                           type="text"
                           inputMode="numeric"
                           pattern="[0-9]*"
@@ -317,9 +337,14 @@ export function RequestForm(props: RequestFormProps) {
                           {...invalid('age')}
                         />
                       </div>
-                      {errLine('age', false)}
+                      {errLine('age', labelled)}
                     </div>
                     <div className="lp-rf-r">
+                      {labelled ? (
+                        <span className="lp-rf-k" aria-hidden>
+                          Gender
+                        </span>
+                      ) : null}
                       <SegmentedControl.Root
                         className="lp-rf-seg"
                         size="1"

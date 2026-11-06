@@ -42,6 +42,7 @@ import {
 } from '@/lib/client/store-contract';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { isPostValue, isUuid, postFull, type EditSection, type PhotoTiming } from '@/lib/domain';
+import { formatCaseNumber } from '@/lib/format';
 import {
   canSaveEdit,
   createOutcomeToast,
@@ -466,6 +467,7 @@ function EditForm({ id, section, row }: { id: string; section: EditSection; row:
         offline={false}
         busy={busy}
         notice={notice}
+        title={`Edit ${formatCaseNumber(row.caseNumber)}`}
         submitLabel="Save"
         submitDisabled={offline || !canSaveEdit(form.base, form.values)}
         onSubmit={() => void save()}
