@@ -58,6 +58,14 @@ describe('README.md and HANDOFF.md', () => {
     for (const doc of [readme, handoff]) {
       expect(doc).not.toMatch(/15-second refresh|manual refresh,|localhost:3000|save on profile close|URL normalization only/i);
       expect(doc).not.toMatch(/20261105_(add_last_seen|update_locations_and_statuses)\.sql/);
+      // v2.5 (A50): the Export CSV button and GET /api/export are gone; docs/export.sql replaces them.
+      expect(doc).not.toMatch(/Export CSV|\/api\/export/i);
     }
+  });
+
+  it('both docs point at docs/export.sql for the end-of-event export, and it exists', () => {
+    expect(existsSync(`${root}docs/export.sql`)).toBe(true);
+    expect(readme).toContain('docs/export.sql');
+    expect(handoff).toMatch(/^- \[ \] At the end, run `?docs\/export\.sql`? in the SQL editor and download the results/m);
   });
 });

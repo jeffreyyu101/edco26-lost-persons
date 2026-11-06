@@ -1,6 +1,6 @@
 # Build spec v2: "Is my friend in medical?" (EDC Orlando 2026)
 
-This is the single contract for every agent building the app. Version 2 adds the findings from the GPT-6 Astra (Codex) and Claude Fable 5.1 plan reviews. §13 (v2.1), §14 (v2.2, the Phase 1a review), §15 (v2.3, the Phase 1a verification) and §16 (v2.4, the integrated QA) override anything above them.
+This is the single contract for every agent building the app. Version 2 adds the findings from the GPT-6 Astra (Codex) and Claude Fable 5.1 plan reviews. §13 (v2.1), §14 (v2.2, the Phase 1a review), §15 (v2.3, the Phase 1a verification), §16 (v2.4, the integrated QA) and §17 (v2.5, the product decisions of 2026-11-06 morning) override anything above them.
 
 - **When documents disagree:**
   - This file wins on engineering questions.
@@ -275,7 +275,7 @@ It must be safe to paste into the production SQL editor once or twice.
 | `POST /api/requests/:id/cancel` | Body `{expectedVersion}` through `lp_cancel`. |
 | `POST /api/requests/:id/photos` | Multipart with fields `photoId` (client UUID), `photo` and `thumb` (each sniffed by magic bytes: JPEG, PNG or WebP), and `timing` (`today` or `older`). **The whole request must be ≤ 3,900,000 bytes, because Vercel caps request bodies at 4.5 MB.** Upload to the private bucket at the stable paths `{patientId}/{photoId}.jpg` and `{patientId}/{photoId}_thumb.jpg` with `upsert: true`, so retries are idempotent. Then call `lp_add_photo`. Delete the objects **only** after a definitive rejection: `P0429`, `P0422`, `P0403` or 404. On timeouts and network or unknown errors, keep them, return 503, and let the client retry with the same `photoId`. Orphaned objects are acceptable. |
 | `GET /api/photos/:id?size=thumb\|full` | Requires a session. Looks up the active photo; `thumb` falls back to `storage_path` when `thumb_path` is null. Responds with a 302 redirect to a 120 s signed URL and `Cache-Control: private, max-age=60`. |
-| `GET /api/export` | CSV. Columns, all times in the event timezone: case number, name, age, gender, status label, post, clothing, last seen, hair, height/build, identifying features, physical description, notes, contact name, phone, relationship, contact notes, created by, created, updated, found, closed. Quote **every** field and double embedded quotes. Prefix `'` when the value, after leading whitespace or control characters, starts with `= + - @`, or when it starts with a tab, CR or LF, or with the full-width `＝ ＋ － ＠`. Response headers: `Content-Disposition: attachment; filename="lost-persons-YYYY-MM-DD.csv"`, `no-store`. |
+| ~~`GET /api/export`~~ | **Removed in v2.5 (A50); see `docs/export.sql`.** Was: CSV. Columns, all times in the event timezone: case number, name, age, gender, status label, post, clothing, last seen, hair, height/build, identifying features, physical description, notes, contact name, phone, relationship, contact notes, created by, created, updated, found, closed. Quote **every** field and double embedded quotes. Prefix `'` when the value, after leading whitespace or control characters, starts with `= + - @`, or when it starts with a tab, CR or LF, or with the full-width `＝ ＋ － ＠`. Response headers: `Content-Disposition: attachment; filename="lost-persons-YYYY-MM-DD.csv"`, `no-store`. |
 | `GET /api/stats` | Returns `lp_stats()`. |
 
 **Delete Jeffrey's old routes** (`/api/login`, `/api/logout`, `/api/patients/**` and the old `/api/photos/[id]`) once the new ones replace them. Nothing external calls them.
@@ -1064,4 +1064,97 @@ Unknown params are ignored.
 - **Why hash the path.** Storage's `upsert: false` does not serialise concurrent writers. Two uploads to one path both succeed and the last one wins (checked against the local storage-api v1.60). With the hash in the name, other bytes always get another path, so a recorded row's object can't change even under a race. A losing upload is left as an orphan, which §6 allows.
 - **Other bytes under an unrecorded photoId** (only the sending phone knows it) are stored beside the earlier objects and recorded as sent, attributed and audited to their sender.
 - `GET /api/photos/:id` reads the path from the row, so legacy and seed photos are unaffected. `lp_add_photo` only checks the `{patientId}/` prefix and the 200-character limit; these paths are at most 148 characters.
+
+## 17. v2.5 amendments (OVERRIDE anything above; product decisions of 2026-11-06 morning)
+
+Brian and Jeffrey decided these after the app went live (`design/DECISIONS.md` "v2.2 (2026-11-06 morning)"). The visual spec is `design/screens/polish-v7.html` with its renders `v7-log.png`, `v7-dash.png` and `v7-laptop.png`, polished with the patterns in `design/references/mobbin-lists-dashboards.txt`. Where the mockup CSS misses WCAG AA or 44 px targets, the accessibility rules of `DECISIONS.md` ("Accessibility pass") still win. Numbering continues from A44, because A25–A44 are already taken by §14–§16.
+
+**A45 · Not in medical is closed** (replaces the A3 bucket table; Jeffrey, texts 09:11–09:13).
+
+| Bucket | Statuses | Colour |
+|---|---|---|
+| `open` | `Added` (Waiting for check); `Found – Awaiting Reunion` and legacy `Bring friend to medical` (In medical · friend coming) | blue; green |
+| `closed` | `Checked – Not Found` (Not in medical), `Reunited – Closed`, `Found – Discharged`, `Cancelled` | grey |
+
+- There is no `answered` bucket: `StatusBucket = 'open' | 'closed'` (`lib/domain.ts`, already at b48718a).
+- Not in medical has tone `gray` and keeps its own glyph: a filled grey circle (`--gray-8`) with a × cut out in the background colour, the same circle as the closed ✓ (Reunited, Discharged) and – (Cancelled) glyphs. Its label is grey wherever it shows (rows, tiles, the profile status block, the audit trail, alerts).
+- Only the two open statuses carry colour: Waiting is a blue ring (`--blue-9`, label `--blue-11`), In medical a green ring with a ¾ pie (`--green-9`, label `--green-11`).
+- Behaviour is unchanged: Not in medical still offers **Change answer** (`primaryActions`), Reopen is still only for Reunited, Discharged and Cancelled (`menuActions`), Pending already left it out, and A42's `open=1` already meant the `open` bucket.
+- Dimming (closed text at `--gray-11`, faded glyph and photo) now applies to Not in medical rows and cards too.
+
+**A46 · All requests is log option B** (replaces the §8 "All" bullets; Brian + Jeffrey picked B).
+
+- **Order.** Outbox items on top (unchanged). Then every `open` row, newest first by `createdAt` (ties: higher `caseNumber` first). Then one **Closed N** row, collapsed when the view opens; expanding it shows every `closed` row below it, newest first, in the same row component with name and status in secondary grey.
+- **The fold** is a plain row, not a card: "Closed" (15 px, medium, secondary), N in a grey capsule (`--gray-a3`, 12 px medium, min-width 22 px, height 20 px, 7 px side padding) and a chevron pinned right that turns 180° when open. It is one `<button aria-expanded aria-controls>`, at least 44 px tall (52 px in the mockup), whose accessible name says the count in a sentence, e.g. "Closed requests, 6. Show them."
+- **Filters.** The post and status chips (A22, A42) filter first, and the open/closed split applies to what is left; N counts the closed rows the view would show. Pending, My requests and Search keep their own layouts. *Open question for Brian:* whether a closed-status filter from a dashboard tile should open the fold by itself.
+- **Column headers** "#", "Friend", "Status", "Created", "Updated" sit above the rows (11 px medium). They are `aria-hidden`, because each row's accessible name says everything in full.
+- **Bottom padding** equals the New request button's height plus 16 px, so it never covers the last row or the fold.
+
+**A47 · Log row columns** (replaces the §8 "Each row" and "second line" bullets; Jeffrey asked for the number and both times, Brian + Jeffrey picked AM/PM).
+
+- **One line per row**, at least 48 px tall, no full-width rules (a hairline inset to the name column at most). Left to right, with 16 px side margins:
+
+  | Column | Content | Rule |
+  |---|---|---|
+  | # | `caseNumber` as plain digits: "1013" | Leftmost, fixed width, 13 px medium, secondary grey, tabular figures |
+  | Friend | `name` (the missing person) | The **only** cell that may truncate, with an ellipsis |
+  | Status | the 14 px glyph and `shortLabel` ("Waiting for check", "In medical", "Not in medical", "Reunited", …) | Never truncates; colour per A45 |
+  | Created | `createdAt` | Right-aligned, sized to its content, secondary grey, tabular figures |
+  | Updated | `updatedAt` relative to now | Right-aligned, fixed width, tertiary grey, tabular figures |
+
+- **Created.** `h:mm AM/PM` in the event timezone when `createdAt` is on the same event-timezone day as now ("11:02 PM", "9:58 AM"); for an earlier day, the short weekday first ("Thu 11:02 PM"). This replaces §8's "h:mm".
+- **Updated.** "—" when nothing has been saved since the request was logged (`updatedAt` within 1 s of `createdAt`). Otherwise whole units, rounded down, never "ago": under 1 minute "now", under 60 minutes "2m", under 24 hours "1h", then days "3d".
+- **Accessible name** of a row, in full: "LP-1013, T.R., Waiting for check, logged 11:02 PM, not updated since." or "…, updated 2 minutes ago."
+- The same row, without Created, is the dashboard's Recently updated row (A48).
+- Check at 375 and 390 px wide, light and dark, that no cell but the name overflows (`scrollWidth > clientWidth`).
+
+**A48 · Dashboard global view** (replaces the §8 Dashboard layout; Jeffrey 09:13, "Lgtm" on the metrics 09:33).
+
+- **Data** is unchanged: `GET /api/stats` every 15 s while open, plus the two new fields (A49).
+- **Order on a phone:**
+  1. **Status tiles**, 2 columns, 8 px gutter, filled (`--gray-a3`), no borders, 12 px radius, each label led by its status glyph. Row 1: **Open** (`open.waiting + open.inMedical`, 34 px digits, with a 4 px split bar: blue Waiting and green In medical in proportion, 2 px gap) and **Closed** (`notInMedical + reunited + discharged + cancelled`, 34 px, grey). Row 2: **Waiting for check** and **In medical**. Row 3: **Not in medical** and **Reunited**. Discharged and Cancelled have no tile of their own; they count in Closed. Status tiles open All filtered by their status (A22). There is no legend.
+  2. **Open by post**: each post's label above a 6 px bar on a faint full-width track, the count in a fixed right column, scaled to the busiest post; a zero draws only the track. Order and grouping as A31; each bar opens `?post=<key>&open=1` (A42).
+  3. **Recently updated**: the 5 rows of `recent` in the A47 row (number, name, status, updated); each opens the profile.
+  4. **Performance**, last: rows, not tiles, with inset hairlines. Label left (icon, label, a small grey qualifier), value right (17 px semibold digits, 13 px unit):
+
+     | Row | Value | Qualifier |
+     |---|---|---|
+     | Longest wait | `longestWait.minutes` | its number and post, e.g. "1010 · FA 4" |
+     | Time to answer | `avgAnswerMinutes` | "avg, 2 h" |
+     | Time to reunite | `avgReuniteMinutes` | "avg" |
+     | Logged | `loggedLastHour` | "last hour" |
+
+     A null value shows "—". Minutes show rounded to whole minutes with the unit "m".
+- **Laptop or iPad (Command)**, as `v7-laptop.png`: the six tiles in one row (Open, Waiting for check, In medical, Closed, Not in medical, Reunited), Open by post and Recently updated side by side, and Performance in two columns.
+- **Export CSV is gone** from the dashboard (A50).
+
+**A49 · `lp_stats`: `avgReuniteMinutes` and `loggedLastHour`** (the Performance rows; the contract is in `lib/api-types.ts` since b48718a).
+
+- **`loggedLastHour`**: the number of requests whose `created_at` is in the last 60 minutes (`> clock_timestamp() − 60 min`), any status.
+- **`avgReuniteMinutes`**: the mean, in minutes rounded to 1 decimal, over reunions in the **last 2 hours**; `null` when there are none.
+  - **A reunion** is, for a request that is `Reunited – Closed` now, its latest audit `status_changed` with `new_value.status = 'Reunited – Closed'`, when that happened in the last 2 hours. After an Undo or a Reopen the request is not Reunited, so it does not count until it is reunited again.
+  - **It is measured from** the latest In medical answer at or before it: a `status_changed` from `Added` or `Checked – Not Found` (`previous_value.status`) into `Found – Awaiting Reunion` or legacy `Bring friend to medical` (`new_value.status`), or a legacy `medical_search_found`. So Change answer restarts the clock, while the Undo of a Reunited (which comes from `Reunited – Closed`) and a Reopen do not. Jeffrey's full-row events match on the same `status` keys.
+  - A reunion with no In medical answer before it (a direct database write) is left out.
+- **Computed like `avgAnswerMinutes`:** from the audit events, in the same `STABLE` snapshot as every other number, with `v_now = clock_timestamp()` captured once and the function-level `statement_timeout = '4s'` and `lock_timeout = '2s'`.
+- **Migration.** `lp_stats` is now `create or replace` (no longer dropped first), so the rework file stays one transaction, keeps its preflight and is safe to run again on a database that already has every `lp_*` function. **Production needs the file applied again**, dry run first (`HANDOFF.md`).
+- **Tests.** `tests/integration/stats.test.ts` checks both fields through the API against an independent recomputation from the raw audit trail, and checks exact values (the null case, Change answer, Undo, Reopen, Discharged, legacy events, the 2 h and 60 min edges, rounding) on a scratch database built from the migration chain.
+
+**A50 · No CSV export in the app** (replaces §6 `GET /api/export`, the §8 Export CSV entries, the §9 CSV gates and the §11 "CSV in standalone" check; Brian removed the button).
+
+- **Removed:** `app/api/export/route.ts`, `lib/server/csv.ts`, `tests/integration/export.test.ts`, the export cases in `tests/integration/security.test.ts`, the Export CSV items in the avatar menu and on the dashboard (`components/account/export-csv.ts`), and the e2e CSV download test. `GET /api/export` now reaches the unknown-route handler: a JSON 404 `{error: {code: 'not_found'}}`, `no-store`, with or without a session (asserted in `security.test.ts`).
+- **`docs/export.sql`** is Jeffrey's end-of-event export from the Supabase SQL editor ("Download CSV" on the results). Its top comment gives the 3 steps. Two read-only selects:
+  1. **Requests**, one row each, ordered by case number: case number (`LP-####`), name (initials or full), age, gender, height/build, hair, identifying features, physical description, clothing, last seen, notes, reporting location, other location, contact name, phone, relationship and notes, the status label and its database value, the created, updated, found, reunion-started and closed times in `America/New_York` (`YYYY-MM-DD HH24:MI:SS`), and created by and updated by.
+  2. **The audit trail**, one row per event, joined to the case number, ordered by case number then time: when, staff, action, from and to status, kind, notes, and the raw previous and new values.
+  - Text a spreadsheet could run as a formula gets a leading `'`, by the old CSV's rule: = + - @ or their full-width forms after any leading whitespace or invisible characters, or a leading tab, CR or LF.
+- **Tests.** `tests/unit/export-sql.test.ts` lexes the file: exactly two `WITH … SELECT` statements, no statement or function that writes, locks or changes a setting, only `patients` and `audit_events`, every old CSV field. `tests/integration/export-sql.test.ts` runs both queries on the local database in a `READ ONLY` session and checks the rows, the New York times, the LP numbers and the formula guard with every injection prefix.
+- **HANDOFF** checklist: "At the end, run docs/export.sql in the SQL editor and download the results" replaces the Export CSV check.
+
+**A51 · Header declutter** (replaces the §8 "The `/` page shell" header bullets and the header part of the A23 `AppHeader`; Brian's v6 declutter, Brian + Jeffrey final).
+
+- **The view switcher is the large page title**: the view name (28 px bold), its count (28 px regular, tertiary grey, no badge) and a small chevron on one baseline, as one menu button: "All requests 13 ⌄". The menu (§8 View switcher) is unchanged.
+- **The app name leaves the list header.** "Is my friend in medical?" stays on sign-in and as the document title.
+- **Right side:** search and the avatar only.
+- **The alerts bell moves into the avatar menu** as an Alerts on/off item. Everything the bell did stays (§7 Alerts, the iPhone Home Screen intro, `lp-bell`).
+- **The live dot only appears when the app is offline or reconnecting** (`connection` is `offline` or `error`; amber when offline). While live it is not rendered. Tapping it still syncs now, and the offline and "Can't reach the log" banners are unchanged.
+- **"Newest first" goes.** The order is A46's.
 
