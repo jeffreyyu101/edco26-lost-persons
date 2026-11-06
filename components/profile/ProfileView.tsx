@@ -4,11 +4,14 @@
 // synced); photos and the audit trail come from useDetail(id), which refetches whenever the synced
 // rowVersion changes, and show skeletons until it loads.
 //
-//   top bar      × · LP number · ⋯ (Edit details, Mark discharged while In medical, Reopen when closed —
-//                Cancelled → Waiting creator-only —, Cancel request creator-only while Waiting)
+//   top bar      × · LP number · ⋯ (Edit details, Mark discharged while In medical, Reopen when Reunited /
+//                Discharged / Cancelled — Cancelled → Waiting creator-only —, Cancel request creator-only
+//                while Waiting). Not in medical is closed and grey since v2.2 but keeps its own actions:
+//                Change answer only, never Reopen (domain primaryActions / menuActions go by status).
 //   header       portrait + photo count, name, age · gender, post · who logged it
-//   status block status colour; wait badge while Waiting; "Rae Chen · 11:10 · Maya R. heading to Main
-//                Med" while In medical; who and when for the other answers
+//   status block status colour (grey for every closed status, Not in medical included); wait badge while
+//                Waiting; "Rae Chen · 11:10 · Maya R. heading to Main Med" while In medical; who and when for
+//                the other answers
 //   details      Missing person / Friend or family, filled fields only, each with Edit; Phone has Call
 //   photos       tiles → full-screen viewer; Add tile (needs a connection) until there are 3
 //   audit trail  newest first (audit-trail.ts)
@@ -539,10 +542,12 @@ function Portrait({ row, photoCount, canOpen, onOpen }: { row: RequestSummary; p
 /** Before the audit trail loads: who answered and when, from the row's own timestamps where possible. */
 function fallbackOrigin(row: RequestSummary): StatusOrigin | null {
   // reunion_started_at is set on every entry into In medical; found_at only the first time (legacy
-  // Bring-friend rows may have only found_at).
+  // Bring-friend rows may have only found_at). closed_at belongs to Reunited / Discharged / Cancelled (and
+  // legacy closed values) only: Not in medical is in the closed bucket since v2.2 but never sets it, so it
+  // keeps waiting for the audit trail as before.
   const at = isInMedical(row.status)
     ? (row.reunionStartedAt ?? (row.status === STATUS.legacyBringFriend ? row.foundAt : null))
-    : statusMeta(row.status).bucket === 'closed'
+    : statusMeta(row.status).bucket === 'closed' && row.status !== STATUS.notInMedical
       ? row.closedAt
       : null;
   if (!at) return null;

@@ -152,6 +152,63 @@ test('renders from the request, answers, changes the answer, reunites, reopens a
   await expect(statusBlock(page)).toContainText('Discharged');
 });
 
+test('Not in medical is closed and grey, and keeps exactly its actions: Change answer only', async ({ browser, page, baseURL }) => {
+  // v2.2 (Jeffrey, 2026-11-06): Not in medical counts as closed and is greyed out like Reunited, but it is
+  // still answerable — no Reopen, no Mark discharged, no Cancel request (not even for the person who logged it).
+  const origin = baseURL as string;
+  const row = await createRequest(page, origin);
+  await page.goto(`/?r=${row.id}`);
+  await page.getByRole('button', { name: 'Not in medical', exact: true }).click();
+  await expect(profileStatus(page, 'Checked – Not Found')).toBeVisible();
+
+  // Grey like the other closed states: grey tint, grey label, grey × glyph.
+  await expect(statusBlock(page)).toHaveAttribute('data-tone', 'gray');
+  await expect(statusBlock(page).locator('[data-accent-color="gray"]', { hasText: 'Not in medical' })).toBeVisible();
+  await expect(statusBlock(page).locator('svg[data-glyph="notInMedical"] circle')).toHaveAttribute('fill', 'var(--gray-9)');
+  const tint = await statusBlock(page).evaluate((el) => getComputedStyle(el).backgroundColor);
+  // The audit trail's newest entry: the grey glyph on the timeline and in "Waiting for check → Not in medical".
+  const latest = auditItems(page).first();
+  await expect(latest).toContainText('Not in medical');
+  await expect(latest.locator('svg[data-glyph="notInMedical"] circle')).toHaveCount(2);
+  for (const circle of await latest.locator('svg[data-glyph="notInMedical"] circle').all()) await expect(circle).toHaveAttribute('fill', 'var(--gray-9)');
+  await expect(latest.locator('[data-accent-color="gray"]', { hasText: 'Not in medical' })).toBeVisible();
+
+  // Exactly one action: Change answer (to In medical).
+  const bar = page.getByTestId('profile-actions');
+  await expect(bar.getByRole('button')).toHaveCount(1);
+  await expect(bar.getByRole('button', { name: 'Change answer to In medical' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Reunited', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Cancel request' })).toHaveCount(0);
+  // ⋯ holds Edit details only.
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Edit details' })).toBeVisible();
+  await expect(page.getByRole('menuitem')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+
+  // Someone else sees the same: Change answer, no Reopen.
+  const liaison = await otherPerson(browser, LIAISON, origin);
+  await liaison.page.goto(`/?r=${row.id}`);
+  await expect(statusBlock(liaison.page)).toHaveAttribute('data-tone', 'gray');
+  await expect(liaison.page.getByTestId('profile-actions').getByRole('button')).toHaveCount(1);
+  await liaison.page.getByRole('button', { name: 'More actions' }).click();
+  await expect(liaison.page.getByRole('menuitem')).toHaveCount(1);
+  await liaison.context.close();
+
+  // The same grey tint as Reunited's block.
+  const reunitedRow = await createRequest(page, origin);
+  const inMedical = await setStatus(page, origin, reunitedRow, 'Found – Awaiting Reunion', 'answer');
+  await setStatus(page, origin, inMedical, 'Reunited – Closed', 'reunite');
+  await page.goto(`/?r=${reunitedRow.id}`);
+  await expect(profileStatus(page, 'Reunited – Closed')).toBeVisible();
+  expect(await statusBlock(page).evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(tint);
+
+  // And Change answer still works.
+  await page.goto(`/?r=${row.id}`);
+  await page.getByRole('button', { name: 'Change answer to In medical' }).click();
+  await expect(profileStatus(page, 'Found – Awaiting Reunion')).toBeVisible();
+  await expect(statusBlock(page)).toHaveAttribute('data-tone', 'green');
+});
+
 test('cancel is creator-only, asks once (Keep / Cancel request), and the creator can reopen', async ({ browser, page, baseURL }) => {
   const origin = baseURL as string;
   const row = await createRequest(page, origin);
