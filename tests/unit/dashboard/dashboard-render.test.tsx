@@ -1,6 +1,8 @@
 // Server renders of the dashboard (design/screens/polish-v7.html Dash / Laptop) against the stub store and
 // mocked Stats: section order, the tiles and their numbers, Open by post busiest first, Recently updated rows,
 // Performance with "—" for missing values, the connection chip, and no Export CSV. Synthetic data only.
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { Theme } from '@radix-ui/themes';
 import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
@@ -177,6 +179,31 @@ describe('dashboard render', () => {
     expect(perf).toContain('Average time to answer over the last 2 hours: 9 minutes.');
     expect(perf).toContain('Average time to reunite: 18 minutes.');
     expect(perf).toContain('Logged in the last hour: 6 requests.');
+  });
+
+  // Regression: a long Other location in the Longest wait context scrolled the page sideways on a phone
+  // (layout covered in tests/e2e/dashboard.spec.ts). The context is its own span, the one that may shrink.
+  it('Longest wait at a long Other location: the whole text in the context span and the label, the context ellipsizes', () => {
+    const where = 'TEST-dash-1 Lost and found tent behind the stereoBloom stage';
+    const longestWait = { id: '5eed0000-0000-4000-8000-000000001010', caseNumber: 1010, reportingLocation: 'Other', otherLocation: where, postShort: where, minutes: 24 };
+    const html = render(storeWith(), <DashboardContent stats={v7Stats({ longestWait })} />);
+    expect(html).toMatch(new RegExp(`<span class="([^"]+)" data-testid="perf-longest-wait-context">1010 · ${where}</span>`));
+    expect(html).toContain(`aria-label="Longest wait 1010 · ${where} 24m. Request 1010 at ${where} has been waiting 24 minutes. Opens the request."`);
+    expect(html).toMatch(/data-testid="perf-longest-wait-value"><span[^>]*>24<\/span><span[^>]*>m<\/span>/);
+  });
+
+  it('Performance row CSS: label and value never shrink; only the context does, with an ellipsis', () => {
+    const css = readFileSync(fileURLToPath(new URL('../../../components/dashboard/dashboard.module.css', import.meta.url)), 'utf8');
+    const rule = (sel: string) => {
+      const m = css.match(new RegExp(`(?:^|\\n)\\${sel} \\{([^}]*)\\}`));
+      expect(m, sel).not.toBeNull();
+      return (m?.[1] ?? '').replace(/\s+/g, ' ');
+    };
+    const m = rule('.m');
+    for (const decl of ['flex: 0 1 auto;', 'min-width: 0;', 'white-space: nowrap;', 'overflow: hidden;', 'text-overflow: ellipsis;']) expect(m).toContain(decl);
+    expect(rule('.k')).toContain('flex: none;');
+    expect(rule('.pv')).toContain('flex: none;');
+    expect(rule('.kv')).toContain('min-width: 0;');
   });
 
   it('Performance shows "—" when the server sends null or nothing (v2.2 fields not deployed yet)', () => {

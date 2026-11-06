@@ -418,7 +418,9 @@ function PerfRow({ testId, icon: Icon, label, context, parts, phrase, onClick }:
         <span className={s.k}>{label}</span>{' '}
         {context ? (
           <>
-            <span className={s.m}>{context}</span>{' '}
+            <span className={s.m} data-testid={`${testId}-context`}>
+              {context}
+            </span>{' '}
           </>
         ) : null}
         <span className={s.sp} />

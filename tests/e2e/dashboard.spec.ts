@@ -380,6 +380,82 @@ test.describe('with /api/stats mocked', () => {
     expect(overflow.out).toEqual(['TEST-P-D Alexandria Montgomery-Fitzgerald the Third (ellipsis)']);
   });
 
+  // Regression: an Other location's free text (up to 80 characters) in the Longest wait context pushed the
+  // minutes off-screen and scrolled the whole page sideways on a phone. The context now ellipsizes; the
+  // label, the "1010" and the value never move.
+  test('Longest wait at a long Other location: the context ellipsizes, the minutes stay in their column, no sideways scroll', async ({
+    page,
+  }) => {
+    const where = 'TEST-dash-1 Lost and found tent behind the stereoBloom stage';
+    const longestWait = { ...mockStats().longestWait, reportingLocation: 'Other', otherLocation: where, postShort: where };
+    await routeStats(page, mockStats({ longestWait }));
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/?dashboard=1');
+    await expect(value(page, 'perf-longest-wait')).toHaveText('24m');
+    await expect(page.getByTestId('perf-longest-wait-context')).toHaveText(`1010 · ${where}`);
+    // Screen readers still hear the whole location.
+    await expect(page.getByRole('button', { name: `Longest wait 1010 · ${where} 24m. Request 1010 at ${where} has been waiting 24 minutes. Opens the request.` })).toBeVisible();
+
+    for (const size of [
+      { width: 375, height: 812 },
+      { width: 390, height: 844 },
+      { width: 768, height: 1024 },
+      { width: 1100, height: 800 },
+    ]) {
+      await page.setViewportSize(size);
+      const m = await page.evaluate(() => {
+        const get = (id: string) => {
+          const el = document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+          if (!el) throw new Error(`no ${id}`);
+          return el;
+        };
+        // The y of an element's text baseline: a zero-size inline-block sits on it.
+        const baseline = (el: HTMLElement) => {
+          const probe = document.createElement('span');
+          probe.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline';
+          el.appendChild(probe);
+          const y = probe.getBoundingClientRect().bottom;
+          probe.remove();
+          return y;
+        };
+        const ctx = get('perf-longest-wait-context');
+        const label = ctx.previousElementSibling as HTMLElement;
+        const value = get('perf-longest-wait-value');
+        const digits = value.firstElementChild as HTMLElement;
+        const r = (el: HTMLElement) => el.getBoundingClientRect();
+        return {
+          vw: document.documentElement.clientWidth,
+          hScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+          row: r(get('perf-longest-wait')).right,
+          label: { right: r(label).right, cut: label.scrollWidth > label.clientWidth + 1 },
+          ctx: { left: r(ctx).left, right: r(ctx).right, cut: ctx.scrollWidth > ctx.clientWidth + 1, overflow: getComputedStyle(ctx).textOverflow },
+          value: { left: r(value).left, right: r(value).right, cut: value.scrollWidth > value.clientWidth + 1 },
+          // Time to reunite sits in the same column as Longest wait at every width.
+          sameColumnValueRight: r(get('perf-reunite-value')).right,
+          baselines: { label: baseline(label), ctx: baseline(ctx), digits: baseline(digits) },
+        };
+      });
+      const at = `${size.width}x${size.height}`;
+      expect(m.hScroll, at).toBe(false);
+      expect(m.value.right, at).toBeLessThanOrEqual(m.vw - 16);
+      expect(m.value.right, at).toBeLessThanOrEqual(m.row + 0.5);
+      expect(Math.abs(m.value.right - m.sameColumnValueRight), at).toBeLessThanOrEqual(0.5);
+      expect(m.value.cut, at).toBe(false);
+      expect(m.label.cut, at).toBe(false);
+      expect(m.ctx.left, at).toBeGreaterThanOrEqual(m.label.right);
+      expect(m.ctx.right, at).toBeLessThanOrEqual(m.value.left);
+      expect(m.ctx.cut, at).toBe(true);
+      expect(m.ctx.overflow, at).toBe('ellipsis');
+      // Label, context and digits still share one baseline.
+      expect(Math.abs(m.baselines.ctx - m.baselines.label), at).toBeLessThanOrEqual(1);
+      expect(Math.abs(m.baselines.digits - m.baselines.label), at).toBeLessThanOrEqual(1);
+    }
+
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.getByTestId('perf-longest-wait').click();
+    await expect(page).toHaveURL(/\?r=5eed0000-0000-4000-8000-000000001010$/);
+  });
+
   test('768 px and wider: six tiles in one row, posts beside recent, performance in two columns', async ({ page }) => {
     await routeStats(page, mockStats());
     await page.setViewportSize({ width: 1100, height: 800 });
