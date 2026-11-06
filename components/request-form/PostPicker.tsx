@@ -1,11 +1,14 @@
 'use client';
 // "Reporting from" picker sheet (states.html PostPicker): FA 3 – Kinetic, FA 4 – Oasis, Command, Base and
 // Other; Other shows a "Where?" field (other_location, 1–80 characters). The last pick is remembered by
-// the caller (store prefs.lastPost). STUB (Phase 1a): props are final; F (Phase 2) builds the real sheet.
+// the caller (store prefs.lastPost). Real radio inputs (visually hidden) give arrow-key navigation and
+// correct semantics; each option row is its label.
 import { Button } from '@radix-ui/themes';
-import { useState } from 'react';
+import { Check, MapPin } from 'lucide-react';
+import { useId, useState } from 'react';
 import { Sheet } from '@/components/ui/Sheet';
 import { LIMITS, OTHER_POST, POSTS, type PostValue } from '@/lib/domain';
+import './request-form.css';
 
 export interface PostChoice {
   reportingLocation: PostValue;
@@ -23,37 +26,91 @@ export interface PostPickerProps {
 }
 
 export function PostPicker({ open, onOpenChange, value, onChange }: PostPickerProps) {
-  const [post, setPost] = useState<PostValue | null>(value?.reportingLocation ?? null);
-  const [other, setOther] = useState(value?.otherLocation ?? '');
-  const done = () => {
-    if (!post) return;
-    if (post === OTHER_POST && !other.trim()) return;
-    onChange({ reportingLocation: post, otherLocation: post === OTHER_POST ? other.trim() : null });
-    onOpenChange(false);
-  };
   return (
     <Sheet open={open} onOpenChange={onOpenChange} title="Reporting from">
-      <div role="radiogroup" aria-label="Reporting from" style={{ display: 'grid', gap: 4, margin: '12px 0' }}>
-        {POSTS.map((p) => (
-          <label key={p.value} style={{ display: 'flex', gap: 12, alignItems: 'center', minHeight: 48 }}>
-            <input type="radio" name="post" checked={post === p.value} onChange={() => setPost(p.value)} />
-            {p.value}
-          </label>
-        ))}
+      {/* Mounted only while open, so every opening starts from the current value. */}
+      {open ? (
+        <PostPickerBody
+          value={value}
+          onDone={(choice) => {
+            onChange(choice);
+            onOpenChange(false);
+          }}
+        />
+      ) : null}
+    </Sheet>
+  );
+}
+
+/** A complete choice from the picker state, or null while Other has no location yet. */
+export function postChoiceFrom(post: PostValue | null, other: string): PostChoice | null {
+  if (!post) return null;
+  if (post !== OTHER_POST) return { reportingLocation: post, otherLocation: null };
+  const where = other.trim().replace(/\s+/g, ' ');
+  return where ? { reportingLocation: post, otherLocation: where } : null;
+}
+
+function PostPickerBody({ value, onDone }: { value: PostChoice | null; onDone: (choice: PostChoice) => void }) {
+  const [post, setPost] = useState<PostValue | null>(value?.reportingLocation ?? null);
+  const [other, setOther] = useState(value?.otherLocation ?? '');
+  const name = useId();
+  const choice = postChoiceFrom(post, other);
+  const done = () => {
+    if (choice) onDone(choice);
+  };
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        done();
+      }}
+    >
+      <div className="lp-rf-grp lp-rf-opts" role="radiogroup" aria-label="Reporting from">
+        {POSTS.map((p) => {
+          const checked = post === p.value;
+          return (
+            <label key={p.value} className="lp-rf-opt">
+              <input
+                className="lp-rf-radio"
+                type="radio"
+                name={name}
+                value={p.value}
+                checked={checked}
+                onChange={() => setPost(p.value)}
+              />
+              <MapPin size={17} strokeWidth={1.75} aria-hidden />
+              <span className="lp-rf-sp">{p.value}</span>
+              {checked ? (
+                <span className="lp-rf-ck">
+                  <Check size={17} strokeWidth={1.75} aria-hidden />
+                </span>
+              ) : null}
+            </label>
+          );
+        })}
         {post === OTHER_POST ? (
-          <input
-            aria-label="Other location"
-            placeholder="Where?"
-            maxLength={LIMITS.otherLocation}
-            value={other}
-            onChange={(e) => setOther(e.currentTarget.value)}
-            style={{ fontSize: 16, minHeight: 44 }}
-          />
+          <div className="lp-rf-opt">
+            <span style={{ width: 17, flex: 'none' }} aria-hidden />
+            <input
+              className="lp-rf-where"
+              aria-label="Other location"
+              placeholder="Where?"
+              autoComplete="off"
+              autoCapitalize="sentences"
+              enterKeyHint="done"
+              maxLength={LIMITS.otherLocation}
+              value={other}
+              onChange={(e) => setOther(e.currentTarget.value)}
+              // Picking Other means the next thing to do is type where.
+              autoFocus={value?.reportingLocation !== OTHER_POST}
+            />
+          </div>
         ) : null}
       </div>
-      <Button size="3" highContrast style={{ width: '100%' }} onClick={done} disabled={!post || (post === OTHER_POST && !other.trim())}>
+      <Button type="submit" size="3" highContrast mt="4" style={{ width: '100%' }} disabled={!choice}>
         Done
       </Button>
-    </Sheet>
+    </form>
   );
 }
