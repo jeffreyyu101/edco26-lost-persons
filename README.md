@@ -2,7 +2,8 @@
 
 A phone-first web app for Ground Control / Headliner Experience (GC/HX) staff at EDC Orlando, Nov 6–8 2026.
 Front-of-house staff at FA 3 and FA 4 log a missing person and the friend looking for them. The medical
-liaison at Main Med checks the charts and answers **In medical** or **Not in medical**. When the answer is
+liaison at Main Med checks the charts and answers **In medical** or **Not found** (the request then reads "Not
+found in medical"). When the answer is
 In medical, the friend is walked to Main Med, and medical taps **Reunited**.
 
 The app stores identifying and contact details only. Never enter medical records, diagnoses, medications or
@@ -123,7 +124,7 @@ Pending.
   (with a progress line), Search, New request, the profile, Edit and the dashboard. Views are URL parameters
   on `/`, so Back and shared links work. The view menu is the large page title ("All requests 13 ⌄").
 - **All requests.** Open requests (Waiting for check, In medical) come first, newest first; every closed one
-  (Not in medical, Reunited, Discharged, Cancelled) folds into one "Archived N" row. Each row shows the LP
+  (Not found in medical, Reunited, Discharged, Cancelled) folds into one "Archived N" row. Each row shows the LP
   number, the name, the status, when it was logged ("11:02 PM", or "Thu 11:02 PM" for an earlier day) and
   when it last changed ("now", "2m", "1h", "3d", or "—").
 - **Live.** The list syncs every 6 s while the app is open (60 s in the background). A line under the title
@@ -131,8 +132,13 @@ Pending.
   Problems show as a banner, "Reconnecting…" (amber) or "Offline · N waiting to send" (gray), while the line
   shows the last good time ("Last updated 3:42 PM").
 - **Brand row.** All requests opens with one compact row (logos, "Is my friend in medical?", the dates). Its X
-  hides it on that phone; "Show header" in the avatar menu brings it back.
-- **Answers.** Not in medical, In medical, Reunited and Change answer each offer Undo for 10 s. Change answer
+  hides it on that device; "Show header" in the avatar menu brings it back.
+- **Desk and tablet (from 768 px).** A sidebar (or an icon rail under 1280 px), a top bar with the view's
+  title, its live line and Refresh now, search and New request, and the list as a table; a request opens
+  beside it (docked from 1024 px) and New request as a side sheet or a centred dialog. Pending is two
+  columns, To check and Friend coming. All requests opens with the same compact brand row, its X and Show
+  header.
+- **Answers.** Not found, In medical, Reunited and Change answer each offer Undo for 10 s. Change answer
   is a menu: the other answer, or Back to Waiting for check. Two people giving the same answer is harmless.
   A change made by someone else shows as "Updated by someone else".
 - **Alerts** appear only while the app is open: changes to your requests by someone else, and new requests

@@ -1,0 +1,93 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Brand header · compact</title>
+<!-- 2026-11-06 afternoon. Brian: make Jeffrey's brand header more compact and dismissible with an X. Keeps Jeffrey's ask
+     (logos, event details, "Is my friend in medical?", the gradient of his original) in a fraction of the height.
+     X hides it on that device (remembered); the avatar menu gets "Show header" to bring it back. All requests only. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@radix-ui/themes@3.3.0/styles.css">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+body{margin:0;background:#0c0c0d}
+.radix-themes{--default-font-family:InterVariable,Inter,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;font-feature-settings:"cv11";-webkit-font-smoothing:antialiased}
+.radix-themes[data-is-root-theme]{min-height:0!important;height:100%;position:relative}
+.board{display:flex;flex-wrap:wrap;justify-content:center;gap:28px 20px;padding:24px;max-width:1320px}
+.board figure{margin:0}.frame{width:390px;height:520px;border-radius:30px;overflow:hidden;border:1px solid #2b2b30}
+.frame.desk{width:1240px;height:300px;border-radius:12px}
+figcaption{margin-top:10px;text-align:center;font:500 15px/1.3 system-ui;color:#e4e4e7}
+figcaption span{display:block;font-weight:400;font-size:13px;color:#8e8e96;margin-top:2px}
+.app{height:100%;display:flex;flex-direction:column;background:var(--color-background)}
+.sp{flex:1}
+.grad{position:relative;overflow:hidden;color:#fff;background:radial-gradient(ellipse at 12% 140%,#e83f91 0,transparent 45%),radial-gradient(ellipse at 88% -40%,#25c7d7 0,transparent 42%),linear-gradient(112deg,#181329 4%,#36205a 55%,#211835 100%)}
+.grad::after{content:"";position:absolute;width:220px;height:220px;right:-70px;top:-120px;border-radius:50%;box-shadow:0 0 0 1px rgba(255,255,255,.12),0 0 0 22px rgba(255,255,255,.0),inset 0 0 0 22px rgba(255,255,255,0);border:1px solid rgba(255,255,255,.12)}
+.edc{filter:invert(1);height:22px;width:auto;display:block}
+.gc{height:19px;width:auto;display:block}
+.div{width:1px;height:20px;background:rgba(255,255,255,.28)}
+.x{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.12);color:#fff;flex:none;position:relative;z-index:1}
+.ttl{font-weight:700;letter-spacing:-.02em}.ttl em{font-style:normal;color:#8ef0e7;font-weight:500}
+.kick{font-size:10.5px;letter-spacing:.14em;font-weight:700;color:#cdb9f0}
+/* A · one row */
+.a{margin:12px 12px 4px;border-radius:14px;padding:10px 10px 10px 14px;display:flex;align-items:center;gap:10px}
+.a .ttl{font-size:16px;line-height:1.15}
+/* B · two rows */
+.b{margin:12px 12px 4px;border-radius:16px;padding:12px 12px 14px 16px;display:flex;flex-direction:column;gap:8px}
+.b .ttl{font-size:22px;line-height:1.1}
+.lt{display:flex;align-items:center;gap:6px;padding:14px 12px 10px 16px}
+.lt .tx{font-size:28px;font-weight:700;letter-spacing:-.022em;color:var(--gray-12)}.lt .tc{font-size:28px;color:var(--gray-9)}
+.ib{width:36px;height:36px;display:grid;place-items:center;color:var(--gray-11)}
+.av{width:32px;height:32px;border-radius:50%;background:var(--gray-12);color:var(--gray-1);display:grid;place-items:center;font-size:12px;font-weight:600}
+.colh{display:grid;grid-template-columns:36px 1fr 120px 52px;padding:0 16px;font-size:11px;color:var(--gray-9);height:24px;align-items:center}
+.row{display:grid;grid-template-columns:36px 1fr 120px 52px;padding:0 16px;height:48px;align-items:center;border-bottom:1px solid var(--gray-a3);font-size:15px;color:var(--gray-12)}
+.row .n{font-size:13px;color:var(--gray-10)}.row .s{font-size:12.5px;display:flex;gap:6px;align-items:center}.row .t{text-align:right;font-size:13px;color:var(--gray-11)}
+.menu{margin:8px 12px;border-radius:14px;background:var(--color-panel-solid);box-shadow:var(--shadow-5);padding:6px}
+.mi{display:flex;align-items:center;gap:10px;height:42px;padding:0 10px;border-radius:8px;font-size:15px;color:var(--gray-12)}
+.mi.hl{background:var(--gray-a3)}.mi svg{color:var(--gray-11)}
+/* desktop */
+.dwin{height:100%;display:grid;grid-template-columns:232px 1fr;background:var(--color-background)}
+.side{background:var(--gray-2);border-right:1px solid var(--gray-a4)}
+.dmain{display:flex;flex-direction:column}
+.d{margin:14px 20px 4px 24px;border-radius:14px;padding:12px 12px 12px 18px;display:flex;align-items:center;gap:14px}
+.d .ttl{font-size:20px}
+.dtop{display:flex;align-items:center;gap:8px;height:52px;padding:0 24px;font-size:17px;font-weight:600;color:var(--gray-12)}
+</style>
+<script type="importmap">{"imports":{
+"react":"https://esm.sh/react@18.3.1","react-dom":"https://esm.sh/react-dom@18.3.1","react-dom/client":"https://esm.sh/react-dom@18.3.1/client",
+"@radix-ui/themes":"https://esm.sh/@radix-ui/themes@3.3.0?deps=react@18.3.1,react-dom@18.3.1","htm":"https://esm.sh/htm@3.1.1"}}</script>
+</head><body>
+<img id="edc" src="../edc-logo.png" hidden alt=""><img id="gc" src="../gc-logo.png" hidden alt="">
+<div id="b"></div>
+<script type="module">
+import React from 'react';
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
+import htm from 'htm';
+import { Theme } from '@radix-ui/themes';
+const h = htm.bind(React.createElement);
+const EDC = document.getElementById('edc').src, GC = document.getElementById('gc').src;
+const svg = (p, s = 16, w = 1.75) => h`<svg width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth=${w} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style=${{ flex: 'none' }} dangerouslySetInnerHTML=${{ __html: p }} />`;
+const P = { x: '<path d="M18 6 6 18M6 6l12 12"/>', search: '<circle cx="11" cy="11" r="7.5"/><path d="m20.5 20.5-4.2-4.2"/>', chev: '<path d="m6 9 6 6 6-6"/>',
+  eye: '<path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/>', bell: '<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>', out: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/>' };
+const Logos = ({ s = 1 }) => h`<div style=${{ display: 'flex', alignItems: 'center', gap: 10 * s, position: 'relative', zIndex: 1 }}><img className="edc" src=${EDC} style=${{ height: 22 * s }} alt="EDC Orlando"/><span className="div"></span><img className="gc" src=${GC} style=${{ height: 19 * s }} alt="Ground Control"/></div>`;
+const X = () => h`<span className="x" aria-label="Hide header">${svg(P.x, 15, 2.25)}</span>`;
+const Title = ({ cls = '' }) => h`<div className=${'ttl ' + cls} style=${{ position: 'relative', zIndex: 1 }}>Is my friend <em>in medical?</em></div>`;
+const A = () => h`<div className="grad a"><${Logos} s=${0.85}/><span className="sp"></span><${X}/></div>`;
+const Arow = () => h`<div className="grad a"><${Logos} s=${0.8}/><div style=${{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, position: 'relative', zIndex: 1 }}><${Title}/><span className="kick" style=${{ fontSize: 9.5 }}>NOV 6–8 · EVENT OPS</span></div><span className="sp"></span><${X}/></div>`;
+const B = () => h`<div className="grad b"><div style=${{ display: 'flex', alignItems: 'center' }}><${Logos} s=${0.9}/><span className="sp"></span><${X}/></div><${Title}/><span className="kick" style=${{ position: 'relative', zIndex: 1 }}>EVENT OPERATIONS · NOVEMBER 6–8, 2026</span></div>`;
+const List = ({ n = 6 }) => h`<div className="lt"><span className="tx">All requests</span><span className="tc">12</span><span style=${{ color: 'var(--gray-10)', display: 'flex' }}>${svg(P.chev, 18, 2.25)}</span><span className="sp"></span><span className="ib">${svg(P.search, 20)}</span><span className="av">DK</span></div>
+  <div className="colh"><span>#</span><span>Friend</span><span>Status</span><span style=${{ textAlign: 'right' }}>Created</span></div>
+  ${[['0012', 'J.D.', 'Waiting for check', 'b', '2:10 PM'], ['0011', 'Kayla Martinez', 'Waiting for check', 'b', '2:06 PM'], ['0010', 'B.W.', 'In medical', 'g', '2:01 PM'], ['0009', 'A.N.', 'Waiting for check', 'b', '1:58 PM'], ['0007', 'R.P.', 'In medical', 'g', '1:47 PM'], ['0006', 'K.T.', 'Waiting for check', 'b', '1:40 PM']].slice(0, n).map(([a, b, c, t, d]) => h`<div key=${a} className="row"><span className="n">${a}</span><span>${b}</span><span className="s" style=${{ color: t === 'g' ? 'var(--green-11)' : 'var(--blue-11)' }}>● ${c}</span><span className="t">${d}</span></div>`)}`;
+const Shell = ({ children, dark = true }) => h`<${Theme} appearance=${dark ? 'dark' : 'light'} accentColor="gray" grayColor="gray" radius="medium"><div className="app">${children}</div><//>`;
+const Menu = () => h`<${Shell}><${List} n=${2}/><div className="menu">
+  <div className="mi">${svg(P.sun)}Theme</div><div className="mi">${svg(P.bell)}Alerts</div><div className="mi hl">${svg(P.eye)}Show header</div><div className="mi">${svg(P.out)}Sign out</div></div><//>`;
+const Desk = () => h`<${Theme} appearance="dark" accentColor="gray" grayColor="gray" radius="medium"><div className="dwin"><aside className="side"></aside><div className="dmain">
+  <div className="grad d"><${Logos}/><span className="div" style=${{ position: 'relative', zIndex: 1 }}></span><${Title}/><span className="kick" style=${{ position: 'relative', zIndex: 1 }}>EVENT OPERATIONS · NOVEMBER 6–8, 2026</span><span className="sp"></span><${X}/></div>
+  <div className="dtop">All requests<span style=${{ color: 'var(--gray-9)', fontWeight: 400 }}>12</span></div></div></div><//>`;
+const Fig = ({ cap, sub, desk, children }) => h`<figure><div className=${'frame' + (desk ? ' desk' : '')}>${children}</div><figcaption>${cap}<span>${sub}</span></figcaption></figure>`;
+const Board = () => h`<div className="board">
+  <${Fig} cap="A · One row (recommended)" sub="Logos, title and dates in 64 px; X hides it"><${Shell}><${Arow}/><${List}/><//><//>
+  <${Fig} cap="B · Two rows" sub="Bigger title, about 120 px"><${Shell}><${B}/><${List} n=${5}/><//><//>
+  <${Fig} cap="Hidden" sub="Tap X: the list starts at the top"><${Shell}><${List}/><//><//>
+  <${Fig} cap="Bring it back" sub="Avatar menu → Show header"><${Menu}/><//>
+  <${Fig} desk cap="Desktop" sub="One slim row above the table, X on the right"><${Desk}/><//>
+</div>`;
+flushSync(() => createRoot(document.getElementById('b')).render(h`<${Board}/>`));
+</script></body></html>

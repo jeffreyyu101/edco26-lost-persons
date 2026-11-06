@@ -11,7 +11,7 @@ screenshots.
 ## What changed
 
 - **The whole UI is rebuilt from the approved mockups** (Radix Themes, light and dark). It has All /
-  Pending / My requests views, a two-answer check (In medical, Not in medical), Reunited, Undo, search, a
+  Pending / My requests views, a two-answer check (In medical, Not found), Reunited, Undo, search, a
   dashboard and the avatar menu.
 - **Every write is one SQL function** (`lp_*`). The change and its audit row commit together, and
   `row_version` catches conflicting edits. The three-photo limit holds under concurrent uploads, and a
@@ -27,7 +27,7 @@ screenshots.
 
 ### 2026-11-06 morning (v2.5, Brian + Jeffrey)
 
-- **Not in medical is closed** and grey everywhere. Only Waiting for check (blue) and In medical · friend
+- **Not in medical (now "Not found in medical") is closed** and grey everywhere. Only Waiting for check (blue) and In medical · friend
   coming (green) are open.
 - **All requests is log option B:** open requests first, every closed one folded into one "Closed N" row. The
   LP number ("1013") is the leftmost column; each row shows its created time ("11:02 PM", or "Thu 11:02 PM"
@@ -71,6 +71,23 @@ screenshots.
   camera again (`components/photo/CropSheet.tsx`).
 - No migration and no environment change: this is client-only.
 
+### 2026-11-06 evening (F2 release, `release/f2`)
+
+- **Desk and tablet layout from 768 px** (wave 2): a sidebar or icon rail, a top bar (title, live line,
+  search, New request), the list as a table, a request docked beside it from 1024 px, New request as a side
+  sheet or a centred dialog. Phones under 768 px are unchanged.
+- **Pending v8 and where medical has them** (Dani's request): Pending is To check | Friend coming (two
+  columns on the desk); after In medical a sheet asks for the bed or chair (optional, free text, at most 60
+  characters), kept until someone edits it. **This needs the migration below, before the deploy.**
+- **The brand row on the desk** is the phone's compact row with the same X and "Show header", and the
+  **live line** ("Updated just now", Refresh now) sits in the desk's top bar next to the title.
+- **"Not in medical" now reads "Not found in medical"**, and its answer button reads **"Not found"**
+  (Brian, 18:00). The database value is unchanged (`Checked – Not Found`), and so is what it does. The
+  end-of-event export's status label follows (`docs/export.sql`).
+- **Photos:** Retake on a later photo of a multi-photo pick no longer loses the photos already kept, and a
+  double tap or a held key in the crop step answers one photo, never the next.
+- **System notifications** (above) ship in this release too.
+
 ## The production migration
 
 [`supabase/migrations/20261106000000_rework.sql`](supabase/migrations/20261106000000_rework.sql) is the only
@@ -79,20 +96,25 @@ file production needs. The other files in that folder are the local chain: the b
 
 - **Applied to production on 2026-11-06** through the Supabase Management API, with a dry run (ending in
   `rollback;`) first, then the commit run.
-- **It must be re-applied on production before this build deploys** (release `release/f1`). Two changes
-  need it:
-  - `lp_stats` now also returns `avgReuniteMinutes` and `loggedLastHour` (the new dashboard reads both).
-  - `patients.age` becomes free text ("mid-20s"; step 1b), its 0–120 CHECK is dropped, and
-    `lp_clean_fields` takes free-text age and gender (at most 40 characters each). Every stored age is kept
-    as its text (24 → `'24'`).
+- **It must be re-applied on production before the F2 build deploys** (release `release/f2`). New
+  against what production has (the F1 / F1.1 file, already applied):
+  - **step 1c:** `alter table public.patients add column if not exists medical_location text;` (nullable,
+    no default: no table rewrite, nothing else changes);
+  - **recreated functions:** `lp_row` (also returns `medical_location`), `lp_clean_fields` (takes
+    `medical_location`, trimmed, at most 60 characters), `lp_create_request` (refuses `medical_location`
+    on a new request) and `lp_update_fields` (stores it, audited like any edit). Every other step and
+    function is re-run unchanged.
 
   The integrator does this, with the same dry run, then commit. **Order: migration first, then deploy.**
-  The new build sends text ages, which the old `lp_clean_fields` refuses, and its dashboard needs the two
-  new stats fields. The build that is live now keeps working on the migrated database: it sends whole-number
-  ages, which are stored as their text, and reads them back as numbers. The extra stats fields change nothing
-  for it. The file is one transaction, keeps its preflight, and is safe to re-run on a database that already
-  has every `lp_*` function and a text `age`. `lp_stats` is `create or replace`, and step 1b prints
-  `patients.age: already text, unchanged.` on a second run.
+  F2's location save needs the new functions. The build that is live now (F1.1) keeps working on the
+  migrated database: it never sends `medical_location`, and its server maps `lp_row` through an allowlist,
+  so the extra key is ignored; phones with cached rows or queued requests are unaffected (a queued create
+  never carries the field). The file is one transaction, keeps its preflight, and is safe to re-run: a
+  second paste keeps every saved location (`add column if not exists`), `lp_stats` is `create or replace`,
+  and step 1b prints `patients.age: already text, unchanged.`
+
+  (Release `release/f1` needed the same file for `lp_stats`' `avgReuniteMinutes` / `loggedLastHour` and the
+  free-text `age`; that run is done.)
 
 By hand, in the Supabase dashboard:
 
@@ -106,7 +128,10 @@ By hand, in the Supabase dashboard:
    functions (among them `lp_sync`, `lp_create_request`, `lp_set_status` and `lp_stats`), and
    `select lp_stats() ? 'avgReuniteMinutes', lp_stats() ? 'loggedLastHour';` returns `true | true`, and
    `select format_type(atttypid, atttypmod) from pg_attribute where attrelid = 'public.patients'::regclass and attname = 'age';`
-   returns `text`.
+   returns `text`. For F2,
+   `select format_type(atttypid, atttypmod) from pg_attribute where attrelid = 'public.patients'::regclass and attname = 'medical_location';`
+   returns `text`, and `select public.lp_row(p) ? 'medical_location' from public.patients p limit 1;` returns
+   `true`.
 5. **Storage.** Confirm the `patient-photos` bucket is still **private**.
 
 If the preflight stops it ("Preflight failed: …"), the SQL editor is pointed at the wrong project or the
@@ -139,6 +164,11 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
       photo selected, dragging a corner cuts the bezel, Use photo adds it within about a second, and the
       saved photo looks cleaner, not harsher. Safari's Web Inspector (Timelines) shows `lp-photo-prepare`
       with its timings.
+- [ ] F2, on an iPhone: a profile's Add photo with two photos, Use photo on the first, Retake on the second,
+      take another: the Add sheet shows both. Retake, then close the picker without a photo: the first
+      still reaches the Add sheet within about 2 s.
+- [ ] F2, on a laptop: the brand row's X hides it, a reload never flashes it, and "Show header" in the
+      sidebar's account menu (All requests) brings it back.
 - [ ] Keychain fills the password on sign-in step 2.
 - [ ] A Home Screen app signs in on its own and keeps its own saved requests, separate from the Safari tab.
 - [ ] With the mute switch on, an alert still shows its toast (silently).
