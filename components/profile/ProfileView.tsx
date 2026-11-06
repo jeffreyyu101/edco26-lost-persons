@@ -256,9 +256,11 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh }: ProfileP
 
   // --- Cancel ------------------------------------------------------------------------------------------
   const [cancelState, setCancelState] = useState<CancelState | null>(null);
-  // The dialog closes by itself if the request stops being cancellable (someone answered it), unless a
-  // cancel is in flight or its error is showing.
-  const confirmOpen = cancelState !== null && (cancellable || cancelState.busy || cancelState.error !== null);
+  // The dialog closes for good if the request stops being cancellable while it is open (someone answered
+  // it), unless a cancel is in flight or its error is showing. (State adjusted during render, React's
+  // pattern for state that follows props.)
+  if (cancelState && !cancellable && !cancelState.busy && cancelState.error === null) setCancelState(null);
+  const confirmOpen = cancelState !== null;
   const openCancel = () => setCancelState({ busy: false, error: null });
   const doCancel = async () => {
     if (offline) {
@@ -534,8 +536,10 @@ function Portrait({ row, photoCount, canOpen, onOpen }: { row: RequestSummary; p
 
 /** Before the audit trail loads: who answered and when, from the row's own timestamps where possible. */
 function fallbackOrigin(row: RequestSummary): StatusOrigin | null {
+  // reunion_started_at is set on every entry into In medical; found_at only the first time (legacy
+  // Bring-friend rows may have only found_at).
   const at = isInMedical(row.status)
-    ? (row.reunionStartedAt ?? row.foundAt)
+    ? (row.reunionStartedAt ?? (row.status === STATUS.legacyBringFriend ? row.foundAt : null))
     : statusMeta(row.status).bucket === 'closed'
       ? row.closedAt
       : null;
