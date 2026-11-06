@@ -73,7 +73,14 @@ import s from './profile.module.css';
 export interface ProfileViewProps {
   /** Request id from ?r=. */
   id: string;
+  /**
+   * "panel": inside the desk detail pane (components/desk), which supplies the top bar (LP number, ⋯,
+   * close) and scrolls itself, so the profile hides its own top bar and leaves the window scroll alone.
+   */
+  presentation?: 'page' | 'panel';
 }
+
+const HIDDEN = { display: 'none' } as const;
 
 /** How long the "Updated by someone else" banner stays up. */
 const CONFLICT_BANNER_MS = 8_000;
@@ -82,7 +89,8 @@ const NO_NAME = 'Name not provided';
 
 const close = () => goBack({});
 
-export function ProfileView({ id }: ProfileViewProps) {
+export function ProfileView({ id, presentation = 'page' }: ProfileViewProps) {
+  const panel = presentation === 'panel';
   const storeRow = useRequest(id);
   const { detail, loading: detailLoading, error: detailError, refresh } = useDetail(id);
   const storeLoading = useIsLoading();
@@ -91,27 +99,27 @@ export function ProfileView({ id }: ProfileViewProps) {
 
   // Views share one document: start a profile at the top, not at the list's scroll position.
   useEffect(() => {
-    window.scrollTo(0, 0);
-  }, [id]);
+    if (!panel) window.scrollTo(0, 0);
+  }, [id, panel]);
 
   if (!row) {
     const settled = !storeLoading && !detailLoading;
     if (settled && detailError === 'not_found') {
       return (
-        <Frame>
+        <Frame panel={panel}>
           <EmptyState icon="search" title="Request not found" action={{ label: 'Back', onClick: close }} />
         </Frame>
       );
     }
     if (settled && detailError && detailError !== 'unauthorized') {
       return (
-        <Frame>
+        <Frame panel={panel}>
           <EmptyState icon="plug" title="Can't reach the log" action={{ label: 'Try again', onClick: refresh, icon: 'refresh' }} />
         </Frame>
       );
     }
     return (
-      <Frame>
+      <Frame panel={panel}>
         <ProfileSkeleton chrome={false} />
       </Frame>
     );
@@ -124,15 +132,16 @@ export function ProfileView({ id }: ProfileViewProps) {
       detailLoading={detailLoading}
       detailFailed={!detail && !detailLoading && detailError !== null}
       refresh={refresh}
+      panel={panel}
     />
   );
 }
 
 /** The bare top bar (× only) around the loading / not-found states. */
-function Frame({ children }: { children: ReactNode }) {
+function Frame({ children, panel }: { children: ReactNode; panel: boolean }) {
   return (
-    <div className={s.app} data-testid="profile">
-      <div className={s.nav}>
+    <div className={s.app} data-testid="profile" data-presentation={panel ? 'panel' : undefined}>
+      <div className={s.nav} style={panel ? HIDDEN : undefined}>
         <CloseButton />
         <span />
         <span />
@@ -156,12 +165,13 @@ interface ProfileProps {
   detailLoading: boolean;
   detailFailed: boolean;
   refresh: () => void;
+  panel: boolean;
 }
 
 type AddState = { picks: PhotoPick[]; unreadable: number; phase: 'preparing' | 'ready' | 'uploading'; error: string | null };
 type CancelState = { busy: boolean; error: string | null };
 
-function Profile({ row, detail, detailLoading, detailFailed, refresh }: ProfileProps) {
+function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: ProfileProps) {
   const actions = useActions();
   const session = useSession();
   const { connection } = useConnection();
@@ -293,8 +303,8 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh }: ProfileP
   const footer = primaryActions(row.status);
 
   return (
-    <div className={s.app} data-testid="profile" data-status={row.status}>
-      <div className={s.nav}>
+    <div className={s.app} data-testid="profile" data-status={row.status} data-presentation={panel ? 'panel' : undefined}>
+      <div className={s.nav} style={panel ? HIDDEN : undefined}>
         <CloseButton />
         <Text size="2" weight="medium" color="gray" data-testid="profile-case">
           {label}

@@ -44,6 +44,7 @@ import {
 } from '@/lib/client/store-contract';
 import { parsePostFilterKey, postFilterLabel, statusMeta, type GlyphKind } from '@/lib/domain';
 import { formatCreatedTime, formatUpdatedAgo, updatedPhrase } from '@/lib/format';
+import { useInDesk } from '@/components/desk/desk-context';
 import { AppHeader } from './AppHeader';
 import { BrandCard } from './BrandCard';
 import { CheckCard, ComingCard, MineCard, OutboxCard } from './cards';
@@ -87,6 +88,8 @@ function Chrome({ view, chips, filtered = false, skeleton, children }: ChromePro
   const hydrated = useStoreSelector(selectHydrated);
   const snackbar = useSnackbar();
   const { rootRef, stickyRef } = useStickyHeight();
+  // From 768 px the desk shell draws the brand (its sidebar) and this view's chrome: the brand card is phone only.
+  const inDesk = useInDesk();
   // The reconnecting arrow turns only for a retry that takes a moment (no flicker on fast attempts).
   const slowSync = useDelayedFlag(syncing, SLOW_SYNC_MS);
 
@@ -114,7 +117,7 @@ function Chrome({ view, chips, filtered = false, skeleton, children }: ChromePro
 
   return (
     <div className={s.root} data-view={view} ref={rootRef}>
-      <BrandCard />
+      {inDesk ? null : <BrandCard />}
       <div className={s.sticky} ref={stickyRef}>
         <AppHeader
           view={view}

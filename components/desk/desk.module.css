@@ -1,0 +1,716 @@
+/* Desk chrome, ported from design/screens/desktop-log.html (.side, .ni, .bell, .me, .top, .search, .kbd,
+   .newb, .panel, .ph, .ib) and desktop-new-tablet.html (.rl, .ri, .bd). Text that the mockups draw in
+   gray-9 / gray-10 uses gray-11 here: gray-10 is under 4.5:1 on these backgrounds (spec §7, WCAG AA).
+   Touch screens (iPad, also in the sidebar layout on a 12.9" iPad) get 44 px targets. */
+
+.side,
+.side *,
+.rail,
+.rail *,
+.topbar,
+.topbar *,
+.pane,
+.pane * {
+  box-sizing: border-box;
+}
+
+.sp {
+  flex: 1;
+}
+
+/* ---- Sidebar (≥ 1280) and rail (768–1279): CSS shows one ------------------------------------------ */
+
+.side,
+.rail {
+  display: none;
+}
+
+@media (min-width: 768px) and (max-width: 1279.98px) {
+  .rail {
+    display: flex;
+  }
+}
+
+@media (min-width: 1280px) {
+  .side {
+    display: flex;
+  }
+}
+
+.side {
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  padding: calc(14px + env(safe-area-inset-top)) 10px calc(14px + env(safe-area-inset-bottom));
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 8px 16px;
+}
+
+/* The app mark; its corner dot is the live state (the phone header's live dot). Tap to sync now. */
+.mark {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: var(--gray-12);
+  color: var(--gray-1);
+  display: grid;
+  place-items: center;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  flex: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.mark::before {
+  content: '';
+  position: absolute;
+  inset: -11px;
+}
+.mark:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+
+.live {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green-9);
+  box-shadow: 0 0 0 2px var(--gray-2);
+  transition: background-color 0.2s;
+}
+.live[data-state='off'] {
+  background: var(--amber-9);
+}
+.live[data-state='loading'] {
+  background: var(--gray-8);
+}
+
+.bt {
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--gray-12);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.views {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ni {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--gray-11);
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.ni svg {
+  flex: none;
+  color: var(--gray-10);
+}
+.ni:hover {
+  background: var(--gray-a3);
+  color: var(--gray-12);
+}
+.ni[aria-current='page'] {
+  background: var(--gray-a4);
+  color: var(--gray-12);
+  font-weight: 500;
+}
+.ni[aria-current='page'] svg {
+  color: var(--gray-12);
+}
+.ni:focus-visible,
+.bell:focus-visible,
+.ri:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -2px;
+}
+
+.nl {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nc {
+  margin-left: auto;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
+}
+
+.sep {
+  display: block;
+  height: 1px;
+  background: var(--gray-a4);
+  margin: 10px 8px;
+}
+
+/* The Alerts row is the switch. */
+.bell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--gray-11);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.bell svg {
+  flex: none;
+  color: var(--gray-10);
+}
+.bell:hover {
+  background: var(--gray-a3);
+}
+.bell[aria-checked='true'] svg {
+  color: var(--gray-12);
+}
+
+.sw {
+  position: relative;
+  flex: none;
+  margin-left: auto;
+  width: 28px;
+  height: 16px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1.5px var(--gray-a8);
+  transition: background-color 0.15s;
+}
+.sw::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--gray-10);
+  transition: transform 0.15s;
+}
+.sw[data-on] {
+  background: var(--gray-12);
+  box-shadow: none;
+}
+.sw[data-on]::after {
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  background: var(--gray-1);
+  transform: translateX(12px);
+}
+
+/* The signed-in person. The account menu's avatar button stretches its hit area over the whole row. */
+.me {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+  padding: 8px;
+  border-radius: 8px;
+  min-width: 0;
+}
+.me:hover {
+  background: var(--gray-a3);
+}
+.me:has(:focus-visible) {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -2px;
+}
+.me [data-testid='account-trigger'] {
+  position: static;
+  flex: none;
+}
+.me [data-testid='account-trigger']::after {
+  inset: 0;
+  border-radius: 8px;
+}
+.me [data-testid='account-trigger']:focus-visible {
+  outline: none;
+}
+
+.mt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.mn,
+.mteam {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mn {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--gray-12);
+}
+
+.mteam {
+  font-size: 12px;
+  color: var(--gray-11);
+}
+
+.mchev {
+  flex: none;
+  color: var(--gray-10);
+}
+
+/* Rail */
+.rail {
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: calc(14px + env(safe-area-inset-top)) 0 calc(14px + env(safe-area-inset-bottom));
+}
+
+.railMark {
+  margin-bottom: 10px;
+}
+
+.railViews {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.ri {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  padding: 0;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: none;
+  color: var(--gray-11);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.ri:hover {
+  background: var(--gray-a3);
+  color: var(--gray-12);
+}
+.ri[aria-current='page'],
+.ri[data-on] {
+  color: var(--gray-12);
+}
+.ri[aria-current='page'] {
+  background: var(--gray-a4);
+}
+
+.bd {
+  position: absolute;
+  top: 4px;
+  right: 3px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: var(--gray-12);
+  color: var(--gray-1);
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.railSep {
+  display: block;
+  width: 28px;
+  height: 1px;
+  margin: 4px 0;
+  background: var(--gray-a4);
+}
+
+.railMe {
+  margin-top: 6px;
+  display: grid;
+  place-items: center;
+}
+
+/* Tooltips (Tip): to the right of a rail icon, or under a pane button. */
+.tip {
+  position: absolute;
+  z-index: 10;
+  top: 50%;
+  left: calc(100% + 10px);
+  translate: 0 -50%;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--gray-12);
+  color: var(--gray-1);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.12s,
+    visibility 0s 0.12s;
+}
+.tip[data-below] {
+  top: calc(100% + 6px);
+  left: 50%;
+  translate: -50% 0;
+}
+.tip[data-below][data-end] {
+  left: auto;
+  right: 0;
+  translate: none;
+}
+:is(.ri, .ib):hover > .tip,
+:is(.ri, .ib):focus-visible > .tip {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0.3s, 0.3s;
+}
+@media (hover: none) {
+  .tip {
+    display: none;
+  }
+}
+
+/* ---- Top bar ------------------------------------------------------------------------------------- */
+
+.topbar {
+  container-type: inline-size;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 100%;
+  padding: 0 calc(20px + env(safe-area-inset-right)) 0 24px;
+}
+
+.title {
+  margin: 0;
+  min-width: 0;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--gray-12);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.count {
+  margin-left: 2px;
+  font-weight: 400;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
+}
+
+.kbd {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--gray-11);
+  box-shadow: inset 0 0 0 1px var(--gray-a5);
+}
+
+.search {
+  display: none;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  width: 260px;
+  height: 32px;
+  padding: 0 8px 0 10px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--gray-a5);
+  color: var(--gray-11);
+}
+.search:focus-within {
+  box-shadow: inset 0 0 0 1px var(--gray-a7);
+  outline: 2px solid var(--focus-8);
+  outline-offset: -1px;
+}
+
+.searchGlyph {
+  flex: none;
+  color: var(--gray-11);
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--gray-12);
+}
+.searchInput::placeholder {
+  color: var(--gray-11);
+  opacity: 1;
+}
+.searchInput::-webkit-search-cancel-button,
+.searchInput::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+
+.searchClear {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--gray-11);
+  cursor: pointer;
+}
+.searchClear:hover {
+  background: var(--gray-a3);
+  color: var(--gray-12);
+}
+
+.searchIcon {
+  margin: 0 !important;
+  color: var(--gray-11) !important;
+}
+
+.newb {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--gray-12);
+  color: var(--gray-1);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.newb:hover {
+  opacity: 0.9;
+}
+.newb:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+
+.newLong,
+.newKbd {
+  display: none;
+}
+
+.newKbd {
+  color: var(--gray-1);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gray-1) 35%, transparent);
+}
+
+/* In Search the field shows at any width. */
+.topbar[data-searching] .search {
+  display: flex;
+}
+.topbar[data-searching] .searchIcon {
+  display: none;
+}
+
+@container (max-width: 679.98px) {
+  .search {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 120px;
+    max-width: 320px;
+  }
+}
+
+/* Room for the full bar: the field with its "/" cap, "New request" with its "N" cap (desktop-log.html,
+   desktop-new-tablet.html iPad portrait). Narrower (a docked request on an iPad in landscape): the search
+   icon and "New". */
+@container (min-width: 680px) {
+  .search {
+    display: flex;
+  }
+  .searchIcon {
+    display: none;
+  }
+  .newb {
+    padding: 0 10px 0 12px;
+  }
+  .newLong {
+    display: inline;
+  }
+  .newShort {
+    display: none;
+  }
+  .newKbd {
+    display: inline-grid;
+  }
+}
+
+/* ---- Detail pane --------------------------------------------------------------------------------- */
+
+.pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-background);
+}
+
+.ph {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 56px;
+  padding: 0 12px 0 20px;
+  border-bottom: 1px solid var(--gray-a4);
+}
+
+.pid {
+  margin-right: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gray-12);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ib {
+  position: relative;
+  width: 30px !important;
+  height: 30px !important;
+  margin: 0 !important;
+  border-radius: 7px !important;
+  color: var(--gray-11) !important;
+}
+.ib:disabled,
+.ib[data-disabled] {
+  color: var(--gray-8) !important;
+}
+
+.pbody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The phone profile fills the pane (not the window) and keeps its sticky actions at the pane's foot. */
+.pbody > [data-testid='profile'] {
+  flex: 1 0 auto;
+  min-height: 0;
+}
+.pbody > [data-testid='profile'] > main {
+  padding: 16px 20px 24px;
+}
+
+.btns {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+/* ---- Touch screens: 44 px targets ---------------------------------------------------------------- */
+
+@media (pointer: coarse) {
+  .ni,
+  .bell {
+    height: 44px;
+  }
+  /* The field keeps the mockup's 32 px; its input and clear button reach 44 px past it (the bar is 56). */
+  .searchInput {
+    height: 44px;
+    margin: -6px 0;
+    font-size: 16px;
+  }
+  .searchClear {
+    width: 44px;
+    height: 44px;
+    margin: -6px -8px -6px -6px;
+    border-radius: 8px;
+  }
+  .searchClear:hover {
+    background: none;
+  }
+  .ph {
+    gap: 0;
+    padding-right: 6px;
+  }
+  .ib {
+    width: 44px !important;
+    height: 44px !important;
+  }
+}
