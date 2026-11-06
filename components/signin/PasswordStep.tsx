@@ -152,6 +152,7 @@ export function PasswordStep({ identity, onChange, next, autoFocus }: PasswordSt
               highContrast
               className={styles.hitSmall}
               aria-label="Change name or team"
+              disabled={submitting}
               onClick={onChange}
             >
               Change
@@ -205,7 +206,8 @@ export function PasswordStep({ identity, onChange, next, autoFocus }: PasswordSt
             mt="1"
             highContrast
             loading={submitting}
-            disabled={!password || lockedUntil !== null}
+            // Radix only defaults `disabled` to `loading` when no disabled prop is given: say both.
+            disabled={submitting || !password || lockedUntil !== null}
           >
             Sign in
           </Button>

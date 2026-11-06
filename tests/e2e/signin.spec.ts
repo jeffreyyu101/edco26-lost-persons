@@ -214,14 +214,24 @@ test.describe('sign-in UI', () => {
     await expect(stepTwoHeading(page)).toBeVisible();
   });
 
-  test('a custom Other team is sent as Other + otherTeam', async ({ page }) => {
-    const bodies = await mockSession(page, (route) => json(route, 401, { error: { code: 'unauthorized', message: 'x' } }));
+  test('a custom Other team is sent as Other + otherTeam; nothing can be re-sent or changed mid-request', async ({ page }) => {
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const bodies = await mockSession(page, async (route) => {
+      await held;
+      await json(route, 401, { error: { code: 'unauthorized', message: 'x' } });
+    });
     await openSignIn(page);
     await fillStepOne(page, 'Sam Ortiz', { other: 'Site Ops' });
     await expect(page.getByText('Site Ops', { exact: true })).toBeVisible();
     await passwordField(page).fill('orlando-wrong');
     await signInButton(page).click();
+    await expect(signInButton(page)).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Change name or team' })).toBeDisabled();
+    await passwordField(page).press('Enter');
+    release();
     await expect(page.getByText('Incorrect password')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Change name or team' })).toBeEnabled();
     expect(bodies).toEqual([{ staffName: 'Sam Ortiz', team: 'Other', otherTeam: 'Site Ops', password: 'orlando-wrong' }]);
   });
 
