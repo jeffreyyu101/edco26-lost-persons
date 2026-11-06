@@ -1216,10 +1216,13 @@ $fn$;
 --   byPost: the 4 fixed posts always (count may be 0), then one entry per other location with open rows
 --   (Other grouped by other_location, legacy post values as themselves); the counts sum to open.
 --   postShort here must match postShort() in lib/domain.ts.
+--   STABLE (read-only): every statement below reads the same snapshot, so open, byPost, longestWait and
+--   recent always agree with each other even while requests change. A VOLATILE function would take a new
+--   snapshot per statement.
 create function public.lp_stats()
 returns jsonb
 language plpgsql
-volatile
+stable
 security invoker
 set search_path = public, pg_temp
 set statement_timeout = '4s'
