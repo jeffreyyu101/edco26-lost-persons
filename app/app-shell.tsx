@@ -1,24 +1,26 @@
 'use client';
 // The `/` page shell (spec §7 One route, v2.1 A22/A23): the store provider, the client view router and
-// the hosts for banners, toasts and the Undo snackbar. Views are separate chunks loaded with next/dynamic
-// (client-only: the server HTML never contains request data) and all of them are prefetched after the
-// first idle so they work offline later.
-// Phase 1b (C) owns this file: real banners / alerts / SW update toast wiring go here.
+// the hosts for banners, toasts, the Undo snackbar, alerts (chime / vibration), the outbox operator prompt,
+// the "Alerts are on" sheet, and the offline precache. Views are separate chunks loaded with next/dynamic
+// (client-only: the server HTML never contains request data); all of them are prefetched after the first
+// idle and then handed to the service worker (A15) so they work offline later.
 import dynamic from 'next/dynamic';
-import { Suspense, useEffect } from 'react';
-import { Banner } from '@/components/ui/Banner';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { ConnectionBanner } from '@/components/ui/Banner';
 import { ProfileSkeleton, RowSkeletons } from '@/components/ui/Skeleton';
 import { Snackbar, Toaster } from '@/components/ui/Toast';
+import { installAudioUnlock, playChime, vibrate } from '@/lib/client/chime';
 import { useView } from '@/lib/client/nav';
 import { StoreProvider } from '@/lib/client/store';
-import { useActions, useConnection, useOutbox, useSnackbar, useToasts } from '@/lib/client/store-contract';
+import { useAppStore, usePrefs, useSnackbar, useStoreSelector, useToasts, type StoreState } from '@/lib/client/store-contract';
 import { followSystemTheme } from '@/lib/theme';
 
 const loadList = () => import('@/components/list/ListViews');
 const loadForm = () => import('@/components/request-form/RequestFormView');
 const loadProfile = () => import('@/components/profile/ProfileView');
 const loadDashboard = () => import('@/components/dashboard/DashboardView');
-const VIEW_CHUNKS = [loadList, loadForm, loadProfile, loadDashboard];
+const loadDialogs = () => import('@/components/ui/ShellDialogs');
+const VIEW_CHUNKS = [loadList, loadForm, loadProfile, loadDashboard, loadDialogs];
 
 const listLoading = () => <RowSkeletons />;
 const AllView = dynamic(() => loadList().then((m) => m.AllView), { ssr: false, loading: listLoading });
@@ -28,6 +30,8 @@ const SearchView = dynamic(() => loadList().then((m) => m.SearchView), { ssr: fa
 const RequestFormView = dynamic(() => loadForm().then((m) => m.RequestFormView), { ssr: false });
 const ProfileView = dynamic(() => loadProfile().then((m) => m.ProfileView), { ssr: false, loading: () => <ProfileSkeleton /> });
 const DashboardView = dynamic(() => loadDashboard().then((m) => m.DashboardView), { ssr: false });
+const OutboxPromptDialog = dynamic(() => loadDialogs().then((m) => m.OutboxPromptDialog), { ssr: false });
+const BellIntroSheet = dynamic(() => loadDialogs().then((m) => m.BellIntroSheet), { ssr: false });
 
 export interface AppShellProps {
   eventTimezone: string;
@@ -69,50 +73,85 @@ function ViewRouter() {
   }
 }
 
+/**
+ * The offline / error banner for views that don't place their own <ConnectionBanner /> (lists and the
+ * form put it under their own top bar, as in the mockups).
+ */
 function ShellBanners() {
-  const { connection } = useConnection();
-  const outbox = useOutbox();
-  const actions = useActions();
-  if (connection === 'offline') {
-    return (
-      <Banner tone="amber" icon="offline">
-        Offline · {outbox.length} waiting to send
-      </Banner>
-    );
-  }
-  if (connection === 'error') {
-    return (
-      <Banner tone="red" icon="error" action={{ label: 'Try again', onClick: actions.syncNow }}>
-        Can&apos;t reach the log
-      </Banner>
-    );
-  }
-  return null;
+  return <ConnectionBanner placement="shell" />;
 }
 
+const selectPrompt = (s: StoreState) => s.outboxPrompt;
+
 function ShellHosts() {
-  const actions = useActions();
+  const store = useAppStore();
+  const actions = store.actions;
   const toasts = useToasts();
   const snackbar = useSnackbar();
+  const prompt = useStoreSelector(selectPrompt);
+  const prefs = usePrefs();
+  const [bellIntro, setBellIntro] = useState(false);
+  const bellWasOn = useRef<boolean | null>(null);
 
-  // Prefetch every view chunk after the first idle so later offline use has them.
+  // Prefetch every view chunk after the first idle, then let the service worker cache them all (A15).
   useEffect(() => {
-    const prefetch = () => VIEW_CHUNKS.forEach((load) => void load().catch(() => undefined));
+    let cancelled = false;
+    const prefetch = () => {
+      void Promise.allSettled(VIEW_CHUNKS.map((load) => load())).then(() => {
+        if (!cancelled) void actions.prepareOffline?.();
+      });
+    };
     if ('requestIdleCallback' in window) {
       const id = window.requestIdleCallback(prefetch, { timeout: 4_000 });
-      return () => window.cancelIdleCallback(id);
+      return () => {
+        cancelled = true;
+        window.cancelIdleCallback(id);
+      };
     }
     const id = setTimeout(prefetch, 1_500);
-    return () => clearTimeout(id);
-  }, []);
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+    };
+  }, [actions]);
 
   // Auto theme follows the phone's setting live.
   useEffect(() => followSystemTheme(), []);
+
+  // Alerts: the store shows the toast; this host adds the chime (once a tap unlocked audio) and vibration.
+  useEffect(() => installAudioUnlock(), []);
+  useEffect(
+    () =>
+      actions.subscribeAlerts(() => {
+        playChime();
+        vibrate();
+      }),
+    [actions],
+  );
+
+  // "Alerts are on": only the first time the bell is switched on (not when it was already on at load: the
+  // first run reads the store itself, because the hydration render still carries the server's prefs).
+  useEffect(() => {
+    const was = bellWasOn.current;
+    bellWasOn.current = prefs.bell;
+    if (was === null) {
+      bellWasOn.current = store.getState().prefs.bell;
+      return;
+    }
+    if (!was && prefs.bell && !prefs.bellIntroSeen) {
+      setBellIntro(true);
+      actions.setPref('bellIntroSeen', true);
+    }
+  }, [actions, store, prefs.bell, prefs.bellIntroSeen]);
+
+  const answerPrompt = useCallback((send: boolean) => void actions.outbox.answerPrompt(send), [actions]);
 
   return (
     <>
       <Toaster toasts={toasts} onDismiss={actions.dismissToast} />
       <Snackbar snackbar={snackbar} onUndo={(id) => void actions.undo(id)} onDismiss={actions.dismissSnackbar} />
+      {prompt ? <OutboxPromptDialog prompt={prompt} onAnswer={answerPrompt} /> : null}
+      {bellIntro ? <BellIntroSheet open={bellIntro} onOpenChange={setBellIntro} /> : null}
     </>
   );
 }
