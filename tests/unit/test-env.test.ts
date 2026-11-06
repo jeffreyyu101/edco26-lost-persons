@@ -1,6 +1,7 @@
 // A process started with childTestEnv() must never pick up a dotenv file through Next's loader
 // (@next/env loadEnvConfig), including the dev-server reload path (forceReload) that ignores
-// __NEXT_PROCESSED_ENV. Uses a fake project directory in the OS temp dir, never the real checkout.
+// __NEXT_PROCESSED_ENV. Uses a fake project directory in the OS temp dir, never the real checkout. Needs no
+// database, so it skips the local Supabase keys (CI runs it with no stack).
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -30,11 +31,11 @@ function run(env: Record<string, string>) {
 
 describe('childTestEnv', () => {
   it('stops Next from loading .env.local or .env, even on a dev reload', () => {
-    expect(run(childTestEnv())).toEqual([null, null]);
+    expect(run(childTestEnv({}, { keys: false }))).toEqual([null, null]);
   });
 
   it('control: without the preload the same probe does load them', () => {
-    const { NODE_OPTIONS: _preload, ...withoutPreload } = childTestEnv();
+    const { NODE_OPTIONS: _preload, ...withoutPreload } = childTestEnv({}, { keys: false });
     expect(run(withoutPreload)).toEqual(['leaked', 'leaked']);
   });
 });

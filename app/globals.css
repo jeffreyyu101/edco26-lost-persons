@@ -11,6 +11,9 @@ html,
 body {
   margin: 0;
   padding: 0;
+  /* The header never moves: no rubber-band bounce past the top or bottom of the page, so the sticky header stays
+     pinned (Brian, 2026-11-06). Safari 16+, Chrome. Sheets and the form keep their own overscroll containment. */
+  overscroll-behavior-y: none;
 }
 
 body {
