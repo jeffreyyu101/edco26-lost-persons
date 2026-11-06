@@ -4,9 +4,11 @@ import type { ChangeResponse, CreateResponse, RequestDetail, RequestSummary } fr
 import { signedInAs } from './helpers/session';
 
 // Dashboard and account menu (spec §8 Dashboard / Avatar menu, §9.4 "dashboard numbers, and a tile filtering
-// All", "the CSV download"). The database is shared, so numbers are asserted as DELTAS from what the
-// dashboard showed before this test's own changes (v2.1 A17), never as seed totals. Stats poll every 15 s.
-// Runs at integration against the real store and API. Synthetic rows only (TEST-P-D…), closed afterwards.
+// All"). The global view (design/screens/polish-v7.html): status tiles, Open by post, Recently updated,
+// Performance; no Export CSV (Jeffrey exports from Supabase, docs/export.sql). The database is shared, so
+// numbers are asserted as DELTAS from what the dashboard showed before this test's own changes (v2.1 A17),
+// never as seed totals. Stats poll every 15 s. Runs at integration against the real store and API, except
+// where /api/stats is mocked to pin the Performance values. Synthetic rows only (TEST-P-D…), closed afterwards.
 
 const FRONT = { staffName: 'TEST-P Dashboard', team: 'GC/HX - Base' };
 
@@ -48,9 +50,19 @@ async function count(locator: Locator): Promise<number> {
 async function numbers(page: Page) {
   return {
     open: Number(await page.getByTestId('open-count').innerText()),
-    waiting: await count(page.getByTestId('legend-waiting')),
-    inMedical: await count(page.getByTestId('legend-in-medical')),
+    waiting: await count(page.getByTestId('tile-waiting')),
+    inMedical: await count(page.getByTestId('tile-in-medical')),
     fa4: await count(page.getByRole('button', { name: /^FA 4 – Oasis \d+ open$/ })),
+  };
+}
+
+/** Closed = Not in medical + Reunited + Discharged + Cancelled, as the tiles show them. */
+async function closedNumbers(page: Page) {
+  const value = async (id: string) => Number(await page.getByTestId(`${id}-value`).innerText());
+  return {
+    closed: await value('tile-closed'),
+    notInMedical: await value('tile-not-in-medical'),
+    reunited: await value('tile-reunited'),
   };
 }
 
@@ -74,13 +86,21 @@ test.afterEach(async ({ baseURL }) => {
   }
 });
 
-test('open counts move by the deltas of this test, and tiles, legend and bars open All filtered', async ({ page, baseURL }) => {
+test('open counts move by the deltas of this test, and tiles and bars open All filtered', async ({ page, baseURL }) => {
   const origin = baseURL as string;
   await page.goto('/?dashboard=1');
   await expect(page.getByTestId('open-count')).toBeVisible();
-  await expect(page.getByTestId('dashboard-live')).toHaveText('Live');
+  await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
+  // Live: no pill, no chip (the chip only appears offline or while retrying).
+  await expect(page.getByTestId('dashboard-connection')).toHaveText('');
+  await expect(page.getByText('Live', { exact: true })).toHaveCount(0);
+  // Export CSV is gone from the dashboard.
+  await expect(page.getByRole('link', { name: 'Export CSV' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Export CSV' })).toHaveCount(0);
   const before = await numbers(page);
   expect(before.open).toBe(before.waiting + before.inMedical);
+  const closedBefore = await closedNumbers(page);
+  expect(closedBefore.closed).toBeGreaterThanOrEqual(closedBefore.notInMedical + closedBefore.reunited);
 
   // A closed request at FA 4 (cancelled): the FA 4 bar never counts it, so its list must not show it.
   const closed = await createRequest(page, origin, 'FA 4 – Oasis');
@@ -102,22 +122,45 @@ test('open counts move by the deltas of this test, and tiles, legend and bars op
     .poll(() => numbers(page), POLL)
     .toEqual({ open: before.open + 1, waiting: before.waiting, inMedical: before.inMedical + 1, fa4: before.fa4 + 1 });
 
-  // Recently updated lists it (most recent first) and opens its profile.
+  // The cancelled one counts as closed (Closed = Not in medical + Reunited + Discharged + Cancelled).
+  await expect.poll(async () => (await closedNumbers(page)).closed, POLL).toBeGreaterThanOrEqual(closedBefore.closed + 1);
+
+  // Recently updated lists it, number first, and opens its profile.
   const recent = page.getByRole('region', { name: 'Recently updated' });
-  await expect(recent.getByRole('button', { name: new RegExp(row.name) })).toBeVisible();
-  await recent.getByRole('button', { name: new RegExp(row.name) }).click();
+  const recentRow = recent.getByRole('button', { name: new RegExp(row.name) });
+  await expect(recentRow).toBeVisible();
+  // The number leads the row; the name starts with what the row shows (WCAG 2.5.3).
+  await expect(recentRow).toHaveAccessibleName(new RegExp(`^${row.caseNumber} ${row.name} In medical (now|\\d+m)\\. In medical · friend coming, FA 4, updated `));
+  expect((await recentRow.innerText()).replace(/\s+/g, ' ').trim()).toMatch(new RegExp(`^${row.caseNumber} ${row.name} In medical (now|\\d+m)$`));
+  await recentRow.click();
   await expect(page).toHaveURL(new RegExp(`\\?r=${row.id}$`));
   await expect(page.getByTestId('profile')).toBeVisible();
   await page.goBack();
 
-  // Tiles, legend rows and bars open All filtered.
+  // The section header is the link to All requests.
+  await page.getByRole('button', { name: 'Recently updated. Show all requests' }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByTestId('request-list')).toBeVisible();
+  await page.goBack();
+
+  // Status tiles and bars open All filtered; Open opens Pending (exactly the open requests).
   await page.getByTestId('tile-not-in-medical').click();
   await expect(page).toHaveURL(/\?status=Checked\+%E2%80%93\+Not\+Found$/);
   await expect(page.getByTestId('request-list')).toBeVisible();
   await page.goBack();
-  await page.getByTestId('legend-in-medical').click();
+  await page.getByTestId('tile-in-medical').click();
   await expect(page).toHaveURL(/\?status=Found\+%E2%80%93\+Awaiting\+Reunion$/);
   await expect(page.locator(`[data-request-id="${row.id}"]`)).toBeVisible();
+  await page.goBack();
+  await page.getByTestId('tile-waiting').click();
+  await expect(page).toHaveURL(/\?status=Added$/);
+  await page.goBack();
+  await page.getByTestId('tile-reunited').click();
+  await expect(page).toHaveURL(/\?status=Reunited\+%E2%80%93\+Closed$/);
+  await page.goBack();
+  await page.getByTestId('tile-open').click();
+  await expect(page).toHaveURL(/\?view=pending$/);
+  await expect(page.locator(`[data-request-id="${row.id}"]`).first()).toBeVisible();
   await page.goBack();
   // Regression: the bar opens the open requests it counts (?open=1), so the chip's count is the bar's.
   const fa4Bar = page.getByRole('button', { name: /^FA 4 – Oasis \d+ open$/ });
@@ -178,19 +221,6 @@ test('an Other location named like a fixed post gets its own bar and filter', as
   expect(await openListed()).toBe(baseCount);
 });
 
-test('Export CSV downloads the log with this test’s row in it', async ({ page, baseURL }) => {
-  const origin = baseURL as string;
-  const row = await createRequest(page, origin, 'Command');
-  await page.goto('/?dashboard=1');
-  await expect(page.getByTestId('open-count')).toBeVisible();
-  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('link', { name: 'Export CSV' }).click()]);
-  expect(download.suggestedFilename()).toMatch(/^lost-persons-\d{4}-\d{2}-\d{2}\.csv$/);
-  const path = await download.path();
-  const { readFile } = await import('node:fs/promises');
-  const csv = await readFile(path, 'utf8');
-  expect(csv).toContain(row.name);
-});
-
 test('the account menu shows who is signed in, switches theme, and opens the dashboard', async ({ page }) => {
   await page.goto('/');
   await page.getByTestId('account-trigger').click();
@@ -198,7 +228,6 @@ test('the account menu shows who is signed in, switches theme, and opens the das
   await expect(menu).toContainText(FRONT.staffName);
   await expect(menu).toContainText('GCHX Base');
   await expect(menu).toContainText('Built by Jeffrey Yu');
-  await expect(menu.getByRole('link', { name: 'Export CSV' })).toHaveAttribute('href', '/api/export');
 
   await menu.getByRole('radio', { name: 'Dark' }).click();
   await expect(page.locator('html')).toHaveClass(/\bdark\b/);
@@ -211,4 +240,244 @@ test('the account menu shows who is signed in, switches theme, and opens the das
   await page.getByRole('dialog', { name: 'Account' }).getByRole('button', { name: 'Dashboard' }).click();
   await expect(page).toHaveURL(/\?dashboard=1$/);
   await expect(page.getByTestId('open-count')).toBeVisible();
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Mocked /api/stats: Performance values, "—" for what the server does not send, and the layout
+// (design/screens/v7-dash.png on a phone, v7-laptop.png at 768 px and wider). Synthetic numbers only.
+// ---------------------------------------------------------------------------------------------------
+
+function mockStats(over: Record<string, unknown> = {}) {
+  const ago = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+  const id = (n: number) => `5eed0000-0000-4000-8000-00000000${n}`;
+  return {
+    open: { waiting: 4, inMedical: 3 },
+    notInMedical: 2,
+    reunited: 2,
+    discharged: 1,
+    cancelled: 1,
+    total: 13,
+    longestWait: { id: id(1010), caseNumber: 1010, reportingLocation: 'FA 4 – Oasis', otherLocation: null, postShort: 'FA 4', minutes: 24 },
+    avgAnswerMinutes: 9,
+    avgReuniteMinutes: 18,
+    loggedLastHour: 6,
+    byPost: [
+      { reportingLocation: 'FA 3 – Kinetic', otherLocation: null, postShort: 'FA 3', count: 3 },
+      { reportingLocation: 'FA 4 – Oasis', otherLocation: null, postShort: 'FA 4', count: 1 },
+      { reportingLocation: 'Command', otherLocation: null, postShort: 'Command', count: 0 },
+      { reportingLocation: 'Base', otherLocation: null, postShort: 'Base', count: 3 },
+    ],
+    recent: [
+      { id: id(1007), caseNumber: 1007, name: 'TEST-P-D Jordan', status: 'Found – Awaiting Reunion', postShort: 'FA 4', updatedAt: ago(2) },
+      { id: id(1009), caseNumber: 1009, name: 'TEST-P-D A.N.', status: 'Checked – Not Found', postShort: 'FA 3', updatedAt: ago(6) },
+    ],
+    serverTime: new Date().toISOString(),
+    ...over,
+  };
+}
+
+async function routeStats(page: Page, body: Record<string, unknown>) {
+  await page.route('**/api/stats', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) }));
+}
+
+const value = (page: Page, id: string) => page.getByTestId(`${id}-value`);
+
+/** Rounded bounding box of a test id. */
+async function box(page: Page, testId: string) {
+  const b = await page.getByTestId(testId).boundingBox();
+  if (!b) throw new Error(`${testId} has no box`);
+  return { x: Math.round(b.x), y: Math.round(b.y), right: Math.round(b.x + b.width), bottom: Math.round(b.y + b.height) };
+}
+
+async function regionBox(page: Page, name: string) {
+  const b = await page.getByRole('region', { name }).boundingBox();
+  if (!b) throw new Error(`${name} has no box`);
+  return b;
+}
+
+// page.route() never sees a request the service worker answers, so these run without it.
+test.describe('with /api/stats mocked', () => {
+  test.use({ serviceWorkers: 'block' });
+
+  test('Performance rows: Longest wait opens the request; averages and Logged show their values', async ({ page }) => {
+    await routeStats(page, mockStats());
+    await page.goto('/?dashboard=1');
+    await expect(page.getByTestId('open-count')).toHaveText('7');
+    await expect(value(page, 'tile-closed')).toHaveText('6');
+    // (Non-breaking spaces inside each part: a narrow tile wraps only after the "·".)
+    await expect(page.getByTestId('reunited-sub')).toContainText('+1\u00a0discharged\u00a0· 1\u00a0cancelled');
+    await expect(value(page, 'perf-longest-wait')).toHaveText('24m');
+    await expect(page.getByTestId('perf-longest-wait')).toContainText('1010 · FA 4');
+    await expect(value(page, 'perf-answer')).toHaveText('9m');
+    await expect(value(page, 'perf-reunite')).toHaveText('18m');
+    await expect(value(page, 'perf-logged')).toHaveText('6');
+    // Busiest post first, ties in the server's order, zero last.
+    const posts = await page
+      .getByRole('region', { name: 'Open by post' })
+      .getByRole('button')
+      .evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')));
+    expect(posts).toEqual(['FA 3 – Kinetic 3 open', 'Base 3 open', 'FA 4 – Oasis 1 open', 'Command 0 open']);
+    await page.getByRole('button', { name: /^Longest wait 1010 · FA 4 24m\. Request 1010 at FA 4 has been waiting 24 minutes/ }).click();
+    await expect(page).toHaveURL(/\?r=5eed0000-0000-4000-8000-000000001010$/);
+  });
+
+  test('Performance shows "—" for values the server leaves null or out, and no sub without discharged / cancelled', async ({ page }) => {
+    const stats = mockStats({ longestWait: null, avgAnswerMinutes: null, avgReuniteMinutes: null, discharged: 0, cancelled: 0 });
+    delete (stats as Record<string, unknown>).loggedLastHour;
+    await routeStats(page, stats);
+    await page.goto('/?dashboard=1');
+    for (const id of ['perf-longest-wait', 'perf-answer', 'perf-reunite', 'perf-logged']) await expect(value(page, id)).toHaveText('—');
+    // Without a waiting request there is nothing to open.
+    await expect(page.getByRole('button', { name: /^Longest wait/ })).toHaveCount(0);
+    await expect(page.getByTestId('reunited-sub')).toHaveCount(0);
+    await expect(value(page, 'tile-closed')).toHaveText('4');
+  });
+
+  test('a compact Offline chip only while offline', async ({ page, context }) => {
+    await page.goto('/?dashboard=1');
+    await expect(page.getByTestId('open-count')).toBeVisible();
+    const chip = page.getByTestId('dashboard-connection');
+    await expect(chip).toHaveText('');
+    await context.setOffline(true);
+    try {
+      await expect(chip).toHaveText('Offline', { timeout: 15_000 });
+      // The numbers stay on screen.
+      await expect(page.getByTestId('open-count')).toBeVisible();
+    } finally {
+      await context.setOffline(false);
+    }
+    await expect(chip).toHaveText('', { timeout: 20_000 });
+  });
+
+  test('phone: two tiles per row, Open and Closed on one baseline, sections stacked; nothing but names cut', async ({ page }) => {
+    const long = { ...mockStats().recent[0], name: 'TEST-P-D Alexandria Montgomery-Fitzgerald the Third' };
+    await routeStats(page, mockStats({ recent: [long] }));
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/?dashboard=1');
+    await expect(page.getByTestId('open-count')).toHaveText('7');
+    const open = await box(page, 'tile-open');
+    const closed = await box(page, 'tile-closed');
+    const waiting = await box(page, 'tile-waiting');
+    expect(closed.y).toBe(open.y);
+    expect(waiting.y).toBeGreaterThan(open.bottom);
+    // The two big numbers sit on one line.
+    expect((await box(page, 'open-count')).bottom).toBe((await box(page, 'tile-closed-value')).bottom);
+    // Not in medical's number lines up with Reunited's even though Reunited has a second line.
+    expect((await box(page, 'tile-not-in-medical-value')).bottom).toBe((await box(page, 'tile-reunited-value')).bottom);
+    const posts = await regionBox(page, 'Open by post');
+    const recent = await regionBox(page, 'Recently updated');
+    expect(recent.y).toBeGreaterThan(posts.y + posts.height - 1);
+    const overflow = await page.evaluate(() => {
+      const out: string[] = [];
+      for (const el of Array.from(document.querySelectorAll<HTMLElement>('[data-testid="dashboard"] *'))) {
+        const ownText = Array.from(el.childNodes).some((n) => n.nodeType === 3 && n.textContent?.trim());
+        if (!ownText || el.clientWidth <= 1 || el.closest('svg')) continue;
+        if (el.scrollWidth > el.clientWidth + 1) out.push(`${el.textContent} (${getComputedStyle(el).textOverflow})`);
+      }
+      return { out, hScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+    });
+    expect(overflow.hScroll).toBe(false);
+    expect(overflow.out).toEqual(['TEST-P-D Alexandria Montgomery-Fitzgerald the Third (ellipsis)']);
+  });
+
+  // Regression: an Other location's free text (up to 80 characters) in the Longest wait context pushed the
+  // minutes off-screen and scrolled the whole page sideways on a phone. The context now ellipsizes; the
+  // label, the "1010" and the value never move.
+  test('Longest wait at a long Other location: the context ellipsizes, the minutes stay in their column, no sideways scroll', async ({
+    page,
+  }) => {
+    const where = 'TEST-dash-1 Lost and found tent behind the stereoBloom stage';
+    const longestWait = { ...mockStats().longestWait, reportingLocation: 'Other', otherLocation: where, postShort: where };
+    await routeStats(page, mockStats({ longestWait }));
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/?dashboard=1');
+    await expect(value(page, 'perf-longest-wait')).toHaveText('24m');
+    await expect(page.getByTestId('perf-longest-wait-context')).toHaveText(`1010 · ${where}`);
+    // Screen readers still hear the whole location.
+    await expect(page.getByRole('button', { name: `Longest wait 1010 · ${where} 24m. Request 1010 at ${where} has been waiting 24 minutes. Opens the request.` })).toBeVisible();
+
+    for (const size of [
+      { width: 375, height: 812 },
+      { width: 390, height: 844 },
+      { width: 768, height: 1024 },
+      { width: 1100, height: 800 },
+    ]) {
+      await page.setViewportSize(size);
+      const m = await page.evaluate(() => {
+        const get = (id: string) => {
+          const el = document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+          if (!el) throw new Error(`no ${id}`);
+          return el;
+        };
+        // The y of an element's text baseline: a zero-size inline-block sits on it.
+        const baseline = (el: HTMLElement) => {
+          const probe = document.createElement('span');
+          probe.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline';
+          el.appendChild(probe);
+          const y = probe.getBoundingClientRect().bottom;
+          probe.remove();
+          return y;
+        };
+        const ctx = get('perf-longest-wait-context');
+        const label = ctx.previousElementSibling as HTMLElement;
+        const value = get('perf-longest-wait-value');
+        const digits = value.firstElementChild as HTMLElement;
+        const r = (el: HTMLElement) => el.getBoundingClientRect();
+        return {
+          vw: document.documentElement.clientWidth,
+          hScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+          row: r(get('perf-longest-wait')).right,
+          label: { right: r(label).right, cut: label.scrollWidth > label.clientWidth + 1 },
+          ctx: { left: r(ctx).left, right: r(ctx).right, cut: ctx.scrollWidth > ctx.clientWidth + 1, overflow: getComputedStyle(ctx).textOverflow },
+          value: { left: r(value).left, right: r(value).right, cut: value.scrollWidth > value.clientWidth + 1 },
+          // Time to reunite sits in the same column as Longest wait at every width.
+          sameColumnValueRight: r(get('perf-reunite-value')).right,
+          baselines: { label: baseline(label), ctx: baseline(ctx), digits: baseline(digits) },
+        };
+      });
+      const at = `${size.width}x${size.height}`;
+      expect(m.hScroll, at).toBe(false);
+      expect(m.value.right, at).toBeLessThanOrEqual(m.vw - 16);
+      expect(m.value.right, at).toBeLessThanOrEqual(m.row + 0.5);
+      expect(Math.abs(m.value.right - m.sameColumnValueRight), at).toBeLessThanOrEqual(0.5);
+      expect(m.value.cut, at).toBe(false);
+      expect(m.label.cut, at).toBe(false);
+      expect(m.ctx.left, at).toBeGreaterThanOrEqual(m.label.right);
+      expect(m.ctx.right, at).toBeLessThanOrEqual(m.value.left);
+      expect(m.ctx.cut, at).toBe(true);
+      expect(m.ctx.overflow, at).toBe('ellipsis');
+      // Label, context and digits still share one baseline.
+      expect(Math.abs(m.baselines.ctx - m.baselines.label), at).toBeLessThanOrEqual(1);
+      expect(Math.abs(m.baselines.digits - m.baselines.label), at).toBeLessThanOrEqual(1);
+    }
+
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.getByTestId('perf-longest-wait').click();
+    await expect(page).toHaveURL(/\?r=5eed0000-0000-4000-8000-000000001010$/);
+  });
+
+  test('768 px and wider: six tiles in one row, posts beside recent, performance in two columns', async ({ page }) => {
+    await routeStats(page, mockStats());
+    await page.setViewportSize({ width: 1100, height: 800 });
+    await page.goto('/?dashboard=1');
+    await expect(page.getByTestId('open-count')).toHaveText('7');
+    const order = ['tile-open', 'tile-waiting', 'tile-in-medical', 'tile-closed', 'tile-not-in-medical', 'tile-reunited'];
+    const boxes = await Promise.all(order.map((id) => box(page, id)));
+    for (const b of boxes) expect(b.y).toBe(boxes[0]?.y);
+    for (let i = 1; i < boxes.length; i += 1) expect(boxes[i]?.x).toBeGreaterThan(boxes[i - 1]?.x ?? Infinity);
+    const posts = await regionBox(page, 'Open by post');
+    const recent = await regionBox(page, 'Recently updated');
+    expect(Math.round(recent.y)).toBe(Math.round(posts.y));
+    expect(recent.x).toBeGreaterThan(posts.x + posts.width);
+    const longest = await box(page, 'perf-longest-wait');
+    const answer = await box(page, 'perf-answer');
+    expect(answer.y).toBe(longest.y);
+    expect(answer.x).toBeGreaterThan(longest.right);
+
+    // An iPad in portrait is still the wide layout.
+    await page.setViewportSize({ width: 768, height: 1024 });
+    const narrow = await Promise.all(order.map((id) => box(page, id)));
+    for (const b of narrow) expect(b.y).toBe(narrow[0]?.y);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+  });
 });
