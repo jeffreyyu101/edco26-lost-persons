@@ -1,6 +1,7 @@
 // Not in medical on the profile (v2.2, Jeffrey 2026-11-06): it counts as closed and is grey everywhere, like
 // Reunited / Discharged / Cancelled, but it keeps exactly the actions it had before (Change answer, nothing
-// else: no Reopen, no Mark discharged, no Cancel request). Server renders against the stub store, plus the
+// else: no Reopen, no Mark discharged, no Cancel request). Change answer opens its menu (In medical, Back to
+// Waiting for check) since the v2.2 "Change answer and Undo" decision. Server renders against the stub store, plus the
 // domain helpers the profile takes its actions from. Synthetic data only.
 import { Theme } from '@radix-ui/themes';
 import type { ReactNode } from 'react';
@@ -72,12 +73,14 @@ describe('Not in medical on the profile', () => {
     expect(closed).toMatch(/<span[^>]*data-accent-color="gray"[^>]*>Reunited<\/span>/);
   });
 
-  it('keeps exactly its actions: Change answer (to In medical) and nothing else', () => {
+  it('keeps exactly its actions: Change answer (its menu: In medical, Back to Waiting for check) and nothing else', () => {
     const html = render(<ProfileView id={notIn.id} />);
     const bar = footer(html);
     expect(bar).toContain('data-layout="one"');
     expect(bar.match(/<button/g)).toHaveLength(1);
-    expect(bar).toContain('aria-label="Change answer to In medical"');
+    // v2.2 (Brian + Jeffrey, 2026-11-06): Change answer opens a menu (tests/unit/profile/change-answer.test.tsx).
+    expect(bar).toMatch(/<button[^>]*data-testid="change-answer"[^>]*aria-haspopup="menu"/);
+    expect(bar).toContain('Change answer');
     for (const other of ['>Reunited<', '>In medical<', '>Not in medical<', 'Reopen', 'Mark discharged']) expect(bar).not.toContain(other);
     // Even for the person who logged it: Cancel request is only for Waiting.
     expect(html).not.toContain('Cancel request');
