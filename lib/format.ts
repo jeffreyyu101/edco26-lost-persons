@@ -66,20 +66,6 @@ export function formatAuditTime(value: Instant, timeZone = DEFAULT_EVENT_TIMEZON
   return `${p.month} ${p.day}, ${p.hour}:${p.minute} ${p.dayPeriod}`;
 }
 
-/** CSV time: "2026-11-06 23:10" (24-hour) in the event timezone; "" for null. */
-export function formatCsvTime(value: Instant | null | undefined, timeZone = DEFAULT_EVENT_TIMEZONE): string {
-  if (value === null || value === undefined || value === '') return '';
-  const p = parts(value, timeZone, {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  });
-  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
-}
-
 /** Whole minutes from `from` to `now`, never negative (clock skew). */
 export function minutesSince(from: Instant, now: Instant = Date.now()): number {
   const ms = toDate(now).getTime() - toDate(from).getTime();

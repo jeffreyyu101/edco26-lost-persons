@@ -10,7 +10,6 @@ import {
   formatClock,
   formatClockAmPm,
   formatCreatedTime,
-  formatCsvTime,
   formatDuration,
   formatListTime,
   formatUpdatedAgo,
@@ -68,12 +67,6 @@ describe('event timezone', () => {
   it('formats audit times like "Nov 6, 11:10 PM"', () => {
     expect(formatAuditTime(FRI_2310)).toBe('Nov 6, 11:10 PM');
     expect(formatAuditTime(FRI_0958)).toBe('Nov 6, 9:58 AM');
-  });
-
-  it('formats CSV times in 24 h event time', () => {
-    expect(formatCsvTime(FRI_2310)).toBe('2026-11-06 23:10');
-    expect(formatCsvTime(SAT_0015)).toBe('2026-11-07 00:15');
-    expect(formatCsvTime(null)).toBe('');
   });
 
   it('handles the DST change (Nov 1 2026) correctly', () => {
