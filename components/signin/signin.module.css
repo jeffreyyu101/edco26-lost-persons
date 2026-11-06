@@ -107,8 +107,10 @@
   color: var(--gray-12);
 }
 
+/* One line at default size on every phone ≥ 360 px (as in the mockup); wraps instead of clipping when
+   Safari's page zoom or a very narrow screen leaves less room. */
 .cardLabel {
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 /* Wrong password: red border, and a red focus ring so the state survives focus. */

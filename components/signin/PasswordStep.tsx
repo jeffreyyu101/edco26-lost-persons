@@ -124,14 +124,13 @@ export function PasswordStep({ identity, onChange, next, autoFocus }: PasswordSt
       <Brand title="Enter the event password" appLine={false} />
       <form method="post" noValidate onSubmit={submit}>
         <Flex direction="column" gap="3">
-          {/* Keychain saves and fills the password against this username. */}
+          {/* Keychain saves and fills the password against this username (not readOnly: Safari skips those). */}
           <input
             className={styles.keychain}
             type="text"
             name="username"
             autoComplete="username"
-            value={identity.name}
-            readOnly
+            defaultValue={identity.name}
             tabIndex={-1}
             aria-hidden="true"
           />
