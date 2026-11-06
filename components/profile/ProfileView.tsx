@@ -15,11 +15,13 @@
 //   details      Missing person / Friend or family, filled fields only, each with Edit; Phone has Call
 //   photos       tiles → full-screen viewer; Add tile (needs a connection) until there are 3
 //   audit trail  newest first (audit-trail.ts)
-//   actions      sticky, by status; disabled offline with "Needs a connection"
+//   actions      sticky, by status; disabled offline with "Needs a connection". Change answer (In medical,
+//                Not in medical) opens a menu: the other answer and Back to Waiting for check
+//                (change-answer.ts). Every answer, change and Reunited offers Undo (the store's snackbar).
 //   cancel       red, creator-only (canonical created_by match, A18), while Waiting, confirm Keep / Cancel
 //   conflict     "Updated by someone else" when another person's change arrives while it is open
 import { AlertDialog, Badge, Button, DropdownMenu, Heading, IconButton, Skeleton, Text, VisuallyHidden } from '@radix-ui/themes';
-import { Camera, Check, Clock, CloudOff, Ellipsis, Pencil, Phone, RotateCcw, Trash2, Undo2, X } from 'lucide-react';
+import { Camera, Check, ChevronDown, Clock, CloudOff, Ellipsis, Pencil, Phone, RotateCcw, Trash2, Undo2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { Banner, ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -55,13 +57,16 @@ import {
   telHref,
   waitTone,
   type PhotoTiming,
+  type SettableStatus,
   type StatusAction,
+  type StatusKind,
 } from '@/lib/domain';
 import { formatCaseNumber, formatDuration, formatListTime, minutesSince } from '@/lib/format';
 import { AddPhotosSheet, type PhotoPick } from './AddPhotos';
 import { AuditTrail, AuditTrailSkeleton } from './AuditTrail';
 import { buildAuditTrail, statusOrigin, type StatusOrigin } from './audit-trail';
 import { Bust } from './Bust';
+import { changeAnswerChoices } from './change-answer';
 import { PhotoViewer, photoUrl } from './PhotoViewer';
 import s from './profile.module.css';
 
@@ -281,7 +286,9 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh }: ProfileP
     else setCancelState({ busy: false, error: failureMessage(result) });
   };
 
-  const setStatus = (a: StatusAction) => void actions.setStatus(row.id, a.to, a.kind);
+  // The store owns the optimistic overlay, the Undo bar (answer, change, reunite) and every failure toast.
+  const move = (to: SettableStatus, kind: StatusKind) => void actions.setStatus(row.id, to, kind);
+  const setStatus = (a: StatusAction) => move(a.to, a.kind);
   const menu = menuActions(row.status, isCreator);
   const footer = primaryActions(row.status);
 
@@ -415,9 +422,15 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh }: ProfileP
               {NEEDS_CONNECTION}
             </span>
           ) : null}
-          {footer.map((a) => (
-            <ActionButton key={a.id} action={a} disabled={offline} onClick={() => setStatus(a)} />
-          ))}
+          {footer.map((a) =>
+            a.kind === 'change' ? (
+              // Keyed by status: an open menu closes when the status moves under it (someone else's answer),
+              // so a tap never lands on a choice that changed meaning.
+              <ChangeAnswerMenu key={`${a.id}:${row.status}`} status={row.status} disabled={offline} onChoose={move} />
+            ) : (
+              <ActionButton key={a.id} action={a} disabled={offline} onClick={() => setStatus(a)} />
+            ),
+          )}
         </div>
       ) : null}
 
@@ -726,20 +739,50 @@ function ActionButton({ action, disabled, onClick }: { action: StatusAction; dis
           {action.label}
         </Button>
       );
-    case 'notInMedical':
+    default:
+      // Not in medical. (Change answer is ChangeAnswerMenu.)
       return (
         <Button {...common} variant="soft" color="gray">
           <X size={16} aria-hidden />
           {action.label}
         </Button>
       );
-    default:
-      // Change answer (to Not in medical / to In medical).
-      return (
-        <Button {...common} variant="soft" color="gray" aria-label={`${action.label} to ${statusMeta(action.to).shortLabel}`}>
-          <Undo2 size={16} aria-hidden />
-          {action.label}
-        </Button>
-      );
   }
+}
+
+/**
+ * Change answer: a menu with the other answer and Back to Waiting for check, each marked with the glyph of
+ * the status it moves to. A choice saves on tap (kind 'change'); the store shows the overlay and the Undo bar.
+ */
+function ChangeAnswerMenu({ status, disabled, onChoose }: { status: string; disabled: boolean; onChoose: (to: SettableStatus, kind: StatusKind) => void }) {
+  const choices = changeAnswerChoices(status);
+  const [answer, ...rest] = choices;
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger disabled={disabled}>
+        <Button size="3" variant="soft" color="gray" className="lp-hit" disabled={disabled} data-testid="change-answer">
+          <Undo2 size={16} aria-hidden />
+          Change answer
+          <ChevronDown size={14} aria-hidden className={s.chev} />
+        </Button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Content side="top" align="start" variant="soft" className={s.pmenu} data-testid="change-answer-menu">
+        {answer ? <ChangeChoiceItem to={answer.to} label={answer.label} disabled={disabled} onSelect={() => onChoose(answer.to, answer.kind)} /> : null}
+        {rest.length > 0 ? <DropdownMenu.Separator /> : null}
+        {rest.map((c) => (
+          <ChangeChoiceItem key={c.to} to={c.to} label={c.label} disabled={disabled} onSelect={() => onChoose(c.to, c.kind)} />
+        ))}
+      </DropdownMenu.Content>
+    </DropdownMenu.Root>
+  );
+}
+
+function ChangeChoiceItem({ to, label, disabled, onSelect }: { to: SettableStatus; label: string; disabled: boolean; onSelect: () => void }) {
+  // Disabled when the connection drops while the menu is open (answers need a connection).
+  return (
+    <DropdownMenu.Item onSelect={onSelect} disabled={disabled} data-to={to}>
+      <StatusGlyph status={to} size={16} />
+      {label}
+    </DropdownMenu.Item>
+  );
 }
