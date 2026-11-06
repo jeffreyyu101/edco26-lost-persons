@@ -401,7 +401,8 @@ The draft is the form values, the chosen photos as compressed blobs, the photo t
 
 ### Service worker (`public/sw.js`, scope `/`)
 
-- **Cache name** includes the build id, injected at build. On activate, delete old caches.
+- **Cache name** includes the build id, injected at build. On activate, retire old caches: each is deleted once none of the pages open at activation is left, and until then `/_next/static` requests fall back to it (a tab still on the older build keeps loading its chunks offline).
+- **Complete before "Update ready".** `next build` writes `public/sw-manifest.json`, every `/_next/static` file of the build (`scripts/sw-manifest.mjs`, run as `compiler.runAfterProductionCompile`). A worker installing over an active one caches `/`, `/signin`, the core files and every manifest file (unchanged hashed files are copied from older caches), and fails its install if any is missing, so the old worker keeps serving and the update is retried later. The first install is best effort.
 - **Precache:**
   - the `/` shell HTML (the first successful 200 navigation response, **not** a redirect, `type === 'basic'`)
   - `/signin`
