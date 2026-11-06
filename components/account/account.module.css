@@ -96,6 +96,16 @@ a.mitem:hover {
   flex: 1;
 }
 
+/* The Alerts switch's value: "On" in the primary text colour, "Off" in grey. */
+.mval {
+  font-size: 14px;
+  color: var(--gray-11);
+}
+.mval[data-on] {
+  color: var(--gray-12);
+  font-weight: 500;
+}
+
 .mfoot {
   padding: 6px 10px;
 }

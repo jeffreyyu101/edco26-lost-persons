@@ -11,37 +11,38 @@ function S({ w, h = 12, r }: { w: string; h?: number; r?: string }) {
   return <Skeleton width={w} height={`${h}px`} style={r ? { borderRadius: r, flex: 'none' } : { flex: 'none' }} />;
 }
 
-// Varied widths so the skeleton reads like real text, not a grid of identical bars.
+// Varied name and status widths so the skeleton reads like the log, not a grid of identical bars.
 const ROW_WIDTHS: ReadonlyArray<readonly [string, string]> = [
-  ['46%', '22%'],
-  ['60%', '30%'],
-  ['38%', '26%'],
-  ['52%', '34%'],
-  ['44%', '20%'],
-  ['56%', '28%'],
-  ['40%', '24%'],
+  ['44%', '96px'],
+  ['70%', '96px'],
+  ['38%', '96px'],
+  ['52%', '64px'],
+  ['46%', '64px'],
+  ['60%', '72px'],
+  ['40%', '64px'],
 ];
 
-/** All requests: rows with a status dot, a name line, a status line and a time (varying widths). */
+/**
+ * All requests (log option B): one-line rows in the log's columns, number · name · status glyph and label ·
+ * created · updated (varying widths).
+ */
 export function RowSkeletons({ count = 8 }: { count?: number }) {
   return (
     <div aria-busy="true" aria-label="Loading requests" role="status">
       {Array.from({ length: count }, (_, i) => {
-        const [a, b] = ROW_WIDTHS[i % ROW_WIDTHS.length] as readonly [string, string];
+        const [name, status] = ROW_WIDTHS[i % ROW_WIDTHS.length] as readonly [string, string];
         return (
-          <div key={i} className={styles.skRow}>
-            <S w="14px" h={14} r="50%" />
-            <div className={styles.skMain}>
-              <div className={styles.skLine}>
-                <S w={a} h={13} />
-                <span className={styles.skSpacer} />
-                <S w="34px" h={11} />
-              </div>
-              <div className={styles.skLine}>
-                <S w={b} h={10} />
-                <S w="22%" h={10} />
-              </div>
+          <div key={i} className={styles.skLogRow}>
+            <S w="32px" h={11} />
+            <div className={styles.skLine}>
+              <S w={name} h={13} />
             </div>
+            <div className={styles.skLine} style={{ gap: 6 }}>
+              <S w="14px" h={14} r="50%" />
+              <S w={status} h={10} />
+            </div>
+            <S w="48px" h={11} />
+            <S w="22px" h={11} />
           </div>
         );
       })}

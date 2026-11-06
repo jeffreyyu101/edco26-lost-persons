@@ -1,20 +1,27 @@
 import { randomUUID } from 'node:crypto';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import type { RequestDetail, RequestSummary } from '../../lib/api-types';
-import { testBaseUrl } from '../../scripts/test-env.mjs';
+import { formatCreatedTime } from '../../lib/format';
+import { loadTestEnv, testBaseUrl } from '../../scripts/test-env.mjs';
 import { syntheticPng } from './helpers/png';
 import { newSignedInContext, signedInAs } from './helpers/session';
 import { syncRows } from './helpers/sync';
 
 // List views end to end (spec §8 List views, §9.4 "it appears in All and My requests", "a second context
 // sees it in Pending … taps In medical", "Friend coming → Reunited", "undo", "search", "a tile filtering
-// All"). Runs against the real store and API on the local stack. Every row is synthetic and unique to this
-// run (TEST-L-<tag>); nothing is truncated or reset.
+// All"), with log option B and the header declutter (2026-11-06): the large title is the view menu, the
+// number column, Created with AM/PM, Updated "—" until something changes, every closed request folded
+// into "Closed N", Alerts in the avatar menu, and no live dot unless the connection is down. Runs against
+// the real store and API on the local stack. Every row is synthetic and unique to this run (TEST-L-<tag>);
+// nothing is truncated or reset, and the requests a test opened are closed after it.
 
 const BASE = testBaseUrl();
 const STAFF = { staffName: 'TEST-L Lists', team: 'Medical' };
 const TAG = `TEST-L-${Date.now().toString(36)}`;
+const TZ = (loadTestEnv() as Record<string, string | undefined>)['EVENT_TIMEZONE'] || 'America/New_York';
 let seq = 0;
+
+const opened: Array<{ id: string; request: APIRequestContext }> = [];
 
 async function createRequest(page: Page, extra: Record<string, unknown> = {}): Promise<RequestSummary> {
   seq += 1;
@@ -32,13 +39,30 @@ async function createRequest(page: Page, extra: Record<string, unknown> = {}): P
     },
   });
   expect(res.status(), await res.text()).toBe(201);
+  const request = ((await res.json()) as { request: RequestSummary }).request;
+  opened.push({ id: request.id, request: page.request });
+  return request;
+}
+
+async function setStatus(page: Page, r: RequestSummary, status: string, kind: string): Promise<RequestSummary> {
+  const res = await page.request.post(`/api/requests/${r.id}/status`, { headers: { origin: BASE }, data: { status, expectedVersion: r.rowVersion, kind } });
+  expect(res.ok(), `status → ${res.status()}`).toBe(true);
   return ((await res.json()) as { request: RequestSummary }).request;
 }
 
 const row = (page: Page, id: string) => page.locator(`[data-request-id="${id}"]`);
+const cell = (page: Page, id: string, col: string) => row(page, id).locator(`[data-col="${col}"]`);
 const checkCard = (page: Page, id: string) => page.locator(`[data-testid="check-card"]:has([data-request-id="${id}"])`);
 const comingCard = (page: Page, id: string) => page.locator(`[data-testid="friend-coming-card"]:has([data-request-id="${id}"])`);
 const lp = (r: RequestSummary) => `LP-${String(r.caseNumber).padStart(4, '0')}`;
+const fold = (page: Page) => page.getByTestId('closed-fold');
+
+/** Back to All through the large-title view menu (there is no separate ×). */
+async function showAll(page: Page) {
+  await page.getByTestId('view-switcher').click();
+  await page.getByRole('menuitemradio', { name: /^All requests \d+$/ }).click();
+  await expect(page).toHaveURL(/127\.0\.0\.1:\d+\/$/);
+}
 
 let errors: string[];
 
@@ -54,25 +78,144 @@ test.beforeEach(async ({ page }) => {
   page.on('pageerror', (e) => errors.push(e.message));
 });
 
-test.afterEach(() => {
+test.afterEach(async () => {
+  // Leave nothing open in Pending for the other specs (best effort).
+  for (const { id, request } of opened.splice(0)) {
+    try {
+      const r = (await (await request.get(`/api/requests/${id}`)).json()) as RequestDetail;
+      if (r.status === 'Added') {
+        await request.post(`/api/requests/${id}/cancel`, { headers: { origin: BASE }, data: { expectedVersion: r.rowVersion } });
+      } else if (r.status === 'Found – Awaiting Reunion') {
+        await request.post(`/api/requests/${id}/status`, {
+          headers: { origin: BASE },
+          data: { status: 'Reunited – Closed', expectedVersion: r.rowVersion, kind: 'reunite' },
+        });
+      }
+    } catch {
+      // The context may already be closed.
+    }
+  }
   expect(errors).toEqual([]);
 });
 
-test('All: a new request is on top with its status, post and LP number, and opens the profile', async ({ page }) => {
+test('All: the large title is the view menu; a new request is the top row and opens the profile', async ({ page }) => {
   const r = await createRequest(page);
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Is my friend in medical?' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: /^All requests \d+, change view$/ })).toBeVisible();
   await expect(row(page, r.id)).toBeVisible({ timeout: 10_000 });
   await expect(page.locator('[data-testid="request-list"] [data-request-id]').first()).toHaveAttribute('data-request-id', r.id);
-  await expect(row(page, r.id)).toContainText('Waiting for check');
-  await expect(row(page, r.id)).toContainText(`FA 3 · ${lp(r)}`);
-  await expect(row(page, r.id)).toContainText('21 F');
-  await expect(page.getByText('Newest first')).toBeVisible();
+  // One quiet column header: # · Friend · Status · Created · Updated.
+  await expect(page.getByTestId('log-columns')).toHaveText(/^#\s*Friend\s*Status\s*Created\s*Updated$/);
+  await expect(cell(page, r.id, 'number')).toHaveText(String(r.caseNumber));
+  await expect(cell(page, r.id, 'name')).toHaveText(r.name);
+  await expect(cell(page, r.id, 'status')).toHaveText('Waiting for check');
+  // The header declutter: no "Newest first", no ×, no bell, no live dot while the app is live.
+  await expect(page.getByText('Newest first')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Back to all requests' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'New-request alerts' })).toHaveCount(0);
+  await expect(page.getByTestId('connection-indicator')).toHaveCount(0);
+  await expect(page.getByTestId('live-dot')).toHaveCount(0);
   await row(page, r.id).click();
   await expect(page).toHaveURL(new RegExp(`\\?r=${r.id}$`));
 });
 
-test('view switcher: Pending and My requests with counts, × returns to All', async ({ page }) => {
+test('All rows: Created with AM/PM in the event timezone, Updated "—" until it changes, then a compact age', async ({ page }) => {
+  const r = await createRequest(page);
+  await page.goto('/');
+  await expect(row(page, r.id)).toBeVisible({ timeout: 10_000 });
+  const createdText = formatCreatedTime(r.createdAt, Date.now(), TZ);
+  expect(createdText).toMatch(/^(\w{3} )?\d{1,2}:\d{2} (AM|PM)$/);
+  await expect(cell(page, r.id, 'created')).toHaveText(createdText);
+  await expect(cell(page, r.id, 'updated')).toHaveText('—');
+  await expect(row(page, r.id)).toHaveAccessibleName(`${lp(r)}, ${r.name}, Waiting for check, created ${createdText}, not updated yet`);
+
+  // Someone answers In medical: the row turns green and Updated reads "now" on the next poll.
+  await setStatus(page, r, 'Found – Awaiting Reunion', 'answer');
+  await expect(cell(page, r.id, 'updated')).toHaveText(/^(now|1m)$/, { timeout: 10_000 });
+  await expect(cell(page, r.id, 'status')).toHaveText('In medical');
+  await expect(cell(page, r.id, 'status')).toHaveAttribute('data-tone', 'green');
+  await expect(row(page, r.id)).toHaveAccessibleName(
+    new RegExp(`^${lp(r)}, ${r.name}, In medical, friend coming, created ${createdText}, updated (just now|1 minute ago)$`),
+  );
+});
+
+test('All (option B): closed requests fold into "Closed N"; the fold opens in place, greyed, and stays open this session', async ({ page }) => {
+  const openRow = await createRequest(page);
+  const notIn = await setStatus(page, await createRequest(page), 'Checked – Not Found', 'answer');
+  await page.goto('/');
+  await expect(row(page, openRow.id)).toBeVisible({ timeout: 10_000 });
+
+  // Folded: the Not in medical request is not listed; the fold sits after every open request.
+  await expect(fold(page)).toBeVisible();
+  await expect(fold(page)).toHaveAttribute('aria-expanded', 'false');
+  await expect(fold(page)).toHaveAccessibleName(/^Closed \d+ requests?$/);
+  await expect(row(page, notIn.id)).toHaveCount(0);
+  const order = await page.evaluate(
+    ([openId]) => {
+      const list = document.querySelector('[data-testid="request-list"]')!;
+      const all = [...list.querySelectorAll('[data-request-id], [data-testid="closed-fold"]')];
+      return { openAt: all.findIndex((el) => el.getAttribute('data-request-id') === openId), foldAt: all.findIndex((el) => el.matches('[data-testid="closed-fold"]')) };
+    },
+    [openRow.id],
+  );
+  expect(order.openAt).toBeGreaterThanOrEqual(0);
+  expect(order.foldAt).toBeGreaterThan(order.openAt);
+
+  // Open the fold: the closed rows below it (as many as it counts), greyed: glyph faded, text gray-11, the
+  // row itself not faded (contrast, spec §7).
+  await fold(page).click();
+  await expect(fold(page)).toHaveAttribute('aria-expanded', 'true');
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const label = document.querySelector('[data-testid="closed-fold"]')?.getAttribute('aria-label') ?? '';
+        const shown = document.querySelectorAll('[data-testid="closed-rows"] [data-request-id]').length;
+        return Number(/\d+/.exec(label)?.[0] ?? -1) === shown && shown > 0;
+      }),
+    )
+    .toBe(true);
+  await expect(page.getByTestId('closed-rows').locator(`[data-request-id="${notIn.id}"]`)).toBeVisible();
+  await expect(row(page, notIn.id)).toHaveAttribute('data-closed', '');
+  await expect(cell(page, notIn.id, 'status')).toHaveText('Not in medical');
+  await expect(row(page, notIn.id)).toHaveCSS('opacity', '1');
+  await expect(row(page, notIn.id).locator('svg[data-glyph="notInMedical"]')).toHaveCSS('opacity', '0.55');
+  await expect(row(page, openRow.id)).not.toHaveAttribute('data-closed', '');
+
+  // Remembered for the session (a reload keeps it open); tapping again folds it.
+  await page.reload();
+  await expect(fold(page)).toHaveAttribute('aria-expanded', 'true');
+  await expect(row(page, notIn.id)).toBeVisible();
+  await fold(page).click();
+  await expect(fold(page)).toHaveAttribute('aria-expanded', 'false');
+  await expect(row(page, notIn.id)).toHaveCount(0);
+});
+
+test('at 375 px only names shrink: every other cell fits, and the page never scrolls sideways', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  const r = await createRequest(page, { name: `${TAG} Kayla Alexandra Martinez-Rodriguez` });
+  await page.goto('/');
+  await expect(row(page, r.id)).toBeVisible({ timeout: 10_000 });
+  await fold(page).click();
+  await expect(page.getByTestId('closed-rows')).toBeVisible();
+  const report = await page.evaluate(() => {
+    const cut = [...document.querySelectorAll<HTMLElement>('[data-testid="request-list"] [data-col]')]
+      .filter((el) => el.dataset.col !== 'name' && el.scrollWidth > el.clientWidth + 0.5)
+      .map((el) => `${el.dataset.col}: ${el.textContent}`);
+    const name = document.querySelector<HTMLElement>('[data-testid="request-list"] [data-col="name"]');
+    return {
+      cut,
+      pageScrolls: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      nameEllipsis: name ? getComputedStyle(name).textOverflow : '',
+    };
+  });
+  expect(report.cut).toEqual([]);
+  expect(report.pageScrolls).toBe(false);
+  expect(report.nameEllipsis).toBe('ellipsis');
+  const name = cell(page, r.id, 'name');
+  expect(await name.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+});
+
+test('view switcher: Pending and My requests with counts, the same large title, the menu returns to All', async ({ page }) => {
   const r = await createRequest(page);
   await page.goto('/');
   await expect(row(page, r.id)).toBeVisible({ timeout: 10_000 });
@@ -84,21 +227,51 @@ test('view switcher: Pending and My requests with counts, × returns to All', as
   await expect(page).toHaveURL(/\?view=pending$/);
   await expect(checkCard(page, r.id)).toBeVisible();
   await expect(checkCard(page, r.id)).toContainText(`${lp(r)} · FA 3`);
-  await expect(page.getByRole('button', { name: /^Pending \d+, change view$/ })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: /^Pending \d+, change view$/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Back to all requests' })).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Back to all requests' }).click();
-  await expect(page).toHaveURL(/\/$/);
+  await showAll(page);
 
   await page.getByTestId('view-switcher').click();
   await page.getByRole('menuitemradio', { name: /^My requests \d+$/ }).click();
   await expect(page).toHaveURL(/\?view=mine$/);
+  await expect(page.getByRole('heading', { level: 1, name: /^My requests \d+, change view$/ })).toBeVisible();
   const card = page.locator(`[data-testid="mine-card"]:has([data-request-id="${r.id}"])`);
   await expect(card).toBeVisible();
   await expect(card).toContainText('Waiting for check');
   await expect(card).toContainText('Logged');
 });
 
-test('Pending: In medical → Friend coming, Undo, then Reunited closes it (dimmed in All)', async ({ page }) => {
+test('Alerts live in the avatar menu: On / Off, and "Alerts are on" the first time', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('account-trigger').click();
+  const menu = page.getByRole('dialog', { name: 'Account' });
+  const alerts = menu.getByRole('switch', { name: 'Alerts' });
+  await expect(alerts).toHaveAttribute('aria-checked', 'false');
+  await expect(alerts).toContainText('Off');
+  await expect(menu.getByText('Export CSV')).toHaveCount(0);
+
+  await alerts.click();
+  const sheet = page.getByRole('dialog', { name: 'Alerts are on' });
+  await expect(sheet).toBeVisible();
+  await expect(sheet).toHaveAccessibleDescription('New requests alert you while this app is open.');
+  expect(await page.evaluate(() => localStorage.getItem('lp-bell'))).toBe('1');
+  await sheet.getByRole('button', { name: 'Got it' }).click();
+
+  // Once seen, switching it off and on again just flips it.
+  await page.getByTestId('account-trigger').click();
+  await expect(alerts).toHaveAttribute('aria-checked', 'true');
+  await expect(alerts).toContainText('On');
+  await alerts.click();
+  await expect(alerts).toHaveAttribute('aria-checked', 'false');
+  expect(await page.evaluate(() => localStorage.getItem('lp-bell'))).toBeNull();
+  await alerts.click();
+  await expect(alerts).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('dialog', { name: 'Alerts are on' })).toHaveCount(0);
+});
+
+test('Pending: In medical → Friend coming, Undo, then Reunited closes it (greyed under Closed in All)', async ({ page }) => {
   const r = await createRequest(page);
   await page.goto('/?view=pending');
   await expect(checkCard(page, r.id)).toBeVisible({ timeout: 10_000 });
@@ -118,11 +291,15 @@ test('Pending: In medical → Friend coming, Undo, then Reunited closes it (dimm
   await comingCard(page, r.id).getByRole('button', { name: 'Reunited' }).click();
   await expect(comingCard(page, r.id)).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Back to all requests' }).click();
-  await expect(row(page, r.id)).toContainText('Reunited');
+  await showAll(page);
+  // Closed: folded under "Closed N" until the fold is opened.
+  await expect(row(page, r.id)).toHaveCount(0);
+  await fold(page).click();
+  await expect(cell(page, r.id, 'status')).toHaveText('Reunited');
+  await expect(row(page, r.id)).toHaveAttribute('data-closed', '');
   // Closed rows are dimmed by their glyph and gray-11 text, never by row opacity (contrast, spec §7).
   await expect(row(page, r.id)).toHaveCSS('opacity', '1');
-  await expect(row(page, r.id).locator(':scope > span').first()).toHaveCSS('opacity', '0.55');
+  await expect(row(page, r.id).locator('svg[data-glyph]')).toHaveCSS('opacity', '0.55');
 });
 
 test('Not in medical leaves Pending; ?status= shows a filter chip that clears to All', async ({ page }) => {
@@ -138,6 +315,9 @@ test('Not in medical leaves Pending; ?status= shows a filter chip that clears to
   await expect(chip).toContainText('Not in medical');
   await expect(row(page, r.id)).toBeVisible({ timeout: 10_000 });
   await expect(row(page, r.id)).toContainText('Not in medical');
+  // A filter shows its rows in one list: closed rows greyed in place, no fold.
+  await expect(row(page, r.id)).toHaveAttribute('data-closed', '');
+  await expect(fold(page)).toHaveCount(0);
   // Only Not in medical rows are listed.
   const labels = await page.locator('[data-testid="request-list"] [data-request-id]').allTextContents();
   expect(labels.every((t) => t.includes('Not in medical'))).toBe(true);
@@ -145,6 +325,9 @@ test('Not in medical leaves Pending; ?status= shows a filter chip that clears to
   await chip.click();
   await expect(page).toHaveURL(/\/$/);
   await expect(chip).toHaveCount(0);
+  // Back on the unfiltered log, Not in medical is folded under Closed.
+  await expect(fold(page)).toBeVisible();
+  await expect(row(page, r.id)).toHaveCount(0);
 });
 
 test('search: name with highlight and count, LP number, Cancel returns', async ({ page }) => {
@@ -179,7 +362,8 @@ test('front of house logs a request with a photo; the liaison sees it in Pending
   // Context B (this page): the medical liaison, already on Pending before the request exists.
   await page.goto('/?view=pending');
   await expect(page.getByTestId('view-switcher')).toBeVisible();
-  await expect(page.getByTestId('live-dot')).toHaveAttribute('data-state', 'live', { timeout: 15_000 });
+  await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('connection-indicator')).toHaveCount(0);
 
   // Context A: front of house (Dispatch) logs it through the form, with a photo.
   const foh = await newSignedInContext(browser, { staffName: `${TAG} Front`, team: 'GC/HX - Dispatch' }, { baseURL: BASE, viewport: { width: 390, height: 844 } });
@@ -256,33 +440,40 @@ test('front of house logs a request with a photo; the liaison sees it in Pending
   }
 });
 
-test('a request logged elsewhere shows up within one poll; tapping the live dot syncs now', async ({ page }) => {
+test('a request logged elsewhere shows up within one poll (no live dot to tap)', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 10_000 });
   const r = await createRequest(page);
-  const sync = page.waitForRequest((req) => req.url().includes('/api/sync'));
-  await page.getByTestId('live-dot').click();
-  await sync;
-  await expect(row(page, r.id)).toBeVisible({ timeout: 8_000 });
+  // Polls run every 6 s ± 1 s while the page is visible.
+  await expect(row(page, r.id)).toBeVisible({ timeout: 9_000 });
 });
 
-test('offline: amber dot, banner between the header and the view bar, answers need a connection', async ({ page, context }) => {
+test('offline: a badge on the avatar, the banner under the header, answers need a connection', async ({ page, context }) => {
   const r = await createRequest(page);
   await page.goto('/?view=pending');
   await expect(checkCard(page, r.id)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId('connection-indicator')).toHaveCount(0);
 
   await context.setOffline(true);
   try {
-    await expect(page.getByTestId('live-dot')).toHaveAttribute('data-state', 'off');
+    const badge = page.getByTestId('connection-indicator');
+    await expect(badge).toHaveAttribute('data-state', 'offline');
+    await expect(badge).toHaveAccessibleName('Offline');
+    // The badge sits on the avatar, inside the header row.
+    const avatar = await page.getByTestId('account-trigger').boundingBox();
+    const badgeBox = await badge.boundingBox();
+    expect(avatar && badgeBox).toBeTruthy();
+    expect(badgeBox!.x).toBeGreaterThan(avatar!.x);
+    expect(badgeBox!.y).toBeGreaterThan(avatar!.y);
     // The shell may render its own copy (hidden before list views): only one is ever visible.
     const banner = page.getByText(/^Offline · \d+ waiting to send$/).filter({ visible: true });
     await expect(banner).toBeVisible();
-    const header = await page.getByRole('heading', { name: 'Is my friend in medical?' }).boundingBox();
+    const title = await page.getByTestId('view-switcher').boundingBox();
     const bannerBox = await banner.boundingBox();
-    const bar = await page.getByTestId('view-switcher').boundingBox();
-    expect(header && bannerBox && bar).toBeTruthy();
-    expect(bannerBox!.y).toBeGreaterThan(header!.y);
-    expect(bar!.y).toBeGreaterThan(bannerBox!.y);
+    const list = await page.getByTestId('request-list').boundingBox();
+    expect(title && bannerBox && list).toBeTruthy();
+    expect(bannerBox!.y).toBeGreaterThan(title!.y + title!.height - 1);
+    expect(list!.y).toBeGreaterThan(bannerBox!.y);
 
     const answer = checkCard(page, r.id).getByRole('button', { name: 'In medical', exact: true });
     await expect(answer).toHaveAttribute('aria-disabled', 'true');
@@ -295,5 +486,6 @@ test('offline: amber dot, banner between the header and the view bar, answers ne
   } finally {
     await context.setOffline(false);
   }
-  await expect(page.getByTestId('live-dot')).toHaveAttribute('data-state', /live|loading/, { timeout: 15_000 });
+  // Live again: the badge goes away.
+  await expect(page.getByTestId('connection-indicator')).toHaveCount(0, { timeout: 15_000 });
 });

@@ -1,6 +1,8 @@
 'use client';
 // Avatar + account menu (design/screens/states.html "Avatar"): name and short team, Theme (Light / Dark /
-// Auto), Dashboard, Export CSV (a new tab in an iOS Home Screen app), Sign out, and "Built by Jeffrey Yu".
+// Auto), Alerts (On / Off: the new-request alerts the header bell used to toggle, 2026-11-06 header
+// declutter), Dashboard, Sign out, and "Built by Jeffrey Yu". Export CSV is no longer offered to staff
+// (Jeffrey exports from Supabase at the end, docs/export.sql).
 // Self-contained: reads the store. Sign out is refused by the store while unsent outbox jobs exist; the
 // menu then asks once, and only an explicit "Discard & sign out" throws them away. When the server can't
 // confirm the sign-out (no signal), the store keeps the session and the menu or dialog says so.
@@ -8,12 +10,12 @@
 // A Radix Popover rather than a DropdownMenu: the Theme segmented control must stay reachable with Tab,
 // which a menu's roving focus does not allow.
 import { AlertDialog, Avatar, Button, Popover, SegmentedControl, Text } from '@radix-ui/themes';
-import { ChartColumn, Download, LogOut, Sun } from 'lucide-react';
+import { BellOff, BellRing, ChartColumn, LogOut, Sun } from 'lucide-react';
 import { useId, useState } from 'react';
+import { BellSheet, isStandalone } from '@/components/list/BellSheet';
 import { navigate } from '@/lib/client/nav';
-import { useActions, useConnection, usePrefs, useSession, type ThemePref } from '@/lib/client/store-contract';
+import { useActions, usePrefs, useSession, type ThemePref } from '@/lib/client/store-contract';
 import { avatarInitials, teamShort } from '@/lib/domain';
-import { EXPORT_CSV_PATH, handleExportClick } from './export-csv';
 import s from './account.module.css';
 
 export interface AccountMenuProps {
@@ -33,18 +35,29 @@ export function AccountMenu({ size = '2' }: AccountMenuProps) {
   const session = useSession();
   const prefs = usePrefs();
   const actions = useActions();
-  const { connection } = useConnection();
   const [open, setOpen] = useState(false);
   const [unsent, setUnsent] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [bellSheet, setBellSheet] = useState({ open: false, standalone: false });
   const themeLabelId = useId();
 
   // Offline the session may not be confirmed yet: fall back to who signed in last on this phone.
   const name = session.staffName ?? prefs.rememberedName ?? '';
   const team = session.team ?? prefs.rememberedTeam ?? '';
   const initials = avatarInitials(name) || '?';
-  const offline = connection === 'offline';
+
+  // Exactly what the header bell did: flip the pref; the first time it goes on, "Alerts are on" explains
+  // where alerts show (and the Home Screen tip).
+  const toggleAlerts = () => {
+    const on = !prefs.bell;
+    actions.setPref('bell', on);
+    if (on && !prefs.bellIntroSeen) {
+      actions.setPref('bellIntroSeen', true);
+      setOpen(false);
+      setBellSheet({ open: true, standalone: isStandalone() });
+    }
+  };
 
   const signOut = async (discardOutbox: boolean) => {
     setBusy(true);
@@ -126,6 +139,21 @@ export function AccountMenu({ size = '2' }: AccountMenuProps) {
               ))}
             </SegmentedControl.Root>
           </div>
+          {/* A switch named "Alerts"; its state is announced, so the visible On / Off is not read twice. */}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={prefs.bell}
+            className={s.mitem}
+            onClick={toggleAlerts}
+            data-testid="alerts-switch"
+          >
+            {prefs.bell ? <BellRing size={16} aria-hidden /> : <BellOff size={16} aria-hidden />}
+            <span className={s.sp}>Alerts</span>
+            <span className={s.mval} data-on={prefs.bell ? '' : undefined} aria-hidden>
+              {prefs.bell ? 'On' : 'Off'}
+            </span>
+          </button>
           <button
             type="button"
             className={s.mitem}
@@ -137,25 +165,6 @@ export function AccountMenu({ size = '2' }: AccountMenuProps) {
             <ChartColumn size={16} aria-hidden />
             Dashboard
           </button>
-          {offline ? (
-            <button type="button" className={s.mitem} disabled>
-              <Download size={16} aria-hidden />
-              Export CSV
-            </button>
-          ) : (
-            <a
-              className={s.mitem}
-              href={EXPORT_CSV_PATH}
-              download
-              onClick={(e) => {
-                handleExportClick(e);
-                setOpen(false);
-              }}
-            >
-              <Download size={16} aria-hidden />
-              Export CSV
-            </a>
-          )}
           <div className={s.msep} />
           <button type="button" className={s.mitem} disabled={busy} onClick={() => void signOut(false)}>
             <LogOut size={16} aria-hidden />
@@ -203,6 +212,12 @@ export function AccountMenu({ size = '2' }: AccountMenuProps) {
           </div>
         </AlertDialog.Content>
       </AlertDialog.Root>
+
+      <BellSheet
+        open={bellSheet.open}
+        standalone={bellSheet.standalone}
+        onOpenChange={(o) => setBellSheet((b) => ({ ...b, open: o }))}
+      />
     </>
   );
 }

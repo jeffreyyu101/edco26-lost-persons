@@ -1,79 +1,71 @@
 'use client';
-// List-view header (requests.html .top): the title "Is my friend in medical?", the live dot (tap to sync
-// now; amber offline or when the log can't be reached, grey while loading), then search, the bell and the
-// avatar (account menu, owned by components/account).
-import { Heading, IconButton } from '@radix-ui/themes';
-import { BellOff, BellRing, Search } from 'lucide-react';
+// List-view header (design/screens/polish-v7.html LogTitle, v7-log.png): the large title is the view menu
+// ("All requests 13 ⌄"), then search and the avatar (account menu, owned by components/account, which also
+// holds the Alerts switch). There is no live dot while the app is live (2026-11-06 header declutter): only
+// while it is offline or reconnecting does a small badge sit on the avatar, like a presence dot, amber with a
+// crossed-out cloud when offline, red with a turning arrow while it can't reach the log. It takes no room
+// from the title, and the banner under the header says the same in words (with Try again).
+import { CloudOff, RefreshCw, Search } from 'lucide-react';
 import type { ReactNode } from 'react';
+import type { ViewCounts } from '@/lib/client/selectors';
 import type { Connection } from '@/lib/client/store-contract';
+import { ViewSwitcher, type ListViewName } from './ViewSwitcher';
 import s from './list.module.css';
 
 export interface AppHeaderProps {
+  view: ListViewName;
+  /** null while loading (the count shows a placeholder). */
+  counts: ViewCounts | null;
+  /** The view menu picked a view. */
+  onSelect: (view: ListViewName) => void;
   connection: Connection;
-  /** A sync is in flight: the dot is grey. */
+  /** A sync is in flight (while the log can't be reached, the badge's arrow turns: reconnecting). */
   syncing: boolean;
-  /** Tap the live dot. */
-  onSyncNow: () => void;
   /** Opens search (the field takes over the header): navigate({q: ''}). */
   onOpenSearch: () => void;
-  /** New-request alerts. */
-  bellOn: boolean;
-  onToggleBell: () => void;
   /** The avatar + menu, i.e. <AccountMenu />. */
   account: ReactNode;
 }
 
-export type LiveState = 'live' | 'off' | 'loading';
-
-export function liveState(connection: Connection, syncing: boolean): LiveState {
-  if (syncing) return 'loading';
-  return connection === 'live' ? 'live' : 'off';
-}
-
-const LIVE_LABEL: Readonly<Record<Connection, string>> = {
-  live: 'Live. Tap to sync now',
-  offline: 'Offline. Tap to try again',
-  error: "Can't reach the log. Tap to try again",
+const DOWN_LABEL: Readonly<Record<Exclude<Connection, 'live'>, string>> = {
+  offline: 'Offline',
+  error: "Can't reach the log",
 };
 
-const ICON = { size: 18, strokeWidth: 1.75, 'aria-hidden': true } as const;
+/** The offline / reconnecting badge on the avatar. Nothing when live. */
+export function ConnectionIndicator({ connection, syncing }: Pick<AppHeaderProps, 'connection' | 'syncing'>) {
+  if (connection === 'live') return null;
+  const reconnecting = connection === 'error' && syncing;
+  return (
+    <span
+      className={s.conn}
+      role="img"
+      data-state={connection}
+      data-syncing={reconnecting ? '' : undefined}
+      aria-label={reconnecting ? 'Reconnecting' : DOWN_LABEL[connection]}
+      data-testid="connection-indicator"
+    >
+      {connection === 'offline' ? (
+        <CloudOff size={10} strokeWidth={2.5} aria-hidden />
+      ) : (
+        <RefreshCw size={9} strokeWidth={2.75} aria-hidden className={s.connSpin} />
+      )}
+    </span>
+  );
+}
 
-export function AppHeader({ connection, syncing, onSyncNow, onOpenSearch, bellOn, onToggleBell, account }: AppHeaderProps) {
-  const state = liveState(connection, syncing);
+export function AppHeader({ view, counts, onSelect, connection, syncing, onOpenSearch, account }: AppHeaderProps) {
   return (
     <header className={s.top}>
-      <div className={s.title}>
-        <Heading as="h1" size="3" weight="medium" className={s.heading}>
-          Is my friend in medical?
-        </Heading>
-        <button
-          type="button"
-          className={s.liveBtn}
-          onClick={onSyncNow}
-          aria-label={syncing ? 'Syncing' : LIVE_LABEL[connection]}
-          data-testid="live-dot"
-          data-state={state}
-        >
-          <span className={s.live} data-state={state} />
-        </button>
-      </div>
+      <ViewSwitcher view={view} counts={counts} onSelect={onSelect} />
       <div className={s.icons}>
-        <IconButton className={s.hit} variant="ghost" color="gray" aria-label="Search" onClick={onOpenSearch}>
-          <Search {...ICON} />
-        </IconButton>
-        <IconButton
-          className={s.hit}
-          variant={bellOn ? 'soft' : 'ghost'}
-          color="gray"
-          highContrast={bellOn}
-          // A toggle: the name stays fixed and aria-pressed carries the state.
-          aria-label="New-request alerts"
-          aria-pressed={bellOn}
-          onClick={onToggleBell}
-        >
-          {bellOn ? <BellRing {...ICON} /> : <BellOff {...ICON} />}
-        </IconButton>
-        {account}
+        <button type="button" className={s.ib} aria-label="Search" onClick={onOpenSearch}>
+          <Search size={20} strokeWidth={1.75} aria-hidden />
+        </button>
+        <span className={s.avatar}>
+          {account}
+          <ConnectionIndicator connection={connection} syncing={syncing} />
+        </span>
       </div>
     </header>
   );

@@ -1,5 +1,7 @@
-/* List views (design/screens/requests.html, states.html, skeletons.html). Values are ported from the
-   mockups' CSS; class names follow theirs where possible (.top, .vbar, .vsw, .row, .qh, .qd, …). */
+/* List views (design/screens/polish-v7.html + v7-log.png for the header and the All requests log;
+   requests.html, states.html, skeletons.html for the cards, search and states). Values are ported from the
+   mockups' CSS, except where spec §7 needs more: text is gray-11 or darker (4.5:1 in both themes), and every
+   control has a 44 px tap target. */
 
 /* ---- Page frame -------------------------------------------------------------------------------- */
 
@@ -13,8 +15,9 @@
   padding-right: env(safe-area-inset-right);
 }
 
-/* Header, banner and view bar stay on screen while the list scrolls (the document scrolls, so iOS keeps
-   its momentum scrolling and collapsing toolbars). */
+/* Header, banner and chips stay on screen while the list scrolls (the document scrolls, so iOS keeps its
+   momentum scrolling and collapsing toolbars). Its height is mirrored into --lp-sticky-h (hooks.ts
+   useStickyHeight) for the log's column header, which sticks right under it. */
 .sticky {
   position: sticky;
   top: 0;
@@ -27,105 +30,206 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  /* Room for the New request button over the last row. */
+  /* Room for the New request button over the last row: its 50 px, its 24 px offset and 16 px more. */
   padding-bottom: calc(90px + env(safe-area-inset-bottom));
 }
 
+/* "New request": a 50 px capsule in the primary fill (polish-v7.html .fab). */
 .fab {
-  position: fixed !important;
+  position: fixed;
   right: calc(16px + env(safe-area-inset-right));
   bottom: calc(24px + env(safe-area-inset-bottom));
   z-index: 5;
-  box-shadow: var(--shadow-5);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 50px;
+  padding: 0 20px 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--gray-12);
+  color: var(--gray-1);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow:
+    0 8px 24px -6px rgba(0, 0, 0, 0.45),
+    0 2px 6px rgba(0, 0, 0, 0.2);
+  -webkit-tap-highlight-color: transparent;
 }
 
-/* ---- Header (.top) ----------------------------------------------------------------------------- */
+.fab:active {
+  transform: scale(0.98);
+}
+
+.fab:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+
+/* ---- Header: the large title is the view menu (polish-v7.html .lt) ------------------------------- */
 
 .top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 16px 12px;
+  gap: 8px;
+  padding: 22px 12px 14px 16px;
 }
 
-.title {
+.h1 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font: inherit;
   display: flex;
-  align-items: center;
+}
+
+/* "All requests 13 ⌄": 28/700, the count 28/400 in tertiary grey (gray-9 passes 3:1 as large text in both
+   themes), a small chevron. The button's tap area grows to 44 px tall. */
+.ttl {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
   gap: 8px;
   min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-3);
+  background: none;
+  color: var(--gray-12);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.heading {
+.ttl::before {
+  content: '';
+  position: absolute;
+  inset: min(0px, calc((100% - 44px) / 2)) 0;
+}
+
+.ttl:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 4px;
+}
+
+.ttl[data-state='open'] .tchev {
+  transform: rotate(180deg);
+}
+
+.ttx {
+  min-width: 0;
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 700;
+  letter-spacing: -0.022em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* The live dot: a 44 px tap target around a 7 px dot. */
-.liveBtn {
+.tcount {
   flex: none;
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  color: var(--gray-9);
+  font-variant-numeric: tabular-nums;
+}
+
+.tchev {
+  flex: none;
+  align-self: center;
+  display: flex;
+  margin-left: -2px;
+  color: var(--gray-10);
+  transition: transform 0.15s;
+}
+
+/* The offline / reconnecting button, search and the avatar. Every one has a 44 px tap area that never
+   reaches into its neighbour's box. */
+.icons {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ib {
   position: relative;
   display: grid;
   place-items: center;
-  width: 44px;
-  height: 44px;
-  margin: -18px -18px -18px -18px;
+  width: 36px;
+  height: 36px;
   padding: 0;
   border: 0;
   border-radius: 50%;
   background: none;
+  color: var(--gray-11);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
 
-.liveBtn:focus-visible {
+.ib::before {
+  content: '';
+  position: absolute;
+  inset: min(0px, calc((100% - 44px) / 2));
+}
+
+.ib:active {
+  background: var(--gray-a3);
+}
+
+.ib:focus-visible {
   outline: 2px solid var(--focus-8);
-  outline-offset: -10px;
+  outline-offset: 1px;
 }
 
-.live {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--green-9);
-  box-shadow: 0 0 0 3px var(--green-a4);
-  transition:
-    background-color 0.2s,
-    box-shadow 0.2s,
-    transform 0.15s;
-}
-
-.live[data-state='off'] {
-  background: var(--amber-9);
-  box-shadow: 0 0 0 3px var(--amber-a4);
-}
-
-.live[data-state='loading'] {
-  background: var(--gray-8);
-  box-shadow: none;
-}
-
-.liveBtn:active .live {
-  transform: scale(1.4);
-}
-
-/* Search, the bell and the avatar. Each has a 44 px tap target, so their centres sit 44 px or more apart
-   (14 px between the boxes, no ghost-button pull-in), and no tap area reaches into its neighbour. */
-.icons {
+/* The avatar, with the offline / reconnecting badge on its corner (a presence dot). */
+.avatar {
+  position: relative;
   display: flex;
-  align-items: center;
-  gap: 14px;
-  flex-shrink: 0;
 }
 
-.icons > .hit {
-  margin-left: 0;
-  margin-right: 0;
+/* Shown only while the connection is down: amber offline, red when the log can't be reached (its arrow turns
+   while it retries). Not a control: taps go to the avatar under it. */
+.conn {
+  position: absolute;
+  right: -5px;
+  bottom: -4px;
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--amber-9);
+  color: var(--amber-contrast, #000);
+  box-shadow: 0 0 0 2px var(--color-background);
+  pointer-events: none;
 }
 
-/* 44 px touch targets for the compact icon buttons without changing their layout (as .lp-hit in
-   app/globals.css: each side under 44 px grows, centred). */
+.conn[data-state='error'] {
+  background: var(--red-9);
+  color: var(--red-contrast, #fff);
+}
+
+.conn[data-syncing] .connSpin {
+  animation: lp-spin 0.9s linear infinite;
+}
+
+@keyframes lp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 44 px touch targets for compact icon buttons without changing their layout (as .lp-hit). */
 .hit {
   position: relative;
 }
@@ -136,65 +240,11 @@
   inset: min(0px, calc((100% - 44px) / 2));
 }
 
-/* ---- View bar (.vbar / .vsw / .vmenu) ---------------------------------------------------------- */
-
-.vbar {
-  padding: 0 12px 10px;
-  border-bottom: 1px solid var(--gray-a3);
-}
-
-.vrow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 34px;
-}
-
-.vsw {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 34px;
-  min-width: 0;
-  padding: 0 9px 0 11px;
-  border-radius: var(--radius-3);
-  border: 0;
-  background: var(--gray-a3);
-  color: var(--gray-12);
-  font: inherit;
-  font-size: 15px;
-  font-weight: 500;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.vsw svg {
-  color: var(--gray-11);
-  flex: none;
-}
-
-.vsw[data-state='open'] {
-  background: var(--gray-a5);
-}
-
-.vsw:focus-visible {
-  outline: 2px solid var(--focus-8);
-  outline-offset: 1px;
-}
-
-.vtitle {
-  white-space: nowrap;
-}
-
-.vc {
-  color: var(--gray-11);
-  font-weight: 400;
-  font-variant-numeric: tabular-nums;
-}
-
 .sp {
   flex: 1;
 }
+
+/* ---- The view menu (view-menu.png) -------------------------------------------------------------- */
 
 .vmenu {
   width: 276px;
@@ -245,12 +295,12 @@
   background: var(--gray-a4) !important;
 }
 
-/* Filter chips under the switcher (?status= / ?post=). */
+/* Filter chips under the title (?status= / ?post= / ?open=). */
 .chips {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 10px;
+  padding: 0 16px 12px;
 }
 
 .chip {
@@ -300,21 +350,88 @@
   opacity: 0.7;
 }
 
-/* ---- All: flat rows (.row) --------------------------------------------------------------------- */
+/* ---- All requests: the log (polish-v7.html .cols / .colh / .row / .fold) ------------------------- */
 
-.flat {
-  display: flex;
-  flex-direction: column;
+/* One grid for the whole list: every row (and the column header) is a subgrid of it, so the columns line up
+   and size to their widest value. Only the name column shrinks; everything else keeps its content width. */
+.log {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  column-gap: 7px;
 }
 
-.row {
-  display: flex;
-  gap: 10px;
+/* A row of the log: spans every column and takes them from the log (subgrid). Every cell is placed in
+   row 1 of its column explicitly, so the hairline (a grid item too) never pushes a cell to a new line. */
+.lrow {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
   box-sizing: border-box;
+  padding: 0 16px;
+}
+
+.c1,
+.c2,
+.c3,
+.c4,
+.c5 {
+  grid-row: 1;
+  min-width: 0;
+}
+
+.c1 {
+  grid-column: 1;
+}
+
+.c2 {
+  grid-column: 2;
+}
+
+.c3 {
+  grid-column: 3;
+}
+
+.c4 {
+  grid-column: 4;
+}
+
+.c5 {
+  grid-column: 5;
+}
+
+.end {
+  justify-self: end;
+}
+
+/* "#  Friend  Status  Created  Updated": small, quiet, sticky right under the header. */
+.colh {
+  position: sticky;
+  top: var(--lp-sticky-h, 0px);
+  z-index: 3;
+  height: 24px;
+  background: var(--color-background);
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--gray-11);
+  white-space: nowrap;
+}
+
+/* "Friend" sits over the only column that shrinks: on a very narrow phone it is cut like the names. */
+.colh > .c2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* One request, one 48 px line. No dividers between rows except a hairline inset to the name column. */
+.lr {
+  position: relative;
   width: 100%;
-  padding: 10px 16px 11px;
-  border: 0;
+  min-height: 48px;
   margin: 0;
+  border: 0;
   background: none;
   color: var(--gray-12);
   font: inherit;
@@ -322,49 +439,204 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-.row + .row {
-  border-top: 1px solid var(--gray-a3);
+.lr::after {
+  content: '';
+  grid-column: 2 / -1;
+  grid-row: 1;
+  align-self: end;
+  margin-right: -16px;
+  border-bottom: 1px solid var(--gray-a3);
 }
 
-button.row {
+/* A search result with its matched text on a second line under the name. */
+.lr2 {
+  padding-top: 7px;
+  padding-bottom: 8px;
+  row-gap: 1px;
+}
+
+.lr2::after {
+  grid-row: 2;
+  margin-bottom: -8px;
+}
+
+button.lr {
   cursor: pointer;
 }
 
-button.row:active {
+button.lr:active {
   background: var(--gray-a2);
 }
 
-button.row:focus-visible {
+button.lr:focus-visible {
   outline: 2px solid var(--focus-8);
   outline-offset: -2px;
 }
 
-/* Closed rows (A3) are dimmed without losing text contrast (spec §7: 4.5:1 in both themes): the text
-   steps down from gray-12 to gray-11 and loses its status colour, and the glyph fades. Opacity on the
-   whole row would take the secondary text under 3:1. */
-.muted {
+.num {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.nm {
+  font-size: 15px;
+  line-height: 20px;
+  color: var(--gray-12);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Status: the glyph and its label. Only the two open states have colour (blue, green); every closed state
+   and a queued request are grey. */
+.stc {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--gray-11);
+  white-space: nowrap;
+}
+
+.stc[data-tone='blue'] {
+  color: var(--blue-11);
+}
+
+.stc[data-tone='green'] {
+  color: var(--green-11);
+}
+
+.stc[data-tone='red'] {
+  color: var(--red-11);
+}
+
+.lg {
+  flex: none;
+}
+
+/* A label longer than any status this app writes (an unknown legacy value) is cut, not the layout. */
+.stl {
+  max-width: 10.5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Created and updated: tabular, right-aligned on the name's line. */
+.tm {
+  justify-self: end;
+  font-size: 13px;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The matched text of a search result, under the name and running to the right edge. */
+.match {
+  grid-column: 2 / -1;
+  grid-row: 2;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--gray-11);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Closed rows are greyed without losing text contrast (spec §7): the name and status drop to gray-11 and
+   the glyph fades. Opacity on the whole row would take the text under 4.5:1. */
+.closed .nm {
   color: var(--gray-11);
 }
 
-.muted .g {
+.closed .lg {
   opacity: 0.55;
 }
 
-.g {
-  padding-top: 3px;
-  display: flex;
+.attention {
+  color: var(--red-9);
+  flex: none;
 }
 
-.rm {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+.mark {
+  background: var(--amber-a5);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
 }
 
-.l1,
-.l2 {
+/* "Closed  6  ⌄": a plain row, not a card (polish-v7.html .fold). */
+.fold {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 52px;
+  margin-top: 6px;
+  padding: 0 16px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.fold:active {
+  background: var(--gray-a2);
+}
+
+.fold:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -2px;
+}
+
+.foldLabel {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--gray-11);
+}
+
+.cap {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 20px;
+  box-sizing: border-box;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--gray-a3);
+  color: var(--gray-11);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.foldChev {
+  display: flex;
+  color: var(--gray-10);
+  transition: transform 0.15s;
+}
+
+.foldChev[data-open] {
+  transform: rotate(180deg);
+}
+
+/* The closed rows under the fold: a subgrid, so they share the log's columns. */
+.sub {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+}
+
+/* ---- Card text pieces (Pending / My requests) ---------------------------------------------------- */
+
+.l1 {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -381,47 +653,6 @@ button.row:focus-visible {
 .nowrap {
   flex: none;
   white-space: nowrap;
-}
-
-.t {
-  flex: none;
-  min-width: 24px;
-  font-size: 12px;
-  color: var(--gray-11);
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.meta {
-  min-width: 0;
-  font-size: 12px;
-  color: var(--gray-11);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.attention {
-  color: var(--red-9);
-  flex: none;
-}
-
-/* Search results: the matched text line (states.html .desc + mark). */
-.desc {
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--gray-11);
-  font-size: 13px;
-}
-
-.mark {
-  background: var(--amber-a5);
-  color: inherit;
-  border-radius: 3px;
-  padding: 0 1px;
 }
 
 /* ---- Pending / My requests: cards -------------------------------------------------------------- */
@@ -775,7 +1006,6 @@ button.row:focus-visible {
 
 .cnt {
   padding: 2px 16px 8px;
-  border-bottom: 1px solid var(--gray-a3);
 }
 
 /* ---- Bell sheet (states.html .steps / .sicon) ---------------------------------------------------- */
@@ -815,14 +1045,43 @@ button.row:focus-visible {
 
 /* ---- Skeletons (skeletons.html) ---------------------------------------------------------------- */
 
-.skRow {
-  display: flex;
-  gap: 10px;
-  padding: 12px 16px;
+/* The log's rows: number, name, status glyph and label, created, updated; 48 px, hairline from the name. */
+.skLog {
+  padding-top: 24px;
 }
 
-.skRow + .skRow {
-  border-top: 1px solid var(--gray-a3);
+.skLogRow {
+  position: relative;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 112px 56px 26px;
+  column-gap: 7px;
+  align-items: center;
+  height: 48px;
+  padding: 0 16px;
+}
+
+.skLogRow > :nth-child(4),
+.skLogRow > :nth-child(5) {
+  justify-self: end;
+}
+
+.skLogRow::after {
+  content: '';
+  position: absolute;
+  left: 55px;
+  right: 0;
+  bottom: 0;
+  border-bottom: 1px solid var(--gray-a3);
+}
+
+.skName {
+  display: flex;
+}
+
+.skStatus {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .skRm {

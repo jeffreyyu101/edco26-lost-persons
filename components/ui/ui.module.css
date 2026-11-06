@@ -232,14 +232,30 @@
 }
 
 /* ---- Skeletons (skeletons.html) ---- */
-.skRow {
-  display: flex;
-  gap: 10px;
-  padding: 12px 16px;
+/* All requests (log option B): number, name, status glyph and label, created, updated; 48 px rows with the
+   hairline inset from the name (components/list/list.module.css .skLogRow is the same shape). */
+.skLogRow {
+  position: relative;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 112px 56px 26px;
+  column-gap: 7px;
+  align-items: center;
+  height: 48px;
+  padding: 0 16px;
 }
 
-.skRow + .skRow {
-  border-top: 1px solid var(--gray-a3);
+.skLogRow > :nth-child(4),
+.skLogRow > :nth-child(5) {
+  justify-self: end;
+}
+
+.skLogRow::after {
+  content: '';
+  position: absolute;
+  left: 55px;
+  right: 0;
+  bottom: 0;
+  border-bottom: 1px solid var(--gray-a3);
 }
 
 .skMain {
