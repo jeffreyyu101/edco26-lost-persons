@@ -301,6 +301,23 @@ for (const theme of ['light', 'dark'] as const) {
         await visit(`/?r=${waiting.id}&edit=all`, 'Edit', () => expect(page.getByTestId('request-form-submit')).toBeVisible());
         await visit('/?dashboard=1', 'Dashboard', () => expect(page.getByTestId('open-count')).toBeVisible());
 
+        // ---- Reconnecting: syncs aborted while the phone is online (two quick Refresh now taps make the two
+        // failures the store waits for): the amber banner, the badge and the line's clock time
+        await visit('/?view=pending', 'Pending (before reconnecting)', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
+        await page.route('**/api/sync*', (route) => route.abort());
+        try {
+          const refresh = page.getByRole('button', { name: 'Refresh now', exact: true });
+          for (let i = 0; i < 4 && (await page.getByTestId('connection-banner').count()) === 0; i += 1) {
+            await refresh.click();
+            await expect(refresh).not.toHaveAttribute('data-refreshing', { timeout: 15_000 });
+          }
+          await expect(page.getByTestId('connection-banner')).toHaveText('Reconnecting…', { timeout: 30_000 });
+          await expect(page.getByTestId('live-text')).toHaveText(/^Last updated /);
+          results.push(await audit(page, 'Pending reconnecting'));
+        } finally {
+          await page.unroute('**/api/sync*');
+        }
+
         // ---- Offline: the banner, and answers that need a connection
         await visit('/?view=pending', 'Pending (before offline)', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
         await context.setOffline(true);

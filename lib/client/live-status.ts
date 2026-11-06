@@ -1,26 +1,29 @@
-// The live indicator under the view title (design/screens/live-indicator.html, approved by Brian 2026-11-06):
-// a plain dot and "Updated now" / "Updated 6s ago" / "Updated 2m ago", counted from the last successful sync.
-//   live          green dot while syncs land
-//   reconnecting  amber dot and "Reconnecting · updated 2m ago": no sync has landed for 30 s of visible time,
-//                 or the phone is online but can't reach the log (the store's connection is 'error', or
-//                 'offline' after failed requests while the phone itself reports a connection)
-//   offline       grey dot and "Offline · updated 5m ago": the phone reports no connection
-// Before the first sync there is nothing to show (null).
+// The connection state and the line under the view title (v2.2 afternoon, Brian 2026-11-06: the Apple Mail
+// model). ONE derivation, liveState(), feeds the line, the banner, the avatar badge and the screen-reader live
+// region, so they never disagree (the F1.1 review found the line saying Reconnecting under an Offline banner).
 //
-// The state and the words are pure functions of (sync time, connection, device online, now), so tests drive
-// them with fake timers. `secondClock` is the one clock: it ticks once a second only while an indicator is on
-// screen and the page is visible, and it remembers when the page last became visible, so a phone back from the
-// lock screen is not "Reconnecting" for the moment its catch-up sync takes.
+//   healthy       syncs land: green dot, "Updated just now" (last good sync under 60 s old), then
+//                 "Updated 1 min ago", "Updated 5 min ago", "Updated 1 hr ago". Minutes only, never seconds.
+//   reconnecting  the phone reports a connection, but syncs fail (the store's connection is 'error', or
+//                 'offline' after failed requests), the view's own fetch fails (the dashboard's stats), or
+//                 nothing has landed for more than 30 s of visible time: the amber "Reconnecting…" banner,
+//                 and the line reads "Last updated 3:42 PM" with an amber dot.
+//   offline       the phone reports no connection: the gray "Offline · N waiting to send" banner, and the
+//                 line reads "Last updated 3:42 PM" with a gray dot.
+//
+// Everything here is a pure function of (sync time, connection, device online, visibility, now), so tests
+// drive it with fake timers. The line re-renders only when its words change: a source wakes at the next
+// minute boundary since the last sync (or when a healthy line would turn stale), never once a second.
+import { formatCreatedTime } from '../format';
 import type { Connection } from './store-contract';
 
-export type LiveState = 'live' | 'reconnecting' | 'offline';
+export type LiveState = 'healthy' | 'reconnecting' | 'offline';
 
 /** No successful sync for longer than this (while the page is visible) reads as Reconnecting. */
 export const STALE_AFTER_MS = 30_000;
-/** Under this age the line reads "Updated now". */
-export const JUST_NOW_MS = 2_000;
-/** The indicator's clock tick. */
-export const LIVE_TICK_MS = 1_000;
+/** The line's granularity: "just now" under one minute, then whole minutes, then whole hours. */
+export const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
 
 export interface LiveInput {
   /** This phone's clock (epoch ms) when the last successful sync landed; null before the first one. */
@@ -29,145 +32,117 @@ export interface LiveInput {
   now: number;
   /** The phone reports a connection (navigator.onLine). Defaults to true. */
   online?: boolean;
-  /** When the page last became visible (epoch ms). Staleness only counts visible time. */
+  /** When the page last became visible (epoch ms); null: visible since it loaded. */
   visibleSince?: number | null;
-  /** The view's own fetch is failing (the dashboard's stats): Reconnecting. */
+  /** The page is hidden: staleness doesn't count (background tabs poll once a minute). */
+  hidden?: boolean;
+  /** The view's own fetch is failing (the dashboard's stats). */
   failing?: boolean;
 }
 
-export function liveState({ syncedAt, connection, now, online = true, visibleSince = null, failing = false }: LiveInput): LiveState | null {
-  if (syncedAt === null) return null;
+/** The one state every connection cue shows. */
+export function liveState({ syncedAt, connection, now, online = true, visibleSince = null, hidden = false, failing = false }: LiveInput): LiveState {
   if (!online) return 'offline';
   if (connection !== 'live' || failing) return 'reconnecting';
-  const since = visibleSince === null ? syncedAt : Math.max(syncedAt, visibleSince);
-  return now - since > STALE_AFTER_MS ? 'reconnecting' : 'live';
+  if (syncedAt !== null && !hidden) {
+    // Visible time only: a phone back from the lock screen gets 30 s for its catch-up sync.
+    const since = visibleSince === null ? syncedAt : Math.max(syncedAt, visibleSince);
+    if (now - since > STALE_AFTER_MS) return 'reconnecting';
+  }
+  return 'healthy';
 }
 
-/** "now", "6s ago", "2m ago", "3h ago". A sync that lands between two ticks (a negative age) is "now". */
-export function agoShort(ageMs: number): string {
-  if (ageMs < JUST_NOW_MS) return 'now';
-  const seconds = Math.floor(ageMs / 1_000);
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  return `${Math.floor(minutes / 60)}h ago`;
+/** "just now" under a minute (a sync that lands between two renders, a negative age, too), "5 min ago", "1 hr ago". */
+export function updatedAgo(ageMs: number): string {
+  if (ageMs < MINUTE_MS) return 'just now';
+  if (ageMs < HOUR_MS) return `${Math.floor(ageMs / MINUTE_MS)} min ago`;
+  return `${Math.floor(ageMs / HOUR_MS)} hr ago`;
 }
 
 const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'} ago`;
 
-/** agoShort as a screen reader says it: "just now", "6 seconds ago", "1 minute ago", "3 hours ago". */
-export function agoLong(ageMs: number): string {
-  if (ageMs < JUST_NOW_MS) return 'just now';
-  const seconds = Math.floor(ageMs / 1_000);
-  if (seconds < 60) return plural(seconds, 'second');
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return plural(minutes, 'minute');
-  return plural(Math.floor(minutes / 60), 'hour');
+/** updatedAgo as a screen reader says it: "just now", "1 minute ago", "5 minutes ago", "1 hour ago". */
+export function updatedAgoSpoken(ageMs: number): string {
+  if (ageMs < MINUTE_MS) return 'just now';
+  if (ageMs < HOUR_MS) return plural(Math.floor(ageMs / MINUTE_MS), 'minute');
+  return plural(Math.floor(ageMs / HOUR_MS), 'hour');
 }
 
 export interface LiveLine {
   state: LiveState;
-  /** "Reconnecting" / "Offline" before the time, or null while live. */
-  lead: string | null;
-  /** The rest of the visible line: "Updated 6s ago", or " · updated 2m ago" after a lead. */
-  text: string;
-  /** The whole line as one sentence for screen readers: "Reconnecting. List updated 2 minutes ago". */
-  sentence: string;
+  /** The visible words: "Updated just now", "Last updated 3:42 PM"; null before the first sync. */
+  text: string | null;
+  /** The same as one sentence for screen readers: "Reconnecting. List last updated at 3:42 PM." */
+  sentence: string | null;
 }
 
-const LEAD: Readonly<Record<LiveState, string | null>> = { live: null, reconnecting: 'Reconnecting', offline: 'Offline' };
-
-/** What the indicator shows, or null before the first sync. `subject` starts the spoken sentence. */
-export function liveLine(input: LiveInput, subject = 'List'): LiveLine | null {
-  const state = liveState(input);
-  if (state === null || input.syncedAt === null) return null;
-  const age = input.now - input.syncedAt;
-  const lead = LEAD[state];
-  const said = `${subject} updated ${agoLong(age)}`;
-  return {
-    state,
-    lead,
-    text: lead ? ` · updated ${agoShort(age)}` : `Updated ${agoShort(age)}`,
-    sentence: lead ? `${lead}. ${said}` : said,
-  };
+export interface LiveWords {
+  /** Starts the spoken sentence: "List updated just now.", "Dashboard updated 1 minute ago." */
+  subject?: string;
+  /** IANA zone of the clock time ("Last updated 3:42 PM"). */
+  timeZone: string;
 }
 
-/** The live region's words for a state change ("List is live", "Reconnecting", "Offline"); never the ticks. */
-export function liveAnnouncement(state: LiveState, subject = 'List'): string {
-  return state === 'live' ? `${subject} is live` : (LEAD[state] as string);
-}
-
-// ---------------------------------------------------------------------------------------------------
-// The indicator's clock: one interval for every indicator on screen, stopped while the page is hidden
-// ---------------------------------------------------------------------------------------------------
-
-export interface SecondClock {
-  now: number;
-  /** When the page last became visible (null: visible since it loaded). */
-  visibleSince: number | null;
-}
-
-let clock: SecondClock = { now: Date.now(), visibleSince: null };
-const listeners = new Set<() => void>();
-let timer: ReturnType<typeof setInterval> | undefined;
-let watchingVisibility = false;
-
-const pageHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
-
-function notify() {
-  for (const listener of [...listeners]) listener();
-}
-
-function startTimer() {
-  if (timer || listeners.size === 0 || pageHidden()) return;
-  timer = setInterval(() => {
-    clock = { ...clock, now: Date.now() };
-    notify();
-  }, LIVE_TICK_MS);
-}
-
-function stopTimer() {
-  if (timer) clearInterval(timer);
-  timer = undefined;
-}
-
-/** Remembers when the page comes back into view, even while no indicator is mounted (one listener, kept). */
-function watchVisibility() {
-  if (watchingVisibility || typeof document === 'undefined') return;
-  watchingVisibility = true;
-  document.addEventListener('visibilitychange', () => {
-    if (pageHidden()) {
-      stopTimer();
-      return;
-    }
-    const now = Date.now();
-    clock = { now, visibleSince: now };
-    notify();
-    startTimer();
-  });
-}
-
-/** Subscribe to the once-a-second clock (useSyncExternalStore). Returns the unsubscribe function. */
-export function subscribeSecondClock(listener: () => void): () => void {
-  watchVisibility();
-  listeners.add(listener);
-  startTimer();
-  return () => {
-    listeners.delete(listener);
-    if (listeners.size === 0) stopTimer();
-  };
-}
+const LEAD: Readonly<Record<Exclude<LiveState, 'healthy'>, string>> = { reconnecting: 'Reconnecting', offline: 'Offline' };
 
 /**
- * The clock's last tick (the same object until the next one). With nothing subscribed it is brought up to
- * date at most once a second, so a freshly mounted indicator never starts from an old time.
+ * What the line shows. Healthy: the age in minutes. While a banner shows (Reconnecting, Offline): the fixed clock
+ * time of the last good sync, in the event timezone ("3:42 PM"; "Thu 11:02 PM" for an earlier event day).
  */
-export function readSecondClock(): SecondClock {
-  if (listeners.size === 0) {
-    const now = Date.now();
-    if (Math.abs(now - clock.now) >= LIVE_TICK_MS) clock = { ...clock, now };
+export function liveLine(input: LiveInput, { subject = 'List', timeZone }: LiveWords): LiveLine {
+  const state = liveState(input);
+  const { syncedAt, now } = input;
+  if (syncedAt === null) return { state, text: null, sentence: null };
+  if (state === 'healthy') {
+    const age = now - syncedAt;
+    return { state, text: `Updated ${updatedAgo(age)}`, sentence: `${subject} updated ${updatedAgoSpoken(age)}.` };
   }
-  return clock;
+  const clock = formatCreatedTime(syncedAt, now, timeZone);
+  return { state, text: `Last updated ${clock}`, sentence: `${LEAD[state]}. ${subject} last updated at ${clock}.` };
+}
+
+export const sameLine = (a: LiveLine, b: LiveLine) => a === b || (a.state === b.state && a.text === b.text && a.sentence === b.sentence);
+
+/**
+ * When the line's words can next change with no new event (epoch ms), or null when only an event (a sync, the
+ * connection, online / offline, visibility) can change them. Healthy: the next minute boundary since the last
+ * sync, or the moment it turns stale, whichever comes first. A banner state shows a fixed clock time: nothing.
+ */
+export function nextLiveChange(input: LiveInput): number | null {
+  const { syncedAt, now, hidden = false, visibleSince = null } = input;
+  if (syncedAt === null || hidden || liveState(input) !== 'healthy') return null;
+  const age = now - syncedAt;
+  const nextMinute = syncedAt + (age < 0 ? MINUTE_MS : (Math.floor(age / MINUTE_MS) + 1) * MINUTE_MS);
+  const since = visibleSince === null ? syncedAt : Math.max(syncedAt, visibleSince);
+  const stale = since + STALE_AFTER_MS + 1;
+  return Math.min(nextMinute, stale);
+}
+
+export interface StateCue {
+  /** The colour of the line's dot, the banner and the avatar badge. */
+  tone: 'green' | 'amber' | 'gray';
+  /** The banner's words, or null: no banner. */
+  banner: string | null;
+  /** The avatar badge's name, or null: no badge. */
+  badge: string | null;
+}
+
+/** Everything besides the line that shows a state, from the one table (the banner, the avatar badge). */
+export function stateCue(state: LiveState, waiting = 0): StateCue {
+  switch (state) {
+    case 'healthy':
+      return { tone: 'green', banner: null, badge: null };
+    case 'reconnecting':
+      return { tone: 'amber', banner: 'Reconnecting…', badge: 'Reconnecting' };
+    case 'offline':
+      return { tone: 'gray', banner: `Offline · ${waiting} waiting to send`, badge: 'Offline' };
+  }
+}
+
+/** The live region's words for a change of state, or null when the state is unchanged. Never the minutes. */
+export function liveAnnouncement(from: LiveState, to: LiveState): string | null {
+  if (from === to) return null;
+  return to === 'healthy' ? 'Back online' : LEAD[to];
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -186,5 +161,153 @@ export function subscribeDeviceOnline(listener: () => void): () => void {
   return () => {
     window.removeEventListener('online', listener);
     window.removeEventListener('offline', listener);
+  };
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Page visibility: whether the page is hidden, and when it last became visible (one document listener)
+// ---------------------------------------------------------------------------------------------------
+
+export interface PageVisibility {
+  hidden: boolean;
+  /** When the page last became visible (null: visible since it loaded). */
+  since: number | null;
+}
+
+const pageHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
+let visibility: PageVisibility = { hidden: false, since: null };
+const visibilityListeners = new Set<() => void>();
+let watchingVisibility = false;
+
+/** Remembers when the page comes back into view, even while no line is mounted (one listener, kept). */
+function watchVisibility() {
+  if (watchingVisibility || typeof document === 'undefined') return;
+  watchingVisibility = true;
+  visibility = { hidden: pageHidden(), since: null };
+  document.addEventListener('visibilitychange', () => {
+    visibility = pageHidden() ? { ...visibility, hidden: true } : { hidden: false, since: Date.now() };
+    for (const listener of [...visibilityListeners]) listener();
+  });
+}
+
+export function readVisibility(): PageVisibility {
+  watchVisibility();
+  return visibility;
+}
+
+export function subscribeVisibility(listener: () => void): () => void {
+  watchVisibility();
+  visibilityListeners.add(listener);
+  return () => {
+    visibilityListeners.delete(listener);
+  };
+}
+
+// ---------------------------------------------------------------------------------------------------
+// A live source: the line for one view, as a useSyncExternalStore store
+// ---------------------------------------------------------------------------------------------------
+
+export interface LiveData {
+  syncedAt: number | null;
+  connection: Connection;
+  failing?: boolean;
+}
+
+/** The page around the line: is the phone online, is the page visible (tests pass their own). */
+export interface LivePage {
+  online(): boolean;
+  visibility(): PageVisibility;
+  /** Calls back on online / offline and on visibility changes. */
+  subscribe(onChange: () => void): () => void;
+}
+
+export const browserPage: LivePage = {
+  online: readDeviceOnline,
+  visibility: readVisibility,
+  subscribe(onChange) {
+    const offOnline = subscribeDeviceOnline(onChange);
+    const offVisibility = subscribeVisibility(onChange);
+    return () => {
+      offOnline();
+      offVisibility();
+    };
+  },
+};
+
+export interface LiveSourceOptions extends LiveWords {
+  /** The view's data: the store's last sync and connection (or the dashboard's last stats fetch). */
+  read: () => LiveData;
+  /** Calls back on every change of that data (the store's subscribe). */
+  subscribe: (onChange: () => void) => () => void;
+  /** The same data as the server rendered it (hydration); defaults to `read`. */
+  readServer?: () => LiveData;
+  page?: LivePage;
+}
+
+export interface LiveSource {
+  subscribe(listener: () => void): () => void;
+  /** The line now: the very same object while its words are unchanged, so React skips the render. */
+  getSnapshot(): LiveLine;
+  getServerSnapshot(): LiveLine;
+}
+
+/**
+ * The line for one view. Its clock (`now`) moves only on an event (the data changed, online / offline,
+ * visibility) or on its own single timer, set for nextLiveChange(): while syncs land every 6 s that moment
+ * keeps moving away and the timer never fires, so a healthy line renders at most once a minute.
+ */
+export function createLiveSource({
+  read,
+  subscribe: subscribeData,
+  readServer = read,
+  subject,
+  timeZone,
+  page = browserPage,
+}: LiveSourceOptions): LiveSource {
+  let now = Date.now();
+  let last: LiveLine | null = null;
+  let lastServer: LiveLine | null = null;
+  const words = { subject, timeZone };
+
+  const input = (): LiveInput => {
+    const data = read();
+    const { hidden, since } = page.visibility();
+    return { ...data, online: page.online(), now, visibleSince: since, hidden };
+  };
+
+  return {
+    subscribe(listener) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const arm = () => {
+        if (timer !== undefined) clearTimeout(timer);
+        timer = undefined;
+        const at = nextLiveChange(input());
+        if (at !== null) timer = setTimeout(wake, Math.max(0, at - Date.now()));
+      };
+      // Every event (and the timer itself) re-arms the one timer: arm() clears the pending one first.
+      function wake() {
+        now = Date.now();
+        arm();
+        listener();
+      }
+      const offs = [subscribeData(wake), page.subscribe(wake)];
+      now = Date.now();
+      arm();
+      return () => {
+        for (const off of offs) off();
+        if (timer !== undefined) clearTimeout(timer);
+        timer = undefined;
+      };
+    },
+    getSnapshot() {
+      const next = liveLine(input(), words);
+      if (!last || !sameLine(last, next)) last = next;
+      return last;
+    },
+    getServerSnapshot() {
+      const next = liveLine({ ...readServer(), now, online: true }, words);
+      if (!lastServer || !sameLine(lastServer, next)) lastServer = next;
+      return lastServer;
+    },
   };
 }

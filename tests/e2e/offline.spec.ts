@@ -138,7 +138,7 @@ test('offline: reload from the cached shell, open New request, queue with a phot
   // The cached shell hydrates under its stored CSP and shows the cached list under the offline banner.
   await expect(page.locator('html')).toHaveAttribute('data-hydrated', 'true');
   await expect(page.getByTestId('request-list')).toBeVisible();
-  await expect(page.getByRole('status').filter({ hasText: /^Offline · 0 waiting to send$/ })).toBeVisible();
+  await expect(page.getByTestId('connection-banner').filter({ hasText: /^Offline · 0 waiting to send$/ })).toBeVisible();
 
   // The New request view's chunk and the photo compressor come from the service worker cache.
   await page.getByRole('button', { name: 'New request' }).click();
@@ -153,7 +153,7 @@ test('offline: reload from the cached shell, open New request, queue with a phot
 
   // Waiting to send, on top of the list, and counted in the banner.
   await expect(queuedRow(page, name)).toBeVisible();
-  await expect(page.getByRole('status').filter({ hasText: /^Offline · 1 waiting to send$/ })).toBeVisible();
+  await expect(page.getByTestId('connection-banner').filter({ hasText: /^Offline · 1 waiting to send$/ })).toBeVisible();
   expect(await rowsNamed(page.request, name)).toHaveLength(0);
 
   await context.setOffline(false);
@@ -294,7 +294,7 @@ test('an update applied with no signal reloads from its own cache and opens ever
   }
   await reloadIntoUpdate(page, older);
   await expect(page.getByTestId('request-list')).toBeVisible();
-  await expect(page.getByRole('status').filter({ hasText: /^Offline · 0 waiting to send$/ })).toBeVisible();
+  await expect(page.getByTestId('connection-banner').filter({ hasText: /^Offline · 0 waiting to send$/ })).toBeVisible();
   await page.getByRole('button', { name: 'New request' }).click();
   await expect(submit(page)).toHaveText('Save offline');
   await page.goto('/?dashboard=1');

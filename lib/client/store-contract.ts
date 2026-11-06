@@ -8,7 +8,7 @@
 // changing these types; later phases may ADD members, never change existing ones. The real store must keep
 // the SERVER-RENDER INVARIANTS stated above `AppStore` (pure construction, side effects only in start(),
 // hydration from createServerState()).
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type {
   CreateRequestBody,
   IsoDateTime,
@@ -655,34 +655,62 @@ export function useDetail(id: string | null): DetailState {
 
 /**
  * Dashboard stats, polled every 15 s while `active` (A5). `updatedAt` (added in v2.2, the live indicator) is
- * this phone's clock when the last fetch succeeded.
+ * this phone's clock when the last fetch succeeded. `refresh` (added in v2.2 afternoon, Refresh now) fetches at
+ * once, joining a fetch already on its way, and resolves when it has settled; the next poll is 15 s after it.
  */
-export function useStats(active: boolean): { stats: Stats | null; error: boolean; updatedAt: number | null } {
+export function useStats(active: boolean): {
+  stats: Stats | null;
+  error: boolean;
+  updatedAt: number | null;
+  refresh: () => Promise<void>;
+} {
   const { actions } = useAppStore();
   const [state, setState] = useState<{ stats: Stats | null; error: boolean; updatedAt: number | null }>({
     stats: null,
     error: false,
     updatedAt: null,
   });
+  const runRef = useRef<() => Promise<void>>(idle);
+  const refresh = useCallback(() => runRef.current(), []);
   useEffect(() => {
     if (!active) return;
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let inFlight: Promise<void> | null = null;
+    const fetchOnce = () => {
+      inFlight ??= (async () => {
+        try {
+          const stats = await actions.fetchStats();
+          if (live) setState({ stats, error: false, updatedAt: Date.now() });
+        } catch {
+          if (live) setState((s) => ({ ...s, error: true }));
+        } finally {
+          inFlight = null;
+        }
+      })();
+      return inFlight;
+    };
     const tick = async () => {
-      try {
-        const stats = await actions.fetchStats();
-        if (live) setState({ stats, error: false, updatedAt: Date.now() });
-      } catch {
-        if (live) setState((s) => ({ ...s, error: true }));
-      }
-      if (live) timer = setTimeout(tick, STATS_POLL_MS);
+      await fetchOnce();
+      if (live && !timer) timer = setTimeout(next, STATS_POLL_MS);
+    };
+    const next = () => {
+      timer = undefined;
+      void tick();
     };
     void tick();
+    runRef.current = () => {
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+      return tick();
+    };
     return () => {
       live = false;
       if (timer) clearTimeout(timer);
+      runRef.current = idle;
     };
   }, [actions, active]);
-  return state;
+  return { ...state, refresh };
 }
+const idle = () => Promise.resolve();
 
