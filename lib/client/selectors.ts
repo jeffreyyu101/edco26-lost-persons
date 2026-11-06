@@ -197,3 +197,37 @@ export function searchRequests(rows: readonly RequestSummary[], query: string): 
   }
   return hits.sort((a, b) => time(b.row.createdAt) - time(a.row.createdAt) || b.row.caseNumber - a.row.caseNumber);
 }
+
+// ---------------------------------------------------------------------------------------------------
+// All requests, log option B (Brian + Jeffrey, 2026-11-06): open requests first, and every closed one
+// (Not in medical included) folded into one "Closed N" row.
+// ---------------------------------------------------------------------------------------------------
+
+export interface OpenClosed<T> {
+  /** Waiting for check, In medical (and legacy Bring friend). */
+  open: T[];
+  /** Not in medical, Reunited, Discharged, Cancelled and any unknown legacy status. */
+  closed: T[];
+}
+
+/** Splits requests into the open and closed buckets, keeping their order. */
+export function splitOpenClosed<T extends Pick<RequestSummary, 'status'>>(rows: readonly T[]): OpenClosed<T> {
+  const open: T[] = [];
+  const closed: T[] = [];
+  for (const row of rows) (statusBucket(row.status) === 'open' ? open : closed).push(row);
+  return { open, closed };
+}
+
+/** The unfiltered log: open requests, then the folded closed ones, each newest first by createdAt. */
+export function logSections(rows: readonly RequestSummary[]): OpenClosed<RequestSummary> {
+  return splitOpenClosed(sortNewestFirst(rows));
+}
+
+/** My requests: open first, then the closed ones (the finished area), each newest update first. */
+export function mineSections(
+  rows: readonly RequestSummary[],
+  myIds: ReadonlySet<string>,
+  sessionStaff: string | null,
+): OpenClosed<RequestSummary> {
+  return splitOpenClosed(mineRows(rows, myIds, sessionStaff));
+}

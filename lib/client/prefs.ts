@@ -14,6 +14,8 @@
 //     theme toggle calls setThemePref().
 //   * Phone-created request ids are NOT stored here. They live in IndexedDB next to the store's cache
 //     (spec §4 "Staff identity and ownership") and are cleared on sign-out. Prefs survive sign-out.
+//   * One pref lasts for the browser session only: `closedExpanded` (the All requests "Closed" fold, log
+//     option B, 2026-11-06) lives in sessionStorage.
 //
 // FROZEN after Phase 1a: later phases may ADD exports, never change existing ones.
 import {
@@ -49,6 +51,11 @@ export interface Prefs {
   rememberedTeam: string | null;
   /** No default until one is chosen once. */
   lastPost: LastPost | null;
+  /**
+   * All requests: the "Closed N" fold is open. Remembered for this browser session only (sessionStorage),
+   * so a new session starts folded.
+   */
+  closedExpanded: boolean;
 }
 
 export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
@@ -58,7 +65,14 @@ export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
   rememberedName: null,
   rememberedTeam: null,
   lastPost: null,
+  closedExpanded: false,
 });
+
+/** sessionStorage keys: prefs that last for this browser session only. */
+export const SESSION_PREF_KEYS = {
+  /** '1' while the All requests "Closed" fold is open; absent when folded */
+  closedExpanded: 'lp-closed-expanded',
+} as const;
 
 /** localStorage keys. The theme key is shared with the pre-paint THEME_SCRIPT (lib/theme.ts). */
 export const PREF_STORAGE_KEYS = {
@@ -99,6 +113,33 @@ function write(key: string, value: string | null): void {
     else s.setItem(key, value);
   } catch {
     // Private mode / quota: the pref simply isn't remembered.
+  }
+}
+
+function sessionStore(): Storage | null {
+  try {
+    return typeof window === 'undefined' ? null : (window.sessionStorage ?? null);
+  } catch {
+    return null;
+  }
+}
+
+function readSession(key: string): string | null {
+  try {
+    return sessionStore()?.getItem(key) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSession(key: string, value: string | null): void {
+  try {
+    const s = sessionStore();
+    if (!s) return;
+    if (value === null) s.removeItem(key);
+    else s.setItem(key, value);
+  } catch {
+    // Private mode / quota: the fold simply starts closed next time.
   }
 }
 
@@ -146,7 +187,13 @@ export function readPrefs(): Prefs {
     rememberedName: identity?.name ?? null,
     rememberedTeam: identity?.team ?? null,
     lastPost: cleanLastPost(readJson(PREF_STORAGE_KEYS.lastPost)),
+    closedExpanded: readSession(SESSION_PREF_KEYS.closedExpanded) === '1',
   };
+}
+
+/** All requests: remember (for this browser session) whether the "Closed" fold is open. */
+export function setClosedExpanded(open: boolean): void {
+  writeSession(SESSION_PREF_KEYS.closedExpanded, open ? '1' : null);
 }
 
 /** After a successful sign-in: remember the name and (canonical) team. Invalid input clears them. */
@@ -201,6 +248,9 @@ export function writePref<K extends keyof Prefs>(key: K, value: Prefs[K]): void 
       return;
     case 'lastPost':
       setLastPost(value as LastPost | null);
+      return;
+    case 'closedExpanded':
+      setClosedExpanded(value as boolean);
       return;
     case 'rememberedName':
     case 'rememberedTeam': {
