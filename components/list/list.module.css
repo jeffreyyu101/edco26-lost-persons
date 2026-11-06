@@ -1,0 +1,819 @@
+/* List views (design/screens/requests.html, states.html, skeletons.html). Values are ported from the
+   mockups' CSS; class names follow theirs where possible (.top, .vbar, .vsw, .row, .qh, .qd, …). */
+
+/* ---- Page frame -------------------------------------------------------------------------------- */
+
+.root {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* The list views draw the offline / error banner themselves, between the header and the view bar
+   (states.html Offline). Until the page shell stops rendering its own copy above list views, hide that
+   copy when it sits right before a list view, so the banner never shows twice. Inert otherwise. */
+:global(.lp-banner):has(+ .root) {
+  /* !important: the shell banner sets its display inline. */
+  display: none !important;
+}
+
+/* Header, banner and view bar stay on screen while the list scrolls (the document scrolls, so iOS keeps
+   its momentum scrolling and collapsing toolbars). */
+.sticky {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: var(--color-background);
+  padding-top: env(safe-area-inset-top);
+}
+
+.body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  /* Room for the New request button over the last row. */
+  padding-bottom: calc(90px + env(safe-area-inset-bottom));
+}
+
+.fab {
+  position: fixed !important;
+  right: calc(16px + env(safe-area-inset-right));
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  z-index: 5;
+  box-shadow: var(--shadow-5);
+}
+
+/* ---- Header (.top) ----------------------------------------------------------------------------- */
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 16px 12px;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.heading {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The live dot: a 44 px tap target around a 7 px dot. */
+.liveBtn {
+  flex: none;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: -18px -18px -18px -18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.liveBtn:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -10px;
+}
+
+.live {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green-9);
+  box-shadow: 0 0 0 3px var(--green-a4);
+  transition:
+    background-color 0.2s,
+    box-shadow 0.2s,
+    transform 0.15s;
+}
+
+.live[data-state='off'] {
+  background: var(--amber-9);
+  box-shadow: 0 0 0 3px var(--amber-a4);
+}
+
+.live[data-state='loading'] {
+  background: var(--gray-8);
+  box-shadow: none;
+}
+
+.liveBtn:active .live {
+  transform: scale(1.4);
+}
+
+/* 44 px touch targets for the 32–34 px icon buttons without changing their layout. */
+.hit {
+  position: relative;
+}
+
+.hit::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+
+/* ---- View bar (.vbar / .vsw / .vmenu) ---------------------------------------------------------- */
+
+.vbar {
+  padding: 0 12px 10px;
+  border-bottom: 1px solid var(--gray-a3);
+}
+
+.vrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+}
+
+.vsw {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  min-width: 0;
+  padding: 0 9px 0 11px;
+  border-radius: var(--radius-3);
+  border: 0;
+  background: var(--gray-a3);
+  color: var(--gray-12);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.vsw svg {
+  color: var(--gray-11);
+  flex: none;
+}
+
+.vsw[data-state='open'] {
+  background: var(--gray-a5);
+}
+
+.vsw:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 1px;
+}
+
+.vtitle {
+  white-space: nowrap;
+}
+
+.vc {
+  color: var(--gray-10);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.sp {
+  flex: 1;
+}
+
+.vmenu {
+  width: 276px;
+  max-width: calc(100vw - 24px);
+  --base-menu-content-padding: 6px;
+}
+
+.vitem {
+  height: auto !important;
+  min-height: 46px;
+  gap: 10px !important;
+  padding: 6px 10px !important;
+  border-radius: var(--radius-2);
+}
+
+.vitem[aria-checked='true'] {
+  background: var(--gray-a3);
+}
+
+.vic {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-2);
+  display: grid;
+  place-items: center;
+  background: var(--gray-a3);
+  color: var(--gray-11);
+  flex: none;
+}
+
+.vtx {
+  flex: 1;
+  color: var(--gray-12);
+}
+
+.vcount {
+  font-variant-numeric: tabular-nums;
+}
+
+.vchk {
+  width: 16px;
+  display: flex;
+  color: var(--gray-12);
+}
+
+.vsep {
+  margin: 6px 4px !important;
+  background: var(--gray-a4) !important;
+}
+
+/* Filter chips under the switcher (?status= / ?post=). */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  max-width: 100%;
+  padding: 0 8px 0 10px;
+  border: 0;
+  border-radius: var(--radius-3);
+  background: var(--gray-12);
+  color: var(--gray-1);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.chip::before {
+  content: '';
+  position: absolute;
+  inset: -7px -2px;
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+
+.chipLabel {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chipCount {
+  opacity: 0.7;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.chipX {
+  display: flex;
+  opacity: 0.7;
+}
+
+/* ---- All: flat rows (.row) --------------------------------------------------------------------- */
+
+.flat {
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 16px 11px;
+  border: 0;
+  margin: 0;
+  background: none;
+  color: var(--gray-12);
+  font: inherit;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.row + .row {
+  border-top: 1px solid var(--gray-a3);
+}
+
+button.row {
+  cursor: pointer;
+}
+
+button.row:active {
+  background: var(--gray-a2);
+}
+
+button.row:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -2px;
+}
+
+.muted {
+  opacity: 0.55;
+}
+
+.g {
+  padding-top: 3px;
+  display: flex;
+}
+
+.rm {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.l1,
+.l2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.l1 > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nowrap {
+  flex: none;
+  white-space: nowrap;
+}
+
+.t {
+  flex: none;
+  min-width: 24px;
+  font-size: 12px;
+  color: var(--gray-10);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.meta {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--gray-10);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.attention {
+  color: var(--red-9);
+  flex: none;
+}
+
+/* Search results: the matched text line (states.html .desc + mark). */
+.desc {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--gray-11);
+  font-size: 13px;
+}
+
+.mark {
+  background: var(--amber-a5);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+/* ---- Pending / My requests: cards -------------------------------------------------------------- */
+
+.scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 12px 0;
+}
+
+.scroll > * {
+  flex-shrink: 0;
+}
+
+.sh {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 4px 0;
+  font: inherit;
+}
+
+.card {
+  position: relative;
+}
+
+/* The whole card opens the profile: a transparent button stretched over it. Content stays outside the
+   button (valid markup); the action buttons sit above it. */
+.stretch {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.stretch:active {
+  background: var(--gray-a2);
+}
+
+.stretch:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -2px;
+}
+
+.actions {
+  position: relative;
+  z-index: 2;
+}
+
+.fresh {
+  outline: 1.5px solid var(--focus-8);
+  outline-offset: -1px;
+  border-radius: var(--radius-4);
+}
+
+.fresh[data-tone='blue'] {
+  outline-color: var(--blue-8);
+}
+
+.fresh[data-tone='green'] {
+  outline-color: var(--green-8);
+}
+
+.fresh[data-tone='amber'] {
+  outline-color: var(--amber-8);
+}
+
+.qh {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.qn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-3);
+  flex: none;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.thumbPhoto {
+  background: var(--gray-a5);
+  color: var(--gray-11);
+}
+
+.thumbNone {
+  background: var(--gray-a2);
+  color: var(--gray-8);
+  box-shadow: inset 0 0 0 1px var(--gray-a4);
+}
+
+.thumbSmall {
+  width: 36px;
+  height: 36px;
+}
+
+.qd {
+  margin: 10px 0 12px;
+  color: var(--gray-11);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.qa {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.qaGap {
+  margin-top: 12px;
+}
+
+.cc {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.who {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--green-11);
+}
+
+.who > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.who svg {
+  flex: none;
+}
+
+.badgeIcon {
+  flex: none;
+}
+
+/* My requests: status line and progress stepper. */
+.stat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 14px;
+}
+
+.stepper {
+  display: grid;
+}
+
+.st {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.st:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  left: calc(50% + 8px);
+  right: calc(-50% + 8px);
+  height: 1.5px;
+  background: var(--gray-a5);
+}
+
+.st[data-step='done']::after {
+  background: var(--gray-10);
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--gray-a7);
+}
+
+.st[data-step='done'] .dot {
+  background: var(--gray-10);
+  box-shadow: none;
+}
+
+.st[data-step='cur'] .dot {
+  background: var(--tone);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 28%, transparent);
+}
+
+.st[data-step='pend'] .dot {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px var(--tone);
+}
+
+.lb {
+  font-size: 11px;
+  line-height: 1;
+  color: var(--gray-10);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.st[data-step='cur'] .lb,
+.st[data-step='pend'] .lb {
+  color: var(--gray-12);
+  font-weight: 500;
+}
+
+/* ---- Search (states.html .search / .sfield / .cnt) --------------------------------------------- */
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 12px 10px;
+}
+
+.sfield {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 4px 0 10px;
+  border-radius: var(--radius-3);
+  background: var(--gray-a3);
+  color: var(--gray-12);
+  box-shadow: inset 0 0 0 1.5px var(--gray-a7);
+}
+
+.sfield:focus-within {
+  box-shadow: inset 0 0 0 1.5px var(--gray-a8);
+}
+
+.sfield > svg {
+  color: var(--gray-10);
+  flex: none;
+}
+
+.sinput {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--gray-12);
+  font: inherit;
+  font-size: 16px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.sinput::placeholder {
+  color: var(--gray-a9);
+}
+
+.sinput::-webkit-search-cancel-button,
+.sinput::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.sclear {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--gray-10);
+  cursor: pointer;
+}
+
+.sclear::before {
+  content: '';
+  position: absolute;
+  inset: -7px;
+}
+
+.sclear:focus-visible {
+  outline: 2px solid var(--focus-8);
+}
+
+.cnt {
+  padding: 2px 16px 8px;
+  border-bottom: 1px solid var(--gray-a3);
+}
+
+/* ---- Bell sheet (states.html .steps / .sicon) ---------------------------------------------------- */
+
+.sicon {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-3);
+  display: grid;
+  place-items: center;
+  background: var(--gray-a3);
+  color: var(--gray-12);
+  flex: none;
+}
+
+.siconRound {
+  width: 40px;
+  height: 40px;
+  border-radius: 20px;
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 12px 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 46px;
+}
+
+/* ---- Skeletons (skeletons.html) ---------------------------------------------------------------- */
+
+.skRow {
+  display: flex;
+  gap: 10px;
+  padding: 12px 16px;
+}
+
+.skRow + .skRow {
+  border-top: 1px solid var(--gray-a3);
+}
+
+.skRm {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skL {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.skScroll {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 12px 0;
+}
+
+.skCard {
+  border-radius: var(--radius-4);
+  box-shadow: inset 0 0 0 1px var(--gray-a4);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}

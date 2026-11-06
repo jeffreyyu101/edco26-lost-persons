@@ -1,11 +1,12 @@
 'use client';
 // List-view header (requests.html .top): the title "Is my friend in medical?", the live dot (tap to sync
-// now; amber offline, grey while loading), then search, the bell and the avatar (account menu).
-// STUB (Phase 1a): props are final; L (Phase 2) ports the mockup exactly.
+// now; amber offline or when the log can't be reached, grey while loading), then search, the bell and the
+// avatar (account menu, owned by components/account).
 import { Flex, Heading, IconButton } from '@radix-ui/themes';
-import { Bell, BellOff, Search } from 'lucide-react';
+import { BellOff, BellRing, Search } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { Connection } from '@/lib/client/store-contract';
+import s from './list.module.css';
 
 export interface AppHeaderProps {
   connection: Connection;
@@ -22,40 +23,58 @@ export interface AppHeaderProps {
   account: ReactNode;
 }
 
+export type LiveState = 'live' | 'off' | 'loading';
+
+export function liveState(connection: Connection, syncing: boolean): LiveState {
+  if (syncing) return 'loading';
+  return connection === 'live' ? 'live' : 'off';
+}
+
+const LIVE_LABEL: Readonly<Record<Connection, string>> = {
+  live: 'Live. Tap to sync now',
+  offline: 'Offline. Tap to try again',
+  error: "Can't reach the log. Tap to try again",
+};
+
+const ICON = { size: 18, strokeWidth: 1.75, 'aria-hidden': true } as const;
+
 export function AppHeader({ connection, syncing, onSyncNow, onOpenSearch, bellOn, onToggleBell, account }: AppHeaderProps) {
-  const dot = syncing ? 'var(--gray-9)' : connection === 'live' ? 'var(--green-9)' : 'var(--amber-9)';
-  const dotLabel = syncing ? 'Syncing' : connection === 'live' ? 'Live. Tap to sync now' : connection === 'offline' ? 'Offline. Tap to retry' : "Can't reach the log. Tap to retry";
+  const state = liveState(connection, syncing);
   return (
-    <Flex align="center" justify="between" gap="3" px="4" pt="4" pb="3">
-      <Flex align="center" gap="2" minWidth="0">
-        <Heading size="3" weight="medium" truncate>
+    <header className={s.top}>
+      <div className={s.title}>
+        <Heading as="h1" size="3" weight="medium" className={s.heading}>
           Is my friend in medical?
         </Heading>
         <button
           type="button"
+          className={s.liveBtn}
           onClick={onSyncNow}
-          aria-label={dotLabel}
-          style={{ border: 0, background: 'none', padding: 10, margin: -10, display: 'grid', placeItems: 'center', cursor: 'pointer' }}
+          aria-label={syncing ? 'Syncing' : LIVE_LABEL[connection]}
+          data-testid="live-dot"
+          data-state={state}
         >
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: dot }} />
+          <span className={s.live} data-state={state} />
         </button>
-      </Flex>
+      </div>
       <Flex align="center" gap="4" flexShrink="0">
-        <IconButton variant="ghost" color="gray" aria-label="Search" onClick={onOpenSearch}>
-          <Search size={18} aria-hidden />
+        <IconButton className={s.hit} variant="ghost" color="gray" aria-label="Search" onClick={onOpenSearch}>
+          <Search {...ICON} />
         </IconButton>
         <IconButton
+          className={s.hit}
           variant={bellOn ? 'soft' : 'ghost'}
           color="gray"
           highContrast={bellOn}
-          aria-label={bellOn ? 'New-request alerts on' : 'New-request alerts off'}
+          // A toggle: the name stays fixed and aria-pressed carries the state.
+          aria-label="New-request alerts"
           aria-pressed={bellOn}
           onClick={onToggleBell}
         >
-          {bellOn ? <Bell size={18} aria-hidden /> : <BellOff size={18} aria-hidden />}
+          {bellOn ? <BellRing {...ICON} /> : <BellOff {...ICON} />}
         </IconButton>
         {account}
       </Flex>
-    </Flex>
+    </header>
   );
 }

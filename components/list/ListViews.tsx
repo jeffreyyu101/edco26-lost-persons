@@ -1,15 +1,19 @@
 'use client';
-// List views: All, Pending, My requests and Search (spec §8 List views). The page loads each export with
-// next/dynamic. PLACEHOLDER (Phase 1a): renders the store's rows plainly so Merge 1 can smoke-test the
-// real store; L (Phase 2) builds the real screens. The exported names and props are FINAL.
+// List views: All, Pending, My requests and Search (spec §8 List views, v2.1 A3/A22; mockups
+// design/screens/requests.html, states.html, skeletons.html). The page loads each export with
+// next/dynamic. Every action goes through the store contract; every view change through lib/client/nav.
+//
+// The list views own their header (title, live dot, search, bell, avatar), the offline / error banner
+// between the header and the view bar (states.html Offline), the view switcher with the filter chips,
+// and the New request button. Skeletons show only while there is no cached data yet.
 import { Button, Text } from '@radix-ui/themes';
-import { Plus } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { MapPin, Plus, Search as SearchIcon, X } from 'lucide-react';
+import { useDeferredValue, useEffect, useRef, useState, type ReactNode } from 'react';
 import { AccountMenu } from '@/components/account/AccountMenu';
-import { StatusGlyph } from '@/components/ui/StatusGlyph';
-import { RowSkeletons } from '@/components/ui/Skeleton';
+import { Banner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { navigate } from '@/lib/client/nav';
+import { StatusGlyph } from '@/components/ui/StatusGlyph';
+import { goBack, navigate } from '@/lib/client/nav';
 import {
   useActions,
   useAllRows,
@@ -19,103 +23,145 @@ import {
   useIsLoading,
   useMine,
   useNow,
+  useOutbox,
   usePending,
   usePrefs,
   useSearch,
+  useSession,
+  useSnackbar,
+  useStoreSelector,
+  type StoreState,
 } from '@/lib/client/store-contract';
-import type { RequestSummary } from '@/lib/api-types';
-import { ageGender, statusMeta } from '@/lib/domain';
-import { formatCaseNumber, formatListTime } from '@/lib/format';
+import { statusMeta } from '@/lib/domain';
+import { formatListTime } from '@/lib/format';
+import { BellSheet, isStandalone } from './BellSheet';
+import { CheckCard, ComingCard, MineCard, OutboxCard } from './cards';
+import { primeKeyboard, useDelayedFlag, useScrollMemory, useStatusTap } from './hooks';
+import { mineFreshTone, resultCount } from './list-helpers';
+import { AllSkeleton, MineSkeleton, PendingSkeleton } from './ListSkeletons';
 import { AppHeader } from './AppHeader';
+import { OutboxRow, RequestRow, SearchRow } from './rows';
 import { ViewSwitcher, type ListViewName } from './ViewSwitcher';
+import s from './list.module.css';
 
-function Chrome({ view, children }: { view: ListViewName; children: ReactNode }) {
+/** A sync shorter than this doesn't turn the live dot grey (no flicker on every 6 s poll). */
+const SLOW_SYNC_MS = 400;
+
+const selectHydrated = (state: StoreState) => state.hydrated;
+
+/** Offline · N waiting to send / Can't reach the log · Try again (only once data is on screen). */
+function ConnectionBanner() {
+  const actions = useActions();
+  const { connection } = useConnection();
+  const outbox = useOutbox();
+  if (connection === 'offline') {
+    return (
+      <Banner tone="amber" icon="offline">
+        Offline · {outbox.length} waiting to send
+      </Banner>
+    );
+  }
+  if (connection === 'error') {
+    return (
+      <Banner tone="red" icon="error" action={{ label: 'Try again', onClick: actions.syncNow }}>
+        Can&apos;t reach the log
+      </Banner>
+    );
+  }
+  return null;
+}
+
+interface ChromeProps {
+  view: ListViewName;
+  /** Filter chips under the switcher (All only). */
+  chips?: ReactNode;
+  /** Selecting the current view still navigates (All with a filter clears the filter). */
+  filtered?: boolean;
+  skeleton: ReactNode;
+  children: ReactNode;
+}
+
+function Chrome({ view, chips, filtered = false, skeleton, children }: ChromeProps) {
   const actions = useActions();
   const { connection, syncing } = useConnection();
   const prefs = usePrefs();
   const counts = useCounts();
   const loading = useIsLoading();
+  const hydrated = useStoreSelector(selectHydrated);
+  const snackbar = useSnackbar();
+  const slowSync = useDelayedFlag(syncing, SLOW_SYNC_MS);
+  const [bellSheet, setBellSheet] = useState({ open: false, standalone: false });
+
+  const toggleBell = () => {
+    const on = !prefs.bell;
+    actions.setPref('bell', on);
+    if (on && !prefs.bellIntroSeen) {
+      actions.setPref('bellIntroSeen', true);
+      setBellSheet({ open: true, standalone: isStandalone() });
+    }
+  };
+
+  const select = (next: ListViewName) => {
+    if (next === view && !filtered) return;
+    // Switching views replaces the entry (like tabs): Back never loops between list views.
+    navigate(next === 'all' ? {} : { view: next }, { replace: true });
+  };
+
+  // No cached data: skeletons while loading, or "Can't reach the log" once the cache is known to be empty
+  // and the server can't be reached.
+  const body = loading ? (
+    hydrated && connection !== 'live' ? (
+      <EmptyState
+        icon="plug"
+        title="Can't reach the log"
+        action={{ label: 'Try again', onClick: actions.syncNow, icon: 'refresh' }}
+      />
+    ) : (
+      skeleton
+    )
+  ) : (
+    children
+  );
+
   return (
-    <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', position: 'relative' }}>
-      <AppHeader
-        connection={connection}
-        syncing={syncing}
-        onSyncNow={actions.syncNow}
-        onOpenSearch={() => navigate({ q: '' })}
-        bellOn={prefs.bell}
-        onToggleBell={() => actions.setPref('bell', !prefs.bell)}
-        account={<AccountMenu />}
+    <div className={s.root} data-view={view}>
+      <div className={s.sticky}>
+        <AppHeader
+          connection={connection}
+          // Grey while the first data loads or a slow sync runs; offline / error stays amber.
+          syncing={connection === 'live' && (loading || slowSync)}
+          onSyncNow={actions.syncNow}
+          onOpenSearch={() => {
+            primeKeyboard();
+            navigate({ q: '' });
+          }}
+          bellOn={prefs.bell}
+          onToggleBell={toggleBell}
+          account={<AccountMenu />}
+        />
+        {loading ? null : <ConnectionBanner />}
+        <ViewSwitcher view={view} counts={loading ? null : counts} onSelect={select}>
+          {chips}
+        </ViewSwitcher>
+      </div>
+      <main className={s.body}>{body}</main>
+      {snackbar ? null : (
+        <Button className={s.fab} size="3" radius="full" highContrast onClick={() => navigate({ new: true })}>
+          <Plus size={16} strokeWidth={1.75} aria-hidden /> New request
+        </Button>
+      )}
+      <BellSheet
+        open={bellSheet.open}
+        standalone={bellSheet.standalone}
+        onOpenChange={(open) => setBellSheet((b) => ({ ...b, open }))}
       />
-      <ViewSwitcher
-        view={view}
-        counts={loading ? null : counts}
-        onSelect={(v) => navigate(v === 'all' ? {} : { view: v })}
-      />
-      <div style={{ flex: 1 }}>{loading ? <RowSkeletons /> : children}</div>
-      <Button
-        size="3"
-        radius="full"
-        highContrast
-        onClick={() => navigate({ new: true })}
-        style={{ position: 'fixed', right: 16, bottom: 'calc(24px + env(safe-area-inset-bottom))', boxShadow: 'var(--shadow-5)' }}
-      >
-        <Plus size={16} aria-hidden /> New request
-      </Button>
     </div>
   );
 }
 
-function Row({ row }: { row: RequestSummary }) {
-  const tz = useEventTimezone();
-  const now = useNow();
-  const meta = statusMeta(row.status);
-  return (
-    <button
-      type="button"
-      data-request-id={row.id}
-      onClick={() => navigate({ r: row.id })}
-      style={{ display: 'flex', gap: 10, width: '100%', padding: '10px 16px 11px', border: 0, borderTop: '1px solid var(--gray-a3)', background: 'none', textAlign: 'left', color: 'inherit', font: 'inherit', opacity: meta.bucket === 'closed' ? 0.55 : 1 }}
-    >
-      <span style={{ paddingTop: 3, display: 'flex' }}>
-        <StatusGlyph status={row.status} />
-      </span>
-      <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
-        <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <Text size="2" weight="medium" truncate>
-            {row.name || '—'}
-          </Text>
-          <Text size="2" color="gray">
-            {ageGender(row.age, row.gender)}
-          </Text>
-          <span style={{ flex: 1 }} />
-          <Text size="1" color="gray">
-            {formatListTime(row.createdAt, now, tz)}
-          </Text>
-        </span>
-        <Text size="1" truncate>
-          <Text weight="medium" color={meta.tone}>
-            {meta.label}
-          </Text>
-          <Text color="gray">
-            {' '}
-            · {row.postShort} · {formatCaseNumber(row.caseNumber)}
-          </Text>
-        </Text>
-      </span>
-    </button>
-  );
-}
-
-function Rows({ rows }: { rows: readonly RequestSummary[] }) {
-  if (rows.length === 0) return <EmptyState icon="inbox" title="No requests yet" />;
-  return (
-    <div data-testid="request-list">
-      {rows.map((r) => (
-        <Row key={r.id} row={r} />
-      ))}
-    </div>
-  );
-}
+// ---------------------------------------------------------------------------------------------------
+// All
+// ---------------------------------------------------------------------------------------------------
 
 export interface AllViewProps {
   /** Status filter (database value) from ?status=, shown as a chip. */
@@ -124,58 +170,269 @@ export interface AllViewProps {
   post: string | null;
 }
 
+function FilterChips({ status, post, count }: { status: string | null; post: string | null; count: number }) {
+  const statusLabel = status ? statusMeta(status).shortLabel : '';
+  return (
+    <div className={s.chips}>
+      {status ? (
+        <button
+          type="button"
+          className={s.chip}
+          aria-label={`${statusLabel}: ${count} shown. Clear this filter`}
+          onClick={() => navigate(post ? { post } : {}, { replace: true })}
+          data-testid="status-chip"
+        >
+          <StatusGlyph status={status} size={12} />
+          <span className={s.chipLabel}>{statusLabel}</span>
+          {post ? null : <span className={s.chipCount}>{count}</span>}
+          <span className={s.chipX}>
+            <X size={14} strokeWidth={2} aria-hidden />
+          </span>
+        </button>
+      ) : null}
+      {post ? (
+        <button
+          type="button"
+          className={s.chip}
+          aria-label={`Post ${post}: ${count} shown. Clear this filter`}
+          onClick={() => navigate(status ? { status } : {}, { replace: true })}
+          data-testid="post-chip"
+        >
+          <MapPin size={13} strokeWidth={2} aria-hidden />
+          <span className={s.chipLabel}>{post}</span>
+          <span className={s.chipCount}>{count}</span>
+          <span className={s.chipX}>
+            <X size={14} strokeWidth={2} aria-hidden />
+          </span>
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export function AllView({ status, post }: AllViewProps) {
   const rows = useAllRows({ status, post });
+  const outbox = useOutbox();
+  const loading = useIsLoading();
+  const tz = useEventTimezone();
+  const now = useNow();
+  const filtered = !!(status || post);
+  // Requests saved on this phone sit on top of the unfiltered log (they have no status or LP number yet).
+  const queued = filtered ? [] : outbox;
+  useScrollMemory(`all|${status ?? ''}|${post ?? ''}`, !loading);
+
   return (
-    <Chrome view="all">
-      <Rows rows={rows} />
+    <Chrome
+      view="all"
+      filtered={filtered}
+      chips={filtered ? <FilterChips status={status} post={post} count={rows.length} /> : null}
+      skeleton={<AllSkeleton />}
+    >
+      {rows.length + queued.length === 0 ? (
+        <EmptyState icon="inbox" title={filtered ? 'No matching requests' : 'No requests yet'} />
+      ) : (
+        <div className={s.flat} data-testid="request-list">
+          {queued.map((item) => (
+            <OutboxRow key={item.mutationId} item={item} time={formatListTime(item.createdAt, now, tz)} />
+          ))}
+          {rows.map((row) => (
+            <RequestRow key={row.id} row={row} time={formatListTime(row.createdAt, now, tz)} />
+          ))}
+        </div>
+      )}
     </Chrome>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Pending: Friend coming (oldest first), then Waiting for check (oldest first)
+// ---------------------------------------------------------------------------------------------------
+
+function SectionHeader({ kind, label, count }: { kind: 'inMedical' | 'waiting'; label: string; count: number }) {
+  return (
+    <h2 className={s.sh}>
+      <StatusGlyph kind={kind} />
+      <Text size="2" weight="medium">
+        {label}
+      </Text>
+      <Text size="2" color="gray" weight="regular">
+        {count}
+      </Text>
+    </h2>
   );
 }
 
 export function PendingView() {
   const { friendComing, waiting } = usePending();
+  const loading = useIsLoading();
+  const now = useNow();
+  const { offline, tap } = useStatusTap();
+  useScrollMemory('pending', !loading);
+
   return (
-    <Chrome view="pending">
-      <Rows rows={[...friendComing, ...waiting]} />
+    <Chrome view="pending" skeleton={<PendingSkeleton />}>
+      {friendComing.length + waiting.length === 0 ? (
+        <EmptyState icon="inbox" title="Nothing pending" />
+      ) : (
+        <div className={s.scroll} data-testid="request-list">
+          {friendComing.length > 0 ? (
+            <section className={s.scroll} style={{ padding: 0 }} aria-label={`Friend coming, ${friendComing.length}`}>
+              <SectionHeader kind="inMedical" label="Friend coming" count={friendComing.length} />
+              {friendComing.map((row) => (
+                <ComingCard key={row.id} row={row} now={now} offline={offline} onTap={tap} />
+              ))}
+            </section>
+          ) : null}
+          {waiting.length > 0 ? (
+            <section className={s.scroll} style={{ padding: 0 }} aria-label={`Waiting for check, ${waiting.length}`}>
+              <SectionHeader kind="waiting" label="Waiting for check" count={waiting.length} />
+              {waiting.map((row) => (
+                <CheckCard key={row.id} row={row} now={now} offline={offline} onTap={tap} />
+              ))}
+            </section>
+          ) : null}
+        </div>
+      )}
     </Chrome>
   );
 }
 
+// ---------------------------------------------------------------------------------------------------
+// My requests: queued requests on top, then newest update first, each with the progress stepper
+// ---------------------------------------------------------------------------------------------------
+
 export function MineView() {
   const rows = useMine();
+  const outbox = useOutbox();
+  const session = useSession();
+  const loading = useIsLoading();
+  const now = useNow();
+  useScrollMemory('mine', !loading);
+
   return (
-    <Chrome view="mine">
-      <Rows rows={rows} />
+    <Chrome view="mine" skeleton={<MineSkeleton />}>
+      {rows.length + outbox.length === 0 ? (
+        <EmptyState icon="inbox" title="No requests yet" />
+      ) : (
+        <div className={s.scroll} data-testid="request-list">
+          {outbox.map((item) => (
+            <OutboxCard key={item.mutationId} item={item} now={now} />
+          ))}
+          {rows.map((row) => (
+            <MineCard key={row.id} row={row} now={now} freshTone={mineFreshTone(row, now, session.staff)} />
+          ))}
+        </div>
+      )}
     </Chrome>
   );
 }
+
+// ---------------------------------------------------------------------------------------------------
+// Search: the field takes over the header (states.html Search)
+// ---------------------------------------------------------------------------------------------------
 
 export interface SearchViewProps {
   /** The search text from ?q= (may be empty when search was just opened). */
   q: string;
 }
 
+/** The ?q= value is capped at 200 characters by nav.parseView; longer text would leave search. */
+const MAX_QUERY = 200;
+
 export function SearchView({ q }: SearchViewProps) {
-  const hits = useSearch(q);
+  const [text, setText] = useState(q);
+  const query = useDeferredValue(text);
+  const hits = useSearch(query);
+  const loading = useIsLoading();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const hasQuery = query.trim() !== '';
+  // Freshly opened (empty) search takes focus; coming back to results (Back from a profile) does not
+  // pop the keyboard over them.
+  const [focusOnMount] = useState(q === '');
+  useScrollMemory('search', !loading);
+
+  useEffect(() => {
+    // Takes focus from primeKeyboard()'s proxy input, so iOS keeps the keyboard up.
+    if (focusOnMount) inputRef.current?.focus({ preventScroll: true });
+  }, [focusOnMount]);
+
+  const change = (value: string) => {
+    setText(value);
+    navigate({ q: value }, { replace: true });
+  };
+  const cancel = () => goBack({});
+
   return (
-    <div style={{ minHeight: '100dvh' }}>
-      <div style={{ display: 'flex', gap: 10, padding: '14px 12px 10px' }}>
-        <input
-          aria-label="Search requests"
-          defaultValue={q}
-          autoFocus
-          onChange={(e) => navigate({ q: e.currentTarget.value }, { replace: true })}
-          style={{ flex: 1, fontSize: 16, height: 38, padding: '0 10px' }}
-        />
-        <Button variant="ghost" color="gray" onClick={() => navigate({}, { replace: true })}>
-          Cancel
-        </Button>
+    <div className={s.root} data-view="search">
+      <div className={s.sticky}>
+        <form
+          role="search"
+          className={s.search}
+          onSubmit={(e) => {
+            e.preventDefault();
+            inputRef.current?.blur();
+          }}
+        >
+          <div className={s.sfield}>
+            <SearchIcon size={16} strokeWidth={1.75} aria-hidden />
+            <input
+              ref={inputRef}
+              type="search"
+              enterKeyHint="search"
+              className={s.sinput}
+              value={text}
+              onChange={(e) => change(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') cancel();
+              }}
+              placeholder="Name, clothing, LP number"
+              aria-label="Search requests"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              maxLength={MAX_QUERY}
+            />
+            {text ? (
+              <button
+                type="button"
+                className={s.sclear}
+                aria-label="Clear search"
+                onClick={() => {
+                  change('');
+                  inputRef.current?.focus();
+                }}
+              >
+                <X size={15} strokeWidth={1.75} aria-hidden />
+              </button>
+            ) : null}
+          </div>
+          <Button type="button" variant="ghost" color="gray" onClick={cancel}>
+            Cancel
+          </Button>
+        </form>
+        {loading ? null : <ConnectionBanner />}
+        <div className={s.cnt} aria-live="polite">
+          {hasQuery && !loading ? (
+            <Text size="1" color="gray">
+              {resultCount(hits.length)}
+            </Text>
+          ) : null}
+        </div>
       </div>
-      <Text as="div" size="1" color="gray" style={{ padding: '2px 16px 8px' }}>
-        {hits.length} {hits.length === 1 ? 'result' : 'results'}
-      </Text>
-      <Rows rows={hits.map((h) => h.row)} />
+      <main className={s.body}>
+        {loading && hasQuery ? (
+          <AllSkeleton />
+        ) : hits.length > 0 ? (
+          <div className={s.flat} data-testid="request-list">
+            {hits.map((hit) => (
+              <SearchRow key={hit.row.id} hit={hit} />
+            ))}
+          </div>
+        ) : hasQuery ? (
+          <EmptyState icon="search" title="No matches" />
+        ) : null}
+      </main>
     </div>
   );
 }
