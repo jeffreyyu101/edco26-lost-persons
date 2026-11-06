@@ -719,7 +719,10 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       const s = await checkSession();
       if (s !== 'ok') return s;
     }
-    const full = cursor === null || now() - cursorAt > SYNC.fullFetchAfterMs;
+    const full =
+      cursor === null ||
+      now() - cursorAt > SYNC.fullFetchAfterMs ||
+      (cursorAt < SYNC.logResetResyncAt && now() >= SYNC.logResetResyncAt);
     const reconcile = !full && reconcileDue;
     const since = full ? null : cursor;
     touchedDuringPoll.clear();
