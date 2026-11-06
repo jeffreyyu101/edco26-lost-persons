@@ -4,6 +4,9 @@
 import { describe, expect, it } from 'vitest';
 import type { AuditEvent, RequestDetail, RequestSummary } from '@/lib/api-types';
 import { SETTABLE_STATUSES, STATUS, TRANSITIONS, type Status } from '@/lib/domain';
+import { ApiFailure } from '@/lib/server/errors';
+import { reclassify } from '@/lib/server/reclassify';
+import { OPAQUE_DB_ERROR } from '@/lib/server/supabase';
 import { admin, api, cookieFor, createRequest, forceStatus, newStaff, randomUUID, staffOf, withTestServer, type Staff } from './harness';
 
 withTestServer();
@@ -171,6 +174,27 @@ describe('status details', () => {
     expect(undo.status).toBe(200);
     expect(undo.body.request.status).toBe(STATUS.waiting);
     expect(undo.body.request.closedAt).toBeNull();
+  });
+
+  it('reclassify(): an opaque PostgREST failure is explained from the row only when the row explains it', async () => {
+    const creator = newStaff();
+    const { id, version } = await requestIn(creator, STATUS.notInMedical);
+    const opaque = () => new ApiFailure('unavailable', undefined, { dbCode: OPAQUE_DB_ERROR });
+    // Fits nothing (current version, legal target): stays a 503 so the client retries.
+    const kept = await reclassify(opaque(), id, { fn: 'status', expectedVersion: version, target: STATUS.inMedical });
+    expect(kept).toMatchObject({ code: 'unavailable', status: 503 });
+    expect(await reclassify(opaque(), id, { fn: 'update', expectedVersion: version })).toMatchObject({ code: 'unavailable' });
+    // Stale version → 409; illegal target → 422; non-Waiting cancel → 422; missing row → 404.
+    expect(await reclassify(opaque(), id, { fn: 'status', expectedVersion: version - 1, target: STATUS.inMedical })).toMatchObject({
+      code: 'conflict',
+      extra: { currentStatus: STATUS.notInMedical },
+    });
+    expect(await reclassify(opaque(), id, { fn: 'status', expectedVersion: version, target: STATUS.reunited })).toMatchObject({ code: 'invalid' });
+    expect(await reclassify(opaque(), id, { fn: 'cancel', expectedVersion: version })).toMatchObject({ code: 'invalid' });
+    expect(await reclassify(opaque(), randomUUID(), { fn: 'update', expectedVersion: 0 })).toMatchObject({ code: 'not_found' });
+    // Any other failure passes through untouched.
+    const other = new ApiFailure('unavailable', undefined, { dbCode: '57014' });
+    expect(await reclassify(other, id, { fn: 'update', expectedVersion: version - 1 })).toBe(other);
   });
 
   it('validation 422 (bad status / kind / version), unknown id 404, auth 401, Origin 403', async () => {

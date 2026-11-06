@@ -166,9 +166,9 @@ export function idParam(params: Record<string, unknown>): string {
 
 const IP_PATTERN = /^[0-9a-f:.]{2,45}$/i;
 
-function ipFrom(value: string | null, which: 'first' | 'single'): string | null {
-  if (!value) return null;
-  const candidate = (which === 'first' ? value.split(',')[0] : value)?.trim().toLowerCase() ?? '';
+/** The first (leftmost) entry of an IP header, when it looks like an IPv4 / IPv6 address. */
+function ipFrom(value: string | null): string | null {
+  const candidate = value?.split(',')[0]?.trim().toLowerCase() ?? '';
   return IP_PATTERN.test(candidate) ? candidate : null;
 }
 
@@ -179,9 +179,9 @@ function ipFrom(value: string | null, which: 'first' | 'single'): string | null 
  */
 export function clientIp(headers: Headers): string {
   return (
-    ipFrom(headers.get('x-vercel-forwarded-for'), 'first') ??
-    ipFrom(headers.get('x-real-ip'), 'first') ??
-    ipFrom(headers.get('x-forwarded-for'), 'first') ??
+    ipFrom(headers.get('x-vercel-forwarded-for')) ??
+    ipFrom(headers.get('x-real-ip')) ??
+    ipFrom(headers.get('x-forwarded-for')) ??
     '0.0.0.0'
   );
 }

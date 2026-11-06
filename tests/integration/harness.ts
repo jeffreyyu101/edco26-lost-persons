@@ -47,7 +47,7 @@ async function startServer(): Promise<void> {
   }
   childLog = `/tmp/lp-int-server-${PORT}-${process.pid}-${Date.now()}.log`;
   const fd = openSync(childLog, 'w');
-  child = spawn(process.execPath, ['scripts/with-test-env.mjs', 'next', 'start'], {
+  child = spawn(process.execPath, ['scripts/with-test-env.mjs', 'next', 'start', '--hostname', '127.0.0.1'], {
     cwd: ROOT,
     env: { ...process.env, PORT },
     stdio: ['ignore', fd, fd],
@@ -96,6 +96,12 @@ export function assertNoPiiInLogs(): boolean {
   if (!path || !existsSync(path)) return false;
   const log = readFileSync(path, 'utf8');
   for (const value of piiValues) expect(log.includes(value), `server log contains synthetic PII "${value}"`).toBe(false);
+  // Every synthetic name, staff member and description the tests create starts with "TEST-S".
+  expect(log.includes('TEST-S'), 'server log contains a synthetic test value').toBe(false);
+  // The seed's synthetic people and contacts, read by the sync / detail / export tests.
+  for (const seedValue of ['Kayla', 'Martinez', 'Maya R.', '(407) 555-0142', 'Dana Kim', 'Pink cowboy hat']) {
+    expect(log.includes(seedValue), `server log contains seed value "${seedValue}"`).toBe(false);
+  }
   return true;
 }
 

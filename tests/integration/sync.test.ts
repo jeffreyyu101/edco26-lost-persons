@@ -50,6 +50,13 @@ describe('GET /api/sync', () => {
     for (const row of delta.rows) expect(Date.parse(row.updatedAt)).toBeGreaterThan(Date.parse(first.serverTime) - 30_000);
   });
 
+  it('responses are never labelled with a Content-Encoding the body does not have (compression is the host\'s job)', async () => {
+    const cookie = await cookieFor(newStaff());
+    const res = await api('/api/sync', { cookie, headers: { 'accept-encoding': 'gzip, br' } });
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.text).rows.length).toBeGreaterThan(0);
+  });
+
   it('an empty delta is about 100 bytes', async () => {
     const cookie = await cookieFor(newStaff());
     // A cursor far in the future: nothing can match, so this is exactly the empty-delta payload.
@@ -110,14 +117,19 @@ describe('GET /api/sync', () => {
     const start = await sync('/api/sync?ids=5eed0000-0000-4000-8000-000000001012', cookie);
     const made = [];
     for (let i = 0; i < 3; i += 1) made.push((await createRequest(staff)).id);
+    // The delta also re-sends everything updated in the 30 s before `since` (earlier tests), so page through
+    // all of it.
     const ids: string[] = [];
     let after: SyncResponse['next'] = null;
-    for (let i = 0; i < 50; i += 1) {
-      const page = await sync(syncPath({ since: start.serverTime, limit: 1, after }), cookie);
+    let done = false;
+    for (let i = 0; i < 2_000 && !done; i += 1) {
+      const page = await sync(syncPath({ since: start.serverTime, limit: 3, after }), cookie);
       ids.push(...page.rows.map((r) => r.id));
-      if (!page.hasMore) break;
+      done = !page.hasMore;
       after = page.next;
     }
+    expect(done).toBe(true);
+    expect(new Set(ids).size).toBe(ids.length);
     for (const id of made) expect(ids).toContain(id);
   });
 

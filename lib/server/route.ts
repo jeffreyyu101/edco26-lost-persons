@@ -74,6 +74,8 @@ function wrap<P extends Params>(
       response = json(failure.body(), failure.status, failure.headers);
     }
     if (refresh && session?.setCookie) response.headers.append('Set-Cookie', session.setCookie);
+    // No compression here: Next.js drops a route handler's Content-Encoding header (the client would get
+    // gzip bytes labelled as plain JSON). Vercel's edge compresses responses itself.
     logRequest({
       route: name,
       status: response.status,
