@@ -6,3 +6,4 @@ export declare function assertLocalUrl(label: string, url: string | undefined): 
 export declare function loadTestEnv(): Record<string, string>;
 export declare function childTestEnv(extra?: Record<string, string>): Record<string, string>;
 export declare function testBaseUrl(): string;
+export declare const NO_DOTENV_PRELOAD: string;

@@ -54,16 +54,27 @@ export function loadTestEnv() {
   return env;
 }
 
+/** Preloaded into every test child process: makes Next.js read no .env* file at all (see that file). */
+export const NO_DOTENV_PRELOAD = join(ROOT, 'scripts', 'test-env-preload.cjs');
+
 /**
  * The environment for a child process (next build / next start / test runner) that must only ever see
- * test values: the caller's PATH/HOME-style basics, then .env.test, then __NEXT_PROCESSED_ENV=true so
- * Next.js does not apply any .env* file (in particular .env.local) on top.
+ * test values: the caller's PATH/HOME-style basics, then .env.test. NODE_OPTIONS preloads
+ * NO_DOTENV_PRELOAD into it and every process it starts, so Next.js never reads .env.local, .env or any
+ * other dotenv file, not even on a dev-server reload. __NEXT_PROCESSED_ENV=true stays as a second guard.
  */
 export function childTestEnv(extra = {}) {
   const keep = ['PATH', 'HOME', 'SHELL', 'LANG', 'TMPDIR', 'USER', 'TERM', 'CI', 'PLAYWRIGHT_BROWSERS_PATH'];
   const base = {};
   for (const key of keep) if (process.env[key] !== undefined) base[key] = process.env[key];
-  const env = { ...base, ...loadTestEnv(), ...extra, __NEXT_PROCESSED_ENV: 'true', NEXT_TELEMETRY_DISABLED: '1' };
+  const env = {
+    ...base,
+    ...loadTestEnv(),
+    ...extra,
+    NODE_OPTIONS: `--require=${JSON.stringify(NO_DOTENV_PRELOAD)}`,
+    __NEXT_PROCESSED_ENV: 'true',
+    NEXT_TELEMETRY_DISABLED: '1',
+  };
   assertLocalUrl('NEXT_PUBLIC_SUPABASE_URL', env.NEXT_PUBLIC_SUPABASE_URL);
   return env;
 }
