@@ -32,7 +32,10 @@ export async function staticAssetUrls(distDir) {
  */
 export async function writeSwManifest({ projectDir, distDir }) {
   const assets = await staticAssetUrls(distDir);
-  if (!assets.some((u) => u.startsWith(`${STATIC_URL_PREFIX}chunks/`))) {
+  // Local builds write static/chunks/…; Vercel writes static/immutable/chunks/… (and static/build-<id>/…).
+  if (!assets.some((u) => u.startsWith(STATIC_URL_PREFIX) && u.includes('/chunks/'))) {
+    // Show what the build did write, so a failing deploy log says why (Vercel builds differ from local ones).
+    console.error(`sw-manifest: ${assets.length} files under static/, first: ${assets.slice(0, 8).join(', ') || '(none)'}`);
     throw new Error(`sw-manifest: no client chunks under ${join(distDir, 'static')}`);
   }
   await writeFile(join(projectDir, 'public', SW_MANIFEST_FILE), `${JSON.stringify({ assets })}\n`);

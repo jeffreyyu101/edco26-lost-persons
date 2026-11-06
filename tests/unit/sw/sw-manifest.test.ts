@@ -48,6 +48,19 @@ describe('sw-manifest', () => {
     expect(await written()).toEqual({ assets });
   });
 
+  it('accepts the layout Vercel builds write (static/immutable/chunks, static/build-<id>)', async () => {
+    await file('immutable/chunks/07_s943xsdled.js');
+    await file('immutable/chunks/0_wgrunrnim_i.css');
+    await file('build-TfctsWXpff2fKS/_buildManifest.js');
+
+    const assets = await writeSwManifest({ projectDir, distDir });
+    expect(assets).toEqual([
+      '/_next/static/build-TfctsWXpff2fKS/_buildManifest.js',
+      '/_next/static/immutable/chunks/07_s943xsdled.js',
+      '/_next/static/immutable/chunks/0_wgrunrnim_i.css',
+    ]);
+  });
+
   it('fails the build when there are no client chunks', async () => {
     await file('media/inter.woff2');
     await expect(writeSwManifest({ projectDir, distDir })).rejects.toThrow(/no client chunks/);

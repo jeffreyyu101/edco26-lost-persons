@@ -20,8 +20,15 @@ const nextConfig: NextConfig = {
   compiler: {
     // public/sw-manifest.json: every /_next/static file of this build, which an updating service worker
     // caches in full before it offers "Update ready" (public/sw.js, scripts/sw-manifest.mjs).
+    // On Vercel (restored Turbopack cache, "modifyConfig") the client chunks are not on disk yet at this point, so
+    // a miss here only warns; `npm run build` writes the manifest again after `next build` finishes and fails
+    // the build there if it still finds no chunks.
     runAfterProductionCompile: async (metadata) => {
-      await writeSwManifest(metadata);
+      try {
+        await writeSwManifest(metadata);
+      } catch (error) {
+        console.warn(`${error instanceof Error ? error.message : String(error)} (retried after next build)`);
+      }
     },
   },
   async headers() {
