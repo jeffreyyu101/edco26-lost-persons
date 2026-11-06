@@ -1,0 +1,461 @@
+/* The desk request table (design/screens/desktop-log.html .tbl, .th, .tr, .fold, .cap). Values are the
+   mockup's, except where spec §7 needs more: text is gray-11 or darker (4.5:1 in both themes, so the
+   mockup's gray-9 / gray-10 cells are gray-11 here), closed rows dim their text to gray-11 and fade the glyph
+   instead of fading the row, and touch screens get 44 px targets.
+
+   Columns (fixed widths, so every row lines up without measuring; the Friend column takes the rest):
+     768+, or a request open      #  Friend  Status  Created  Updated            (.withPanel .tbl)
+     1024–1279 with a request     the same, tighter (the main column is 544–799 px)
+     1280+ with nothing open      #  Friend  Status  Post  Created  Updated  Logged by   (.tbl)
+   The frame marks an open request with [data-pane] (components/desk/DeskFrame.tsx). */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - var(--desk-top, 56px));
+  min-height: calc(100dvh - var(--desk-top, 56px));
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+
+.table {
+  --tbl-cols: 56px minmax(0, 1fr) 160px 96px 72px;
+  --tbl-gap: 12px;
+  --tbl-pad-l: 24px;
+  --tbl-pad-r: calc(20px + env(safe-area-inset-right));
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cPost,
+.cBy {
+  display: none;
+}
+
+@media (min-width: 1024px) and (max-width: 1279.98px) {
+  [data-pane] .table {
+    --tbl-cols: 48px minmax(0, 1fr) 140px 88px 56px;
+    --tbl-gap: 10px;
+    --tbl-pad-l: 20px;
+    --tbl-pad-r: 16px;
+  }
+}
+
+@media (min-width: 1280px) {
+  .table {
+    --tbl-cols: 64px minmax(0, 1fr) 170px 128px 104px 76px 150px;
+  }
+  .cPost,
+  .cBy {
+    display: block;
+  }
+  [data-pane] .table {
+    --tbl-cols: 56px minmax(0, 1fr) 160px 96px 72px;
+  }
+  [data-pane] .cPost,
+  [data-pane] .cBy {
+    display: none;
+  }
+}
+
+/* One line of the table: the header, a row, a skeleton row. */
+.grid {
+  display: grid;
+  grid-template-columns: var(--tbl-cols);
+  column-gap: var(--tbl-gap);
+  align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0 var(--tbl-pad-r) 0 var(--tbl-pad-l);
+}
+
+.grid > * {
+  min-width: 0;
+}
+
+/* "#  Friend  Status …": small and quiet, sticky right under the top bar. */
+.th {
+  position: sticky;
+  top: var(--desk-top, 56px);
+  z-index: 2;
+  height: 34px;
+  background: var(--color-background);
+  border-bottom: 1px solid var(--gray-a4);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--gray-11);
+  white-space: nowrap;
+}
+
+.th > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cCreated,
+.cUpdated {
+  text-align: right;
+}
+
+/* ---- Rows ---------------------------------------------------------------------------------------- */
+
+.row {
+  position: relative;
+  min-height: 44px;
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid var(--gray-a3);
+  background: none;
+  color: var(--gray-12);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* A search result with its matched text on a second line under the name. */
+.two {
+  min-height: 56px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
+button.row {
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  button.row:hover {
+    background: var(--gray-a2);
+  }
+}
+
+button.row:active {
+  background: var(--gray-a3);
+}
+
+/* The keyboard's selection (J / K move the focus) and the open request: the mockup's .tr.sel. Light mode
+   tints with gray-a2: gray-a3 takes the blue status text under 4.5:1 there. */
+button.row:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -2px;
+  background: var(--gray-a2);
+}
+
+.row[data-selected] {
+  background: var(--gray-a2);
+  box-shadow: inset 2px 0 0 var(--gray-12);
+}
+
+:global(.dark) .row[data-selected] {
+  background: var(--gray-a3);
+}
+
+.num {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.friend {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+}
+
+/* The name takes the room; the muted age / sex after it gives way first. */
+.who {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.nm {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 20px;
+  color: var(--gray-12);
+}
+
+.ag {
+  flex: 0 4 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+  color: var(--gray-11);
+}
+
+.match {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  line-height: 17px;
+  color: var(--gray-11);
+}
+
+/* Status: glyph and label. Only the open states have colour (blue Waiting, green In medical). */
+.st {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--gray-11);
+}
+
+.st[data-tone='blue'] {
+  color: var(--blue-11);
+}
+
+.st[data-tone='green'] {
+  color: var(--green-11);
+}
+
+.st[data-tone='red'] {
+  color: var(--red-11);
+}
+
+.stl {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.glyph {
+  flex: none;
+}
+
+.attention {
+  color: var(--red-9);
+}
+
+.mut {
+  font-size: 13px;
+  color: var(--gray-11);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tm {
+  font-size: 13px;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Closed rows: greyed without losing text contrast. */
+.closed .nm {
+  color: var(--gray-11);
+}
+
+.closed .glyph {
+  opacity: 0.55;
+}
+
+.mark {
+  background: var(--amber-a5);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+/* A row's sentence for screen readers only. */
+.vh {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- Archived fold, group header ----------------------------------------------------------------- */
+
+.fold {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 var(--tbl-pad-r) 0 var(--tbl-pad-l);
+  border: 0;
+  border-bottom: 1px solid var(--gray-a3);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button.fold {
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  button.fold:hover {
+    background: var(--gray-a2);
+  }
+}
+
+button.fold:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -2px;
+}
+
+.fold[data-static] {
+  margin-top: 8px;
+  font-weight: inherit;
+}
+
+.foldLabel {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--gray-11);
+}
+
+.cap {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  box-sizing: border-box;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--gray-a3);
+  color: var(--gray-11);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.sp {
+  flex: 1;
+}
+
+.chev {
+  display: flex;
+  color: var(--gray-11);
+  transition: transform 0.15s;
+}
+
+.chev[data-open] {
+  transform: rotate(180deg);
+}
+
+/* ---- Above the table: the connection banner and the filter chips ---------------------------------- */
+
+.banner {
+  padding: 12px calc(20px + env(safe-area-inset-right)) 0 24px;
+}
+
+.banner:empty {
+  display: none;
+}
+
+.banner :global(.lp-banner) {
+  margin: 0;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px calc(20px + env(safe-area-inset-right)) 12px 24px;
+}
+
+.chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 28px;
+  box-sizing: border-box;
+  padding: 0 8px 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--gray-a3);
+  color: var(--gray-12);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (hover: hover) {
+  .chip:hover {
+    background: var(--gray-a4);
+  }
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+
+/* Touch screens: a 44 px target around the 28 px chip. */
+@media (pointer: coarse) {
+  .chip::before {
+    content: '';
+    position: absolute;
+    inset: -8px -4px;
+  }
+}
+
+.chipLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chipCount {
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
+}
+
+.chipX {
+  flex: none;
+  color: var(--gray-11);
+}
+
+/* ---- Skeleton ------------------------------------------------------------------------------------- */
+
+.skRow {
+  height: 44px;
+}
+
+.skCell {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.skEnd {
+  justify-content: flex-end;
+}
