@@ -204,6 +204,15 @@ test.describe('desktop 1440 × 900', () => {
     await page.goBack();
     await expect.poll(() => paramOf(page, 'new')).toBeNull();
 
+    // Closing the form gives the focus back to where it was before it opened.
+    await page.getByTestId('desk-new').focus();
+    await page.keyboard.press('Enter');
+    await expect.poll(() => paramOf(page, 'new')).toBe('1');
+    await expect(page.getByTestId('request-form-submit')).toBeVisible();
+    await page.goBack();
+    await expect.poll(() => paramOf(page, 'new')).toBeNull();
+    await expect(page.getByTestId('desk-new')).toBeFocused();
+
     // The sidebar switches views in place.
     await page.getByTestId('desk-sidebar').getByRole('link', { name: /^Pending/ }).click();
     await expect.poll(() => paramOf(page, 'view')).toBe('pending');

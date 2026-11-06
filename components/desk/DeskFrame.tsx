@@ -72,7 +72,7 @@ export function DeskFrame({ desk, nav = null, top = null, pane = null, form = nu
           </div>
         ) : null}
         {form ? (
-          <div className={f.form} ref={formRef}>
+          <div className={f.form} ref={formRef} data-desk-form="">
             {form}
           </div>
         ) : null}

@@ -81,6 +81,9 @@ export const ROW_SELECTOR = '[data-request-id]';
 /** Where the main column's request rows live (DeskFrame sets it). */
 export const MAIN_SELECTOR = '[data-desk-main]';
 
+/** The layer a form renders into (DeskFrame sets it). */
+export const FORM_LAYER_SELECTOR = '[data-desk-form]';
+
 interface ElementLike {
   tagName?: string;
   isContentEditable?: boolean;

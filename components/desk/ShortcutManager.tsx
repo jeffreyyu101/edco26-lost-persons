@@ -1,11 +1,24 @@
 'use client';
 // The desk keyboard (from 768 px; rules in ./keyboard.ts): "/" search, N new request, J/K or ↓/↑ move
 // through the main column's requests (opening each one when a request is open), Enter opens the selected
-// request, Esc closes the open one and puts focus back on its row. Renders nothing.
+// request, Esc closes the open one and puts focus back on its row. When a form (New request, edit) closes
+// and leaves the focus on nothing, it goes back to where it was before the form opened (New request, the
+// row, the pane's ⋯). Renders nothing.
 import { useEffect, useRef } from 'react';
 import { navigate, parseView, type View } from '@/lib/client/nav';
 import { closePane, openInPane, takeClosedPane } from './DetailPane';
-import { MAIN_SELECTOR, ROW_SELECTOR, decideShortcut, describeTarget, overlayOpen, readRowIds, rowElement, type ShortcutAction } from './keyboard';
+import {
+  FORM_LAYER_SELECTOR,
+  MAIN_SELECTOR,
+  OVERLAY_SELECTOR,
+  ROW_SELECTOR,
+  decideShortcut,
+  describeTarget,
+  overlayOpen,
+  readRowIds,
+  rowElement,
+  type ShortcutAction,
+} from './keyboard';
 import { neighbours } from './nav-model';
 import { isFormView, paneRequestId, type MainView } from './views';
 
@@ -35,12 +48,37 @@ function focusRow(el: HTMLElement): void {
   el.focus({ preventScroll: true });
 }
 
+/** Where the focus was outside any dialog, menu or form: the element, and its row's id if it is a row. */
+interface FocusMark {
+  el: HTMLElement;
+  rowId: string | null;
+}
+
+/** Focus `fn()`'s element once the focus is on nothing, for up to ~30 frames while it renders. */
+function refocusWhenFree(fn: () => HTMLElement | null): () => void {
+  let frame = 0;
+  let tries = 0;
+  const attempt = () => {
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    const el = fn();
+    if (el) focusRow(el);
+    else if (++tries < 30) frame = requestAnimationFrame(attempt);
+  };
+  frame = requestAnimationFrame(attempt);
+  return () => cancelAnimationFrame(frame);
+}
+
+const shown = (el: HTMLElement | null | undefined): el is HTMLElement => !!el && el.isConnected && el.getClientRects().length > 0;
+
 export function DeskKeys({ view, main }: DeskKeysProps) {
   const paneId = paneRequestId(view);
   const formOpen = isFormView(view);
   const latest = useRef(main);
   /** The selected row: the last one moved to, focused or opened. */
   const cursor = useRef<string | null>(paneId);
+  /** The last focus outside dialogs, menus and the form layer (where a closed form gives it back). */
+  const outside = useRef<FocusMark | null>(null);
 
   useEffect(() => {
     latest.current = main;
@@ -94,15 +132,27 @@ export function DeskKeys({ view, main }: DeskKeysProps) {
       e.preventDefault();
       run(action, open);
     };
-    const onFocusIn = () => {
+    const onFocusIn = (e: FocusEvent) => {
       const id = focusedRowId();
       if (id) cursor.current = id;
+      const el = e.target instanceof HTMLElement ? e.target : null;
+      if (el && el !== document.body && !el.closest(OVERLAY_SELECTOR) && !el.closest(FORM_LAYER_SELECTOR)) outside.current = { el, rowId: id };
+    };
+    // Focus let go to nothing on purpose (Esc in the search field, a click on empty space) leaves nothing
+    // to return to. Not when a form covering the desk made it inert, or the window lost focus.
+    const onFocusOut = (e: FocusEvent) => {
+      if (e.relatedTarget || !document.hasFocus()) return;
+      const el = e.target instanceof HTMLElement ? e.target : null;
+      if (el?.closest('[inert]')) return;
+      outside.current = null;
     };
     window.addEventListener('keydown', onKeyDown);
     document.addEventListener('focusin', onFocusIn);
+    document.addEventListener('focusout', onFocusOut);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('focusin', onFocusIn);
+      document.removeEventListener('focusout', onFocusOut);
     };
   }, []);
 
@@ -114,18 +164,20 @@ export function DeskKeys({ view, main }: DeskKeysProps) {
     if (!rendered || paneId || formOpen) return;
     // The request the address bar had open (a quick K then Esc can close before its render lands).
     const was = takeClosedPane() ?? rendered;
-    let frame = 0;
-    let tries = 0;
-    const tryFocus = () => {
-      const active = document.activeElement;
-      if (active && active !== document.body) return;
-      const el = rowElement(was);
-      if (el) focusRow(el);
-      else if (++tries < 30) frame = requestAnimationFrame(tryFocus);
-    };
-    frame = requestAnimationFrame(tryFocus);
-    return () => cancelAnimationFrame(frame);
+    return refocusWhenFree(() => rowElement(was));
   }, [paneId, formOpen]);
+
+  // When a form closes (Esc, ×, Cancel, Send, Back) with the focus left on nothing (a dialog with no
+  // trigger gives it to the page), it returns to where it was: New request, the row, the pane's ⋯.
+  const lastForm = useRef(formOpen);
+  useEffect(() => {
+    const was = lastForm.current;
+    lastForm.current = formOpen;
+    if (!was || formOpen) return;
+    const mark = outside.current;
+    if (!mark) return;
+    return refocusWhenFree(() => (shown(mark.el) ? mark.el : mark.rowId ? rowElement(mark.rowId) : null));
+  }, [formOpen]);
 
   return null;
 }
