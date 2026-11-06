@@ -104,24 +104,31 @@ function ShellHosts() {
   const [bellIntro, setBellIntro] = useState(false);
   const bellWasOn = useRef<boolean | null>(null);
 
-  // Prefetch every view chunk after the first idle, then let the service worker cache them all (A15).
+  // Prefetch every view chunk after the first idle, then let the service worker cache them all (A15). If the
+  // signal dropped before every chunk arrived, try again when the phone is back online.
   useEffect(() => {
     let cancelled = false;
     const prefetch = () => {
-      void Promise.allSettled(VIEW_CHUNKS.map((load) => load())).then(() => {
-        if (!cancelled) void actions.prepareOffline?.();
+      void Promise.allSettled(VIEW_CHUNKS.map((load) => load())).then((results) => {
+        if (cancelled) return;
+        void actions.prepareOffline?.();
+        if (results.some((r) => r.status === 'rejected')) window.addEventListener('online', prefetch, { once: true });
       });
+    };
+    const stop = () => {
+      cancelled = true;
+      window.removeEventListener('online', prefetch);
     };
     if ('requestIdleCallback' in window) {
       const id = window.requestIdleCallback(prefetch, { timeout: 4_000 });
       return () => {
-        cancelled = true;
+        stop();
         window.cancelIdleCallback(id);
       };
     }
     const id = setTimeout(prefetch, 1_500);
     return () => {
-      cancelled = true;
+      stop();
       clearTimeout(id);
     };
   }, [actions]);

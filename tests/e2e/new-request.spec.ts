@@ -116,13 +116,17 @@ async function rowsNamed(request: APIRequestContext, name: string): Promise<Row[
 
 // ---- Setup ----------------------------------------------------------------------------------------
 
-const NETWORK_FAILURE = /^(Failed to load resource|Cannot load |FetchEvent\.respondWith received an error: TypeError: Load failed)/;
+const NETWORK_FAILURE = /^(Failed to load resource|Cannot load http|FetchEvent\.respondWith received an error: TypeError: Load failed)/;
 let errors: string[];
 
 test.beforeEach(async ({ context, page }) => {
   await addSessionCookie(context, STAFF);
   errors = [];
-  page.on('pageerror', (e) => errors.push(String(e)));
+  // WebKit also reports a chunk fetch the offline worker couldn't serve as a page error.
+  page.on('pageerror', (e) => {
+    const text = String(e);
+    if (!NETWORK_FAILURE.test(text) && !NETWORK_FAILURE.test(e.message)) errors.push(text);
+  });
   page.on('console', (msg) => {
     // Network failures (expected while offline: the idle prefetch of other view chunks) are not app errors:
     // Chromium logs "Failed to load resource", WebKit "Cannot load …" and the worker's "Load failed".

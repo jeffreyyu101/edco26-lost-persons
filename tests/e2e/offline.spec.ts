@@ -65,7 +65,8 @@ const form = (page: Page) => page.getByTestId('request-form');
 const personName = (page: Page) => page.getByRole('group', { name: 'Missing person' }).getByLabel('Name', { exact: true });
 const queuedRow = (page: Page, name: string) => page.getByRole('group', { name: new RegExp(`^${name}\\. Waiting to send\\.`) });
 const updateToast = (page: Page) => page.locator('.lp-toast').filter({ hasText: 'Update ready' });
-const controllerUrl = (page: Page) => page.evaluate(() => navigator.serviceWorker.controller?.scriptURL ?? '');
+/** The controlling worker's URL ('' while none, or while the page is between documents during a reload). */
+const controllerUrl = (page: Page) => page.evaluate(() => navigator.serviceWorker.controller?.scriptURL ?? '').catch(() => '');
 
 interface Row {
   id: string;
