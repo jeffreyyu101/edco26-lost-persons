@@ -5,9 +5,13 @@ import { syntheticPng } from './helpers/png';
 import { signedInAs } from './helpers/session';
 import { syncRows } from './helpers/sync';
 
-// New request / Edit on tablet and desktop (design/screens/desktop-new-tablet.html frame 1):
-//   1024 px and up   a centred 760 px two-column modal (520 px for a one-section edit)
-//   768–1023         a 480 px side sheet over the right side, one column, footer pinned
+// New request / Edit on tablet and desktop (design/screens/desktop-new-tablet.html frame 1), in Jeffrey's
+// order (DECISIONS.md, 10:31): every field free text, More details right after the missing person and
+// always open, Friend or family last and optional, nothing to expand.
+//   1024 px and up   a centred 760 px modal: Missing person + More details left, Friend or family right
+//                    (520 px, one column, for a one-section edit); the body scrolls between a pinned
+//                    header and footer when it doesn't fit
+//   768–1023         a 480 px side sheet over the right side, the same order in one column, footer pinned
 //   under 768        the phone page, unchanged (tests/e2e/new-request.spec.ts covers it in full)
 // Esc, × and a click outside close without discarding (a new request keeps its draft); Cancel asks as on
 // the phone; ⌘/Ctrl+↵ sends. Runs against the production build (`npm run build:test`). Synthetic data
@@ -31,7 +35,9 @@ const modal = (page: Page, name: string | RegExp = 'New request') => page.getByR
 const form = (page: Page) => page.getByTestId('request-form');
 const submit = (page: Page) => page.getByTestId('request-form-submit');
 const person = (page: Page) => page.getByRole('group', { name: 'Missing person' });
+const more = (page: Page) => page.getByRole('group', { name: 'More details' });
 const friend = (page: Page) => page.getByRole('group', { name: 'Friend or family' });
+const scroller = (page: Page) => form(page).locator('.lp-rf-scroll');
 const personName = (page: Page) => person(page).getByLabel('Name', { exact: true });
 const lastSeen = (page: Page) => page.getByRole('textbox', { name: 'Last seen' });
 const postChip = (page: Page) => page.getByRole('button', { name: /^Reporting from/ });
@@ -41,6 +47,21 @@ async function openNew(page: Page) {
   await expect(modal(page)).toBeVisible();
   await expect(submit(page)).toBeVisible();
 }
+
+/**
+ * Every field of the form in DOM order (which is also the Tab and Enter-to-next order), by its accessible
+ * label. Jeffrey's order: the missing person, More details, then Friend or family.
+ */
+async function fieldOrder(page: Page): Promise<string[]> {
+  return form(page)
+    .locator('.lp-rf-in')
+    .evaluateAll((els) =>
+      els.map((el) => ((el as HTMLInputElement).labels?.[0]?.textContent ?? el.getAttribute('aria-label') ?? '').trim()),
+    );
+}
+const PERSON_FIELDS = ['Name', 'Age', 'Gender', 'Wearing', 'Last seen'];
+const MORE_FIELDS = ['Hair', 'Build', 'Features', 'Description', 'Other notes'];
+const FRIEND_FIELDS = ['Name', 'Phone', 'Relation', 'Notes'];
 
 /** The element's box once the dialog's open animation (a scale / slide) has finished. */
 async function box(page: Page, locator: ReturnType<Page['locator']>) {
@@ -122,15 +143,29 @@ test.describe('desktop, 1440 × 900', () => {
     const name = uniqueName('modal');
     await openNew(page);
 
-    // 760 px, centred, 84 px from the top; Missing person left of Friend or family.
+    // 760 px, centred, 84 px from the top. Left column: Missing person, then More details under it;
+    // right column: Friend or family, level with Missing person.
     const frame = await box(page, modal(page));
     expect(Math.round(frame.width)).toBe(760);
     expect(Math.abs(frame.x + frame.width / 2 - 720)).toBeLessThanOrEqual(1);
     expect(Math.round(frame.y)).toBe(84);
     const left = await box(page, person(page));
+    const below = await box(page, more(page));
     const right = await box(page, friend(page));
     expect(left.x + left.width).toBeLessThanOrEqual(right.x);
     expect(Math.abs(left.y - right.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(below.x - left.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(below.width - left.width)).toBeLessThanOrEqual(1);
+    expect(below.y).toBeGreaterThan(left.y + left.height);
+
+    // Nothing to expand: every field is on screen, in Jeffrey's order, and the whole form fits at 1440 × 900.
+    expect(await fieldOrder(page)).toEqual([...PERSON_FIELDS, ...MORE_FIELDS, ...FRIEND_FIELDS]);
+    await expect(form(page).getByRole('button', { name: /More details/ })).toHaveCount(0);
+    for (const label of MORE_FIELDS) await expect(more(page).getByLabel(label, { exact: true })).toBeVisible();
+    await expect(more(page).getByText('Other notes', { exact: true })).toBeVisible();
+    await expect(friend(page).getByLabel('Notes')).toBeVisible();
+    await expect(form(page).getByText('Optional', { exact: true })).toBeVisible();
+    expect(await scroller(page).evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(0);
 
     // Typing starts in Name; the place chips are on screen without focusing Last seen; Send shows ⌘↵.
     await expect(personName(page)).toBeFocused();
@@ -163,11 +198,18 @@ test.describe('desktop, 1440 × 900', () => {
     await expect(page.getByRole('button', { name: 'Reporting from FA 4 – Oasis. Change' })).toBeVisible();
 
     await personName(page).fill(name);
-    await person(page).getByLabel('Age', { exact: true }).fill('19');
+    // Age is free text.
+    await person(page).getByLabel('Age', { exact: true }).fill('mid-20s');
     // Gender is free text with quick-fill chips (F1).
     await person(page).getByRole('button', { name: 'Female', exact: true }).click();
     await expect(person(page).getByLabel('Gender', { exact: true })).toHaveValue('Female');
     await page.getByLabel('Wearing').fill('TEST-form pink hat, silver fringe top');
+    // More details, typed straight in (no tap to open them).
+    await more(page).getByLabel('Hair', { exact: true }).fill('TEST-form blonde braids');
+    await more(page).getByLabel('Build', { exact: true }).fill('TEST-form 5\'5", slim');
+    await more(page).getByLabel('Features', { exact: true }).fill('TEST-form nose ring');
+    await more(page).getByLabel('Description', { exact: true }).fill('TEST-form tall, freckles,\nclear bag');
+    await more(page).getByLabel('Other notes', { exact: true }).fill('TEST-form lost phone');
     // A chip clicked from another field appends to Last seen and takes the caret there.
     await personName(page).focus();
     await page.getByRole('button', { name: 'kineticFIELD' }).click();
@@ -177,6 +219,8 @@ test.describe('desktop, 1440 × 900', () => {
     await friend(page).getByLabel('Name').fill('TEST-form Maya R.');
     await friend(page).getByLabel('Phone').fill('(407) 555-0142');
     await expect(page.getByRole('img', { name: 'Valid number' })).toBeVisible();
+    await friend(page).getByLabel('Relation').fill('TEST-form sister');
+    await friend(page).getByLabel('Notes').fill('TEST-form waiting at the ferris wheel');
     await page.locator('input[type=file]').setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: syntheticPng() });
     await expect(page.getByRole('button', { name: /^1 photo, today/ })).toBeVisible();
 
@@ -191,12 +235,19 @@ test.describe('desktop, 1440 × 900', () => {
     created.push({ id: row!.id, request: page.request });
     expect(row).toMatchObject({
       reportingLocation: 'FA 4 – Oasis',
-      age: '19',
+      age: 'mid-20s',
       gender: 'Female',
       clothing: 'TEST-form pink hat, silver fringe top',
       lastSeen: 'kineticFIELD, ~10:30',
+      hair: 'TEST-form blonde braids',
+      heightBuild: 'TEST-form 5\'5", slim',
+      identifyingFeatures: 'TEST-form nose ring',
+      physicalDescription: 'TEST-form tall, freckles,\nclear bag',
+      additionalNotes: 'TEST-form lost phone',
       contactName: 'TEST-form Maya R.',
       contactPhone: '(407) 555-0142',
+      contactRelationship: 'TEST-form sister',
+      contactNotes: 'TEST-form waiting at the ferris wheel',
     });
     await expect.poll(async () => (await apiDetail(page.request, row!.id)).photos.length, { timeout: 20_000 }).toBe(1);
   });
@@ -306,6 +357,29 @@ test.describe('desktop, 1440 × 900', () => {
     await expect(form(page)).toHaveCount(0);
     expect(await apiDetail(page.request, row.id)).toMatchObject({ contactPhone: '407 555 0199', contactName: 'TEST-form Jo' });
   });
+
+  test('edit of the person is one column: the person, then More details open under it; nothing else', async ({ page }) => {
+    const name = uniqueName('edit-person');
+    const row = await apiCreate(page.request, { name, age: 'early 20s', hair: 'TEST-form red bob', contactName: 'TEST-form Jo' });
+    const title = `Edit LP-${String(row.caseNumber).padStart(4, '0')}`;
+    await page.goto(`/?r=${row.id}&edit=person`);
+    await expect(modal(page, title)).toBeVisible();
+    expect(Math.round((await box(page, modal(page, title))).width)).toBe(520);
+    await expect(friend(page)).toHaveCount(0);
+    expect(await fieldOrder(page)).toEqual([...PERSON_FIELDS, ...MORE_FIELDS]);
+    const top = await box(page, person(page));
+    const below = await box(page, more(page));
+    expect(below.y).toBeGreaterThan(top.y + top.height);
+    expect(Math.abs(below.x - top.x)).toBeLessThanOrEqual(1);
+    await expect(person(page).getByLabel('Age', { exact: true })).toHaveValue('early 20s');
+    await expect(more(page).getByLabel('Hair', { exact: true })).toHaveValue('TEST-form red bob');
+
+    const patch = page.waitForRequest((r) => r.method() === 'PATCH' && r.url().endsWith(`/api/requests/${row.id}`));
+    await more(page).getByLabel('Features', { exact: true }).fill('TEST-form glitter on cheeks');
+    await page.keyboard.press('ControlOrMeta+Enter');
+    expect((await patch).postDataJSON()).toEqual({ patch: { identifyingFeatures: 'TEST-form glitter on cheeks' }, expectedVersion: row.rowVersion });
+    await expect(form(page)).toHaveCount(0);
+  });
 });
 
 // ---- Accessibility: axe in both themes, no overlapping targets ---------------------------------------
@@ -376,9 +450,14 @@ test.describe('iPad portrait, 820 × 1180', () => {
     expect(Math.round(frame.x + frame.width)).toBe(810);
     expect(Math.round(frame.y)).toBe(10);
     expect(Math.round(frame.y + frame.height)).toBe(1170);
+    // One column in Jeffrey's order: Missing person, More details, Friend or family.
+    expect(await fieldOrder(page)).toEqual([...PERSON_FIELDS, ...MORE_FIELDS, ...FRIEND_FIELDS]);
     const top = await box(page, person(page));
+    const middle = await box(page, more(page));
     const below = await box(page, friend(page));
-    expect(below.y).toBeGreaterThan(top.y + top.height - 1);
+    expect(middle.y).toBeGreaterThan(top.y + top.height - 1);
+    expect(below.y).toBeGreaterThan(middle.y + middle.height - 1);
+    expect(Math.abs(middle.x - top.x)).toBeLessThanOrEqual(1);
     expect(Math.abs(below.x - top.x)).toBeLessThanOrEqual(1);
     // Footer pinned at the bottom of the sheet; no key cap on a touch screen.
     const send = await box(page, submit(page));
@@ -405,6 +484,28 @@ test.describe('iPad landscape, 1180 × 820', () => {
     expect(Math.round((await box(page, modal(page))).width)).toBe(760);
     expect(await smallTargets(page, '[data-testid="request-form"]')).toEqual([]);
     expect(await overlappingTargets(page, '[data-testid="request-form"]')).toEqual([]);
+  });
+
+  test('too tall for 820 px: the body scrolls between the pinned header and footer', async ({ page }) => {
+    await openNew(page);
+    const frame = await box(page, modal(page));
+    expect(frame.y + frame.height).toBeLessThanOrEqual(820);
+    expect(await scroller(page).evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+    const title = page.getByRole('heading', { name: 'New request' });
+    const titleAt = await box(page, title);
+    const sendAt = await box(page, submit(page));
+
+    // The last More details field, typed into from the keyboard, scrolls into view above the footer.
+    await more(page).getByLabel('Other notes', { exact: true }).focus();
+    await page.keyboard.type('TEST-form scrolled');
+    await scroller(page).evaluate((el) => el.scrollTo(0, el.scrollHeight));
+    expect(await scroller(page).evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+    const notes = await box(page, more(page).getByLabel('Other notes', { exact: true }));
+    const body = await box(page, scroller(page));
+    expect(notes.y + notes.height).toBeLessThanOrEqual(body.y + body.height + 0.5);
+    expect(await box(page, title)).toEqual(titleAt);
+    expect(await box(page, submit(page))).toEqual(sendAt);
+    expect(sendAt.y + sendAt.height).toBeLessThanOrEqual(frame.y + frame.height);
   });
 });
 
