@@ -69,7 +69,7 @@ import {
 import { readPrefs, subscribePrefs, writePref } from './prefs';
 import { SESSION_CHANNEL, clearLogoutPending, readLogoutPending, writeLogoutPending, type LogoutPending } from './session-signals';
 import { startServiceWorker, type SwController } from './sw-client';
-import type { AlertNotifier } from './system-notify';
+import type { AlertNotifier, AlertPlan } from './system-notify';
 import {
   createServerState,
   type AlertEvent,
@@ -167,19 +167,28 @@ export function browserEnv(): StoreEnv {
  */
 function lazyNotifier(): AlertNotifier {
   let real: AlertNotifier | null = null;
+  let active = false;
   import('./system-notify').then(
     (m) => {
       real = m.startNotify();
+      if (active) real.setActive(true);
     },
     () => undefined,
   );
   return {
-    route: () => real?.route() ?? 'toast',
+    plan: (keys) => real?.plan(keys) ?? TOAST_PLAN,
     show: (alert, rowOf, sources) => real?.show(alert, rowOf, sources) ?? Promise.resolve(false),
     close: (tag, key) => real?.close(tag, key),
     closeAll: () => real?.closeAll(),
+    setActive: (on) => {
+      active = on;
+      real?.setActive(on);
+    },
   };
 }
+
+/** Every alert a toast (no notifier, or system-notify not loaded yet). Kept here: a type import costs nothing on the first load. */
+const TOAST_PLAN: AlertPlan = { route: 'toast', skip: new Set<string>() };
 
 export interface CreateAppStoreOptions {
   eventTimezone: string;
@@ -314,6 +323,12 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   let failures = 0;
   /** The first successful sync after load is the alert baseline. */
   let armed = false;
+  /** Armed (past the baseline sync) and alerting: the notifier may then claim the front for this tab. */
+  const setArmed = (on: boolean) => {
+    if (armed === on) return;
+    armed = on;
+    notifier?.setActive(on);
+  };
   /**
    * Alerts of synced rows that are applied but not shown yet. A sync shows them when it ends, whether it
    * succeeded or a later request of it failed, and they survive a stop: an applied row never re-alerts
@@ -595,20 +610,25 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     const current = latestPerRequest(raised).filter((r) =>
       r.alert.requestId ? alertStillCurrent(r.alert.kind, r.status, state.confirmed.get(r.alert.requestId)) : true,
     );
-    // A system notification while the app is in the background, else the toast (decided once per batch).
+    // Decided once per batch: a system notification while the app is in the background, else the toast;
+    // nothing while another app tab of this browser is in front (it toasts these alerts from its own sync),
+    // and nothing for an alert another tab already delivered (v2.5 A52: never both, across tabs too).
     const n = notifier;
-    const route = n?.route() ?? 'toast';
+    const plan = n?.plan(current.map((r) => r.key)) ?? TOAST_PLAN;
+    const route = plan.route;
     // Only a current alert replaces the toast of its request. A dropped one (the row changed again since,
     // and that change may have its own toast up already) closes nothing: pruneAlertToasts below still
     // closes any toast that no longer matches its row. A new notification replaces the old one by its tag;
-    // a toast shown instead closes it.
+    // an alert not shown as one here closes it.
     for (const r of current) {
       if (!r.alert.requestId) continue;
       dismissAlertToastsFor(r.alert.requestId);
-      if (route === 'toast') closeSystemAlert(r.alert.requestId);
+      if (route !== 'system') closeSystemAlert(r.alert.requestId);
     }
-    const statusOf = new Map(current.map((r) => [r.alert, r.status]));
-    const sources = current.map((r) => r.alert);
+    // Combined ("3 new requests") only counts what this tab shows.
+    const shown = route === 'none' ? [] : current.filter((r) => !plan.skip.has(r.key));
+    const statusOf = new Map(shown.map((r) => [r.alert, r.status]));
+    const sources = shown.map((r) => r.alert);
     for (const alert of coalesceAlerts(sources)) {
       const status = statusOf.get(alert) ?? null;
       if (route === 'system' && n) showSystemAlert(n, alert, status, alert.kind === 'combined' ? sources : [alert]);
@@ -766,7 +786,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     set({ confirmed: new Map(), pending: new Map(), hasData: false });
     cursor = null;
     cursorAt = 0;
-    armed = false;
+    setArmed(false);
     alertBacklog = [];
     for (const toastId of [...alertToasts.keys()]) dismissToast(toastId);
     closeSystemAlerts();
@@ -1073,7 +1093,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       set({ lastSyncAt: firstServerTime, hasData: true });
     }
     // The first sync after load is the baseline: it alerts nothing (runSync shows what later ones raise).
-    armed = true;
+    setArmed(true);
     if (state.outbox.length) kickOutbox();
     return 'ok';
   };
@@ -1885,7 +1905,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     cursor = null;
     cursorAt = 0;
     cacheStaff = null;
-    armed = false;
+    setArmed(false);
     alertBacklog = [];
     rowsDirty = false;
     if (rowsTimer) clearTimeout(rowsTimer);
@@ -2394,6 +2414,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     channel = e.channel(SESSION_CHANNEL);
     channel?.addEventListener('message', onChannelMessage);
     notifier = e.notifier?.() ?? null;
+    if (armed) notifier?.setActive(true);
     sw = e.serviceWorker({
       onUpdateReady: () => {
         if (!state.updateReady) set({ updateReady: true });
@@ -2419,6 +2440,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     channel = null;
     sw?.stop();
     sw = null;
+    notifier?.setActive(false);
     notifier = null;
     pollInFlight = false;
     if (state.syncing) set({ syncing: false });

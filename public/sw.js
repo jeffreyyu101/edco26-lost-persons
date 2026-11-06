@@ -34,7 +34,8 @@
  * while the app is in the background (lib/client/system-notify.ts). There is no push: this worker only
  * handles the click. It closes the notification, focuses an open window of the app and has it open the
  * request (`/?r=<id>`, `/` for a combined one) in place; a window that does not answer is navigated there;
- * with no window, one opens.
+ * with no window, one opens. A page asks {type: 'lp-caps'} first and notifies only once the active worker
+ * answers {notificationClick: true}: the worker of an older build has no click handler and never answers.
  */
 'use strict';
 
@@ -52,6 +53,7 @@ const MAX_PRECACHE = 400;
 // How long a window may take to answer "open this request" before it is navigated instead (A52).
 const OPEN_REPLY_MS = 1500;
 const OPEN_MESSAGE = 'lp-open';
+const CAPS_MESSAGE = 'lp-caps';
 const CORE = [
   '/manifest.webmanifest',
   '/icons/icon-192.png',
@@ -385,6 +387,12 @@ self.addEventListener('message', (event) => {
   const data = event.data || {};
   if (data.type === 'skip-waiting') {
     self.skipWaiting();
+    return;
+  }
+  if (data.type === CAPS_MESSAGE) {
+    // This worker handles notification clicks (A52): the page may show alerts as notifications.
+    const port = event.ports && event.ports[0];
+    if (port) port.postMessage({ notificationClick: true });
     return;
   }
   if (data.type === 'precache' && Array.isArray(data.urls)) {

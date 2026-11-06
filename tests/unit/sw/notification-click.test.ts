@@ -55,6 +55,20 @@ beforeEach(() => {
   worker = loadWorker({ version: 'n1', caches: new FakeCacheStorage(), network: new FakeNetwork(), active: 'n1', pages });
 });
 
+describe('lp-caps (a page notifies only once the active worker handles clicks)', () => {
+  it('this worker says it handles notification clicks', async () => {
+    expect(await worker.message({ type: 'lp-caps' })).toEqual({ notificationClick: true });
+  });
+
+  it('the answer changes nothing else: no skipWaiting, no caching', async () => {
+    const caches = new FakeCacheStorage();
+    const w = loadWorker({ version: 'n2', caches, network: new FakeNetwork(), active: 'n1', waiting: 'n2' });
+    expect(await w.message({ type: 'lp-caps' })).toEqual({ notificationClick: true });
+    expect(w.skipWaitingCalls()).toBe(0);
+    expect(await caches.keys()).toEqual([]);
+  });
+});
+
 describe('notificationclick', () => {
   it('closes the notification, focuses the app window and has it open the request in place', async () => {
     const app = win('tab-1', '/?view=pending');

@@ -4,24 +4,35 @@
 // alert is out of date is closed like its toast. Fake notifier; synthetic rows only.
 import { describe, expect, it } from 'vitest';
 import type { AlertEvent } from '@/lib/client/store-contract';
-import { systemNotice, type AlertNotifier, type AlertRoute, type SystemNotice } from '@/lib/client/system-notify';
+import { createNotifySystem, systemNotice, type AlertNotifier, type AlertRoute, type SystemNotice } from '@/lib/client/system-notify';
 import { STATUS } from '@/lib/domain';
-import { advance } from './helpers/env';
+import { MemoryStorage, advance } from './helpers/env';
 import { boot, finish, installStoreHooks, ready } from './helpers/boot';
 import { FakeServer, STAFF, makeRow } from './helpers/fake-server';
+import { fakeNotifyHost, fakeRegistration } from './helpers/notify-host';
 
 installStoreHooks();
 
 function fakeNotifier(initial: AlertRoute = 'system') {
   const n = {
     route: initial,
+    /** Keys another tab already delivered. */
+    elsewhere: new Set<string>(),
     works: true,
     shown: [] as SystemNotice[],
     closed: [] as Array<{ tag: string; key: string | null | undefined }>,
     closedAll: 0,
+    planned: [] as string[][],
+    active: [] as boolean[],
   };
   const notifier: AlertNotifier = {
-    route: () => n.route,
+    plan: (keys) => {
+      n.planned.push([...keys]);
+      return { route: n.route, skip: new Set(keys.filter((k) => n.elsewhere.has(k))) };
+    },
+    setActive: (on) => {
+      n.active.push(on);
+    },
     show: async (alert, rowOf, sources) => {
       // Built at once from the rows the store passes, as the real notifier does.
       const notice = systemNotice(alert, rowOf, sources);
@@ -158,5 +169,120 @@ describe('alerts in the background are system notifications', () => {
     await ready();
     expect(await finish(a.signOut())).toEqual({ ok: true });
     expect(n.closedAll).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('alerts across tabs of one browser (the store’s side)', () => {
+  it('plans each batch with the (id, rowVersion) of its alerts', async () => {
+    const mine = makeRow(4, { createdBy: STAFF.dana.staff });
+    const server = new FakeServer([mine]);
+    const { n } = bootWith(server);
+    await ready();
+    server.change(mine.id, { status: STATUS.inMedical });
+    await advance(6_000);
+    expect(n.planned.at(-1)).toEqual([`${mine.id}:2`]);
+  });
+
+  it('another tab in front ("none"): no toast, no chime, no notification here; a stale one of this tab closes', async () => {
+    const mine = makeRow(4, { createdBy: STAFF.dana.staff });
+    const server = new FakeServer([mine]);
+    const { s, n, heard } = bootWith(server);
+    await ready();
+    server.change(mine.id, { status: STATUS.inMedical });
+    await advance(6_000);
+    expect(n.shown).toHaveLength(1);
+    n.route = 'none';
+    server.change(mine.id, { status: STATUS.notInMedical });
+    await advance(6_000);
+    expect(n.shown).toHaveLength(1);
+    expect(s().toasts).toEqual([]);
+    expect(heard).toEqual([]);
+    expect(n.closed).toEqual([{ tag: mine.id, key: `${mine.id}:2` }]);
+  });
+
+  it('an alert another tab already delivered shows nowhere here; the rest of the batch does (and only they count toward "3 new requests")', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    const { a, s, n, heard } = bootWith(server, 'toast');
+    await ready();
+    a.setPref('bell', true);
+    const rows = [31, 32, 33].map((i) => makeRow(i, { caseNumber: 1000 + i }));
+    n.elsewhere.add(`${rows[0]!.id}:1`);
+    for (const r of rows) server.put(r);
+    await advance(6_000);
+    expect(alertTitles(s)).toEqual(['New request · LP-1032', 'New request · LP-1033']);
+    expect(heard.map((e) => e.title)).toEqual(['New request · LP-1032', 'New request · LP-1033']);
+    // In the background the same rule: one notification each, not "3 new requests".
+    n.route = 'system';
+    const more = [41, 42, 43].map((i) => makeRow(i, { caseNumber: 1000 + i }));
+    n.elsewhere.add(`${more[2]!.id}:1`);
+    for (const r of more) server.put(r);
+    await advance(6_000);
+    expect(n.shown.map((x) => x.title)).toEqual(['New request · LP-1041', 'New request · LP-1042']);
+  });
+
+  it('tells the notifier when it is alerting: after the baseline sync, and no more once stopped', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    const { n, stop } = bootWith(server);
+    expect(n.active).toEqual([]);
+    await ready();
+    expect(n.active).toEqual([true]);
+    stop();
+    expect(n.active).toEqual([true, false]);
+  });
+
+  it('two real tabs: the focused one toasts and chimes, the background one shows nothing; then all in the background, one notification', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    const registration = fakeRegistration();
+    const storage = new MemoryStorage();
+    const hostA = fakeNotifyHost({ permission: 'granted', registration, storage, readyNow: true });
+    const hostB = fakeNotifyHost({ permission: 'granted', registration, storage, readyNow: true, window: { hidden: true, focused: false } });
+    const sysA = createNotifySystem(hostA.host);
+    const sysB = createNotifySystem(hostB.host);
+    sysA.start();
+    sysB.start();
+    const A = boot(server, {}, (env) => {
+      env.notifier = () => sysA;
+    });
+    const B = boot(server, {}, (env) => {
+      env.notifier = () => sysB;
+    });
+    B.fe.setVisible(false);
+    const heardA: AlertEvent[] = [];
+    const heardB: AlertEvent[] = [];
+    A.a.subscribeAlerts((e) => heardA.push(e));
+    B.a.subscribeAlerts((e) => heardB.push(e));
+    await ready();
+    A.a.setPref('bell', true);
+    B.a.setPref('bell', true);
+
+    // The background tab happens to sync first; the focused tab on its next poll.
+    const first = makeRow(51, { caseNumber: 1051 });
+    server.put(first);
+    B.a.syncNow();
+    await advance(50);
+    expect(B.s().confirmed.has(first.id)).toBe(true);
+    expect(registration.shows).toEqual([]);
+    await advance(6_000);
+    expect(alertTitles(A.s)).toEqual(['New request · LP-1051']);
+    expect(heardA).toHaveLength(1);
+    expect(B.s().toasts).toEqual([]);
+    expect(heardB).toEqual([]);
+    expect(registration.shows).toEqual([]);
+
+    // Another app gets the focus: both tabs are in the background. One notification, from whichever
+    // tab polls first; the other tab adds nothing, now or when it comes back to the front.
+    await hostA.setWindow({ focused: false }, 'blur');
+    const second = makeRow(52, { caseNumber: 1052 });
+    server.put(second);
+    await advance(6_000);
+    expect(registration.shows.map((x) => x.title)).toEqual(['New request · LP-1052']);
+    B.a.syncNow();
+    await advance(50);
+    expect(B.s().confirmed.has(second.id)).toBe(true);
+    await hostB.setWindow({ hidden: false, focused: true }, 'focus');
+    expect(registration.shows).toHaveLength(1);
+    expect(B.s().toasts).toEqual([]);
+    expect(heardB).toEqual([]);
+    expect(alertTitles(A.s)).toEqual(['New request · LP-1051']);
   });
 });

@@ -115,10 +115,14 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 - [ ] Keychain fills the password on sign-in step 2.
 - [ ] A Home Screen app signs in on its own and keeps its own saved requests, separate from the Safari tab.
 - [ ] With the mute switch on, an alert still shows its toast (silently).
-- [ ] Desktop Chrome: tap "Allow notifications" in the avatar menu (or turn Alerts on) and allow it, then
-      minimise the window. When someone answers one of your requests (or logs one, with Alerts on), a
+- [ ] Desktop Chrome: on a laptop that used the app before this deploy, tap "Update ready · Reload" first
+      (until the new build's worker is active, alerts stay toasts, because the old worker can't open a
+      clicked notification). Tap "Allow notifications" in the avatar menu (or turn Alerts on) and allow it,
+      then minimise the window. When someone answers one of your requests (or logs one, with Alerts on), a
       system notification appears within about a minute, with no phone number in it, and clicking it opens
       that request in the app window.
+- [ ] Desktop Chrome with the app in two windows (say the list and the dashboard): an alert is one toast in
+      the focused window and nothing in the other; with both minimised it is one notification.
 - [ ] iPhone Home Screen app: turning Alerts on asks to allow notifications, and the app then appears in
       Settings → Notifications. In a Safari tab on iPhone nothing is asked and alerts stay toasts.
 - [ ] At the end, run `docs/export.sql` in the SQL editor and download the results (Query 1, then Query 2;
@@ -140,8 +144,10 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
   Android and the iPhone Home Screen app show a system notification (once allowed); a Safari tab on iPhone
   shows only the toast. A background tab checks once a minute, so a notification can be up to a minute late.
   Phones pause background pages (an iPhone almost at once, Android Chrome after a few minutes), so phone
-  notifications are best effort; a desktop window keeps them coming. The chime is silent under the mute
-  switch.
+  notifications are best effort; a desktop window keeps them coming. Notifications start only once the
+  device runs this build's service worker ("Update ready · Reload"). A tab still open from before this
+  deploy keeps its toast and chime and doesn't coordinate with newer tabs, so it can toast an alert another
+  window shows as a notification until it is reloaded. The chime is silent under the mute switch.
 - **Identity is self-declared.** Everyone shares one event password, and the name and team are only for
   attribution. Cancelling a request, and reopening a cancelled one, are limited to the staff member who
   logged it, matched by name and team.

@@ -11,9 +11,10 @@ import { newSignedInContext, signedInAs } from './helpers/session';
 //
 // Chromium, desktop context: context.grantPermissions(['notifications']) and a spy on
 // ServiceWorkerRegistration.prototype.showNotification (nothing is really shown). Playwright can't
-// minimise a window, so the page's visibility and focus are overridden in place; a hidden tab polls once a
-// minute, so the test asks for a sync with an `online` event. The other phone logs synthetic requests
-// (TEST-N-<tag>), closed again after each test.
+// minimise a window, so the page's visibility and focus are overridden in place (and the events fired); a
+// hidden tab polls once a minute, so the test asks for a sync with an `online` event. Two pages of one
+// context are two windows of one browser: never a toast in one and a notification in the other. The other
+// phone logs synthetic requests (TEST-N-<tag>), closed again after each test.
 
 const BASE = testBaseUrl();
 const LIAISON = { staffName: 'TEST-N Notify', team: 'Medical' };
@@ -76,6 +77,9 @@ async function installSpy(context: BrowserContext, mode: Mode): Promise<void> {
       Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (hidden ? 'hidden' : 'visible') });
       Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
       document.hasFocus = () => focused;
+      // What the browser would say, so the app hears it (the front claim across tabs follows these).
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event(focused ? 'focus' : 'blur'));
     };
   }, mode);
 }
@@ -103,6 +107,10 @@ async function desktop(browser: Browser, mode: Mode, opts: { bell?: boolean } = 
 }
 
 const lp = (r: RequestSummary) => `LP-${String(r.caseNumber).padStart(4, '0')}`;
+/** The page's list has the row: its sync applied it (alerting, or not, on the way). */
+const synced = (page: Page, r: RequestSummary) => expect(page.locator(`[data-request-id="${r.id}"]`).first()).toBeAttached({ timeout: 15_000 });
+/** The front claim across the browser's app tabs (lib/client/system-notify.ts FRONT_KEY). */
+const frontClaim = (page: Page) => page.evaluate(() => localStorage.getItem('lp-alerts-front'));
 const shownFor = (page: Page, id: string) => page.evaluate((tag) => window.__lpShown.filter((n) => n.tag === tag), id);
 const toastFor = (page: Page, r: RequestSummary) => page.locator('.lp-toast').filter({ hasText: `New request · ${lp(r)}` });
 /** A hidden tab polls once a minute: sync now. */
@@ -223,6 +231,62 @@ test.describe('desktop (Chromium)', () => {
       await syncNow(page);
       await expect.poll(() => shownFor(page, blurred.id), { timeout: 15_000 }).toHaveLength(1);
       await expect(toastFor(page, blurred)).toHaveCount(0);
+    } finally {
+      await closeAll(front, created);
+      await front.close();
+      await desk.close();
+    }
+  });
+
+  test('two windows of one browser: the focused one toasts, the other shows nothing; all in the background, one notification', async ({ browser }) => {
+    test.slow();
+    const desk = await desktop(browser, 'granted', { bell: true });
+    const front = await newSignedInContext(browser, FRONT, { baseURL: BASE });
+    const created: RequestSummary[] = [];
+    try {
+      const list = await desk.newPage();
+      watch(list);
+      await openApp(list);
+      const other = await desk.newPage();
+      watch(other);
+      await openApp(other);
+      // Both have system notifications on (their worker answers lp-caps).
+      for (const page of [list, other]) {
+        await page.getByTestId('account-trigger').click();
+        const menu = page.getByRole('dialog', { name: 'Account' });
+        await expect(menu.getByTestId('notify-state')).toHaveAttribute('data-state', 'granted', { timeout: 30_000 });
+        await page.keyboard.press('Escape');
+        await expect(menu).toHaveCount(0);
+      }
+      // A second window, visible but without the focus (the dashboard on another monitor); the list in front.
+      await other.evaluate(() => window.__lpBackground(false, false));
+      await list.evaluate(() => window.__lpBackground(false, true));
+      await expect.poll(() => frontClaim(other)).not.toBeNull();
+
+      // The other window syncs first: nothing there. The list syncs: its toast.
+      const r1 = await logRequest(front, created);
+      await syncNow(other);
+      await synced(other, r1);
+      await syncNow(list);
+      await expect(toastFor(list, r1)).toBeVisible({ timeout: 15_000 });
+      await other.waitForTimeout(1_500);
+      expect(await shownFor(other, r1.id)).toEqual([]);
+      expect(await shownFor(list, r1.id)).toEqual([]);
+      await expect(toastFor(other, r1)).toHaveCount(0);
+
+      // Everything in the background (minimised): one notification, from the window that syncs first;
+      // the other adds neither a notification nor a toast.
+      await list.evaluate(() => window.__lpBackground(true, false));
+      await expect.poll(() => frontClaim(other)).toBeNull();
+      const r2 = await logRequest(front, created);
+      await syncNow(list);
+      await expect.poll(() => shownFor(list, r2.id), { timeout: 15_000 }).toHaveLength(1);
+      await syncNow(other);
+      await synced(other, r2);
+      await other.waitForTimeout(1_500);
+      expect(await shownFor(other, r2.id)).toEqual([]);
+      await expect(toastFor(other, r2)).toHaveCount(0);
+      await expect(toastFor(list, r2)).toHaveCount(0);
     } finally {
       await closeAll(front, created);
       await front.close();

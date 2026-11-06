@@ -129,8 +129,9 @@ Pending.
   chime. In the background (another tab, a minimised window) it is a system notification instead, where the
   device allows one and it was allowed (desktop Chrome, Edge, Firefox and Safari, Android Chrome, the iPhone
   Home Screen app; "Allow notifications" in the avatar menu). It shows the LP number, the status, initials
-  and the post, never contact details, and a click opens the request. A Safari tab on iPhone keeps the
-  toast only. There is no push: a closed app gets nothing.
+  and the post, never contact details, and a click opens the request. One alert is never both a toast and a
+  notification, even with the app in two windows. A Safari tab on iPhone keeps the toast only. There is no
+  push: a closed app gets nothing.
 - **Offline.** A new request (with its photos) is saved on the phone first and sent when the signal is back.
   Answers, edits and adding photos to an existing request need a connection.
 - **Dashboard.** Status count tiles first, then Open by post, Recently updated, and Performance last (longest

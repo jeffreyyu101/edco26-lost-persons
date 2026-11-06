@@ -3,18 +3,22 @@
 // VAPID. The page that raised an alert shows it through its own service worker registration, so it works
 // only while the app is open (a background tab or a minimised window included).
 //
-//   * Supported: 'Notification' in window, an active service worker registration, and not a Safari tab on
-//     iPhone or iPad (there only a Home Screen app may notify, iOS 16.4+; the tab never prompts). That
-//     covers desktop Chrome / Edge / Firefox, Safari on macOS, Android Chrome and the iPhone Home Screen
-//     app. Always registration.showNotification(), never `new Notification()` (Android Chrome throws).
+//   * Supported: 'Notification' in window, an active service worker that handles notification clicks
+//     (it answers {type: 'lp-caps'}; the worker of a build before this one does not, so until the update
+//     takes over the page keeps toasts), and not a Safari tab on iPhone or iPad (there only a Home Screen
+//     app may notify, iOS 16.4+; the tab never prompts). That covers desktop Chrome / Edge / Firefox,
+//     Safari on macOS, Android Chrome and the iPhone Home Screen app. Always
+//     registration.showNotification(), never `new Notification()` (Android Chrome throws).
 //   * Permission is asked only inside a tap: turning Alerts on, or "Allow notifications" (menu and sheet).
 //     Denied is shown quietly ("Blocked in browser") and never asked again by the app.
 //   * Delivery (routeAlert): permission granted and the page hidden, or a desktop window without focus →
-//     a system notification; otherwise the in-app toast + chime as before. Never both for one alert.
+//     a system notification; otherwise the in-app toast + chime as before. Never both for one alert, in
+//     one tab or across the tabs and windows of the browser (createPeerBoard): a background tab shows
+//     nothing while another app tab is in front (that tab toasts it from its own sync), and an alert
+//     another tab already delivered is not delivered again the other way.
 //   * One notification per request (tag = request id): a later alert for it replaces the earlier one, and
 //     the store closes one whose alert is out of date (alerts.ts alertStillCurrent). 3+ at once are one
-//     notification ("3 new requests"), like the toast. Another tab that already showed the same
-//     (id, rowVersion) is not shown twice.
+//     notification ("3 new requests"), like the toast.
 //   * Content: the LP number, "New request" or the status, initials and the post. Never a phone number or
 //     any other contact detail: it lands on the lock screen and in the notification centre.
 //   * Click: public/sw.js focuses an app window and posts {type: 'lp-open', url}; this page opens that view
@@ -30,9 +34,11 @@ import { formatCaseNumber } from '../format';
 import { alertKey } from './alerts';
 import { hrefFor, navigate, parseView, viewToParams } from './nav';
 import type { AlertEvent } from './store-contract';
+import { uuid } from './uuid';
 
 export type NotifyPermission = 'default' | 'granted' | 'denied';
-export type AlertRoute = 'system' | 'toast';
+/** 'none': this tab is in the background and another app tab is in front, which toasts the alert itself. */
+export type AlertRoute = 'system' | 'toast' | 'none';
 
 export interface NotifyState {
   /** System notifications can be shown on this device (see the header). */
@@ -63,7 +69,10 @@ export interface DeviceInfo {
   maxTouchPoints: number;
   /** Running as a Home Screen / installed app. */
   standalone: boolean;
-  /** An active service worker registration (registration.showNotification needs one). */
+  /**
+   * An active service worker registration (registration.showNotification needs one) whose worker handles
+   * notification clicks.
+   */
   registration: boolean;
 }
 
@@ -93,10 +102,19 @@ export interface WindowInfo {
   desktop: boolean;
 }
 
-/** Where an alert raised now goes: a system notification, or the in-app toast + chime. */
-export function routeAlert(state: NotifyState, win: WindowInfo): AlertRoute {
-  if (!state.supported || state.permission !== 'granted') return 'toast';
-  return win.hidden || (win.desktop && !win.focused) ? 'system' : 'toast';
+/** This window is the one being looked at: visible and, on a desktop, focused. */
+export function inFront(win: WindowInfo): boolean {
+  return !win.hidden && (win.focused || !win.desktop);
+}
+
+/**
+ * Where an alert raised now goes: the in-app toast + chime while this window is in front; else a system
+ * notification, or nothing when another app tab of this browser is in front (`otherTabInFront`): that tab
+ * raises the same alert from its own sync and toasts it.
+ */
+export function routeAlert(state: NotifyState, win: WindowInfo, otherTabInFront = false): AlertRoute {
+  if (!state.supported || state.permission !== 'granted' || inFront(win)) return 'toast';
+  return otherTabInFront ? 'none' : 'system';
 }
 
 /** What a system notification shows, and what a click on it opens. */
@@ -181,10 +199,30 @@ export interface ShownNotificationLike {
   close(): void;
 }
 
+export interface WorkerLike {
+  postMessage(message: unknown, transfer?: unknown[]): void;
+}
+
 export interface RegistrationLike {
+  /** The worker that receives notification clicks. */
+  readonly active?: WorkerLike | null;
   showNotification(title: string, options?: NotificationOptions): Promise<void>;
   getNotifications?(filter?: { tag?: string }): Promise<readonly ShownNotificationLike[]>;
 }
+
+/** localStorage, as far as the cross-tab board uses it. */
+export interface StorageLike {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+/**
+ * What the notifier hears from the browser: the window gained or lost focus or visibility, the page is
+ * going away or is back (bfcache), the active service worker changed, or the permission changed in the
+ * site settings.
+ */
+export type HostEvent = 'focus' | 'blur' | 'visibilitychange' | 'pagehide' | 'pageshow' | 'controllerchange' | 'permission';
 
 /** What the notifier reads from the browser (tests pass a fake). */
 export interface NotifyHost {
@@ -192,15 +230,38 @@ export interface NotifyHost {
   notification(): NotificationLike | null;
   /** navigator.serviceWorker.ready, or null without service workers. */
   ready(): Promise<RegistrationLike> | null;
+  /**
+   * True once the registration's active worker says it handles notification clicks ({type: 'lp-caps'}).
+   * The worker of an older build never answers: until this build's worker takes over (after "Update
+   * ready · Reload"), a click on a notification would do nothing, so alerts stay toasts.
+   */
+  handlesClicks(registration: RegistrationLike): Promise<boolean>;
   device(): Pick<DeviceInfo, 'userAgent' | 'platform' | 'maxTouchPoints' | 'standalone'>;
   window(): WindowInfo;
-  /** Calls `onChange` when the permission may have changed. Returns the remover. */
-  watch(onChange: () => void): () => void;
+  /** Calls `onChange` on each HostEvent. Returns the remover. */
+  watch(onChange: (event: HostEvent) => void): () => void;
+  /** localStorage (shared by the browser's tabs and windows of the app), or null when blocked. */
+  storage(): StorageLike | null;
+  now(): number;
 }
+
+/** Where a batch of alerts goes (AlertNotifier.plan). */
+export interface AlertPlan {
+  route: AlertRoute;
+  /** Alert keys another tab of this browser already delivered (toast or notification): shown nowhere here. */
+  skip: ReadonlySet<string>;
+}
+
+/** Every alert a toast, nothing skipped: the store's default, and every device without system notifications. */
+export const TOAST_PLAN: Readonly<AlertPlan> = Object.freeze({ route: 'toast', skip: new Set<string>() });
 
 /** What the store uses to deliver alerts (StoreEnv.notifier). */
 export interface AlertNotifier {
-  route(): AlertRoute;
+  /**
+   * Where a batch goes, decided once (routeAlert and the cross-tab board), with `keys` the (id, rowVersion)
+   * of its alerts. A batch routed to 'toast' or 'system' records its keys for the browser's other tabs.
+   */
+  plan(keys: readonly string[]): AlertPlan;
   /**
    * Shows `alert` as a system notification (systemNotice, built at once from `rowOf`; `sources` are the
    * alerts a combined one stands for). False when it could not be shown: the store then toasts it.
@@ -208,13 +269,20 @@ export interface AlertNotifier {
   show(alert: AlertEvent, rowOf: (id: string) => RequestSummary | undefined, sources: readonly AlertEvent[]): Promise<boolean>;
   /** Closes the notification with this tag (only the one of `key`, when given). */
   close(tag: string, key?: string | null): void;
-  /** Closes every notification of the app (sign-out, another staff signed in). */
+  /** Closes every notification of the app (sign-out, another staff signed in), and forgets the board. */
   closeAll(): void;
+  /**
+   * The store is signed in and raising alerts (past its baseline sync). Only then may this tab, while in
+   * front, claim the alerts of the browser's other app tabs.
+   */
+  setActive(active: boolean): void;
 }
 
 export interface NotifySystem extends AlertNotifier {
   /** Starts reading the registration and watching the permission (idempotent). */
   start(): void;
+  /** Where an alert raised now would go (plan() without recording anything). */
+  route(): AlertRoute;
   /** Shows a built notice (show() builds it from the alert). */
   showNotice(notice: SystemNotice): Promise<boolean>;
   state(): NotifyState;
@@ -231,11 +299,120 @@ function keyOf(shown: ShownNotificationLike): string | null {
   return data && typeof data.key === 'string' ? data.key : null;
 }
 
+// ---------------------------------------------------------------------------------------------------
+// Across tabs: never both (one browser, several app tabs or windows)
+// ---------------------------------------------------------------------------------------------------
+//
+// Each tab has its own store, sync and `seen` set, so each raises the same alert on its own. With system
+// notifications on, two records in localStorage keep one alert from showing as a toast in one tab and as a
+// notification in another:
+//   * FRONT_KEY {tab, until}: the app tab in front (visible, and focused on a desktop), refreshed while it
+//     is. A background tab shows nothing while another tab holds it: that tab toasts the same alert from
+//     its own sync (every 6 s in front). It expires on its own if the tab dies without pagehide.
+//   * DELIVERED_KEY {key: until}: the (id, rowVersion) each tab delivered, for 10 minutes. A tab that
+//     raises one of them later (it polled later, or came to the front since) shows nothing for it.
+
+export const FRONT_KEY = 'lp-alerts-front';
+export const DELIVERED_KEY = 'lp-alerts-delivered';
+/** A front claim lasts this long unless refreshed (a tab that died without pagehide stops claiming). */
+export const FRONT_TTL_MS = 30_000;
+const FRONT_REFRESH_MS = 10_000;
+/** Longer than a background tab's poll (60 s), even throttled. */
+export const DELIVERED_TTL_MS = 10 * 60_000;
+const DELIVERED_MAX = 300;
+
+export interface PeerBoard {
+  /** Another app tab of this browser holds a fresh front claim. */
+  otherInFront(): boolean;
+  /** Claims (or refreshes) the front for this tab, or releases this tab's claim. */
+  setFront(front: boolean): void;
+  /** A tab of this browser delivered this alert key in the last DELIVERED_TTL_MS. */
+  delivered(key: string): boolean;
+  markDelivered(keys: readonly string[]): void;
+  /** Forgets the delivered keys and releases this tab's claim (sign-out, another staff). */
+  clear(): void;
+}
+
+export function createPeerBoard(storage: () => StorageLike | null, tab: string, now: () => number): PeerBoard {
+  const readJson = (key: string): unknown => {
+    try {
+      const raw = storage()?.getItem(key);
+      return raw ? (JSON.parse(raw) as unknown) : null;
+    } catch {
+      return null;
+    }
+  };
+  const write = (key: string, value: unknown) => {
+    try {
+      storage()?.setItem(key, JSON.stringify(value));
+    } catch {
+      // Full or blocked: this tab decides alone, as before.
+    }
+  };
+  const remove = (key: string) => {
+    try {
+      storage()?.removeItem(key);
+    } catch {
+      // blocked
+    }
+  };
+  const claim = (): { tab: string; until: number } | null => {
+    const c = readJson(FRONT_KEY) as { tab?: unknown; until?: unknown } | null;
+    return c && typeof c.tab === 'string' && typeof c.until === 'number' ? { tab: c.tab, until: c.until } : null;
+  };
+  const deliveredMap = (): Record<string, number> => {
+    const raw = readJson(DELIVERED_KEY);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    const t = now();
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) if (typeof v === 'number' && v > t) out[k] = v;
+    return out;
+  };
+  const releaseMine = () => {
+    if (claim()?.tab === tab) remove(FRONT_KEY);
+  };
+  return {
+    otherInFront() {
+      const c = claim();
+      return !!c && c.tab !== tab && c.until > now();
+    },
+    setFront(front) {
+      if (front) write(FRONT_KEY, { tab, until: now() + FRONT_TTL_MS });
+      else releaseMine();
+    },
+    delivered: (key) => key in deliveredMap(),
+    markDelivered(keys) {
+      if (keys.length === 0) return;
+      const map = deliveredMap();
+      const until = now() + DELIVERED_TTL_MS;
+      for (const k of keys) map[k] = until;
+      const entries = Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, DELIVERED_MAX);
+      write(DELIVERED_KEY, Object.fromEntries(entries));
+    },
+    clear() {
+      remove(DELIVERED_KEY);
+      releaseMine();
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The notifier
+// ---------------------------------------------------------------------------------------------------
+
 export function createNotifySystem(host: NotifyHost): NotifySystem {
   let registration: RegistrationLike | null = null;
   let snapshot: NotifyState = NO_NOTIFY;
   let started = false;
   const listeners = new Set<() => void>();
+  const board = createPeerBoard(() => host.storage(), uuid(), () => host.now());
+  /** The store is signed in and alerting (setActive). */
+  let active = false;
+  /** pagehide: the page is going away (or into the bfcache), so it no longer claims the front. */
+  let leaving = false;
+  let claimTimer: ReturnType<typeof setInterval> | undefined;
+  let checkSeq = 0;
+  let checking = false;
 
   const read = (): NotifyState => {
     const n = host.notification();
@@ -247,19 +424,68 @@ export function createNotifySystem(host: NotifyHost): NotifySystem {
     snapshot = next;
     for (const l of [...listeners]) l();
   };
+  /** System notifications are on here: only then do this browser's tabs coordinate (toast-only tabs are as before). */
+  const coordinated = () => snapshot.supported && snapshot.permission === 'granted';
+
+  /** Claims the front while this tab is in front and alerting; releases it otherwise. */
+  const updateClaim = () => {
+    const front = active && !leaving && coordinated() && inFront(host.window());
+    board.setFront(front);
+    if (front && claimTimer === undefined) claimTimer = setInterval(updateClaim, FRONT_REFRESH_MS);
+    if (!front && claimTimer !== undefined) {
+      clearInterval(claimTimer);
+      claimTimer = undefined;
+    }
+  };
+  const sync = () => {
+    refresh();
+    updateClaim();
+  };
+
+  /** Reads the registration and asks its active worker whether it handles clicks (the latest check wins). */
+  const checkWorker = () => {
+    const ready = host.ready();
+    if (!ready) return;
+    const seq = ++checkSeq;
+    checking = true;
+    ready.then(
+      async (r) => {
+        let ok = false;
+        try {
+          ok = await host.handlesClicks(r);
+        } catch {
+          ok = false;
+        }
+        if (seq !== checkSeq) return;
+        checking = false;
+        registration = ok ? r : null;
+        sync();
+      },
+      () => {
+        if (seq === checkSeq) checking = false;
+      },
+    );
+  };
 
   const start = () => {
     if (started) return;
     started = true;
     refresh();
-    host.ready()?.then(
-      (r) => {
-        registration = r;
-        refresh();
-      },
-      () => undefined,
-    );
-    host.watch(refresh);
+    checkWorker();
+    host.watch((event) => {
+      if (event === 'pagehide') leaving = true;
+      else if (event === 'pageshow') leaving = false;
+      // A new worker took over, or an earlier check found none that handles clicks (it timed out, or an
+      // older build's worker was active): ask again.
+      if (event === 'controllerchange' || (registration === null && !checking && (event === 'focus' || event === 'visibilitychange'))) checkWorker();
+      sync();
+    });
+  };
+
+  const route = (): AlertRoute => {
+    refresh();
+    const win = host.window();
+    return routeAlert(snapshot, win, !inFront(win) && board.otherInFront());
   };
 
   const showNotice = async (notice: SystemNotice): Promise<boolean> => {
@@ -310,7 +536,7 @@ export function createNotifySystem(host: NotifyHost): NotifySystem {
       if (!n || !snapshot.supported || n.permission !== 'default') return Promise.resolve(snapshot.permission);
       return new Promise<NotifyPermission>((resolve) => {
         const done = () => {
-          refresh();
+          sync();
           resolve(snapshot.permission);
         };
         try {
@@ -322,9 +548,18 @@ export function createNotifySystem(host: NotifyHost): NotifySystem {
         }
       });
     },
-    route() {
-      refresh();
-      return routeAlert(snapshot, host.window());
+    route,
+    plan(keys) {
+      const r = route();
+      if (!coordinated() || r === 'none') return { route: r, skip: TOAST_PLAN.skip };
+      const skip = new Set(keys.filter((k) => board.delivered(k)));
+      // Recorded before anything is shown, so a tab raising the same keys a moment later already sees them.
+      board.markDelivered(keys.filter((k) => !skip.has(k)));
+      return { route: r, skip };
+    },
+    setActive(on) {
+      active = on;
+      updateClaim();
     },
     // The notice is built before anything is awaited, from the rows the store holds at this moment.
     show: (alert, rowOf, sources) => showNotice(systemNotice(alert, rowOf, sources)),
@@ -334,8 +569,35 @@ export function createNotifySystem(host: NotifyHost): NotifySystem {
     },
     closeAll() {
       closeWhere(undefined, () => true);
+      board.clear();
     },
   };
+}
+
+/** The message public/sw.js answers with {notificationClick: true} (a worker of an older build never does). */
+export const CAPS_MESSAGE = 'lp-caps';
+/** How long the active worker may take to answer (it may have to start up first). */
+export const CAPS_REPLY_MS = 5_000;
+
+/** Asks `worker` for {type: 'lp-caps'}; true once it says it handles notification clicks. */
+export function askWorkerCaps(worker: WorkerLike | null | undefined, timeoutMs = CAPS_REPLY_MS): Promise<boolean> {
+  if (!worker || typeof MessageChannel === 'undefined') return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    const done = (ok: boolean) => {
+      clearTimeout(timer);
+      channel.port1.onmessage = null;
+      channel.port1.close();
+      resolve(ok);
+    };
+    const timer = setTimeout(() => done(false), timeoutMs);
+    channel.port1.onmessage = (event: MessageEvent<{ notificationClick?: unknown } | null>) => done(event.data?.notificationClick === true);
+    try {
+      worker.postMessage({ type: CAPS_MESSAGE }, [channel.port2]);
+    } catch {
+      done(false);
+    }
+  });
 }
 
 /** The real browser. Only called on the client. */
@@ -345,7 +607,8 @@ export function browserNotifyHost(): NotifyHost {
       const w = window as unknown as { Notification?: NotificationLike };
       return 'Notification' in window && w.Notification ? w.Notification : null;
     },
-    ready: () => ('serviceWorker' in navigator ? (navigator.serviceWorker.ready as Promise<RegistrationLike>) : null),
+    ready: () => ('serviceWorker' in navigator ? (navigator.serviceWorker.ready as unknown as Promise<RegistrationLike>) : null),
+    handlesClicks: (registration) => askWorkerCaps(registration.active),
     device: () => {
       const nav = navigator as Navigator & { standalone?: boolean };
       return {
@@ -362,19 +625,32 @@ export function browserNotifyHost(): NotifyHost {
     }),
     watch(onChange) {
       const offs: Array<() => void> = [];
-      const on = (target: EventTarget, type: string) => {
-        target.addEventListener(type, onChange);
-        offs.push(() => target.removeEventListener(type, onChange));
+      const on = (target: EventTarget, type: string, event: HostEvent) => {
+        const handler = () => onChange(event);
+        target.addEventListener(type, handler);
+        offs.push(() => target.removeEventListener(type, handler));
       };
-      on(window, 'focus');
-      on(document, 'visibilitychange');
+      on(window, 'focus', 'focus');
+      on(window, 'blur', 'blur');
+      on(window, 'pagehide', 'pagehide');
+      on(window, 'pageshow', 'pageshow');
+      on(document, 'visibilitychange', 'visibilitychange');
+      if ('serviceWorker' in navigator) on(navigator.serviceWorker, 'controllerchange', 'controllerchange');
       // Chrome and Firefox report a change made in the browser's site settings.
       navigator.permissions?.query({ name: 'notifications' as PermissionName }).then(
-        (status) => on(status, 'change'),
+        (status) => on(status, 'change', 'permission'),
         () => undefined,
       );
       return () => offs.splice(0).forEach((off) => off());
     },
+    storage: () => {
+      try {
+        return window.localStorage;
+      } catch {
+        return null;
+      }
+    },
+    now: () => Date.now(),
   };
 }
 
@@ -384,6 +660,8 @@ const NULL_SYSTEM: NotifySystem = {
   subscribe: () => () => undefined,
   request: () => Promise.resolve('default'),
   route: () => 'toast',
+  plan: () => TOAST_PLAN,
+  setActive: () => undefined,
   show: () => Promise.resolve(false),
   showNotice: () => Promise.resolve(false),
   close: () => undefined,

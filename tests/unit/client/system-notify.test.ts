@@ -2,12 +2,19 @@
 // when permission is asked, where an alert goes (system notification or toast), and what a notification
 // may show (never contact details). Notification, the service worker registration and visibility are
 // fakes. Synthetic rows only.
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RequestSummary } from '@/lib/api-types';
 import { newRequestAlert, statusAlert, coalesceAlerts } from '@/lib/client/alerts';
 import {
+  CAPS_REPLY_MS,
   COMBINED_TAG,
+  DELIVERED_KEY,
+  DELIVERED_TTL_MS,
+  FRONT_KEY,
+  FRONT_TTL_MS,
+  askWorkerCaps,
   browserNotifyHost,
+  createPeerBoard,
   createNotifySystem,
   isAppleTouch,
   noticeOptions,
@@ -15,20 +22,14 @@ import {
   routeAlert,
   systemNotice,
   type DeviceInfo,
-  type NotifyHost,
   type NotifyState,
-  type ShownNotificationLike,
   type WindowInfo,
 } from '@/lib/client/system-notify';
 import { STATUS } from '@/lib/domain';
+import { MemoryStorage } from './helpers/env';
 import { makeRow } from './helpers/fake-server';
+import { UA, fakeNotifyHost, fakeRegistration, flush } from './helpers/notify-host';
 
-const UA = {
-  chromeMac: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
-  safariMac: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15',
-  iPhone: 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1',
-  android: 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36',
-};
 
 const device = (patch: Partial<DeviceInfo> = {}): DeviceInfo => ({
   hasNotification: true,
@@ -88,6 +89,16 @@ describe('where an alert goes', () => {
   it('a page in front: the toast + chime', () => {
     expect(routeAlert(granted, win())).toBe('toast');
     expect(routeAlert(granted, win({ desktop: false }))).toBe('toast');
+  });
+
+  it('another app tab of this browser in front: a background tab shows nothing (that tab toasts it)', () => {
+    expect(routeAlert(granted, win({ hidden: true, focused: false }), true)).toBe('none');
+    expect(routeAlert(granted, win({ focused: false }), true)).toBe('none');
+    // This window is the one in front: its own toast, whatever another tab claims.
+    expect(routeAlert(granted, win(), true)).toBe('toast');
+    expect(routeAlert(granted, win({ focused: false, desktop: false }), true)).toBe('toast');
+    // Toast-only tabs are as before.
+    expect(routeAlert({ supported: true, permission: 'denied' }, win({ hidden: true, focused: false }), true)).toBe('toast');
   });
 
   it('without permission, or where unsupported: always the toast, even hidden', () => {
@@ -187,74 +198,7 @@ describe('what a notification shows', () => {
 
 // ---- The notifier against fake browser parts ----
 
-interface Shown extends ShownNotificationLike {
-  title: string;
-  tag: string;
-  closed: boolean;
-}
-
-function fakeHost(opts: { permission?: string; answer?: string; ua?: string; platform?: string; touch?: number; noNotification?: boolean; noWorker?: boolean } = {}) {
-  let permission = opts.permission ?? 'default';
-  let asked = 0;
-  let resolveReady: () => void = () => undefined;
-  let win: WindowInfo = { hidden: false, focused: true, desktop: true };
-  let onWatch: (() => void) | null = null;
-  const open: Shown[] = [];
-  const shows: Array<{ title: string; options: NotificationOptions | undefined }> = [];
-  let failShow = false;
-  const registration = {
-    showNotification: async (title: string, options?: NotificationOptions) => {
-      if (failShow) throw new TypeError('No active registration');
-      shows.push({ title, options });
-      const tag = options?.tag ?? '';
-      for (const n of open.filter((x) => x.tag === tag)) open.splice(open.indexOf(n), 1);
-      const n: Shown = { title, tag, data: options?.data, closed: false, close: () => ((n.closed = true), open.splice(open.indexOf(n), 1)) };
-      open.push(n);
-    },
-    getNotifications: async (filter?: { tag?: string }) => open.filter((n) => !filter?.tag || n.tag === filter.tag),
-  };
-  const notification = {
-    get permission() {
-      return permission;
-    },
-    requestPermission: () => {
-      asked += 1;
-      permission = opts.answer ?? 'granted';
-      return Promise.resolve(permission);
-    },
-  };
-  const host: NotifyHost = {
-    notification: () => (opts.noNotification ? null : notification),
-    ready: () => (opts.noWorker ? null : new Promise((resolve) => (resolveReady = () => resolve(registration)))),
-    device: () => ({ userAgent: opts.ua ?? UA.chromeMac, platform: opts.platform ?? 'MacIntel', maxTouchPoints: opts.touch ?? 0, standalone: false }),
-    window: () => win,
-    watch: (fn) => {
-      onWatch = fn;
-      return () => (onWatch = null);
-    },
-  };
-  return {
-    host,
-    open,
-    shows,
-    asked: () => asked,
-    ready: async () => {
-      resolveReady();
-      await Promise.resolve();
-      await Promise.resolve();
-    },
-    setPermission: (p: string) => {
-      permission = p;
-    },
-    setWindow: (patch: Partial<WindowInfo>) => {
-      win = { ...win, ...patch };
-    },
-    failShow: (v: boolean) => {
-      failShow = v;
-    },
-    fireWatch: () => onWatch?.(),
-  };
-}
+const fakeHost = fakeNotifyHost;
 
 const sample = () => systemNotice(statusAlert(makeRow(4, { status: STATUS.inMedical, rowVersion: 2 })), () => makeRow(4, { status: STATUS.inMedical, rowVersion: 2 }));
 
@@ -312,16 +256,53 @@ describe('the notifier', () => {
     expect(system.route()).toBe('toast'); // no service worker yet
     await f.ready();
     expect(system.route()).toBe('toast');
-    f.setWindow({ hidden: true, focused: false });
+    f.peekWindow({ hidden: true, focused: false });
     expect(system.route()).toBe('system');
-    f.setWindow({ hidden: false, focused: false });
+    f.peekWindow({ hidden: false, focused: false });
     expect(system.route()).toBe('system');
-    f.setWindow({ desktop: false });
+    f.peekWindow({ desktop: false });
     expect(system.route()).toBe('toast');
     // Blocked in the browser's site settings meanwhile: back to the toast.
-    f.setWindow({ hidden: true });
+    f.peekWindow({ hidden: true });
     f.setPermission('denied');
     expect(system.route()).toBe('toast');
+  });
+
+  it('only once the active worker handles clicks (lp-caps): an older build’s worker keeps alerts toasts until the update takes over', async () => {
+    const f = fakeHost({ permission: 'granted' });
+    f.reg.setClicks(false);
+    const system = createNotifySystem(f.host);
+    const heard = vi.fn();
+    system.subscribe(heard);
+    await f.ready();
+    expect(f.reg.caps).toEqual([{ type: 'lp-caps' }]);
+    expect(system.state()).toEqual({ supported: false, permission: 'granted' });
+    f.peekWindow({ hidden: true, focused: false });
+    expect(system.route()).toBe('toast');
+    expect(await system.showNotice(sample())).toBe(false);
+    expect(f.shows).toEqual([]);
+    // "Update ready · Reload" in another tab: this build's worker takes over this page too.
+    f.reg.setClicks(true);
+    await f.fire('controllerchange');
+    expect(system.state()).toEqual({ supported: true, permission: 'granted' });
+    expect(system.route()).toBe('system');
+    expect(heard).toHaveBeenCalled();
+  });
+
+  it('asks the worker again on focus while it has no answer yet, and not once it has one', async () => {
+    const f = fakeHost({ permission: 'granted' });
+    f.reg.setClicks(false);
+    const system = createNotifySystem(f.host);
+    system.start();
+    await f.ready();
+    expect(f.reg.caps).toHaveLength(1);
+    f.reg.setClicks(true);
+    await f.fire('focus');
+    expect(f.reg.caps).toHaveLength(2);
+    expect(system.state().supported).toBe(true);
+    await f.fire('focus');
+    await f.fire('visibilitychange');
+    expect(f.reg.caps).toHaveLength(2);
   });
 
   it('hears a permission change made in the browser settings', async () => {
@@ -332,7 +313,7 @@ describe('the notifier', () => {
     await f.ready();
     heard.mockClear();
     f.setPermission('denied');
-    f.fireWatch();
+    await f.fire('permission');
     expect(system.state().permission).toBe('denied');
     expect(heard).toHaveBeenCalledTimes(1);
   });
@@ -376,7 +357,7 @@ describe('the notifier', () => {
     await f.ready();
     expect(await system.showNotice(sample())).toBe(false); // not granted
     f.setPermission('granted');
-    f.failShow(true);
+    f.reg.failShow(true);
     expect(await system.showNotice(sample())).toBe(false);
     expect(f.shows).toHaveLength(0);
   });
@@ -405,38 +386,195 @@ describe('the notifier', () => {
   });
 });
 
+// ---- Two tabs of one browser (one localStorage, one registration) ----
+
+describe('across tabs: never a toast in one and a notification in another', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'], now: Date.parse('2026-11-07T03:00:00Z') });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Tab `a` (the list, focused) and tab `b` (another window or tab), both with permission granted. */
+  async function twoTabs(permission = 'granted') {
+    const registration = fakeRegistration();
+    const storage = new MemoryStorage();
+    const a = fakeNotifyHost({ permission, registration, storage, readyNow: true });
+    const b = fakeNotifyHost({ permission, registration, storage, readyNow: true, window: { hidden: true, focused: false } });
+    const ta = createNotifySystem(a.host);
+    const tb = createNotifySystem(b.host);
+    ta.start();
+    tb.start();
+    await flush();
+    return { a, b, ta, tb, storage, registration };
+  }
+
+  it('the tab in front claims; a background tab shows nothing and records nothing; the front tab toasts and records', async () => {
+    const { b, ta, tb, storage } = await twoTabs();
+    expect(tb.state()).toEqual({ supported: true, permission: 'granted' });
+    ta.setActive(true);
+    tb.setActive(true);
+    expect(JSON.parse(storage.getItem(FRONT_KEY) ?? 'null')).toMatchObject({ until: Date.now() + FRONT_TTL_MS });
+    // The background tab polled first.
+    expect(tb.plan(['r1:2'])).toEqual({ route: 'none', skip: new Set() });
+    expect(storage.getItem(DELIVERED_KEY)).toBeNull();
+    // The tab in front sees it on its own poll: its toast + chime.
+    expect(ta.plan(['r1:2'])).toEqual({ route: 'toast', skip: new Set() });
+    // A dashboard window, visible on another monitor but not focused: nothing either.
+    await b.setWindow({ hidden: false, focused: false });
+    expect(tb.plan(['r2:1'])).toEqual({ route: 'none', skip: new Set() });
+    // The claim is kept while the tab stays in front (refreshed), and is not taken over by the other tab.
+    await vi.advanceTimersByTimeAsync(FRONT_TTL_MS * 3);
+    expect(tb.route()).toBe('none');
+  });
+
+  it('an alert one tab delivered is shown nowhere else: not later as a notification, not as a toast on coming to the front', async () => {
+    const { a, ta, tb } = await twoTabs();
+    ta.setActive(true);
+    tb.setActive(true);
+    expect(ta.plan(['r1:2']).route).toBe('toast');
+    // Everything goes to the background (another app is focused): no claim any more.
+    await a.setWindow({ focused: false }, 'blur');
+    expect(tb.route()).toBe('system');
+    // The other tab raises r1 a minute later on its own poll: already delivered (as the toast).
+    expect(tb.plan(['r1:2', 'r3:1'])).toEqual({ route: 'system', skip: new Set(['r1:2']) });
+    // r3 went out as a notification from tab b; tab a raises it later and comes to the front: no toast.
+    await a.setWindow({ focused: true }, 'focus');
+    expect(ta.plan(['r3:1'])).toEqual({ route: 'toast', skip: new Set(['r3:1']) });
+    // A newer change of the same request is a new key.
+    expect(ta.plan(['r3:2'])).toEqual({ route: 'toast', skip: new Set() });
+  });
+
+  it('only a signed-in, alerting tab claims the front (not one still on its baseline sync, not one that is leaving)', async () => {
+    const { a, ta, tb } = await twoTabs();
+    expect(tb.route()).toBe('system'); // tab a is not alerting yet
+    ta.setActive(true);
+    expect(tb.route()).toBe('none');
+    await a.fire('pagehide');
+    expect(tb.route()).toBe('system');
+    await a.fire('pageshow');
+    expect(tb.route()).toBe('none');
+    ta.setActive(false); // signed out, or stopped
+    expect(tb.route()).toBe('system');
+  });
+
+  it('a claim left by a tab that died without pagehide expires', async () => {
+    const { tb, storage } = await twoTabs();
+    storage.setItem(FRONT_KEY, JSON.stringify({ tab: 'crashed-tab', until: Date.now() + FRONT_TTL_MS }));
+    expect(tb.route()).toBe('none');
+    await vi.advanceTimersByTimeAsync(FRONT_TTL_MS + 1);
+    expect(tb.route()).toBe('system');
+  });
+
+  it('delivered keys are forgotten after a while, and on sign-out (closeAll)', async () => {
+    const { ta, tb, storage } = await twoTabs();
+    ta.setActive(true);
+    ta.plan(['r1:2']);
+    expect(tb.plan(['r1:2']).route).toBe('none');
+    ta.setActive(false);
+    await vi.advanceTimersByTimeAsync(DELIVERED_TTL_MS + 1);
+    expect(tb.plan(['r1:2'])).toEqual({ route: 'system', skip: new Set() });
+    tb.closeAll();
+    expect(storage.getItem(DELIVERED_KEY)).toBeNull();
+  });
+
+  it('toast-only tabs (permission not granted) are as before: each toasts, nothing is claimed or recorded', async () => {
+    const { ta, tb, storage } = await twoTabs('default');
+    ta.setActive(true);
+    tb.setActive(true);
+    expect(storage.getItem(FRONT_KEY)).toBeNull();
+    expect(ta.plan(['r1:2'])).toEqual({ route: 'toast', skip: new Set() });
+    expect(tb.plan(['r1:2'])).toEqual({ route: 'toast', skip: new Set() });
+    expect(storage.getItem(DELIVERED_KEY)).toBeNull();
+  });
+
+  it('blocked localStorage: each tab decides alone, nothing throws', async () => {
+    const board = createPeerBoard(
+      () => ({
+        getItem: () => {
+          throw new Error('blocked');
+        },
+        setItem: () => {
+          throw new Error('blocked');
+        },
+        removeItem: () => {
+          throw new Error('blocked');
+        },
+      }),
+      'tab-x',
+      () => Date.now(),
+    );
+    board.setFront(true);
+    board.markDelivered(['r1:2']);
+    expect(board.otherInFront()).toBe(false);
+    expect(board.delivered('r1:2')).toBe(false);
+    board.clear();
+  });
+});
+
 describe('the browser host (stubbed globals)', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  function stubBrowser(opts: { ua: string; platform: string; touch: number; standalone?: boolean; hidden: boolean; focused: boolean; hover: boolean; permission: string }) {
+  /** The active worker: this build's answers lp-caps; an older build's ('old') never does. */
+  function activeWorker(kind: 'current' | 'old') {
+    const asked: unknown[] = [];
+    return {
+      asked,
+      postMessage: (message: unknown, transfer?: unknown[]) => {
+        asked.push(message);
+        const port = transfer?.[0] as MessagePort | undefined;
+        if (kind === 'current' && (message as { type?: string }).type === 'lp-caps') port?.postMessage({ notificationClick: true });
+      },
+    };
+  }
+
+  function stubBrowser(opts: {
+    ua: string;
+    platform: string;
+    touch: number;
+    standalone?: boolean;
+    hidden: boolean;
+    focused: boolean;
+    hover: boolean;
+    permission: string;
+    worker?: 'current' | 'old';
+  }) {
     const showNotification = vi.fn(async () => undefined);
-    const registration = { showNotification, getNotifications: async () => [] };
+    const active = activeWorker(opts.worker ?? 'current');
+    const registration = { active, showNotification, getNotifications: async () => [] };
     const target = () => ({ addEventListener: vi.fn(), removeEventListener: vi.fn() });
     const Notification = { permission: opts.permission, requestPermission: vi.fn(async () => 'granted') };
+    const serviceWorker = { ...target(), ready: Promise.resolve(registration) };
     vi.stubGlobal('window', {
       ...target(),
       Notification,
+      localStorage: new MemoryStorage(),
       matchMedia: (q: string) => ({ matches: q.includes('standalone') ? !!opts.standalone : opts.hover }),
     });
     vi.stubGlobal('navigator', {
       userAgent: opts.ua,
       platform: opts.platform,
       maxTouchPoints: opts.touch,
-      serviceWorker: { ready: Promise.resolve(registration) },
+      serviceWorker,
       permissions: { query: async () => target() },
     });
     vi.stubGlobal('document', { ...target(), visibilityState: opts.hidden ? 'hidden' : 'visible', hasFocus: () => opts.focused });
-    return { showNotification, Notification };
+    return { showNotification, Notification, active, serviceWorker };
   }
+
+  /** Lets ready, the lp-caps round trip (a real MessageChannel) and the state update finish. */
+  const settleHost = async () => {
+    for (let i = 0; i < 6; i += 1) await new Promise<void>((r) => setImmediate(r));
+  };
 
   it('desktop Chrome, minimised, permission granted: the alert is a system notification', async () => {
     const b = stubBrowser({ ua: UA.chromeMac, platform: 'MacIntel', touch: 0, hidden: true, focused: false, hover: true, permission: 'granted' });
     const system = createNotifySystem(browserNotifyHost());
     system.start();
-    await Promise.resolve();
-    await Promise.resolve();
+    await settleHost();
     expect(system.state()).toEqual({ supported: true, permission: 'granted' });
     expect(system.route()).toBe('system');
     expect(await system.showNotice(sample())).toBe(true);
@@ -447,20 +585,57 @@ describe('the browser host (stubbed globals)', () => {
     const b = stubBrowser({ ua: UA.iPhone, platform: 'iPhone', touch: 5, hidden: true, focused: false, hover: false, permission: 'default' });
     const system = createNotifySystem(browserNotifyHost());
     system.start();
-    await Promise.resolve();
-    await Promise.resolve();
+    await settleHost();
     expect(system.state().supported).toBe(false);
     expect(system.route()).toBe('toast');
     await system.request();
     expect(b.Notification.requestPermission).not.toHaveBeenCalled();
   });
 
+  it('asks the active worker for lp-caps over a MessageChannel; a worker of an older build keeps alerts toasts', async () => {
+    const current = stubBrowser({ ua: UA.chromeMac, platform: 'MacIntel', touch: 0, hidden: true, focused: false, hover: true, permission: 'granted' });
+    const system = createNotifySystem(browserNotifyHost());
+    system.start();
+    await settleHost();
+    expect(current.active.asked).toEqual([{ type: 'lp-caps' }]);
+    expect(system.state().supported).toBe(true);
+    vi.unstubAllGlobals();
+
+    // The production worker before this build: no notificationclick handler, no answer. A notification
+    // would show, and a click on it would do nothing.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const old = stubBrowser({ ua: UA.chromeMac, platform: 'MacIntel', touch: 0, hidden: true, focused: false, hover: true, permission: 'granted', worker: 'old' });
+      const stale = createNotifySystem(browserNotifyHost());
+      stale.start();
+      await vi.advanceTimersByTimeAsync(CAPS_REPLY_MS + 10);
+      expect(old.active.asked).toEqual([{ type: 'lp-caps' }]);
+      expect(stale.state()).toEqual({ supported: false, permission: 'granted' });
+      expect(stale.route()).toBe('toast');
+      expect(await stale.showNotice(sample())).toBe(false);
+      expect(old.showNotification).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('askWorkerCaps: no worker, or one that never answers, is false', async () => {
+    expect(await askWorkerCaps(null)).toBe(false);
+    expect(await askWorkerCaps({ postMessage: () => undefined }, 20)).toBe(false);
+    expect(
+      await askWorkerCaps({
+        postMessage: () => {
+          throw new Error('redundant');
+        },
+      }),
+    ).toBe(false);
+  });
+
   it('the iPhone Home Screen app: supported', async () => {
     stubBrowser({ ua: UA.iPhone, platform: 'iPhone', touch: 5, standalone: true, hidden: true, focused: false, hover: false, permission: 'granted' });
     const system = createNotifySystem(browserNotifyHost());
     system.start();
-    await Promise.resolve();
-    await Promise.resolve();
+    await settleHost();
     expect(system.state()).toEqual({ supported: true, permission: 'granted' });
     expect(system.route()).toBe('system');
   });
