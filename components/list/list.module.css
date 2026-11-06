@@ -533,6 +533,20 @@ button.lr:focus-visible {
   color: var(--red-11);
 }
 
+/* (F5) The stages (lib/domain STAGE_META, design/screens/colors-1.png): amber Needs info (front of house's turn),
+   violet Not found yet (on hold), teal Friend en route (on the move); Friend arrived is green. */
+.stc[data-tone='amber'] {
+  color: var(--amber-11);
+}
+
+.stc[data-tone='violet'] {
+  color: var(--violet-11);
+}
+
+.stc[data-tone='teal'] {
+  color: var(--teal-11);
+}
+
 .lg {
   flex: none;
 }
@@ -1139,6 +1153,191 @@ button.lr:focus-visible {
 
 .pbtnSoft.pbtnSoft {
   font-weight: 500;
+}
+
+/* ---- (F5) The "Not found yet" hold in Pending > To check (design/screens/recheck-2.png) -------------- */
+
+/* A due recheck's chip, where the minutes would be: blue, with the rotate glyph. Step 12 on its tint in light
+   (step 11 is under 4.5:1 there), step 11 in dark. */
+.rc {
+  flex: none;
+  margin-left: auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 7px;
+  background: var(--blue-a4);
+  color: var(--blue-12);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+:global(.dark) .rc {
+  color: var(--blue-11);
+}
+
+.rc > svg {
+  flex: none;
+}
+
+/* My requests: the stage chip in a card's corner (Needs info, Not found yet) and the outline "Recheck 4:40 PM".
+   Text is step 12 on the tint in light (step 11 is under 4.5:1 there for amber), step 11 in dark. */
+.stageChip,
+.recheckChip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.stageChip > svg,
+.recheckChip > svg {
+  flex: none;
+}
+
+.stageChip[data-tone='amber'] {
+  background: var(--amber-a4);
+  color: var(--amber-12);
+}
+
+.stageChip[data-tone='violet'] {
+  background: var(--violet-a4);
+  color: var(--violet-12);
+}
+
+:global(.dark) .stageChip[data-tone='amber'] {
+  color: var(--amber-11);
+}
+
+:global(.dark) .stageChip[data-tone='violet'] {
+  color: var(--violet-11);
+}
+
+.recheckChip {
+  align-self: flex-start;
+  box-shadow: inset 0 0 0 1px var(--violet-a6);
+  color: var(--violet-11);
+  font-weight: 500;
+}
+
+.stageRow {
+  display: flex;
+  min-width: 0;
+  margin-top: 8px;
+}
+
+/* "⌛ Later 2 ———": the held requests that are not due yet. */
+.laterGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.later {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 4px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gray-11);
+}
+
+.later > svg {
+  flex: none;
+}
+
+.laterN {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  box-sizing: border-box;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--gray-a4);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.laterRule {
+  flex: 1;
+  min-width: 12px;
+  height: 1px;
+  background: var(--gray-a4);
+}
+
+/* A held request: one 52 px row, the whole row opens it. */
+.crow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 52px;
+  margin: 0;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--color-panel-solid);
+  box-shadow: inset 0 0 0 1px var(--gray-a4);
+  color: var(--gray-11);
+  font: inherit;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.crow:active {
+  background: var(--gray-a3);
+}
+
+.crow:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -2px;
+}
+
+.crowNm {
+  min-width: 0;
+  font-weight: 600;
+  color: var(--gray-12);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crowAs {
+  flex: none;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.crowAt {
+  flex: none;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.crowAt > svg {
+  flex: none;
 }
 
 /* The location chip: green with a pin, or a quiet outlined "+ Location". 28 px, with a 44 px tap area. */

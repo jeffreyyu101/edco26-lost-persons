@@ -26,7 +26,7 @@ import { PendingBoard } from '@/components/desk/PendingBoard';
 import { LocationEditor, anchorFor, type LocationTarget, type Measurable } from '@/components/profile/LocationEditor';
 import type { RequestSummary } from '@/lib/api-types';
 import { goBack, navigate } from '@/lib/client/nav';
-import { splitOpenClosed } from '@/lib/client/selectors';
+import { splitOpenClosed, toCheckLanes } from '@/lib/client/selectors';
 import {
   useActions,
   useAllRows,
@@ -38,6 +38,7 @@ import {
   useNow,
   useOutbox,
   usePending,
+  useRecheckNow,
   usePrefs,
   useSearch,
   useSession,
@@ -50,7 +51,8 @@ import { formatCreatedTime, formatUpdatedAgo, updatedPhrase } from '@/lib/format
 import { useInDesk } from '@/components/desk/desk-context';
 import { AppHeader } from './AppHeader';
 import { BrandCard } from './BrandCard';
-import { CheckCard, ComingCard, MineCard, OutboxCard } from './cards';
+import { ComingCard, MineCard, OutboxCard } from './cards';
+import { ToCheckList } from './ToCheckLanes';
 import { displayName } from './list-helpers';
 import { PendingTabs, pendingTabIds, usePendingTab } from './PendingTabs';
 import { primeKeyboard, useDelayedFlag, useScrollMemory, useStatusTap, useStickyHeight } from './hooks';
@@ -225,6 +227,7 @@ function rowTimes(row: RequestSummary, now: number, tz: string) {
     created: formatCreatedTime(row.createdAt, now, tz),
     updated: formatUpdatedAgo(row.createdAt, since, now),
     updatedSaid: updatedPhrase(row.createdAt, since, now),
+    timeZone: tz,
   };
 }
 
@@ -330,7 +333,10 @@ interface Locating {
 export function PendingView() {
   const { friendComing, waiting } = usePending();
   const loading = useIsLoading();
-  const now = useNow();
+  // (F5) The To check lanes (due rechecks, the queue, Later), on time when a hold becomes due.
+  const now = useRecheckNow(waiting);
+  const tz = useEventTimezone();
+  const lanes = useMemo(() => toCheckLanes(waiting, now), [waiting, now]);
   const inDesk = useInDesk();
   const { offline, tap } = useStatusTap();
   const actions = useActions();
@@ -396,7 +402,7 @@ export function PendingView() {
     return chips.find((el) => el.getClientRects().length > 0) ?? null;
   }, [locating]);
 
-  const counts = { check: waiting.length, coming: friendComing.length };
+  const counts = { check: lanes.due.length + lanes.queue.length, coming: friendComing.length };
   const editor = (
     <LocationEditor
       target={locating?.target ?? null}
@@ -412,6 +418,8 @@ export function PendingView() {
       <Chrome view="pending" skeleton={<PendingSkeleton />}>
         <PendingBoard
           waiting={waiting}
+          lanes={lanes}
+          timeZone={tz}
           friendComing={friendComing}
           now={now}
           offline={offline}
@@ -429,7 +437,8 @@ export function PendingView() {
   }
 
   const ids = pendingTabIds(idBase, tab);
-  const shown = tab === 'check' ? waiting : friendComing;
+  // To check shows its Later group even with nothing to check now.
+  const shown = tab === 'check' ? waiting.length : friendComing.length;
   return (
     <Chrome
       view="pending"
@@ -438,19 +447,19 @@ export function PendingView() {
     >
       {friendComing.length + waiting.length === 0 ? (
         <EmptyState icon="inbox" title="Nothing pending" />
-      ) : shown.length === 0 ? (
+      ) : shown === 0 ? (
         <div className={s.tabBody} role="tabpanel" id={ids.panel} aria-labelledby={ids.tab}>
           <EmptyState icon="inbox" title={tab === 'check' ? 'Nothing to check' : 'No friends coming'} />
         </div>
       ) : (
         <div className={s.scroll} role="tabpanel" id={ids.panel} aria-labelledby={ids.tab} data-testid="request-list" data-tab={tab}>
-          {tab === 'check'
-            ? waiting.map((row) => (
-                <CheckCard key={row.id} row={row} now={now} offline={offline} onNotInMedical={onNotInMedical} onInMedical={onInMedical} />
-              ))
-            : friendComing.map((row) => (
+          {tab === 'check' ? (
+            <ToCheckList lanes={lanes} now={now} timeZone={tz} offline={offline} onNotInMedical={onNotInMedical} onInMedical={onInMedical} />
+          ) : (
+            friendComing.map((row) => (
                 <ComingCard key={row.id} row={row} now={now} offline={offline} onReunited={onReunited} onLocate={onLocate} />
-              ))}
+              ))
+          )}
         </div>
       )}
       {editor}
@@ -469,6 +478,7 @@ export function MineView() {
   const session = useSession();
   const loading = useIsLoading();
   const now = useNow();
+  const tz = useEventTimezone();
   const { open, closed } = useMemo(() => splitOpenClosed(rows), [rows]);
   useScrollMemory('mine', !loading);
 
@@ -482,13 +492,13 @@ export function MineView() {
             <OutboxCard key={item.mutationId} item={item} now={now} />
           ))}
           {open.map((row) => (
-            <MineCard key={row.id} row={row} now={now} freshTone={mineFreshTone(row, now, session.staff)} />
+            <MineCard key={row.id} row={row} now={now} timeZone={tz} freshTone={mineFreshTone(row, now, session.staff)} />
           ))}
           {closed.length > 0 ? (
             <section className={s.scroll} style={{ padding: 0 }} aria-label={`Closed, ${closed.length}`} data-testid="mine-closed">
               <SectionHeader kind="closed" label="Closed" count={closed.length} />
               {closed.map((row) => (
-                <MineCard key={row.id} row={row} now={now} freshTone={mineFreshTone(row, now, session.staff)} />
+                <MineCard key={row.id} row={row} now={now} timeZone={tz} freshTone={mineFreshTone(row, now, session.staff)} />
               ))}
             </section>
           ) : null}

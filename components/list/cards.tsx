@@ -4,30 +4,37 @@
 // Each card opens the profile through a transparent button stretched over it; the action buttons and the
 // location chip sit above that button. A photo shows only when the request has one: no empty placeholders.
 import { Badge, Button, Card, Text, VisuallyHidden } from '@radix-ui/themes';
-import { ArrowRight, Check, CircleAlert, Clock, MapPin, Plus, UserRound, X } from 'lucide-react';
+import { ArrowRight, Check, CircleAlert, Clock, MapPin, Plus, RefreshCw, UserRound, X } from 'lucide-react';
 import { memo, useEffect, useId, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
+import { StageGlyph } from '@/components/ui/StageGlyph';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
+import { RecheckChip as RecheckTimeChip, StageChip, hasStageChip } from './StageChips';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { photoPath } from '@/lib/client/api-paths';
 import { navigate } from '@/lib/client/nav';
-import { STATUS, ageGender, statusMeta, waitTone } from '@/lib/domain';
-import { formatCaseNumber, formatDuration, minutesSince } from '@/lib/format';
+import { STATUS, actionLabel, ageGender, displayStage, holdAnsweredAt, waitTone, type StageTone } from '@/lib/domain';
+import { formatCaseNumber, formatClock, formatClockAmPm, formatDuration, minutesSince } from '@/lib/format';
 import {
   cardDescription,
   displayName,
   friendComingLine,
   isClosed,
   isFresh,
-  labelColor,
   minutesPhrase,
   outboxDisplay,
   queuedStepper,
+  statusPhrase,
   statusSince,
   stepperModel,
   whoPhrase,
   type StepperModel,
 } from './list-helpers';
 import s from './list.module.css';
+
+/** (F5) A stage label's Radix colour on the card's solid panel: its tone (step 11), grey inherits the card's. */
+function stageTextColor(tone: StageTone): Exclude<StageTone, 'gray'> | undefined {
+  return tone === 'gray' ? undefined : tone;
+}
 
 // ---------------------------------------------------------------------------------------------------
 // Thumbnails
@@ -216,6 +223,13 @@ export interface CheckCardProps {
   onNotInMedical: (row: RequestSummary) => void;
   /** `card` is the tapped card (where the desk's location popover first points). */
   onInMedical: (row: RequestSummary, card: HTMLElement | null) => void;
+  /**
+   * (F5) A due recheck (design/screens/recheck-2.png): a blue "Recheck" chip instead of the minutes, and
+   * "FA 4 · not found 4:02" (when the first Not found was given) as its quiet line.
+   */
+  recheck?: boolean;
+  /** (F5) The event timezone, for the recheck card's times. */
+  timeZone?: string;
 }
 
 /**
@@ -223,19 +237,25 @@ export interface CheckCardProps {
  * (clock; amber from 10, red from 20), what they're wearing (2 lines), one quiet "FA 4 · LP-0010" line,
  * then Not in medical / In medical (44 px).
  */
-export const CheckCard = memo(function CheckCard({ row, now, offline, onNotInMedical, onInMedical }: CheckCardProps) {
+export const CheckCard = memo(function CheckCard({ row, now, offline, onNotInMedical, onInMedical, recheck = false, timeZone }: CheckCardProps) {
   const reasonId = useId();
   const nameId = useId();
   const metaId = useId();
   const minutes = minutesSince(row.createdAt, now);
   const desc = cardDescription(row);
   const ag = ageGender(row.age, row.gender);
-  const meta = `${row.postShort} · ${formatCaseNumber(row.caseNumber)}`;
-  const label = `${whoPhrase(row)}. ${meta}. Waiting ${minutesPhrase(minutes)}.${desc ? ` ${desc}` : ''}`;
+  // (F5) A due recheck says when the first Not found was given instead of its LP number.
+  const notFoundAt = recheck ? holdAnsweredAt(row) : null;
+  const meta = notFoundAt
+    ? `${row.postShort} · not found ${formatClock(notFoundAt, timeZone)}`
+    : `${row.postShort} · ${formatCaseNumber(row.caseNumber)}`;
+  const label = notFoundAt
+    ? `${whoPhrase(row)}. ${row.postShort} · ${formatCaseNumber(row.caseNumber)}. Recheck due, not found at ${formatClockAmPm(notFoundAt, timeZone)}.${desc ? ` ${desc}` : ''}`
+    : `${whoPhrase(row)}. ${meta}. Waiting ${minutesPhrase(minutes)}.${desc ? ` ${desc}` : ''}`;
   const fresh = isFresh(row.createdAt, now);
   const describedBy = offline ? `${nameId} ${metaId} ${reasonId}` : `${nameId} ${metaId}`;
   return (
-    <div className={`${s.pcard} ${fresh ? s.fresh : ''}`} data-testid="check-card" data-pending-card={row.id}>
+    <div className={`${s.pcard} ${fresh ? s.fresh : ''}`} data-testid="check-card" data-pending-card={row.id} data-recheck={notFoundAt ? '' : undefined}>
       <OpenButton id={row.id} label={label} />
       <div className={s.pwho} aria-hidden>
         {row.firstPhotoId ? <Portrait photoId={row.firstPhotoId} /> : null}
@@ -245,7 +265,7 @@ export const CheckCard = memo(function CheckCard({ row, now, offline, onNotInMed
               {displayName(row.name)}
             </span>
             {ag ? <span className={s.pas}>{ag}</span> : null}
-            <Minutes minutes={minutes} clock />
+            {notFoundAt ? <RecheckChip /> : <Minutes minutes={minutes} clock />}
           </div>
           {desc ? <p className={s.pdesc}>{desc}</p> : null}
           <span className={s.pmeta} id={metaId}>
@@ -264,7 +284,7 @@ export const CheckCard = memo(function CheckCard({ row, now, offline, onNotInMed
           onClick={() => onNotInMedical(row)}
         >
           <X size={16} strokeWidth={1.75} aria-hidden />
-          Not in medical
+          {actionLabel('notInMedical')}
         </Button>
         <Button
           size="3"
@@ -275,13 +295,23 @@ export const CheckCard = memo(function CheckCard({ row, now, offline, onNotInMed
           onClick={(e) => onInMedical(row, cardOf(e))}
         >
           <Check size={16} strokeWidth={2.25} aria-hidden />
-          In medical
+          {actionLabel('inMedical')}
         </Button>
       </div>
       {offline ? <VisuallyHidden id={reasonId}>Needs a connection</VisuallyHidden> : null}
     </div>
   );
 });
+
+/** (F5) A due recheck's chip (recheck-2.png): blue, rotate glyph, "Recheck". */
+function RecheckChip() {
+  return (
+    <span className={s.rc} data-testid="recheck-chip">
+      <RefreshCw size={13} strokeWidth={2.25} aria-hidden />
+      Recheck
+    </span>
+  );
+}
 
 export interface ComingCardProps {
   row: RequestSummary;
@@ -362,13 +392,27 @@ export const ComingCard = memo(function ComingCard({ row, now, offline, onReunit
 // My requests: MCard (with the progress stepper) and queued requests
 // ---------------------------------------------------------------------------------------------------
 
-export const MineCard = memo(function MineCard({ row, now, freshTone }: { row: RequestSummary; now: number; freshTone: string | null }) {
-  const meta = statusMeta(row.status);
+export const MineCard = memo(function MineCard({
+  row,
+  now,
+  freshTone,
+  timeZone,
+}: {
+  row: RequestSummary;
+  now: number;
+  freshTone: string | null;
+  /** (F5) The event timezone, for "Recheck 4:40 PM". */
+  timeZone?: string;
+}) {
   const closed = isClosed(row.status);
   const waiting = row.status === STATUS.waiting;
   const minutes = minutesSince(waiting ? row.createdAt : statusSince(row), now);
   const sub = `${formatCaseNumber(row.caseNumber)} · ${row.postShort}`;
-  const label = `${whoPhrase(row)}. ${sub}. ${meta.label}${waiting ? `, waiting ${minutesPhrase(minutes)}` : `, ${minutesPhrase(minutes)} ago`}.`;
+  // (F5) The stage: a chip in the corner for Needs info and Not found yet, the stage's glyph and label otherwise.
+  const stage = displayStage(row, { now, ...(timeZone ? { timeZone } : {}) });
+  const chip = hasStageChip(stage);
+  const said = stage.key === 'notFoundYet' || stage.key === 'needsInfo' ? stage.said : statusPhrase(row.status);
+  const label = `${whoPhrase(row)}. ${sub}. ${said}${waiting ? `, waiting ${minutesPhrase(minutes)}` : `, ${minutesPhrase(minutes)} ago`}.`;
   return (
     <Card
       size="2"
@@ -381,7 +425,9 @@ export const MineCard = memo(function MineCard({ row, now, freshTone }: { row: R
         <div className={s.qh}>
           <Thumb photoId={row.firstPhotoId} />
           <Who name={displayName(row.name)} ag={ageGender(row.age, row.gender)} sub={sub} />
-          {waiting ? (
+          {chip ? (
+            <StageChip stage={stage} />
+          ) : waiting ? (
             <WaitBadge minutes={minutes} />
           ) : (
             <Text size="1" color="gray" className={s.nowrap}>
@@ -389,12 +435,20 @@ export const MineCard = memo(function MineCard({ row, now, freshTone }: { row: R
             </Text>
           )}
         </div>
-        <div className={s.stat}>
-          <StatusGlyph status={row.status} size={15} />
-          <Text size="2" weight="medium" color={labelColor(meta.tone)}>
-            {meta.label}
-          </Text>
-        </div>
+        {chip ? (
+          stage.key === 'notFoundYet' ? (
+            <div className={s.stageRow}>
+              <RecheckTimeChip stage={stage} />
+            </div>
+          ) : null
+        ) : (
+          <div className={s.stat}>
+            <StageGlyph glyph={stage.glyph} size={15} />
+            <Text size="2" weight="medium" color={stageTextColor(stage.tone)}>
+              {stage.key === 'inMedical' ? stage.fullLabel : stage.label}
+            </Text>
+          </div>
+        )}
         <Stepper model={stepperModel(row.status)} />
       </div>
     </Card>

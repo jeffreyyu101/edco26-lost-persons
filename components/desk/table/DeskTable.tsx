@@ -12,11 +12,12 @@
 import { Skeleton } from '@radix-ui/themes';
 import { ChevronDown, CircleAlert } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
+import { StageGlyph } from '@/components/ui/StageGlyph';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { navigate } from '@/lib/client/nav';
 import type { SearchHit } from '@/lib/client/selectors';
-import { statusMeta } from '@/lib/domain';
+import { stageLook, type DisplayStage } from '@/lib/domain';
 import { NOT_UPDATED } from '@/lib/format';
 import { archivedFoldLabel, highlightParts, isClosed, logNumber, logNumberRanges, type Ranges } from '@/components/list/list-helpers';
 import {
@@ -102,6 +103,8 @@ interface CellsProps {
   glyph: ReactNode;
   tone: string;
   statusLabel: string;
+  /** (F5) What follows the label: "· 4:40 PM", "· Bed 3", "· ~4 min", "· 2 checks". */
+  statusExtra?: string;
   post: string;
   created: string;
   createdTitle?: string;
@@ -128,6 +131,7 @@ function Cells(p: CellsProps) {
       <span className={cx(t.cStatus, t.st)} data-col="status" data-tone={p.tone} aria-hidden>
         {p.glyph}
         <span className={t.stl}>{p.statusLabel}</span>
+        {p.statusExtra ? <span className={t.stx}>{p.statusExtra}</span> : null}
       </span>
       <span className={cx(t.cPost, t.mut)} data-col="post" aria-hidden>
         {p.post}
@@ -156,12 +160,19 @@ export interface TableRowProps {
   times: RowTimes;
   /** The request open in the pane. */
   selected: boolean;
+  /**
+   * (F5) The row's stage at the views' clock (lib/domain displayStage): label and what follows it ("Friend en
+   * route · ~4 min"). Without it, the stage's label alone.
+   */
+  stage?: DisplayStage;
+  /** (F5) For the stage in the row's sentence. */
+  timeZone?: string;
 }
 
 /** One request. Closed rows are greyed in place. A click opens it (beside the list on the desk). */
-export const TableRow = memo(function TableRow({ row, times, selected }: TableRowProps) {
+export const TableRow = memo(function TableRow({ row, times, selected, stage, timeZone }: TableRowProps) {
   const closed = isClosed(row.status);
-  const meta = statusMeta(row.status);
+  const look = stage ?? stageLook(row);
   const friend = friendCell(row);
   return (
     <button
@@ -173,14 +184,15 @@ export const TableRow = memo(function TableRow({ row, times, selected }: TableRo
       aria-current={selected ? 'true' : undefined}
       onClick={() => navigate({ r: row.id })}
     >
-      <Vh>{tableRowLabel(row, times)}</Vh>
+      <Vh>{tableRowLabel(row, times, timeZone)}</Vh>
       <Cells
         number={logNumber(row.caseNumber)}
         name={friend.name}
         ageGender={friend.ageGender}
-        glyph={<StatusGlyph status={row.status} className={t.glyph} />}
-        tone={meta.tone}
-        statusLabel={meta.shortLabel}
+        glyph={<StageGlyph glyph={look.glyph} className={t.glyph} />}
+        tone={look.tone}
+        statusLabel={look.label}
+        statusExtra={stage?.extra}
         post={postCell(row)}
         created={times.created}
         createdTitle={times.createdTitle}
@@ -203,10 +215,10 @@ export interface SearchRowProps extends Omit<TableRowProps, 'row'> {
 }
 
 /** A search result: the row with the match highlighted, and the matched text under the name. */
-export const SearchRow = memo(function SearchRow({ hit, times, selected, nameRanges, caseRanges, line, lineRanges }: SearchRowProps) {
+export const SearchRow = memo(function SearchRow({ hit, times, selected, stage, timeZone, nameRanges, caseRanges, line, lineRanges }: SearchRowProps) {
   const { row } = hit;
   const closed = isClosed(row.status);
-  const meta = statusMeta(row.status);
+  const look = stage ?? stageLook(row);
   const friend = friendCell(row);
   return (
     <button
@@ -218,15 +230,16 @@ export const SearchRow = memo(function SearchRow({ hit, times, selected, nameRan
       aria-current={selected ? 'true' : undefined}
       onClick={() => navigate({ r: row.id })}
     >
-      <Vh>{searchRowLabel(row, times, line)}</Vh>
+      <Vh>{searchRowLabel(row, times, line, timeZone)}</Vh>
       <Cells
         number={<Highlight text={logNumber(row.caseNumber)} ranges={logNumberRanges(row.caseNumber, caseRanges)} />}
         name={<Highlight text={friend.name} ranges={row.name ? nameRanges : []} />}
         ageGender={friend.ageGender}
         line={line ? <Highlight text={line} ranges={lineRanges} /> : null}
-        glyph={<StatusGlyph status={row.status} className={t.glyph} />}
-        tone={meta.tone}
-        statusLabel={meta.shortLabel}
+        glyph={<StageGlyph glyph={look.glyph} className={t.glyph} />}
+        tone={look.tone}
+        statusLabel={look.label}
+        statusExtra={stage?.extra}
         post={postCell(row)}
         created={times.created}
         createdTitle={times.createdTitle}

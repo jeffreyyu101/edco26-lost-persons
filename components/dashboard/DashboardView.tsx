@@ -18,14 +18,15 @@
 //            has room, stacked when a request is docked. Sized by the main column (container queries).
 import { Skeleton, VisuallyHidden } from '@radix-ui/themes';
 import { ChevronLeft, ChevronRight, Clock, Inbox, Timer, Users, type LucideIcon } from 'lucide-react';
-import { Fragment, useEffect, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useInDesk } from '@/components/desk/desk-context';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { StageGlyph } from '@/components/ui/StageGlyph';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { Stats } from '@/lib/api-types';
 import { goBack, navigate } from '@/lib/client/nav';
-import { useConnection, useNow, useStats } from '@/lib/client/store-contract';
-import { STATUS, postFilterKey, postFilterLabel, statusMeta, toneColorVar } from '@/lib/domain';
+import { useConnection, useNow, useRequests, useStats } from '@/lib/client/store-contract';
+import { STATUS, postFilterKey, postFilterLabel, stageLook, stagePhrase, statusMeta, toneColorVar } from '@/lib/domain';
 import {
   NO_VALUE,
   agoPhrase,
@@ -298,6 +299,9 @@ function Posts({ stats }: { stats: Stats }) {
 const NO_NAME = 'No name';
 
 function Recent({ stats, now }: { stats: Stats; now: number }) {
+  // (F5) A synced row knows its stage (Not found yet, …); lp_stats' recent rows only carry the status.
+  const rows = useRequests();
+  const byId = useMemo(() => new Map(rows.map((row) => [row.id, row])), [rows]);
   if (stats.recent.length === 0) return null;
   return (
     <section aria-label="Recently updated" className={s.recent}>
@@ -310,10 +314,12 @@ function Recent({ stats, now }: { stats: Stats; now: number }) {
       <div className={s.rlist}>
         {stats.recent.map((r) => {
           const meta = statusMeta(r.status);
+          const live = byId.get(r.id);
+          const look = live && live.status === r.status ? stageLook(live) : { ...meta, label: meta.shortLabel, glyph: meta.glyph };
           const closed = meta.bucket === 'closed';
           const name = r.name?.trim() || '';
           const ago = formatAgo(r.updatedAt, now);
-          const shown = `${r.caseNumber} ${name || NO_NAME} ${meta.shortLabel} ${ago}`;
+          const shown = `${r.caseNumber} ${name || NO_NAME} ${look.label} ${ago}`;
           return (
             <button
               key={r.id}
@@ -322,15 +328,15 @@ function Recent({ stats, now }: { stats: Stats; now: number }) {
               data-closed={closed ? '' : undefined}
               data-request-id={r.id}
               onClick={() => show({ r: r.id })}
-              aria-label={`${shown}. ${meta.label}, ${r.postShort}, updated ${agoPhrase(r.updatedAt, now)}.`}
+              aria-label={`${shown}. ${look.label !== meta.shortLabel && live ? stagePhrase(live) : meta.label}, ${r.postShort}, updated ${agoPhrase(r.updatedAt, now)}.`}
             >
               <span className={s.num}>{r.caseNumber}</span>{' '}
               <span className={s.nm} data-empty={name ? undefined : ''}>
                 {name || NO_NAME}
               </span>{' '}
-              <span className={s.st} data-tone={meta.tone}>
-                <StatusGlyph status={r.status} />
-                {meta.shortLabel}
+              <span className={s.st} data-tone={look.tone}>
+                <StageGlyph glyph={look.glyph} />
+                {look.label}
               </span>{' '}
               <span className={s.up}>{ago}</span>
             </button>

@@ -25,11 +25,12 @@
 //   cancel       red, creator-only (canonical created_by match, A18), while Waiting, confirm Keep / Cancel
 //   conflict     "Updated by someone else" when another person's change arrives while it is open
 import { AlertDialog, Badge, Button, DropdownMenu, Heading, IconButton, Skeleton, Text, VisuallyHidden } from '@radix-ui/themes';
-import { Camera, Check, ChevronDown, Clock, CloudOff, Ellipsis, MapPin, Pencil, Phone, Plus, RotateCcw, Trash2, Undo2, X } from 'lucide-react';
+import { Camera, Check, ChevronDown, Clock, CloudOff, Ellipsis, MapPin, Pencil, Phone, Plus, RefreshCw, RotateCcw, Trash2, Undo2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { Banner, ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ProfileSkeleton } from '@/components/ui/Skeleton';
+import { StageGlyph } from '@/components/ui/StageGlyph';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { RequestDetail, RequestSummary } from '@/lib/api-types';
 import { goBack, navigate } from '@/lib/client/nav';
@@ -50,7 +51,11 @@ import {
   PHOTO_TIMING_LABEL,
   STATUS,
   canCancel,
+  displayStage,
+  holdAnsweredAt,
+  isHeld,
   isInMedical,
+  isMedicalTeam,
   isStatus,
   menuActions,
   parseStaff,
@@ -68,7 +73,7 @@ import {
 import { formatCaseNumber, formatDuration, formatListTime, minutesSince } from '@/lib/format';
 import { AddPhotosSheet, type PhotoPick } from './AddPhotos';
 import { AuditTrail, AuditTrailSkeleton } from './AuditTrail';
-import { buildAuditTrail, statusOrigin, type StatusOrigin } from './audit-trail';
+import { buildAuditTrail, holdOrigin, statusOrigin, type StatusOrigin } from './audit-trail';
 import { Bust } from './Bust';
 import { primeKeyboard } from '@/components/list/hooks';
 import { changeAnswerChoices } from './change-answer';
@@ -190,7 +195,12 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
   const cancellable = canCancel(row.status, row.createdBy, session.staff);
 
   const trail = useMemo(() => (detail ? buildAuditTrail(detail.audit, timeZone) : null), [detail, timeZone]);
-  const origin = useMemo(() => (detail ? statusOrigin(detail.audit, row.status) : null), [detail, row.status]);
+  // (F5) A request on a "Not found yet" hold shows who gave that first Not found.
+  const held = isHeld(row);
+  const origin = useMemo(
+    () => (detail ? (held ? holdOrigin(detail.audit) : statusOrigin(detail.audit, row.status)) : null),
+    [detail, row.status, held],
+  );
 
   // --- Someone else changed it while it was open ------------------------------------------------------
   const [seenVersion, setSeenVersion] = useState(row.rowVersion);
@@ -307,7 +317,10 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
   const move = (to: SettableStatus, kind: StatusKind) => void actions.setStatus(row.id, to, kind);
   const setStatus = (a: StatusAction) => move(a.to, a.kind);
   const menu = menuActions(row.status, isCreator);
-  const footer = primaryActions(row.status);
+  // (F5) Medical side, Waiting for check (held or not): the two answers sit inside the status block
+  // (design/screens/clarify-7.png, recheck-3.png); front of house keeps them in the bar as before.
+  const answersInBlock = isMedicalTeam(session.team) && row.status === STATUS.waiting;
+  const footer = answersInBlock ? [] : primaryActions(row.status);
   // The phone's sticky bar at the foot of the screen; the desk pane's row under the status block.
   const actionBar =
     footer.length > 0 ? (
@@ -406,6 +419,7 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
           offline={offline}
           panel={panel}
           onNeedsConnection={() => actions.showToast({ tone: 'amber', icon: 'cloud-off', title: NEEDS_CONNECTION, durationMs: 3_000 })}
+          answers={answersInBlock ? <BlockAnswers status={row.status} offline={offline} onAnswer={setStatus} /> : null}
         />
 
         {panel ? actionBar : null}
@@ -613,6 +627,8 @@ function StatusBlock({
   offline,
   panel,
   onNeedsConnection,
+  answers = null,
+  enrouteSlot = null,
 }: {
   row: RequestSummary;
   origin: StatusOrigin | null;
@@ -622,13 +638,28 @@ function StatusBlock({
   offline: boolean;
   panel: boolean;
   onNeedsConnection: () => void;
+  /** (F5) The medical side's answers, inside the block while Waiting for check (held or not). */
+  answers?: ReactNode;
+  /** (F3) The en route row goes here, under the location row. */
+  enrouteSlot?: ReactNode;
 }) {
-  const meta = statusMeta(row.status);
-  const waiting = row.status === STATUS.waiting;
+  // (F5) The stage (lib/domain displayStage): Needs info, Not found yet, … over the stored status. The block
+  // keeps In medical's look while a friend is en route or has arrived: F3's en route row says that under it.
+  const shown = displayStage(row, { now, timeZone });
+  const stage = shown.key === 'enroute' || shown.key === 'arrived' ? displayStage({ ...row, enroute: null }, { now, timeZone }) : shown;
+  const waiting = stage.key === 'waiting';
   const inMedical = isInMedical(row.status);
   let sub: ReactNode = null;
   let badge: ReactNode = null;
-  if (waiting) {
+  if (stage.key === 'needsInfo' && stage.sub) {
+    sub = stage.sub;
+  } else if (stage.key === 'notFoundYet') {
+    // Who gave the first Not found, and when; before the trail loads, the row's own last change when it is that.
+    const o = origin ?? holdFallbackOrigin(row);
+    const parts = o ? [o.staffName, formatListTime(o.at, now, timeZone)].filter(Boolean) : [];
+    if (parts.length > 0) sub = parts.join(' · ');
+    else if (originLoading) sub = <Skeleton height="12px" width="45%" style={{ marginTop: 2 }} />;
+  } else if (row.status === STATUS.waiting) {
     sub = `Logged ${formatListTime(row.createdAt, now, timeZone)}`;
     const minutes = minutesSince(row.createdAt, now);
     const tone = waitTone(minutes);
@@ -648,13 +679,13 @@ function StatusBlock({
     else if (originLoading) sub = <Skeleton height="12px" width="45%" style={{ marginTop: 2 }} />;
   }
   return (
-    <div className={s.statusBox} data-tone={meta.tone} data-testid="status-block">
+    <div className={s.statusBox} data-tone={stage.tone} data-stage={stage.key} data-testid="status-block">
       <div className={s.status}>
-        <StatusGlyph status={row.status} size={18} />
+        <StageGlyph glyph={stage.glyph} size={18} />
         <div className={s.sx}>
           {/* Step 12 of the status colour on its step-3 tint: step 11 is ~4.3:1 there (spec §7). */}
-          <Text size="3" weight="medium" color={meta.tone} highContrast={meta.tone !== 'gray'}>
-            {meta.label}
+          <Text size="3" weight="medium" color={stage.tone} highContrast={stage.tone !== 'gray'} data-testid="status-label">
+            {stage.fullLabel}
           </Text>
           {sub ? (
             <Text as="div" size="1" color="gray">
@@ -662,9 +693,57 @@ function StatusBlock({
             </Text>
           ) : null}
         </div>
-        {badge}
+        {waiting ? badge : null}
       </div>
+      {stage.key === 'notFoundYet' && stage.sub ? (
+        <div className={s.recheckRow} data-due={stage.due ? '' : undefined} data-testid="recheck-row">
+          <RefreshCw size={16} strokeWidth={2} aria-hidden className={s.recheckGlyph} />
+          <span>{stage.sub}</span>
+        </div>
+      ) : null}
       {inMedical ? <LocationRow row={row} offline={offline} panel={panel} onNeedsConnection={onNeedsConnection} /> : null}
+      {inMedical ? enrouteSlot : null}
+      {answers}
+    </div>
+  );
+}
+
+/** (F5) Before the audit trail loads: the hold's answer is the row's last change when they line up. */
+function holdFallbackOrigin(row: RequestSummary): StatusOrigin | null {
+  const at = holdAnsweredAt(row);
+  if (!at) return null;
+  const sameMoment = Math.abs(Date.parse(row.updatedAt) - Date.parse(at)) < 2_000;
+  return sameMoment ? { staffName: parseStaff(row.updatedBy).name, at } : null;
+}
+
+/**
+ * (F5) The medical side's answers inside the status block, [× Not found] [✓ In medical], labelled by their
+ * actions (domain primaryActions), so a renamed answer flows through.
+ */
+function BlockAnswers({ status, offline, onAnswer }: { status: string; offline: boolean; onAnswer: (a: StatusAction) => void }) {
+  const answers = primaryActions(status).filter((a) => a.kind === 'answer');
+  if (answers.length === 0) return null;
+  return (
+    <div className={s.blockActs} data-testid="block-answers">
+      {offline ? (
+        <span className={s.offline}>
+          <CloudOff size={13} aria-hidden />
+          {NEEDS_CONNECTION}
+        </span>
+      ) : null}
+      {answers.map((a) =>
+        a.id === 'inMedical' ? (
+          <Button key={a.id} size="3" color="green" className={`${s.blockBtn} lp-solid-accent`} disabled={offline} onClick={() => onAnswer(a)}>
+            <Check size={16} strokeWidth={2.25} aria-hidden />
+            {a.label}
+          </Button>
+        ) : (
+          <Button key={a.id} size="3" variant="soft" color="gray" className={s.blockBtn} disabled={offline} onClick={() => onAnswer(a)}>
+            <X size={16} aria-hidden />
+            {a.label}
+          </Button>
+        ),
+      )}
     </div>
   );
 }

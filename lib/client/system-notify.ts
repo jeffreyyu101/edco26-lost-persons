@@ -29,7 +29,7 @@
 // browserEnv), and the avatar menu and the sheets import it from their own view chunks.
 import { useSyncExternalStore } from 'react';
 import type { RequestSummary } from '../api-types';
-import { initials, statusMeta } from '../domain';
+import { STAGE_META, initials, isHeld, statusMeta } from '../domain';
 import { formatCaseNumber } from '../format';
 import { alertKey } from './alerts';
 import { hrefFor, navigate, parseView, viewToParams } from './nav';
@@ -167,7 +167,8 @@ export function systemNotice(
   const requireInteraction = alert.kind === 'in_medical';
   if (!row) return { title: alert.title, body: '', tag: id, url, key: null, requireInteraction };
   const lp = formatCaseNumber(row.caseNumber);
-  const title = alert.kind === 'new_request' ? `New request · ${lp}` : `${lp} · ${statusMeta(row.status).shortLabel}`;
+  // (F5) The stage's label: a request on hold reads "Not found yet", not "Waiting for check".
+  const title = alert.kind === 'new_request' ? `New request · ${lp}` : `${lp} · ${isHeld(row) ? STAGE_META.notFoundYet.label : statusMeta(row.status).shortLabel}`;
   const body = alert.kind === 'in_medical' ? [who(row), 'Bring the friend to Main Med'].filter(Boolean).join('\n') : who(row);
   return { title, body, tag: id, url, key: alertKey(row), requireInteraction };
 }

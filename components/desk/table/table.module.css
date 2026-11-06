@@ -18,8 +18,11 @@
   box-sizing: border-box;
 }
 
+/* (F5) The status column fits the longest stage with what follows it ("Not found in medical · 2 checks",
+   "Friend en route · ~4 min", design/screens/colors-6.png) where there is room; with a request open beside
+   the list only what follows the label gives way (table.module.css .stx). */
 .table {
-  --tbl-cols: 56px minmax(0, 1fr) 160px 96px 72px;
+  --tbl-cols: 56px minmax(0, 1fr) 220px 96px 72px;
   --tbl-gap: 12px;
   --tbl-pad-l: 24px;
   --tbl-pad-r: calc(20px + env(safe-area-inset-right));
@@ -35,7 +38,7 @@
 
 @media (min-width: 1024px) and (max-width: 1279.98px) {
   [data-pane] .table {
-    --tbl-cols: 48px minmax(0, 1fr) 140px 88px 56px;
+    --tbl-cols: 48px minmax(0, 1fr) 172px 88px 56px;
     --tbl-gap: 10px;
     --tbl-pad-l: 20px;
     --tbl-pad-r: 16px;
@@ -44,14 +47,14 @@
 
 @media (min-width: 1280px) {
   .table {
-    --tbl-cols: 64px minmax(0, 1fr) 170px 128px 104px 76px 150px;
+    --tbl-cols: 64px minmax(0, 1fr) 240px 128px 104px 76px 150px;
   }
   .cPost,
   .cBy {
     display: block;
   }
   [data-pane] .table {
-    --tbl-cols: 56px minmax(0, 1fr) 160px 96px 72px;
+    --tbl-cols: 56px minmax(0, 1fr) 180px 96px 72px;
   }
   [data-pane] .cPost,
   [data-pane] .cBy {
@@ -229,10 +232,33 @@ button.row:focus-visible {
   color: var(--red-11);
 }
 
+/* (F5) The stages: amber Needs info, violet Not found yet, teal Friend en route (lib/domain STAGE_META). */
+.st[data-tone='amber'] {
+  color: var(--amber-11);
+}
+
+.st[data-tone='violet'] {
+  color: var(--violet-11);
+}
+
+.st[data-tone='teal'] {
+  color: var(--teal-11);
+}
+
+/* The label keeps its words; what follows it ("· 4:40 PM", "· Bed 3", "· 2 checks") gives way first. */
 .stl {
   min-width: 0;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.stx {
+  min-width: 0;
+  flex: 0 1000 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
 }
 
 .glyph {

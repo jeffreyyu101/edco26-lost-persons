@@ -341,8 +341,9 @@ describe('POST /api/requests/:id/cancel', () => {
     const staff = newStaff();
     const cookie = await cookieFor(staff);
     const r = await createRequest(staff);
+    // (F5) In medical: a first Not found would only put it on hold, still Waiting for check (cancellable).
     const answered = await api(`/api/requests/${r.id}/status`, {
-      json: { status: 'Checked – Not Found', expectedVersion: r.rowVersion, kind: 'answer' },
+      json: { status: 'Found – Awaiting Reunion', expectedVersion: r.rowVersion, kind: 'answer' },
       cookie,
     });
     expect(answered.status).toBe(200);

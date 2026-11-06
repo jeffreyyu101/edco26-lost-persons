@@ -7,11 +7,12 @@
 // Queued requests (states.html Offline) and search results (states.html SRow) use the same grid.
 import { CircleAlert, ChevronDown } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
+import { StageGlyph } from '@/components/ui/StageGlyph';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { navigate } from '@/lib/client/nav';
 import type { SearchHit } from '@/lib/client/selectors';
-import { statusMeta } from '@/lib/domain';
+import { stageLook } from '@/lib/domain';
 import { NOT_UPDATED } from '@/lib/format';
 import {
   archivedFoldLabel,
@@ -137,12 +138,15 @@ export interface LogRowProps {
   updated: string;
   /** "updated 2 minutes ago" / "not updated yet" (format.updatedPhrase). */
   updatedSaid: string;
+  /** (F5) The event timezone, for the stage in the row's sentence ("Not found yet, recheck at 4:40 PM"). */
+  timeZone?: string;
 }
 
 /** One request: number, name, status, created, updated. Closed rows are greyed. Tap opens the profile. */
-export const LogRow = memo(function LogRow({ row, created, updated, updatedSaid }: LogRowProps) {
+export const LogRow = memo(function LogRow({ row, created, updated, updatedSaid, timeZone }: LogRowProps) {
   const closed = isClosed(row.status);
-  const meta = statusMeta(row.status);
+  // (F5) The stage: Needs info, Not found yet, Friend en route… over the stored status.
+  const look = stageLook(row);
   return (
     <button
       type="button"
@@ -151,14 +155,14 @@ export const LogRow = memo(function LogRow({ row, created, updated, updatedSaid 
       data-closed={closed ? '' : undefined}
       onClick={() => navigate({ r: row.id })}
     >
-      <Vh>{logRowLabel(row, created, updatedSaid)}</Vh>
+      <Vh>{logRowLabel(row, created, updatedSaid, timeZone)}</Vh>
       <LogCells
         number={logNumber(row.caseNumber)}
         name={displayName(row.name)}
-        glyph={<StatusGlyph status={row.status} className={s.lg} />}
-        tone={meta.tone}
-        statusLabel={meta.shortLabel}
-        statusNarrow={narrowStatusLabel(row.status)}
+        glyph={<StageGlyph glyph={look.glyph} className={s.lg} />}
+        tone={look.tone}
+        statusLabel={look.label}
+        statusNarrow={look.key === 'waiting' ? narrowStatusLabel(row.status) : null}
         created={created}
         updated={updated}
       />
@@ -177,10 +181,10 @@ export interface SearchLogRowProps extends Omit<LogRowProps, 'row'> {
 }
 
 /** A search result: the log row with the match highlighted, and the matched text under the name. */
-export const SearchLogRow = memo(function SearchLogRow({ hit, created, updated, updatedSaid, nameRanges, caseRanges, line, lineRanges }: SearchLogRowProps) {
+export const SearchLogRow = memo(function SearchLogRow({ hit, created, updated, updatedSaid, timeZone, nameRanges, caseRanges, line, lineRanges }: SearchLogRowProps) {
   const { row } = hit;
   const closed = isClosed(row.status);
-  const meta = statusMeta(row.status);
+  const look = stageLook(row);
   return (
     <button
       type="button"
@@ -189,14 +193,14 @@ export const SearchLogRow = memo(function SearchLogRow({ hit, created, updated, 
       data-closed={closed ? '' : undefined}
       onClick={() => navigate({ r: row.id })}
     >
-      <Vh>{searchLogLabel(row, created, updatedSaid, line)}</Vh>
+      <Vh>{searchLogLabel(row, created, updatedSaid, line, timeZone)}</Vh>
       <LogCells
         number={<Highlight text={logNumber(row.caseNumber)} ranges={logNumberRanges(row.caseNumber, caseRanges)} />}
         name={<Highlight text={displayName(row.name)} ranges={row.name ? nameRanges : []} />}
-        glyph={<StatusGlyph status={row.status} className={s.lg} />}
-        tone={meta.tone}
-        statusLabel={meta.shortLabel}
-        statusNarrow={narrowStatusLabel(row.status)}
+        glyph={<StageGlyph glyph={look.glyph} className={s.lg} />}
+        tone={look.tone}
+        statusLabel={look.label}
+        statusNarrow={look.key === 'waiting' ? narrowStatusLabel(row.status) : null}
         created={created}
         updated={updated}
       />

@@ -131,13 +131,14 @@ describe('All requests table', () => {
     const html = render(storeWith(), <DeskAllTable status={null} post={null} />);
     expect(cell(html, 1012, 'number')).toBe('1012');
     expect(cell(html, 1012, 'friend')).toBe('Kayla Martinez 19 F');
-    expect(cell(html, 1012, 'status')).toBe('Waiting for check');
+    // (F5) The stage, then what follows it: minutes waiting, where medical has them (colors-6.png).
+    expect(cell(html, 1012, 'status')).toMatch(/^Waiting for check · \d+m$/);
     expect(cell(html, 1012, 'post')).toBe('FA 3 – Kinetic');
     expect(cell(html, 1012, 'created')).toMatch(/^(\w{3} )?\d{1,2}:\d\d (AM|PM)$/);
     expect(cell(html, 1012, 'updated')).toBe('9m');
     expect(cell(html, 1012, 'by')).toBe('Dana K. · Dispatch');
     expect(cell(html, 1013, 'updated')).toBe('—');
-    expect(cell(html, 1004, 'status')).toBe('In medical');
+    expect(cell(html, 1004, 'status')).toMatch(/^In medical( · .+)?$/);
     expect(rowTag(html, 1012)).toContain('type="button"');
     // Every visible cell is hidden from screen readers; the sentence is the row's name.
     const row = rowHtml(html, 1012);

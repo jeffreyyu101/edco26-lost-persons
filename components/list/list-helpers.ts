@@ -8,7 +8,9 @@ import {
   isInMedical,
   postShort,
   sameStaff,
+  stagePhrase,
   statusMeta,
+  type StageSource,
   type StatusTone,
 } from '@/lib/domain';
 import { formatCaseNumber } from '@/lib/format';
@@ -295,13 +297,25 @@ export function statusPhrase(status: string): string {
  * "LP-1013, T.R., Waiting for check, created 11:02 PM, updated 2 minutes ago".
  * `updated` is format.updatedPhrase(): "updated 2 minutes ago" or "not updated yet".
  */
-export function logRowLabel(row: Pick<RequestSummary, 'caseNumber' | 'name' | 'status'>, created: string, updated: string): string {
-  return `${formatCaseNumber(row.caseNumber)}, ${displayName(row.name)}, ${statusPhrase(row.status)}, created ${created}, ${updated}`;
+export function logRowLabel(
+  row: Pick<RequestSummary, 'caseNumber' | 'name' | 'status' | 'createdAt' | 'recheckAt'> & StageSource,
+  created: string,
+  updated: string,
+  timeZone?: string,
+): string {
+  // (F5) The stage, not just the status: "Not found yet, recheck at 4:40 PM".
+  return `${formatCaseNumber(row.caseNumber)}, ${displayName(row.name)}, ${stagePhrase(row, timeZone)}, created ${created}, ${updated}`;
 }
 
 /** A search result in the log grid: the row's sentence, then the matched text when it is not the name. */
-export function searchLogLabel(row: Pick<RequestSummary, 'caseNumber' | 'name' | 'status'>, created: string, updated: string, line: string): string {
-  return `${logRowLabel(row, created, updated)}.${line ? ` ${line}` : ''}`;
+export function searchLogLabel(
+  row: Pick<RequestSummary, 'caseNumber' | 'name' | 'status' | 'createdAt'> & StageSource,
+  created: string,
+  updated: string,
+  line: string,
+  timeZone?: string,
+): string {
+  return `${logRowLabel(row, created, updated, timeZone)}.${line ? ` ${line}` : ''}`;
 }
 
 /** The number column of the log: the LP number without its prefix or padding, "1013", "998". */
