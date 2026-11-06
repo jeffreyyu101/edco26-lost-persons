@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import { contentSecurityPolicy, config } from '@/proxy';
+import { NextRequest } from 'next/server';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { contentSecurityPolicy, config, proxy } from '@/proxy';
 import { safeNextPath } from '@/lib/safe-next';
+import { SESSION_COOKIE, signSessionToken } from '@/lib/server/session-token';
 
 describe('safeNextPath', () => {
   it('accepts same-origin app paths', () => {
@@ -66,5 +68,47 @@ describe('proxy CSP and matcher', () => {
     ]) {
       expect(re.test(path), path).toBe(false);
     }
+  });
+});
+
+describe('proxy auth redirects', () => {
+  const SECRET = 'unit-test-session-secret-0123456789abcdef';
+  let saved: string | undefined;
+  beforeEach(() => {
+    saved = process.env.SESSION_SECRET;
+  });
+  afterEach(() => {
+    if (saved === undefined) delete process.env.SESSION_SECRET;
+    else process.env.SESSION_SECRET = saved;
+  });
+
+  const request = (path: string, token?: string) =>
+    new NextRequest(`http://127.0.0.1:3100${path}`, token ? { headers: { cookie: `${SESSION_COOKIE}=${token}` } } : {});
+
+  it('sends / without a cookie to sign-in, keeping the view', async () => {
+    process.env.SESSION_SECRET = SECRET;
+    const response = await proxy(request('/?view=mine'));
+    expect(response.status).toBe(307);
+    const location = new URL(response.headers.get('location') ?? '');
+    expect(`${location.pathname}${location.search}`).toBe('/signin?next=%2F%3Fview%3Dmine');
+  });
+
+  it('accepts a cookie signed with the trimmed secret when SESSION_SECRET has surrounding whitespace', async () => {
+    // The session routes sign with serverEnv().sessionSecret, which is trimmed. A value pasted into Vercel
+    // with a trailing newline must not turn every sign-in into a redirect loop.
+    process.env.SESSION_SECRET = ` ${SECRET}\n`;
+    const signed = await signSessionToken({ staffName: 'Dana Kim', team: 'GC/HX - Dispatch' }, SECRET);
+    const home = await proxy(request('/', signed!.token));
+    expect(home.status).toBe(200);
+    expect(home.headers.get('x-middleware-next')).toBe('1');
+    const signin = await proxy(request('/signin', signed!.token));
+    expect(signin.status).toBe(307);
+    expect(new URL(signin.headers.get('location') ?? '').pathname).toBe('/');
+  });
+
+  it('rejects a cookie signed with a different secret', async () => {
+    process.env.SESSION_SECRET = SECRET;
+    const signed = await signSessionToken({ staffName: 'Dana Kim', team: 'Medical' }, `${SECRET}-other`);
+    expect((await proxy(request('/', signed!.token))).status).toBe(307);
   });
 });

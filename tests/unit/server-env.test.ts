@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EnvError, eventTimezone, normalizeSupabaseUrl, resetServerEnvCache, serverEnv } from '@/lib/server/env';
+import { sessionSecretFromEnv } from '@/lib/server/session-token';
 
 // Ported from Jeffrey's tests/supabase-url.test.cjs.
 describe('normalizeSupabaseUrl', () => {
@@ -100,6 +101,16 @@ describe('serverEnv', () => {
     valid();
     process.env.APP_SHARED_PASSWORD_HASH_B64 = Buffer.from('not-a-hash').toString('base64');
     expect(() => serverEnv()).toThrow(/not a base64-encoded bcrypt hash/);
+  });
+
+  it('trims SESSION_SECRET exactly like the proxy does (a pasted trailing newline is harmless)', () => {
+    valid();
+    const secret = 'unit-test-session-secret-0123456789abcdef';
+    process.env.SESSION_SECRET = `  ${secret}\n`;
+    expect(serverEnv().sessionSecret).toBe(secret);
+    expect(sessionSecretFromEnv()).toBe(secret);
+    process.env.SESSION_SECRET = ' \n ';
+    expect(sessionSecretFromEnv()).toBeNull();
   });
 
   it('treats blank values as unset', () => {

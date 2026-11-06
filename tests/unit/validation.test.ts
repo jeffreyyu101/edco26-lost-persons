@@ -99,11 +99,14 @@ describe('requestPatchSchema / updateRequestSchema', () => {
     expect(requestPatchSchema.safeParse({}).success).toBe(false);
   });
 
-  it('checks Other when the post is in the patch', () => {
+  it('rejects only an explicit clear of the location with Other; omitted is left to the merged-row check', () => {
     expect(requestPatchSchema.safeParse({ reportingLocation: 'Other', otherLocation: null }).success).toBe(false);
-    expect(requestPatchSchema.safeParse({ reportingLocation: 'Other' }).success).toBe(false);
+    expect(requestPatchSchema.safeParse({ reportingLocation: 'Other', otherLocation: '  ' }).success).toBe(false);
+    // Omitted = unchanged: the row may already have an other_location (lp_update_fields checks the merged row).
+    expect(requestPatchSchema.parse({ reportingLocation: 'Other' })).toEqual({ reportingLocation: 'Other' });
     expect(requestPatchSchema.safeParse({ reportingLocation: 'Other', otherLocation: 'Gate' }).success).toBe(true);
     expect(requestPatchSchema.safeParse({ otherLocation: 'Gate' }).success).toBe(true);
+    expect(requestPatchSchema.safeParse({ otherLocation: null }).success).toBe(true);
   });
 
   it('never accepts status or identity fields', () => {
@@ -147,8 +150,15 @@ describe('signInSchema', () => {
     });
   });
 
-  it('resolves Other to the custom team text', () => {
-    expect(signInSchema.parse({ staffName: 'Sam Lee', team: 'Other', otherTeam: ' Info booth ', password: 'pw' }).team).toBe('Info booth');
+  it('resolves Other to the custom team text, canonicalising known aliases', () => {
+    const team = (otherTeam: string) => signInSchema.parse({ staffName: 'Sam Lee', team: 'Other', otherTeam, password: 'pw' }).team;
+    expect(team(' Info   booth ')).toBe('Info booth');
+    expect(team('dispatch')).toBe('GC/HX - Dispatch');
+    expect(team('Dispatch')).toBe('GC/HX - Dispatch');
+    expect(team('gchx base')).toBe('GC/HX - Base');
+    expect(team('Transport')).toBe('GC/HX - Special Operations/Med Transpo');
+    expect(team('prevent')).toBe('Prevent');
+    expect(team('MEDICAL')).toBe('Medical');
     expect(signInSchema.safeParse({ staffName: 'Sam Lee', team: 'Other', password: 'pw' }).success).toBe(false);
     expect(signInSchema.safeParse({ staffName: 'Sam Lee', team: 'Other', otherTeam: 'x', password: 'pw' }).success).toBe(false);
   });

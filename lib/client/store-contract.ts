@@ -1,7 +1,8 @@
 'use client';
-// The client store's PUBLIC contract (spec §7, v2.1 A5/A6/A10–A15/A22): state shape, actions, selector
-// hooks, and an in-memory STUB implementation fed by synthetic data so UI work can render before the
-// real store exists. Screens import hooks from here and NEVER call fetch themselves.
+// The client store's PUBLIC contract (spec §7, v2.1 A5/A6/A10–A15/A22): state shape, actions and selector
+// hooks. Screens import hooks from here and NEVER call fetch themselves. The in-memory STUB (synthetic data,
+// lib/client/store-stub.ts) is deliberately NOT re-exported: this module is on the first-load path of `/`,
+// and the stub and its rows must never be bundled into production (v2.2 A25).
 //
 // FROZEN after Phase 1a: Phase 1b (C) implements `AppStore` for real in lib/client/store.tsx without
 // changing these types; later phases may ADD members, never change existing ones.
@@ -15,7 +16,8 @@ import type {
   RequestSummary,
   Stats,
 } from '../api-types';
-import type { PhotoTiming, PostValue, SettableStatus, StatusKind } from '../domain';
+import type { PhotoTiming, SettableStatus, StatusKind } from '../domain';
+import type { Prefs } from './prefs';
 import type { RequestFormValues } from './form-values';
 import {
   type AllFilter,
@@ -50,7 +52,8 @@ import { STATS_POLL_MS } from './constants';
 /** offline: navigator.onLine false or 2 network/timeout failures · error: 3 HTTP 5xx · live: any success. */
 export type Connection = 'live' | 'offline' | 'error';
 
-export type ThemePref = 'light' | 'dark' | 'auto';
+// Prefs and ThemePref are defined in lib/client/prefs.ts, the localStorage module that backs them.
+export type { LastPost, Prefs, ThemePref } from './prefs';
 
 export interface SessionState {
   /** unknown: not checked yet (or offline) · active · expired: a 401 was seen · signed_out */
@@ -61,17 +64,6 @@ export interface SessionState {
   /** Attribution string "staffName · team". */
   staff: string | null;
   expiresAt: IsoDateTime | null;
-}
-
-/** Remembered on this phone (spec §7). The app always opens on All. */
-export interface Prefs {
-  theme: ThemePref;
-  /** New-request alerts (off by default). */
-  bell: boolean;
-  rememberedName: string | null;
-  rememberedTeam: string | null;
-  /** No default until one is chosen once. */
-  lastPost: { reportingLocation: PostValue; otherLocation: string | null } | null;
 }
 
 /** An optimistic overlay for an in-flight mutation (never left once the server has answered). */
@@ -131,6 +123,7 @@ export interface StoreState {
   session: SessionState;
   /** Request ids created on this phone. */
   myIds: ReadonlySet<string>;
+  /** Starts as readPrefs() (lib/client/prefs.ts); changed only through actions.setPref. */
   prefs: Prefs;
   toasts: readonly ToastItem[];
   snackbar: SnackbarItem | null;
@@ -249,7 +242,12 @@ export interface StoreActions {
     retry(mutationId: string): void;
     /** Remove the job and its photos from this phone. */
     discard(mutationId: string): Promise<void>;
-    /** Replace a needs-attention job's payload (same mutationId). */
+    /**
+     * Replace a needs-attention job's payload (same mutationId; build it with toCreateBody(values,
+     * mutationId)). The job's photos are kept unchanged: the outbox editor shows them read-only (to change
+     * photos, discard the job and log the request again). Prefill the editor with
+     * formValuesFromCreateBody(item.payload).
+     */
     update(mutationId: string, payload: CreateRequestBody): Promise<void>;
     /** Send a needs-attention job again after update(). */
     resend(mutationId: string): void;
@@ -272,6 +270,10 @@ export interface StoreActions {
    */
   signOut(opts?: { discardOutbox?: boolean }): Promise<{ ok: true } | { ok: false; reason: 'outbox'; count: number }>;
 
+  /**
+   * Writes through lib/client/prefs.ts (writePref), then updates state.prefs. setPref('theme', t) also
+   * applies the theme (applyTheme), so screens never call applyTheme themselves.
+   */
   setPref<K extends keyof Prefs>(key: K, value: Prefs[K]): void;
 
   showToast(toast: Omit<ToastItem, 'id'>): string;
@@ -561,4 +563,3 @@ export function useStats(active: boolean): { stats: Stats | null; error: boolean
   return state;
 }
 
-export { createStubStore } from './store-stub';

@@ -7,7 +7,6 @@ import { Avatar, DropdownMenu, Text } from '@radix-ui/themes';
 import { navigate } from '@/lib/client/nav';
 import { useActions, usePrefs, useSession } from '@/lib/client/store-contract';
 import { avatarInitials, teamShort } from '@/lib/domain';
-import { applyTheme } from '@/lib/theme';
 
 export interface AccountMenuProps {
   /** Radix avatar size for the trigger (header uses "2"). */
@@ -34,10 +33,8 @@ export function AccountMenu({ size = '2' }: AccountMenuProps) {
         {(['light', 'dark', 'auto'] as const).map((t) => (
           <DropdownMenu.Item
             key={t}
-            onSelect={() => {
-              applyTheme(t);
-              actions.setPref('theme', t);
-            }}
+            // setPref('theme') stores and applies the theme (lib/client/prefs.ts): one source of truth.
+            onSelect={() => actions.setPref('theme', t)}
           >
             {t === 'light' ? 'Light' : t === 'dark' ? 'Dark' : 'Auto'}
             {prefs.theme === t ? ' ✓' : ''}

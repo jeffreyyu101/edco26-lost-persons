@@ -7,6 +7,7 @@
 import 'server-only';
 import { z } from 'zod';
 import { DEFAULT_EVENT_TIMEZONE } from '../format';
+import { sessionSecretFromEnv } from './session-token';
 
 /**
  * Supabase JS expects the project URL and appends `/rest/v1` itself. Accept the REST URL too, since it
@@ -71,7 +72,8 @@ export function serverEnv(): ServerEnv {
   const supabaseKey = readEnv('SUPABASE_SECRET_KEY') ?? readEnv('SUPABASE_SERVICE_ROLE_KEY');
   if (!supabaseKey) problems.push('SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY) is missing');
 
-  const sessionSecret = readEnv('SESSION_SECRET');
+  // The same reader as the proxy, so both always use the identical (trimmed) key.
+  const sessionSecret = sessionSecretFromEnv() ?? undefined;
   if (!sessionSecret) problems.push('SESSION_SECRET is missing');
   else if (sessionSecret.length < 32) problems.push('SESSION_SECRET must be at least 32 characters');
 

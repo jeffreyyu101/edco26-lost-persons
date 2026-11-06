@@ -139,12 +139,20 @@ function currentDepth(): number {
   return typeof state.lpDepth === 'number' ? state.lpDepth : 0;
 }
 
-/** Go to a view. `replace` swaps the current history entry instead of pushing one. */
+/**
+ * Go to a view. `replace` swaps the current history entry instead of pushing one.
+ *
+ * Always pass a FRESH state object, never a copy of window.history.state. Next.js patches pushState /
+ * replaceState: when the data already carries its own `__NA` / `_N` marker (which every entry Next created
+ * has), the patch treats the call as Next-internal, skips its router update, and useSearchParams /
+ * useView() never see the new URL (the address bar changes, the view does not). With a fresh object the
+ * patch copies `__NA` and the router tree in itself and syncs the router.
+ */
 export function navigate(params: NavParams, opts: { replace?: boolean } = {}): void {
   if (typeof window === 'undefined') return;
   const href = hrefFor(params);
   if (opts.replace) {
-    window.history.replaceState({ ...(window.history.state ?? {}), lpDepth: currentDepth() }, '', href);
+    window.history.replaceState({ lpDepth: currentDepth() }, '', href);
   } else {
     window.history.pushState({ lpDepth: currentDepth() + 1 }, '', href);
   }

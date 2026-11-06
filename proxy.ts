@@ -5,7 +5,7 @@
 // here (see `config.matcher`). Runs on the Node.js runtime (the Next.js 16 default for proxy).
 import { NextResponse, type NextRequest } from 'next/server';
 import { safeNextPath } from '@/lib/safe-next';
-import { SESSION_COOKIE, verifySessionToken } from '@/lib/server/session-token';
+import { SESSION_COOKIE, sessionSecretFromEnv, verifySessionToken } from '@/lib/server/session-token';
 
 /** Origin of the Supabase project (signed photo URLs redirect there), or null if unset / invalid. */
 function supabaseOrigin(): string | null {
@@ -61,7 +61,8 @@ export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
   if (pathname === '/' || pathname === '/signin') {
-    const claims = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value, process.env['SESSION_SECRET']);
+    // Same trimmed secret the session routes sign with (serverEnv().sessionSecret).
+    const claims = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value, sessionSecretFromEnv());
 
     if (pathname === '/' && !claims) {
       const target = new URL('/signin', request.url);

@@ -1,7 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
-import { EMPTY_FORM_VALUES, canSend, formValuesFromRequest, hasAnyDetail, parseAge, toCreateBody, toPatch } from '@/lib/client/form-values';
-import { hrefFor, parseView, viewToParams, type View } from '@/lib/client/nav';
+import {
+  EMPTY_FORM_VALUES,
+  canSend,
+  createBodyFromLegacyQueueItem,
+  formValuesFromCreateBody,
+  formValuesFromRequest,
+  hasAnyDetail,
+  parseAge,
+  toCreateBody,
+  toPatch,
+  type RequestFormValues,
+} from '@/lib/client/form-values';
+import { goBack, hrefFor, navigate, parseView, viewToParams, type View } from '@/lib/client/nav';
 import {
   filterAll,
   highlightRanges,
@@ -68,6 +79,45 @@ describe('nav (A22)', () => {
       expect(parseView(new URL(href, 'https://x').searchParams), href).toEqual(v);
     }
     expect(hrefFor({})).toBe('/');
+  });
+});
+
+describe('nav history state (Next.js replaceState patch)', () => {
+  // Every entry Next.js creates carries its own markers. Its patched replaceState treats data that already
+  // has `__NA` as Next-internal and skips the router update, so the view would never change.
+  const NEXT_STATE = { __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: 'x' } };
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+  const fakeHistory = (state: Record<string, unknown> | null) => {
+    const history = { state, pushState: vi.fn(), replaceState: vi.fn(), back: vi.fn() };
+    vi.stubGlobal('window', { history });
+    return history;
+  };
+
+  it('replace passes a fresh state object (never a copy carrying __NA), keeping the depth', () => {
+    const history = fakeHistory({ ...NEXT_STATE, lpDepth: 2 });
+    navigate({ q: 'Kayla' }, { replace: true });
+    expect(history.replaceState).toHaveBeenCalledWith({ lpDepth: 2 }, '', '/?q=Kayla');
+    const data = history.replaceState.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect('__NA' in data || '_N' in data).toBe(false);
+  });
+
+  it('push passes a fresh state object with depth + 1', () => {
+    const history = fakeHistory({ ...NEXT_STATE, lpDepth: 1 });
+    navigate({ r: ID });
+    expect(history.pushState).toHaveBeenCalledWith({ lpDepth: 2 }, '', `/?r=${ID}`);
+  });
+
+  it('goBack on a deep link (depth 0) replaces with the fallback through the same fresh-state path', () => {
+    const history = fakeHistory({ ...NEXT_STATE });
+    goBack({});
+    expect(history.back).not.toHaveBeenCalled();
+    expect(history.replaceState).toHaveBeenCalledWith({ lpDepth: 0 }, '', '/');
+    const inApp = fakeHistory({ ...NEXT_STATE, lpDepth: 1 });
+    goBack({});
+    expect(inApp.back).toHaveBeenCalledTimes(1);
+    expect(inApp.replaceState).not.toHaveBeenCalled();
   });
 });
 
@@ -153,6 +203,93 @@ describe('form values', () => {
     const patch = toPatch(base, { ...base, reportingLocation: 'Other', otherLocation: 'Gate', age: '20' });
     expect(patch).toEqual({ age: 20, reportingLocation: 'Other', otherLocation: 'Gate' });
     expect(requestPatchSchema.safeParse(patch).success).toBe(true);
+  });
+
+  it('formValuesFromCreateBody is the inverse of toCreateBody (needs-attention editor prefill)', () => {
+    const typed: RequestFormValues = {
+      ...EMPTY_FORM_VALUES,
+      name: '  Kayla   Martinez ',
+      age: '19',
+      gender: 'Female',
+      reportingLocation: 'Other',
+      otherLocation: ' Info booth ',
+      clothing: ' Pink hat ',
+      lastSeen: 'kineticFIELD rail',
+      contactPhone: '(407) 555-0142',
+    };
+    const body = toCreateBody(typed, CMID);
+    const back = formValuesFromCreateBody(body);
+    expect(back).toEqual({
+      ...EMPTY_FORM_VALUES,
+      name: 'Kayla Martinez',
+      age: '19',
+      gender: 'Female',
+      reportingLocation: 'Other',
+      otherLocation: 'Info booth',
+      clothing: 'Pink hat',
+      lastSeen: 'kineticFIELD rail',
+      contactPhone: '(407) 555-0142',
+    });
+    // Round trip is stable: the same body again.
+    expect(toCreateBody(back, CMID)).toEqual(body);
+    // A non-Other post never keeps an other location; an invalid post reads as unchosen.
+    expect(formValuesFromCreateBody({ clientMutationId: CMID, reportingLocation: 'Base', otherLocation: 'x' }).otherLocation).toBe('');
+    expect(formValuesFromCreateBody({ clientMutationId: CMID, reportingLocation: 'FA 3' as 'Base' }).reportingLocation).toBe('');
+  });
+
+  it('joins a legacy first_name / last_name into name', () => {
+    const legacyPayload = { clientMutationId: CMID, reportingLocation: 'FA 4 – Oasis', first_name: 'Lena', last_name: 'O.' } as unknown as Parameters<typeof formValuesFromCreateBody>[0];
+    expect(formValuesFromCreateBody(legacyPayload).name).toBe('Lena O.');
+  });
+
+  it("converts Jeffrey's legacy queue items (edc_pending_queue) to a create body", () => {
+    const item = {
+      client_mutation_id: CMID,
+      first_name: 'Paul',
+      last_name: 'G.',
+      age: 30,
+      gender: 'Male',
+      reporting_location: 'FA 3 – Kinetic',
+      other_location: 'stale',
+      clothing: ' Black tee ',
+      last_seen: '',
+      contact_phone: '407 555 0100',
+      height_build: 'Tall',
+    };
+    const body = createBodyFromLegacyQueueItem(item);
+    expect(body).toEqual({
+      clientMutationId: CMID,
+      reportingLocation: 'FA 3 – Kinetic',
+      otherLocation: null,
+      name: 'Paul G.',
+      age: 30,
+      gender: 'Male',
+      clothing: 'Black tee',
+      lastSeen: null,
+      hair: null,
+      heightBuild: 'Tall',
+      identifyingFeatures: null,
+      physicalDescription: null,
+      additionalNotes: null,
+      contactName: null,
+      contactPhone: '407 555 0100',
+      contactRelationship: null,
+      contactNotes: null,
+    });
+    expect(createRequestSchema.safeParse(body).success).toBe(true);
+    expect(formValuesFromCreateBody(body!).name).toBe('Paul G.');
+    // Only a first name; Other keeps its location; a bad age / gender becomes null.
+    expect(createBodyFromLegacyQueueItem({ client_mutation_id: CMID, first_name: 'X.Y.', last_name: '', reporting_location: 'Other', other_location: 'Gate', age: null, gender: '' })).toMatchObject({
+      name: 'X.Y.',
+      otherLocation: 'Gate',
+      age: null,
+      gender: null,
+    });
+    expect(createBodyFromLegacyQueueItem({ client_mutation_id: CMID, reporting_location: 'Base', age: 1.5 })?.age).toBeNull();
+    // Nothing to deduplicate on → not importable.
+    expect(createBodyFromLegacyQueueItem({ first_name: 'A' })).toBeNull();
+    expect(createBodyFromLegacyQueueItem('nope')).toBeNull();
+    expect(createBodyFromLegacyQueueItem(null)).toBeNull();
   });
 });
 

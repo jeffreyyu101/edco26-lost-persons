@@ -13,7 +13,8 @@
 -- What it does (no existing column or constraint is altered, except the NOT VALID re-add in step 2):
 --   0. Preflight: the production tables and the client_mutation_id unique key must exist.
 --   1. patients.row_version (optimistic concurrency and sync) and patients.last_seen (if missing).
---   2. Replaces the reporting_location / status CHECK only when it lacks a needed value, NOT VALID.
+--   2. Replaces the reporting_location / status CHECK only when it lacks a needed value (or a value rows
+--      already hold), NOT VALID. Values already in the table stay allowed, so legacy rows stay editable.
 --   3. lp_touch() BEFORE UPDATE trigger: updated_at = clock_timestamp(), row_version + 1.
 --   4. patient_photos.thumb_path.
 --   5. lp_login_attempts (sign-in rate limiting), RLS on, no policies.
@@ -104,9 +105,13 @@ alter table public.patients add column if not exists last_seen text;
 
 -- -----------------------------------------------------------------------------------------------------
 -- 2. Locations and statuses (in case 20261105_update_locations_and_statuses never ran in production).
---    A CHECK is replaced only when its current definition lacks one of the needed values. The new one is
---    NOT VALID: existing rows are never re-checked (a NOTICE counts the ones that would fail); new
---    inserts and updates are checked.
+--    A CHECK is replaced only when its current definition lacks one of the needed values (spec §4), or a
+--    value that rows already hold. The new CHECK allows the needed values PLUS every value already in the
+--    table: NOT VALID only skips re-checking existing rows once, but Postgres checks every later UPDATE of
+--    a row, and every lp_* write is an UPDATE (status, updated_by, ...). Without the extra values a legacy
+--    row (e.g. reporting_location 'FA 3' or status 'Found – Transported') could never be answered, edited
+--    or given a photo again. New non-canonical values are still refused: lp_clean_fields only accepts the
+--    five posts and lp_set_status only the settable statuses. A NOTICE names the extra values kept.
 -- -----------------------------------------------------------------------------------------------------
 do $checks$
 declare
@@ -116,53 +121,78 @@ declare
   v_def text;
   v_value text;
   v_lacking boolean;
-  v_bad bigint;
+  v_extra text[];
+  v_allowed text[];
+  v_kept text;
 begin
   -- reporting_location
+  select pg_catalog.array_agg(x.v order by x.v),
+         pg_catalog.string_agg(pg_catalog.format('%L (%s rows)', x.v, x.n), ', ' order by x.v)
+    into v_extra, v_kept
+  from (
+    select p.reporting_location as v, pg_catalog.count(*) as n
+    from public.patients p
+    where p.reporting_location is not null and not (p.reporting_location = any (v_locations))
+    group by p.reporting_location
+  ) as x;
+  v_allowed := v_locations || coalesce(v_extra, '{}'::text[]);
+
   select pg_catalog.pg_get_constraintdef(c.oid) into v_def
   from pg_catalog.pg_constraint c
   where c.conrelid = 'public.patients'::regclass and c.conname = 'patients_reporting_location_check';
   v_lacking := v_def is null;
   if not v_lacking then
-    foreach v_value in array v_locations loop
+    foreach v_value in array v_allowed loop
       if pg_catalog.strpos(v_def, pg_catalog.quote_literal(v_value)) = 0 then
         v_lacking := true;
       end if;
     end loop;
   end if;
   if v_lacking then
-    select pg_catalog.count(*) into v_bad from public.patients where not (reporting_location = any (v_locations));
-    raise notice 'patients_reporting_location_check: replacing (NOT VALID). Existing rows that would violate it: %', v_bad;
+    raise notice 'patients_reporting_location_check: replacing (NOT VALID). Legacy values kept for existing rows: %',
+      coalesce(v_kept, 'none');
     alter table public.patients drop constraint if exists patients_reporting_location_check;
-    alter table public.patients
-      add constraint patients_reporting_location_check
-      check (reporting_location in ('FA 3 – Kinetic', 'FA 4 – Oasis', 'Command', 'Base', 'Other')) not valid;
+    execute pg_catalog.format(
+      'alter table public.patients add constraint patients_reporting_location_check check (reporting_location in (%s)) not valid',
+      (select pg_catalog.string_agg(pg_catalog.quote_literal(u.v), ', ' order by u.o)
+       from pg_catalog.unnest(v_allowed) with ordinality as u(v, o)));
   else
-    raise notice 'patients_reporting_location_check: already allows every post, unchanged.';
+    raise notice 'patients_reporting_location_check: already allows every post and every value in use, unchanged.';
   end if;
 
   -- status
+  select pg_catalog.array_agg(x.v order by x.v),
+         pg_catalog.string_agg(pg_catalog.format('%L (%s rows)', x.v, x.n), ', ' order by x.v)
+    into v_extra, v_kept
+  from (
+    select p.status as v, pg_catalog.count(*) as n
+    from public.patients p
+    where p.status is not null and not (p.status = any (v_statuses))
+    group by p.status
+  ) as x;
+  v_allowed := v_statuses || coalesce(v_extra, '{}'::text[]);
+
   select pg_catalog.pg_get_constraintdef(c.oid) into v_def
   from pg_catalog.pg_constraint c
   where c.conrelid = 'public.patients'::regclass and c.conname = 'patients_status_check';
   v_lacking := v_def is null;
   if not v_lacking then
-    foreach v_value in array v_statuses loop
+    foreach v_value in array v_allowed loop
       if pg_catalog.strpos(v_def, pg_catalog.quote_literal(v_value)) = 0 then
         v_lacking := true;
       end if;
     end loop;
   end if;
   if v_lacking then
-    select pg_catalog.count(*) into v_bad from public.patients where not (status = any (v_statuses));
-    raise notice 'patients_status_check: replacing (NOT VALID). Existing rows that would violate it: %', v_bad;
+    raise notice 'patients_status_check: replacing (NOT VALID). Legacy values kept for existing rows: %',
+      coalesce(v_kept, 'none');
     alter table public.patients drop constraint if exists patients_status_check;
-    alter table public.patients
-      add constraint patients_status_check
-      check (status in ('Added', 'Checked – Not Found', 'Found – Awaiting Reunion', 'Reunited – Closed',
-                        'Found – Discharged', 'Bring friend to medical', 'Cancelled')) not valid;
+    execute pg_catalog.format(
+      'alter table public.patients add constraint patients_status_check check (status in (%s)) not valid',
+      (select pg_catalog.string_agg(pg_catalog.quote_literal(u.v), ', ' order by u.o)
+       from pg_catalog.unnest(v_allowed) with ordinality as u(v, o)));
   else
-    raise notice 'patients_status_check: already allows every status, unchanged.';
+    raise notice 'patients_status_check: already allows every status and every value in use, unchanged.';
   end if;
 end
 $checks$;
@@ -1169,6 +1199,8 @@ $fn$;
 -- lp_stats: everything the dashboard needs (spec §8 + A21). camelCase keys, passed through by the server.
 --   open {waiting, inMedical (legacy Bring friend counts as In medical)}; notInMedical, reunited,
 --   discharged, cancelled and total over all rows; longestWait; avgAnswerMinutes; byPost; recent.
+--   byPost: the 4 fixed posts always (count may be 0), then one entry per other location with open rows
+--   (Other grouped by other_location, legacy post values as themselves); the counts sum to open.
 --   postShort here must match postShort() in lib/domain.ts.
 create function public.lp_stats()
 returns jsonb
@@ -1257,15 +1289,23 @@ begin
      and p.status in ('Added', 'Found – Awaiting Reunion', 'Bring friend to medical')
     group by l.loc, l.short, l.ord
     union all
-    select 'Other',
-           pg_catalog.min(pg_catalog.btrim(p.other_location)),
-           coalesce(nullif(pg_catalog.min(pg_catalog.btrim(p.other_location)), ''), 'Other'),
+    -- Every other open row: Other grouped by its location (case-insensitive), and any legacy post value
+    -- (e.g. 'FA 3') as itself, so the bars always add up to the Open number.
+    select p.reporting_location,
+           case when p.reporting_location = 'Other' then pg_catalog.min(pg_catalog.btrim(p.other_location)) end,
+           case when p.reporting_location = 'Other'
+                then coalesce(nullif(pg_catalog.min(pg_catalog.btrim(p.other_location)), ''), 'Other')
+                else p.reporting_location
+           end,
            5,
            pg_catalog.count(*)::integer
     from public.patients p
-    where p.reporting_location = 'Other'
+    where p.reporting_location not in ('FA 3 – Kinetic', 'FA 4 – Oasis', 'Command', 'Base')
       and p.status in ('Added', 'Found – Awaiting Reunion', 'Bring friend to medical')
-    group by pg_catalog.lower(pg_catalog.btrim(coalesce(p.other_location, '')))
+    group by p.reporting_location,
+             case when p.reporting_location = 'Other'
+                  then pg_catalog.lower(pg_catalog.btrim(coalesce(p.other_location, '')))
+             end
   ) as x;
 
   select coalesce(pg_catalog.jsonb_agg(r.obj order by r.updated_at desc, r.case_number desc), '[]'::jsonb)

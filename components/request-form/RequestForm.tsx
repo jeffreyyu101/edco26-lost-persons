@@ -17,7 +17,12 @@ export interface RequestFormProps {
   section: EditSection;
   values: RequestFormValues;
   onChange: (values: RequestFormValues) => void;
-  /** Photos chosen in this form (create / outbox). Edit mode adds photos from the profile instead. */
+  /**
+   * create: the photos chosen in this form (editable). outbox: the job's photos, shown READ-ONLY (no add,
+   * remove or timing toggle; onPhotosChange / onPhotoTimingChange are never called) because
+   * store.outbox.update() replaces only the payload; to change photos, discard the job and log it again.
+   * The view maps OutboxPhoto → DraftPhoto (width/height 0). edit: unused, photos are added from the profile.
+   */
   photos: readonly DraftPhoto[];
   onPhotosChange: (photos: DraftPhoto[]) => void;
   photoTiming: PhotoTiming;

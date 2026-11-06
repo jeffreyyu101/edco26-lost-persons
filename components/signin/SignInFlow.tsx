@@ -1,6 +1,10 @@
 'use client';
 // Sign-in (spec §8 Sign-in, sign-in.html): step 1 name + team, step 2 the event password. Remembered name
 // and team skip to step 2. On success, go to `next` (already validated same-origin) or "/".
+// Remembered identity and theme: lib/client/prefs.ts (this route has no StoreProvider). readPrefs() gives
+// rememberedName / rememberedTeam (both or neither) to skip to step 2; after a successful POST
+// /api/session call writeRememberedIdentity(staffName, team) with the response; "Change" calls
+// clearRememberedIdentity(); the theme toggle calls setThemePref(). Never pick other storage keys.
 // PLACEHOLDER (Phase 1a): the exported name and props are FINAL; B (Phase 2) builds the real flow.
 import { Flex, Heading, Text } from '@radix-ui/themes';
 

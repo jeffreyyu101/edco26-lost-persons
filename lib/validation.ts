@@ -23,6 +23,7 @@ import {
   STATUS,
   STATUS_KINDS,
   TEAM_VALUES,
+  canonicalTeam,
 } from './domain';
 
 const codePoints = (s: string) => Array.from(s).length;
@@ -72,16 +73,32 @@ const fieldShape = {
   otherLocation: otherLocationField.optional(),
 };
 
-const otherNeedsLocation = (
-  v: { reportingLocation?: string | undefined; otherLocation?: string | null | undefined },
-  ctx: z.RefinementCtx,
-) => {
-  if (v.reportingLocation === OTHER_POST && (v.otherLocation === undefined || v.otherLocation === null)) {
-    ctx.addIssue({ code: 'custom', path: ['otherLocation'], message: 'Say where (Other post)' });
-  }
+type PostFields = { reportingLocation?: string | undefined; otherLocation?: string | null | undefined };
+
+const otherLocationTooShort = (v: PostFields, ctx: z.RefinementCtx) => {
   if (v.otherLocation && codePoints(v.otherLocation) < OTHER_LOCATION_MIN) {
     ctx.addIssue({ code: 'custom', path: ['otherLocation'], message: 'Say where (Other post)' });
   }
+};
+
+/** Create: there is no existing row, so Other always needs its location in the body. */
+const otherNeedsLocation = (v: PostFields, ctx: z.RefinementCtx) => {
+  if (v.reportingLocation === OTHER_POST && (v.otherLocation === undefined || v.otherLocation === null)) {
+    ctx.addIssue({ code: 'custom', path: ['otherLocation'], message: 'Say where (Other post)' });
+  }
+  otherLocationTooShort(v, ctx);
+};
+
+/**
+ * Patch: an omitted otherLocation means "unchanged", so `{reportingLocation: 'Other'}` alone is valid here
+ * and the merged row is checked by lp_update_fields (P0422 field:other_location when the row has none).
+ * Only an explicit clear (null, or '' which becomes null) together with Other is rejected up front.
+ */
+const patchOtherNeedsLocation = (v: PostFields, ctx: z.RefinementCtx) => {
+  if (v.reportingLocation === OTHER_POST && v.otherLocation === null) {
+    ctx.addIssue({ code: 'custom', path: ['otherLocation'], message: 'Say where (Other post)' });
+  }
+  otherLocationTooShort(v, ctx);
 };
 
 /**
@@ -100,13 +117,17 @@ export const createRequestSchema = z
 export type CreateRequestBody = z.input<typeof createRequestSchema>;
 export type CreateRequestInput = z.output<typeof createRequestSchema>;
 
-/** The `patch` of PATCH /api/requests/:id: only the keys being changed; at least one. */
+/**
+ * The `patch` of PATCH /api/requests/:id: only the keys being changed; at least one. Omitted = unchanged,
+ * null = clear. The "Other needs a location" rule applies to the MERGED row (lp_update_fields); here only
+ * an explicit clear of otherLocation with reportingLocation 'Other' is rejected.
+ */
 export const requestPatchSchema = z
   .strictObject({
     reportingLocation: postField.optional(),
     ...fieldShape,
   })
-  .superRefine(otherNeedsLocation)
+  .superRefine(patchOtherNeedsLocation)
   .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to change' });
 
 export type RequestPatch = z.input<typeof requestPatchSchema>;
@@ -140,7 +161,10 @@ const staffText = (min: number, max: number, label: string) =>
 
 /**
  * POST /api/session. `team` is a card value or "Other" with `otherTeam` (2–80 characters).
- * Output: {staffName, team (resolved: canonical value or the custom text), password}.
+ * Output: {staffName, team, password}. `team` is always canonical (spec §4 "Data stores the canonical
+ * value"): a card value as is, and the Other text through domain.canonicalTeam(), so a known alias typed
+ * there ("dispatch", "gchx base", "prevent") becomes its canonical team; anything else stays as typed
+ * (whitespace collapsed).
  */
 export const signInSchema = z
   .strictObject({
@@ -156,7 +180,7 @@ export const signInSchema = z
   })
   .transform((v) => ({
     staffName: v.staffName,
-    team: v.team === OTHER_TEAM ? (v.otherTeam as string) : v.team,
+    team: v.team === OTHER_TEAM ? canonicalTeam(v.otherTeam as string) : v.team,
     password: v.password,
   }));
 export type SignInBody = z.input<typeof signInSchema>;

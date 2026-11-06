@@ -197,7 +197,11 @@ export interface Stats {
   } | null;
   /** Mean minutes from logged to first answer, over answers in the last 2 hours; null if none. */
   avgAnswerMinutes: number | null;
-  /** The 4 fixed posts always (count may be 0), then one entry per other location with open rows. */
+  /**
+   * The 4 fixed posts always (count may be 0), then one entry per other location with open rows: Other
+   * grouped by otherLocation (case-insensitive), and a legacy post value (e.g. 'FA 3') as itself. The counts
+   * add up to open.waiting + open.inMedical.
+   */
   byPost: Array<{ reportingLocation: string; otherLocation: string | null; postShort: string; count: number }>;
   /** The 5 most recently updated requests. */
   recent: Array<{ id: string; caseNumber: number; name: string | null; status: StatusValue; postShort: string; updatedAt: IsoDateTime }>;
@@ -208,15 +212,22 @@ export interface Stats {
 // Session
 // ---------------------------------------------------------------------------------------------------
 
-/** GET /api/session (POST returns the same without being required to include expiresAt). */
+/**
+ * GET /api/session (200) and POST /api/session (200): both return exactly this, expiresAt included. POST
+ * computes expiresAt from the claims of the cookie it just issued (exp, in seconds → ISO).
+ */
 export interface SessionInfo {
   staffName: string;
-  /** Canonical team value, or the custom "Other team" text. */
+  /** Canonical team value (a card value, a canonicalised alias, or the custom "Other team" text). */
   team: string;
   /** Attribution string "staffName · team". */
   staff: string;
+  /** When the current cookie expires (12 h idle, never past the 36 h absolute cap). */
   expiresAt: IsoDateTime;
 }
+
+/** The POST /api/session response: the same SessionInfo as GET (expiresAt is required). */
+export type SignInResponse = SessionInfo;
 
 // ---------------------------------------------------------------------------------------------------
 // Errors

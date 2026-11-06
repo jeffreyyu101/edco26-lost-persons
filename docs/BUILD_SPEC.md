@@ -1,6 +1,6 @@
 # Build spec v2: "Is my friend in medical?" (EDC Orlando 2026)
 
-This is the single contract for every agent building the app. Version 2 adds the findings from the GPT-6 Astra (Codex) and Claude Fable 5.1 plan reviews.
+This is the single contract for every agent building the app. Version 2 adds the findings from the GPT-6 Astra (Codex) and Claude Fable 5.1 plan reviews. §13 (v2.1) and §14 (v2.2, the Phase 1a review) override anything above them.
 
 - **When documents disagree:**
   - This file wins on engineering questions.
@@ -126,7 +126,7 @@ These are set inside the transition function.
 | GCHX Base | `GC/HX - Base` |
 | Medical | `Medical` |
 
-The "Other team" field takes free text of 2–80 characters. The UI shows the short label. **Data stores the canonical value.**
+The "Other team" field takes free text of 2–80 characters. The UI shows the short label. **Data stores the canonical value** (the Other text too, through `canonicalTeam`: A28).
 
 ### Posts (reporting location)
 
@@ -197,7 +197,7 @@ It must be safe to paste into the production SQL editor once or twice.
 **Steps:**
 
 1. **Row version.** `alter table patients add column if not exists row_version bigint not null default 0;`
-2. **Locations and statuses.** Re-add the location and status CHECK constraints idempotently, with `drop constraint if exists`, then `add … not valid`, using exactly the values in §4. This is in case Jeffrey's 20261105 migration never ran in production. `not valid` means legacy rows are never rejected.
+2. **Locations and statuses.** Re-add the location and status CHECK constraints idempotently, with `drop constraint if exists`, then `add … not valid`, using the values in §4 **plus every value already in the table** (A30). This is in case Jeffrey's 20261105 migration never ran in production. `not valid` alone does not keep legacy rows editable, because Postgres checks every later UPDATE.
 3. **Touch trigger.** A `BEFORE UPDATE` trigger function, `lp_touch()`, sets `new.updated_at = clock_timestamp()` and `new.row_version = old.row_version + 1`. Install it with `create or replace trigger lp_patients_touch`. Using `clock_timestamp()`, the wall clock at the moment of writing, rather than `now()` keeps the cursor close to commit time. Also `create index if not exists patients_updated_at_idx on patients(updated_at)`.
 4. **Thumbnails.** `alter table patient_photos add column if not exists thumb_path text;`
 5. **Login attempts.** `create table if not exists lp_login_attempts(id bigserial primary key, ip text not null, name_key text not null, ok boolean, at timestamptz not null default now());` with indexes on `(ip, at)` and `(name_key, at)`. RLS on, no policies.
@@ -263,7 +263,7 @@ It must be safe to paste into the production SQL editor once or twice.
 
 | Route | Behaviour |
 |---|---|
-| `POST /api/session` | Body `{staffName (2–60), team, otherTeam?, password}`. Client IP = the first of `x-vercel-forwarded-for`, then `x-real-ip`, then the leftmost `x-forwarded-for`, then `0.0.0.0`. These are set by Vercel's edge and can't be spoofed there. `name_key` = lowercased, trimmed name. Calls `lp_login_begin`, verifies the password, then `lp_login_finish`. Too many attempts returns 429 with `Retry-After`. Returns `{staffName, team, staff}`. |
+| `POST /api/session` | Body `{staffName (2–60), team, otherTeam?, password}`. Client IP = the first of `x-vercel-forwarded-for`, then `x-real-ip`, then the leftmost `x-forwarded-for`, then `0.0.0.0`. These are set by Vercel's edge and can't be spoofed there. `name_key` = lowercased, trimmed name. Calls `lp_login_begin`, verifies the password, then `lp_login_finish`. Too many attempts returns 429 with `Retry-After`. Returns `{staffName, team, staff, expiresAt}` (`SessionInfo`, A27). |
 | `GET /api/session` | Returns `{staffName, team, staff, expiresAt}` or 401. |
 | `DELETE /api/session` | Clears the cookie. |
 | `GET /api/sync?since=<iso>&reconcile=0\|1` | Calls `lp_sync`. The response is `{serverTime, rows: RequestSummary[], versions?}`. **No ETag or 304.** |
@@ -470,7 +470,7 @@ The app always opens on All.
 
 ### Performance
 
-- The first load of `/` should be ≤ 170 KB of JS, gzipped.
+- First-load JS of `/`: the budget is in **A25** (the original ≤ 170 KB is below the framework baseline).
 - Load the views with `next/dynamic`.
 - Inputs use a 16 px font, which prevents iOS zoom.
 - Sticky bars use `env(safe-area-inset-bottom)`.
@@ -932,3 +932,55 @@ Unknown params are ignored.
 - **1a** ships a placeholder `ListViews` that renders store rows, so Merge 1 can run its smoke test.
 
 **A24 · Edit from the profile.** `?r=<id>&edit=person|friend|all` opens the full-screen `RequestFormView` with `mode="edit"` and a `section` prop showing only that group, prefilled.
+
+## 14. v2.2 amendments (OVERRIDE anything above; from the Phase 1a review)
+
+**A25 · First-load JS budget** (replaces §7 "≤ 170 KB").
+
+- **Measured** on the production build (`npm run build:test`): every `<script src>` in the server HTML of the route, gzipped. Views loaded later through `next/dynamic` don't count.
+- **Baseline at Phase 1a.** Next 16.4.5, React 19.3 and Radix Themes 3.3, shared by `/` and `/signin`, come to about 192 KB. `/` was 211.5 KB in total, and 20 KB of that loads only on `/` (about 12 KB of it is the stub store and its synthetic rows). 170 KB can't be met.
+- **Budget:**
+  - `/` total ≤ **230 KB** gzipped.
+  - Route-only code (scripts `/` loads that `/signin` does not) ≤ **40 KB** gzipped.
+- **Enforced** by `tests/e2e/first-load.spec.ts`.
+- **C (1b):** the real `lib/client/store.tsx` must **not** import `store-stub` or `stub-data`. `store-contract.ts` no longer re-exports the stub. Only tests use it after 1b.
+
+**A26 · History state.** `navigate()` passes a **fresh** state object (`{lpDepth}`) to `pushState` / `replaceState`, never a copy of `window.history.state`. Next 16 patches both; when the data already carries Next's `__NA` marker, the patch skips the router sync, so the URL changes but `useSearchParams` / `useView()` don't. Only ever change views through `navigate()` / `goBack()`.
+
+**A27 · Sign-in response.** `POST /api/session` returns the same `SessionInfo` as `GET`, `{staffName, team, staff, expiresAt}`, with `expiresAt` taken from the `exp` of the cookie it just issued. `SignInResponse` = `SessionInfo`.
+
+**A28 · Other team.** `signInSchema` maps the "Other team" text through `domain.canonicalTeam()`. "dispatch" becomes `GC/HX - Dispatch` and "prevent" becomes `Prevent`; unknown text stays as typed (whitespace collapsed). The session, `created_by`, `updated_by`, audit `staff_name` and the CSV therefore always hold the canonical team.
+
+**A29 · Remembered on this phone** (`lib/client/prefs.ts`, frozen).
+
+- **One module.** It has no React and no store dependency, and it is the only reader and writer of the §7 "Remembered on this phone" values:
+
+  | Key (localStorage) | Holds |
+  |---|---|
+  | `lp-theme` | the theme; shared with the pre-paint `THEME_SCRIPT` |
+  | `lp-identity` | `{name, team}`, both or neither |
+  | `lp-last-post` | `{reportingLocation, otherLocation}` |
+  | `lp-bell` | `'1'` when on |
+  | `lp-bell-intro-seen` | `'1'` once the "Alerts are on" sheet has been shown (new pref `bellIntroSeen`) |
+
+- **The store.** `state.prefs` starts as `readPrefs()`, and `setPref` writes through `writePref`. `setPref('theme')` applies the theme, so screens never call `applyTheme`.
+- **SignInFlow** renders outside `StoreProvider`. It uses `readPrefs()` to skip to step 2 and to prefill after a 401, `writeRememberedIdentity(staffName, team)` with the `POST /api/session` response, `clearRememberedIdentity()` on Change, and `setThemePref()` for the toggle.
+- **Phone-created ids** stay in IndexedDB with the cache. They are not prefs.
+
+**A30 · Legacy CHECK values** (refines §5 step 2 and A9). When step 2 replaces a CHECK, the new one allows the §4 values **plus every value already in the table**, still NOT VALID, and the NOTICE names the extra values. It is also replaced when it lacks a value that rows hold.
+
+- **Why:** NOT VALID only skips the one-off check of existing rows. Postgres checks every later UPDATE, and every `lp_*` write is an UPDATE. A legacy row (`reporting_location = 'FA 3'`, status `Found – Transported`) could otherwise never be answered, edited or given a photo.
+- **New writes stay canonical:** `lp_clean_fields` and `lp_set_status` still refuse non-canonical values.
+- **Covered** by the upgrade fixture in `scripts/verify-migration.sh`.
+
+**A31 · byPost** (refines A21). After the 4 fixed posts, byPost has one entry per **other** location with open rows. Other is grouped by `other_location` (case-insensitive); a legacy post value stays as itself, with `postShort` = the value, as in `domain.postShort`. The counts always add up to `open.waiting + open.inMedical`.
+
+**A32 · Patch post rule.** `requestPatchSchema` rejects only an **explicit** clear (`otherLocation` null or '') together with `reportingLocation: 'Other'`. `{reportingLocation: 'Other'}` on its own is valid ("omitted = unchanged"). `lp_update_fields` checks the merged row and raises P0422 `field:other_location` when the row has none.
+
+**A33 · Needs-attention editor** (`?outbox=<mutationId>`).
+
+- **Photos are read-only** there. `outbox.update(mutationId, payload)` replaces only the payload; to change photos, discard the job and log the request again.
+- **Prefill** with `formValuesFromCreateBody(item.payload)`, the inverse of `toCreateBody`. Save with `outbox.update(id, toCreateBody(values, id))`, then `outbox.resend(id)`.
+- **Legacy queue items** (`edc_pending_queue`) are converted at import by `createBodyFromLegacyQueueItem`, which joins `first_name` and `last_name` into `name` and keeps `client_mutation_id`.
+
+**A34 · SESSION_SECRET.** There is one reader, `sessionSecretFromEnv()` in `lib/server/session-token.ts`, which trims the value. Both the proxy and `serverEnv()` use it, so a value pasted with a trailing newline can't cause a sign-in loop.

@@ -7,6 +7,18 @@ import { SignJWT, jwtVerify } from 'jose';
 import { staffString } from '../domain';
 
 export const SESSION_COOKIE = 'lp_session';
+
+// A computed key, so no bundler can ever inline the value.
+const SESSION_SECRET_VAR = 'SESSION_SECRET';
+
+/**
+ * THE one reader of SESSION_SECRET, used by both the proxy and serverEnv(): trimmed (a value pasted into
+ * Vercel with a trailing newline or space must sign and verify with the same key everywhere), blank = null.
+ * The ≥ 32-character rule is checked by serverEnv() and verifySessionToken().
+ */
+export function sessionSecretFromEnv(): string | null {
+  return process.env[SESSION_SECRET_VAR]?.trim() || null;
+}
 export const SESSION_IDLE_SECONDS = 12 * 60 * 60;
 export const SESSION_REFRESH_AFTER_SECONDS = 60 * 60;
 export const SESSION_ABSOLUTE_SECONDS = 36 * 60 * 60;

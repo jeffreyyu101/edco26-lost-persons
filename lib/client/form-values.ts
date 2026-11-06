@@ -5,10 +5,13 @@ import type { RequestSummary } from '../api-types';
 import {
   AGE_MAX,
   AGE_MIN,
+  FIELD_COLUMNS,
   GENDERS,
   OTHER_POST,
   TEXT_FIELDS,
   isPostValue,
+  isUuid,
+  joinName,
   type Gender,
   type PostValue,
   type TextField,
@@ -135,4 +138,67 @@ export function toPatch(base: RequestFormValues, values: RequestFormValues): Req
     if (clean(base[key]) !== clean(values[key])) patch[key] = clean(values[key]);
   }
   return Object.keys(patch).length > 0 ? patch : null;
+}
+
+/** Jeffrey's name split, as found on his offline queue items. */
+interface LegacyNameFields {
+  first_name?: unknown;
+  last_name?: unknown;
+}
+
+const legacyText = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v : null);
+
+/**
+ * Prefill for the needs-attention editor (`?outbox=<mutationId>`, RequestForm mode 'outbox'): the inverse
+ * of toCreateBody, so formValuesFromCreateBody(toCreateBody(v, id)) gives back v as the server would store
+ * it (trimmed, blank → ''). When the payload has no `name` but still carries a legacy first_name /
+ * last_name, they are joined into name (same rule as joinName). A reportingLocation that is not a valid
+ * post reads as '' so the user has to choose one; otherLocation is kept only for Other.
+ */
+export function formValuesFromCreateBody(payload: CreateRequestBody): RequestFormValues {
+  const legacy = payload as CreateRequestBody & LegacyNameFields;
+  const name = payload.name ?? (joinName(legacyText(legacy.first_name), legacyText(legacy.last_name)) || null);
+  const gender: Gender | '' = (GENDERS as readonly string[]).includes(payload.gender ?? '') ? (payload.gender as Gender) : '';
+  const post = isPostValue(payload.reportingLocation) ? payload.reportingLocation : '';
+  const values: RequestFormValues = {
+    ...EMPTY_FORM_VALUES,
+    name: name ?? '',
+    age: typeof payload.age === 'number' ? String(payload.age) : '',
+    gender,
+    reportingLocation: post,
+    otherLocation: post === OTHER_POST ? (payload.otherLocation ?? '') : '',
+  };
+  for (const key of TEXT_FIELDS) values[key] = payload[key] ?? '';
+  return values;
+}
+
+/**
+ * One item of Jeffrey's legacy `localStorage['edc_pending_queue']` (snake_case, the name split into
+ * first_name / last_name, age a number or null) → the CreateRequestBody of an outbox job with source
+ * 'legacy', keeping its client_mutation_id. first_name and last_name are joined into `name`. Null when the
+ * item is not an object or has no valid client_mutation_id (nothing to deduplicate on).
+ * An unknown reporting_location is passed through unchanged: the server rejects it (definitive 4xx), the
+ * job becomes "Needs attention", and the editor (formValuesFromCreateBody) asks for a post. Nothing is lost.
+ */
+export function createBodyFromLegacyQueueItem(item: unknown): CreateRequestBody | null {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+  const raw = item as Record<string, unknown>;
+  const clientMutationId = raw['client_mutation_id'];
+  if (typeof clientMutationId !== 'string' || !isUuid(clientMutationId)) return null;
+  const location = typeof raw['reporting_location'] === 'string' ? raw['reporting_location'] : '';
+  const age = raw['age'];
+  const gender = raw['gender'];
+  const body: CreateRequestBody = {
+    clientMutationId,
+    reportingLocation: location as PostValue,
+    otherLocation: location === OTHER_POST ? legacyText(raw['other_location']) : null,
+    name: cleanName(joinName(legacyText(raw['first_name']), legacyText(raw['last_name']))),
+    age: typeof age === 'number' && Number.isInteger(age) && age >= AGE_MIN && age <= AGE_MAX ? age : null,
+    gender: typeof gender === 'string' && (GENDERS as readonly string[]).includes(gender) ? (gender as Gender) : null,
+  };
+  for (const key of TEXT_FIELDS) {
+    const v = legacyText(raw[FIELD_COLUMNS[key]]);
+    body[key] = v === null ? null : v.trim();
+  }
+  return body;
 }

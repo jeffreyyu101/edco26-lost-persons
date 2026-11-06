@@ -1,6 +1,7 @@
 // In-memory STUB of the AppStore contract, fed by synthetic rows (stub-data.ts). No network, no
 // IndexedDB. It follows the same domain rules (transitions, creator checks, versions, undo) so screens
-// behave plausibly. Phase 1b (C) replaces its use in lib/client/store.tsx with the real store.
+// behave plausibly. Phase 1b (C) replaces its use in lib/client/store.tsx with the real store; after that
+// only tests import it (v2.2 A25: the stub and stub-data must not be in the production first load).
 import type { RequestDetail, RequestSummary, Stats } from '../api-types';
 import {
   STATUS,
@@ -31,6 +32,7 @@ import type {
   ToastItem,
 } from './store-contract';
 import { UNDO_MS } from './constants';
+import { readPrefs, writePref } from './prefs';
 import { STUB_SESSION, stubDetail, stubRows } from './stub-data';
 
 let seq = 0;
@@ -41,6 +43,21 @@ export interface StubOptions {
   now?: number;
   /** Start with no rows (to render empty states). */
   empty?: boolean;
+}
+
+type PostCount = Stats['byPost'][number];
+
+/** Same as lp_stats byPost after the fixed posts: Other grouped by its location (case-insensitive), legacy posts as themselves. */
+function otherPosts(rows: readonly RequestSummary[]): PostCount[] {
+  const groups = new Map<string, PostCount>();
+  for (const r of rows) {
+    const isOther = r.reportingLocation === 'Other';
+    const key = isOther ? `Other|${(r.otherLocation ?? '').trim().toLowerCase()}` : r.reportingLocation;
+    const g = groups.get(key);
+    if (g) g.count += 1;
+    else groups.set(key, { reportingLocation: r.reportingLocation, otherLocation: isOther ? (r.otherLocation?.trim() ?? null) : null, postShort: r.postShort, count: 1 });
+  }
+  return [...groups.values()].sort((a, b) => b.count - a.count || a.postShort.localeCompare(b.postShort));
 }
 
 export function createStubStore(options: StubOptions): AppStore {
@@ -58,7 +75,8 @@ export function createStubStore(options: StubOptions): AppStore {
     lastSyncAt: new Date(now).toISOString(),
     session: { status: 'active', ...STUB_SESSION, expiresAt: new Date(now + 12 * 3600_000).toISOString() },
     myIds: new Set(),
-    prefs: { theme: 'auto', bell: false, rememberedName: STUB_SESSION.staffName, rememberedTeam: STUB_SESSION.team, lastPost: null },
+    // Backed by lib/client/prefs.ts exactly as the real store is (DEFAULT_PREFS on the server / in tests).
+    prefs: readPrefs(),
     toasts: [],
     snackbar: null,
     updateReady: false,
@@ -256,7 +274,10 @@ export function createStubStore(options: StubOptions): AppStore {
           ? { id: oldest.id, caseNumber: oldest.caseNumber, reportingLocation: oldest.reportingLocation, otherLocation: oldest.otherLocation, postShort: oldest.postShort, minutes: minutesSince(oldest.createdAt) }
           : null,
         avgAnswerMinutes: 9,
-        byPost: fixed.map((loc) => ({ reportingLocation: loc, otherLocation: null, postShort: postShort(loc), count: open.filter((r) => r.reportingLocation === loc).length })),
+        byPost: [
+          ...fixed.map((loc) => ({ reportingLocation: loc, otherLocation: null, postShort: postShort(loc), count: open.filter((r) => r.reportingLocation === loc).length })),
+          ...otherPosts(open.filter((r) => !fixed.includes(r.reportingLocation))),
+        ],
         recent: [...all]
           .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
           .slice(0, 5)
@@ -295,6 +316,7 @@ export function createStubStore(options: StubOptions): AppStore {
       return { ok: true };
     },
     setPref(key, value) {
+      writePref(key, value);
       set({ prefs: { ...state.prefs, [key]: value } });
     },
     showToast,
