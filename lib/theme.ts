@@ -5,8 +5,11 @@ export type ThemeChoice = 'light' | 'dark' | 'auto';
 
 export const THEME_STORAGE_KEY = 'lp-theme';
 
-/** Tiny, dependency-free, runs before first paint. Keep in sync with applyTheme(). */
-export const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem(${JSON.stringify(THEME_STORAGE_KEY)});var m=(t==='light'||t==='dark')?t:((window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light');var d=document.documentElement;d.classList.remove('light','dark');d.classList.add(m);d.style.colorScheme=m;}catch(e){}})();`;
+/**
+ * Tiny, dependency-free, runs before first paint. Keep in sync with applyTheme(). The storage read has its
+ * own try: if localStorage throws (blocked storage), the choice is Auto and a class is still applied.
+ */
+export const THEME_SCRIPT = `(function(){var t;try{t=localStorage.getItem(${JSON.stringify(THEME_STORAGE_KEY)})}catch(e){}try{var m=(t==='light'||t==='dark')?t:((window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light');var d=document.documentElement;d.classList.remove('light','dark');d.classList.add(m);d.style.colorScheme=m;}catch(e){}})();`;
 
 export function readThemeChoice(): ThemeChoice {
   try {
