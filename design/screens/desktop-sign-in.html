@@ -1,0 +1,132 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Desktop · Sign in</title>
+<!-- Desktop / tablet exploration 2026-11-06 (Brian: design a computer and other-screen-size version, screen by screen,
+     functionality unchanged). Same two steps and fields as the approved phone sign-in (sign-in.html).
+     A · Centered card, WorkOS AuthKit style: page canvas, one bordered card, logos above, credit at the page foot.
+     B · Split: brand panel left, form right.
+     Desktop touches in both: the name field is focused on load, Enter submits (the ↵ key cap on the button), team
+     cards answer to 1–4, Esc on step 2 goes back to step 1. Real @radix-ui/themes 3.3.0 from CDN. Synthetic data. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@radix-ui/themes@3.3.0/styles.css">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+body{margin:0;background:#0c0c0d}
+.radix-themes{--default-font-family:InterVariable,Inter,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;font-feature-settings:"cv11";-webkit-font-smoothing:antialiased}
+.radix-themes[data-is-root-theme]{min-height:0!important;height:100%;position:relative}
+.board{display:flex;flex-direction:column;align-items:center;gap:28px;padding:24px}
+.board figure{margin:0}
+.frame{width:1280px;height:800px;border-radius:12px;overflow:hidden;border:1px solid #2b2b30}
+.frame.ipad{width:820px;height:1180px;border-radius:28px}
+figcaption{margin-top:10px;text-align:center;font:500 15px/1.3 system-ui;color:#e4e4e7}
+figcaption span{display:block;font-weight:400;font-size:13px;color:#8e8e96;margin-top:2px}
+.dark .logo{filter:invert(1)}
+.logo,.gc{display:block;width:auto}
+.logos{display:flex;align-items:center;gap:18px}.ldiv{width:1px;height:34px;background:var(--gray-a6)}
+.ti{flex:none;color:var(--gray-10)}[data-state=checked] .ti{color:var(--gray-12)}
+.idrow{display:flex;align-items:center;gap:12px;padding:10px 10px 10px 12px;border-radius:var(--radius-3);background:var(--gray-a3)}
+.idrow .nm{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.kbd{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 5px;margin-left:8px;border-radius:5px;font-size:12px;font-weight:500;background:color-mix(in srgb,currentColor 16%,transparent);opacity:.85}
+.tk{margin-left:auto;font-size:11px;color:var(--gray-9);font-variant-numeric:tabular-nums;border:1px solid var(--gray-a5);border-radius:4px;min-width:16px;height:16px;display:inline-grid;place-items:center}
+.credit{font-size:12px;color:var(--gray-10);text-align:center}
+.corner{position:absolute;top:20px;right:22px}
+/* A · centered card */
+.pageA{position:relative;height:100%;display:flex;flex-direction:column;align-items:center;background:var(--gray-2)}
+.pageA .grow{flex:1}
+.cardA{width:420px;box-sizing:border-box;padding:32px 32px 28px;border-radius:14px;background:var(--color-panel-solid);box-shadow:0 0 0 1px var(--gray-a4),0 12px 32px -12px rgba(0,0,0,.18);display:flex;flex-direction:column;gap:22px}
+.dark .cardA{box-shadow:0 0 0 1px var(--gray-a4),0 16px 40px -12px rgba(0,0,0,.6)}
+.head{display:flex;flex-direction:column;gap:4px}
+/* B · split */
+.pageB{position:relative;height:100%;display:grid;grid-template-columns:1fr 1fr}
+.brand{background:#0b0b0c;color:#ededef;display:flex;flex-direction:column;padding:40px 48px}
+.brand .logo{filter:invert(1)}
+.brand .ldiv{background:rgba(255,255,255,.18)}
+.brand .big{font-size:40px;line-height:46px;font-weight:650;letter-spacing:-.025em;margin-top:auto}
+.brand .sub{font-size:15px;color:#9a9aa1;margin-top:10px}
+.brand .credit{color:#7d7d84;text-align:left;margin-top:auto;padding-top:40px}
+.formB{display:flex;flex-direction:column;justify-content:center;align-items:center;background:var(--color-background)}
+.formB .inner{width:380px;display:flex;flex-direction:column;gap:22px}
+</style>
+<script type="importmap">{"imports":{
+"react":"https://esm.sh/react@18.3.1",
+"react-dom":"https://esm.sh/react-dom@18.3.1",
+"react-dom/client":"https://esm.sh/react-dom@18.3.1/client",
+"@radix-ui/themes":"https://esm.sh/@radix-ui/themes@3.3.0?deps=react@18.3.1,react-dom@18.3.1",
+"htm":"https://esm.sh/htm@3.1.1"}}</script>
+</head><body>
+<img id="logo-src" src="../edc-logo.png" alt="" hidden>
+<img id="gc-src" src="../gc-logo.png" alt="" hidden>
+<div id="b"></div>
+<script type="module">
+import React from 'react';
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
+import htm from 'htm';
+import { Theme, Flex, Text, Heading, Button, IconButton, TextField, RadioCards, Avatar } from '@radix-ui/themes';
+const h = htm.bind(React.createElement);
+const LOGO = document.getElementById('logo-src').src;
+const GC = document.getElementById('gc-src').src;
+const svg = (p, s = 16, cls = '') => h`<svg width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className=${cls} aria-hidden="true" dangerouslySetInnerHTML=${{ __html: p }} />`;
+const P = {
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>',
+  moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/>',
+  eye: '<path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/>',
+  dispatch: '<path d="M16.247 7.761a6 6 0 0 1 0 8.478"/><path d="M19.075 4.933a10 10 0 0 1 0 14.134"/><path d="M4.925 19.067a10 10 0 0 1 0-14.134"/><path d="M7.753 16.239a6 6 0 0 1 0-8.478"/><circle cx="12" cy="12" r="2"/>',
+  base: '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  transpo: '<path d="M10 10H6"/><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.28a1 1 0 0 0-.684-.948l-1.923-.641a1 1 0 0 1-.578-.502l-1.539-3.076A1 1 0 0 0 16.382 8H14"/><path d="M8 8v4"/><path d="M9 18h6"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/>',
+  medical: '<path d="M4 9a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h4a1 1 0 0 1 1 1v4a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2v-4a1 1 0 0 1 1-1h4a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2h-4a1 1 0 0 1-1-1V4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4a1 1 0 0 1-1 1z"/>',
+};
+const TEAMS = [['GC/HX - Special Operations/Med Transpo', 'GCHX Med Transpo', P.transpo], ['GC/HX - Dispatch', 'Dispatch', P.dispatch], ['GC/HX - Base', 'GCHX Base', P.base], ['Medical', 'Medical', P.medical]];
+const CREDIT = 'Built by Jeffrey & Brian for Ground Control / Headliner Experience';
+const Kbd = ({ k = '↵' }) => h`<span className="kbd" aria-hidden="true">${k}</span>`;
+const Logos = ({ h1 = 40, h2 = 34 }) => h`<div className="logos"><img className="logo" src=${LOGO} alt="EDC Orlando" height=${h1}/><span className="ldiv"></span><img className="gc" src=${GC} alt="Ground Control" height=${h2}/></div>`;
+// Brian: the password step drops the app-name line (as on the phone).
+const Head = ({ title, center, app = true }) => h`<div className="head" style=${{ alignItems: center ? 'center' : 'flex-start' }}>${app ? h`<${Text} size="2" color="gray" weight="medium">Is my friend in medical?<//>` : null}<${Heading} size="6" weight="medium">${title}<//></div>`;
+
+const WhoForm = ({ name, team }) => h`<${Flex} direction="column" gap="3">
+  <${TextField.Root} size="3" placeholder="Your name" defaultValue=${name} autoFocus>
+    <${TextField.Slot}>${svg(P.user, 16)}<//>
+  <//>
+  <${Text} as="div" size="2" color="gray" mt="1">Your team<//>
+  <${RadioCards.Root} size="1" columns="2" gap="2" highContrast defaultValue=${team}>
+    ${TEAMS.map(([v, l, ic], i) => h`<${RadioCards.Item} key=${v} value=${v}><${Flex} direction="column" align="start" gap="2" width="100%" py="1"><${Flex} width="100%" align="center">${svg(ic, 18, 'ti')}<span className="tk">${i + 1}</span><//><${Text} size="2" style=${{ whiteSpace: 'nowrap' }}>${l}<//><//><//>`)}
+  <//>
+  <${TextField.Root} size="3" placeholder="Other team"/>
+  <${Button} size="3" mt="1" highContrast>Continue<${Kbd}/><//>
+<//>`;
+const PassForm = () => h`<${Flex} direction="column" gap="3">
+  <div className="idrow">
+    <${Avatar} size="2" radius="full" variant="solid" color="gray" highContrast fallback="DK"/>
+    <div className="nm"><${Text} size="2" weight="medium">Dana Kim<//><${Text} size="1" color="gray">GCHX Med Transpo<//></div>
+    <${Button} size="1" variant="surface" color="gray" highContrast>Change<span className="kbd" style=${{ marginLeft: 6, height: 16, minWidth: 0, fontSize: 10.5 }}>esc</span><//>
+  </div>
+  <${TextField.Root} size="3" type="password" placeholder="Event password" defaultValue="festival" autoFocus>
+    <${TextField.Slot} side="right"><${IconButton} size="2" variant="ghost" color="gray" aria-label="Show password">${svg(P.eye, 18)}<//><//>
+  <//>
+  <${Button} size="3" mt="1" highContrast>Sign in<${Kbd}/><//>
+<//>`;
+
+const Toggle = ({ dark }) => h`<${IconButton} className="corner" variant="ghost" color="gray" size="2" aria-label="Theme">${svg(dark ? P.sun : P.moon, 18)}<//>`;
+const A = ({ dark, step }) => h`<${Theme} appearance=${dark ? 'dark' : 'light'} accentColor="gray" grayColor="gray" radius="medium"><div className="pageA">
+  <${Toggle} dark=${dark}/>
+  <span className="grow"></span>
+  <${Logos}/>
+  <div style=${{ height: 28 }}></div>
+  <div className="cardA">${step === 1 ? h`<${Head} title="Staff sign-in"/><${WhoForm} name="Dana Kim" team="GC/HX - Special Operations/Med Transpo"/>` : h`<${Head} app=${false} title="Enter the event password"/><${PassForm}/>`}</div>
+  <span className="grow"></span>
+  <div className="credit" style=${{ paddingBottom: 24 }}>${CREDIT}</div>
+</div><//>`;
+const B = ({ dark, step }) => h`<${Theme} appearance=${dark ? 'dark' : 'light'} accentColor="gray" grayColor="gray" radius="medium"><div className="pageB">
+  <div className="brand"><${Logos} h1=${36} h2=${30}/><div className="big">Is my friend<br/>in medical?</div><div className="sub">EDC Orlando 2026 · Ground Control / Headliner Experience</div><div className="credit">${CREDIT}</div></div>
+  <div className="formB" style=${{ position: 'relative' }}><${Toggle} dark=${dark}/><div className="inner">${step === 1 ? h`<${Heading} size="6" weight="medium">Staff sign-in<//><${WhoForm} name="Sam Ortiz" team="GC/HX - Base"/>` : h`<${Heading} size="6" weight="medium">Enter the event password<//><${PassForm}/>`}</div></div>
+</div><//>`;
+
+const Fig = ({ cap, sub, cls, children }) => h`<figure><div className=${'frame ' + (cls ?? '')}>${children}</div><figcaption>${cap}<span>${sub}</span></figcaption></figure>`;
+const Board = () => h`<div className="board">
+  <${Fig} cap="A · Centered card, step 1" sub="Desktop 1280 × 800, dark"><${A} dark step=${1}/><//>
+  <${Fig} cap="A · Centered card, step 2" sub="Desktop, dark"><${A} dark step=${2}/><//>
+  <${Fig} cap="A · Light" sub="Desktop, light"><${A} step=${1}/><//>
+  <${Fig} cap="B · Split, step 1" sub="Desktop, light"><${B} step=${1}/><//>
+  <${Fig} cls="ipad" cap="A on iPad" sub="820 × 1180 portrait, light"><${A} step=${1}/><//>
+</div>`;
+flushSync(() => createRoot(document.getElementById('b')).render(h`<${Board}/>`));
+</script></body></html>
