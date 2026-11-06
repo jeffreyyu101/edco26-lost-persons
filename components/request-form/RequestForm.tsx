@@ -33,6 +33,11 @@ export interface RequestFormProps {
   busy: boolean;
   /** Banner above the form, e.g. the 409 review: "Someone else just updated this…". */
   notice?: ReactNode;
+  /**
+   * Field-level errors to show on the matching inputs, e.g. the server's rejection of a needs-attention
+   * item (OutboxItem.lastError.field + message) or a 422 on edit. Keys are RequestFormValues keys.
+   */
+  errors?: Partial<Record<keyof RequestFormValues, string>>;
   /** "Similar open request: LP-1009" (informational; links to the profile). */
   duplicateOf?: { id: string; caseNumber: number } | null;
   /** "Send request", "Save offline", "Save", "Resend". */
@@ -43,19 +48,29 @@ export interface RequestFormProps {
 }
 
 export function RequestForm(props: RequestFormProps) {
-  const { values, onChange } = props;
-  const field = (key: keyof RequestFormValues, label: string) => (
-    <label style={{ display: 'grid', gap: 4 }}>
-      <Text size="2" color="gray">
-        {label}
-      </Text>
-      <input
-        value={values[key]}
-        onChange={(e) => onChange({ ...values, [key]: e.currentTarget.value })}
-        style={{ fontSize: 16, minHeight: 44 }}
-      />
-    </label>
-  );
+  const { values, onChange, errors } = props;
+  const field = (key: keyof RequestFormValues, label: string) => {
+    const error = errors?.[key];
+    return (
+      <label style={{ display: 'grid', gap: 4 }}>
+        <Text size="2" color="gray">
+          {label}
+        </Text>
+        <input
+          value={values[key]}
+          onChange={(e) => onChange({ ...values, [key]: e.currentTarget.value })}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? `rf-error-${key}` : undefined}
+          style={{ fontSize: 16, minHeight: 44 }}
+        />
+        {error ? (
+          <Text id={`rf-error-${key}`} size="1" color="red">
+            {error}
+          </Text>
+        ) : null}
+      </label>
+    );
+  };
   return (
     <form
       onSubmit={(e) => {

@@ -8,8 +8,9 @@
 #      no last_seen column, the old location/status CHECKs incl. 'Found – Transported'), widens the
 #      location CHECK to an even older value ('FA 3'), adds a legacy nullable column and legacy rows,
 #      applies the rework migration twice, then smoke-tests the functions: legacy rows (old post, old
-#      status) stay answerable / editable / photo-able, new non-canonical values are still refused, and
-#      lp_stats byPost adds up to the open count. Then drops the scratch database.
+#      status) stay answerable / editable / photo-able, new non-canonical values are still refused,
+#      lp_stats byPost adds up to the open count, a repeat of a legacy status is {changed: false} (A36),
+#      and an other_location-only edit audits both halves of the post (A35). Then drops the scratch database.
 #
 #   bash scripts/verify-migration.sh
 set -euo pipefail
@@ -50,6 +51,20 @@ SQL
 )"
 [[ "$by_post" == "t" ]] || die "app database: lp_stats byPost does not add up to open"
 echo "  lp_stats byPost adds up to open: ok"
+# A36: repeating the legacy 'Bring friend to medical' on a row already in it is {changed: false} (rolled back).
+legacy_repeat="$(psql "$db_url" -v ON_ERROR_STOP=1 -q -At <<'SQL'
+begin;
+set local role service_role;
+select lp_set_status(id, row_version, 'Bring friend to medical', 'T · Medical', 'answer') ->> 'changed'
+  from patients where status = 'Bring friend to medical' order by case_number limit 1;
+rollback;
+SQL
+)"
+case "$legacy_repeat" in
+  false) echo "  legacy Bring friend repeat is changed=false: ok" ;;
+  "") echo "  legacy Bring friend repeat: skipped (no such row in the app database)" ;;
+  *) die "app database: repeating 'Bring friend to medical' returned '$legacy_repeat', expected false" ;;
+esac
 
 echo "2. Upgrade fixture (Jeffrey's original schema, commit 8d21e4f)"
 psql "$db_url" -q -c "drop database if exists lp_upgrade_fixture" -c "create database lp_upgrade_fixture" >/dev/null
@@ -115,11 +130,25 @@ select 'by_post=' || (select string_agg(b ->> 'postShort' || ':' || (b ->> 'coun
 select 'by_post_sums_to_open=' || ((s -> 'open' ->> 'waiting')::int + (s -> 'open' ->> 'inMedical')::int
           = (select sum((b ->> 'count')::int) from jsonb_array_elements(s -> 'byPost') b))::text
   from (select lp_stats() as s) x;
+-- A36: the idempotent repeat holds for a legacy status too ({changed: false}, no audit row), while a
+-- non-canonical target is still refused. (Each check reads the audit in a later statement.)
+select 'legacy_status_repeat=' || (lp_set_status(pg_temp.id('X.Y.'), pg_temp.v('X.Y.'), 'Found – Transported', 'T · Medical', 'answer') ->> 'changed');
+select 'legacy_status_repeat_audit=' || count(*) from audit_events where patient_id = pg_temp.id('X.Y.') and action_type = 'status_changed';
+select 'bogus_status_target=' || pg_temp.refused(format('select lp_set_status(%L, %s, %L, %L, %L)',
+          pg_temp.id('A.B.'), pg_temp.v('A.B.'), 'Found – Transported', 'T · Medical', 'answer'));
+-- A35: an edit of only other_location still records both halves of the post (last, as it renames Gate).
+select 'other_location_edit=' || (lp_update_fields(pg_temp.id('A.B.'), '{"other_location":"Gate 2"}', pg_temp.v('A.B.'), 'T · Medical') ->> 'changed');
+select 'post_pair_audit=' || (previous_value ->> 'reporting_location') || '/' || (previous_value ->> 'other_location')
+       || '>' || (new_value ->> 'reporting_location') || '/' || (new_value ->> 'other_location')
+  from audit_events where patient_id = pg_temp.id('A.B.') and action_type = 'patient_updated'
+  order by occurred_at desc limit 1;
 SQL
 )"
 echo "  smoke: $result"
 for want in "last_seen=true" "rows=3" "answer=Found – Awaiting Reunion" "legacy_post_answer=Found – Awaiting Reunion" \
             "legacy_post_edit=true" "legacy_post_photo=true" "legacy_status_edit=true" "legacy_status_photo=true" \
+            "legacy_status_repeat=false" "legacy_status_repeat_audit=0" "bogus_status_target=refused" \
+            "other_location_edit=true" "post_pair_audit=Other/Gate>Other/Gate 2" \
             "new_legacy_post=refused" "new_bogus_post=refused" "new_bogus_status=refused" "stats_total=3" \
             "by_post=FA 3:0,FA 4:0,Command:0,Base:0,FA 3:1,Gate:1" "by_post_sums_to_open=true"; do
   [[ "$result" == *"$want"* ]] || die "fixture smoke test failed: expected '$want'"

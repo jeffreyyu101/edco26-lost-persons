@@ -8,8 +8,9 @@ import type { CreateRequestBody, RequestPatch } from './validation';
 
 /**
  * An ISO 8601 timestamp from the database clock, e.g. "2026-11-06T23:10:04.123456+00:00" (microsecond
- * precision). Cursors (`serverTime`, `next.at`) must be sent back VERBATIM — never round-trip them through
- * `Date`, which drops the microseconds.
+ * precision). Cursors (`serverTime`, `next.at`) must be sent back VERBATIM and URL-ENCODED — never
+ * round-trip them through `Date`, which drops the microseconds, and never interpolate them raw into a URL:
+ * a raw '+' decodes as a space. Build sync URLs with syncPath() (lib/client/api-paths.ts).
  */
 export type IsoDateTime = string;
 
@@ -77,7 +78,12 @@ export interface PhotoInfo {
   hasThumb: boolean;
 }
 
-/** Values in an `edit` audit entry: camelCase field → value (only the changed fields). */
+/**
+ * Values in an `edit` audit entry: camelCase field → value (the changed fields). A35: a merged display
+ * field comes whole, so a change to either half of the name carries firstName AND lastName, and a change to
+ * either half of the post carries reportingLocation AND otherLocation (the unchanged half is equal in
+ * previous and next). Render with domain.displayChanges(), which merges them and drops unchanged rows.
+ */
 export type AuditFieldValues = Partial<Record<EditableField, string | number | null>>;
 
 interface AuditBase {
@@ -166,6 +172,10 @@ export interface PhotoResponse {
  * Keyset-paged on (updatedAt, id) (A7). The client loops while `hasMore`, passing `next.at` / `next.id`
  * as afterAt / afterId with the SAME `since`, and keeps the FIRST page's `serverTime` as its new cursor,
  * advancing it only after every page is applied.
+ *
+ * Pass cursors verbatim, URL-encoded: build the query with URLSearchParams, i.e. syncPath() in
+ * lib/client/api-paths.ts (a raw '+' in the offset decodes as a space). The server restores that one case
+ * (syncQuerySchema), but clients must not depend on it.
  */
 export interface SyncResponse {
   serverTime: IsoDateTime;
@@ -307,7 +317,16 @@ export interface OutboxItem {
   attempts: number;
   /** Epoch ms on this device (scheduling only). Backoff 5 s, 15 s, 60 s, then every 2 min. */
   nextAttemptAt: number | null;
-  lastError: { code: ApiErrorCode | 'network' | 'timeout'; message: string; status: number | null } | null;
+  lastError: {
+    code: ApiErrorCode | 'network' | 'timeout';
+    message: string;
+    status: number | null;
+    /**
+     * For a definitive `invalid` (422): the field the server rejected, copied from ApiError.error.field
+     * (camelCase, e.g. 'otherLocation', 'name'). The needs-attention editor passes it to RequestForm `errors`.
+     */
+    field?: string;
+  } | null;
   /** Who saved it on this phone. The server attributes it to whoever is signed in when it sends. */
   operator: { staffName: string; team: string; staff: string };
   /** Epoch ms on this device (display only: "Waiting to send" rows sort on it). */

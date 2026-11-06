@@ -19,17 +19,18 @@ import {
 } from '../domain';
 import { formatCaseNumber, minutesSince } from '../format';
 import { toCreateBody } from './form-values';
-import type {
-  AlertEvent,
-  AppStore,
-  CreateInput,
-  CreateResult,
-  DraftPhoto,
-  MutationResult,
-  RequestDraft,
-  StoreActions,
-  StoreState,
-  ToastItem,
+import {
+  createServerState,
+  type AlertEvent,
+  type AppStore,
+  type CreateInput,
+  type CreateResult,
+  type DraftPhoto,
+  type MutationResult,
+  type RequestDraft,
+  type StoreActions,
+  type StoreState,
+  type ToastItem,
 } from './store-contract';
 import { UNDO_MS } from './constants';
 import { readPrefs, writePref } from './prefs';
@@ -332,8 +333,13 @@ export function createStubStore(options: StubOptions): AppStore {
     },
   };
 
+  // Construction above starts nothing (server-render invariants, store-contract.ts); the stub has no
+  // side effects to start(). Hydration uses the shared server state.
+  const serverState = createServerState(options.eventTimezone);
+
   return {
     getState: () => state,
+    getServerState: () => serverState,
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);

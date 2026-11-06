@@ -5,7 +5,9 @@
 // and the stub and its rows must never be bundled into production (v2.2 A25).
 //
 // FROZEN after Phase 1a: Phase 1b (C) implements `AppStore` for real in lib/client/store.tsx without
-// changing these types; later phases may ADD members, never change existing ones.
+// changing these types; later phases may ADD members, never change existing ones. The real store must keep
+// the SERVER-RENDER INVARIANTS stated above `AppStore` (pure construction, side effects only in start(),
+// hydration from createServerState()).
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type {
   CreateRequestBody,
@@ -17,7 +19,7 @@ import type {
   Stats,
 } from '../api-types';
 import type { PhotoTiming, SettableStatus, StatusKind } from '../domain';
-import type { Prefs } from './prefs';
+import { DEFAULT_PREFS, type Prefs } from './prefs';
 import type { RequestFormValues } from './form-values';
 import {
   type AllFilter,
@@ -246,7 +248,9 @@ export interface StoreActions {
      * Replace a needs-attention job's payload (same mutationId; build it with toCreateBody(values,
      * mutationId)). The job's photos are kept unchanged: the outbox editor shows them read-only (to change
      * photos, discard the job and log the request again). Prefill the editor with
-     * formValuesFromCreateBody(item.payload).
+     * formValuesFromCreateBody(item.payload). When the create was rejected, the store has copied
+     * ApiError.error.field into item.lastError.field; the editor passes
+     * formErrorsFromField(item.lastError.field, item.lastError.message) as RequestForm `errors`.
      */
     update(mutationId: string, payload: CreateRequestBody): Promise<void>;
     /** Send a needs-attention job again after update(). */
@@ -285,10 +289,76 @@ export interface StoreActions {
   applyUpdate(): Promise<boolean>;
 }
 
+/**
+ * SERVER-RENDER INVARIANTS. StoreProvider is rendered on the server too: AppShell is a client component
+ * returned by a server page, and the store is built in a useState initializer that runs during server
+ * rendering. ShellBanners and ShellHosts put store state into the server HTML. That HTML is the shell the
+ * service worker caches, and the cached copy is hydrated on later reloads, offline included. So:
+ *
+ *   1. Construction is PURE. Building the store (createXStore(...)) starts nothing: no timers, no fetch,
+ *      no IndexedDB, no navigator / window / document listeners, no BroadcastChannel, no navigator.locks,
+ *      no service-worker calls, no legacy-queue import. On the server, every request builds a store and
+ *      throws it away; anything started there leaks (a poll timer per request).
+ *   2. Side effects begin in `start()`, which StoreProvider calls from useEffect (client only, after
+ *      hydration). start() returns the function that stops them all. React StrictMode in development
+ *      runs start → stop → start, so stop must undo everything and start must work again afterwards.
+ *   3. Hydration matches the server. React hydrates with the SERVER snapshot: `getServerState()` when the
+ *      store has it, otherwise `getState()`. That state must equal what the server rendered, whatever the
+ *      phone knows: connection 'live', empty outbox, no outboxPrompt, no toasts, no snackbar, and so on.
+ *      createServerState(eventTimezone) builds exactly that. React re-renders with getState() right
+ *      after hydration, so an offline reload shows the offline banner one frame later instead of throwing
+ *      away the whole Suspense boundary on a hydration mismatch.
+ *      The real store SHOULD implement getServerState(), because its getState() may legitimately differ
+ *      on the client before start(). state.prefs, for example, starts as readPrefs() (A29), which reads
+ *      localStorage on the client and returns DEFAULT_PREFS on the server.
+ */
 export interface AppStore {
   getState(): StoreState;
   subscribe(listener: () => void): () => void;
   actions: StoreActions;
+  /**
+   * Begin every side effect: sync polling, IndexedDB hydration of the cache / outbox / phone ids,
+   * navigator.onLine and online/offline/focus/visibility/pageshow listeners, the outbox worker,
+   * BroadcastChannel('lp'), the legacy-queue import and service-worker wiring. Called once per mount by
+   * StoreProvider (client only). Returns the stop function. Optional: a store without side effects (the
+   * stub) omits it.
+   */
+  start?(): () => void;
+  /**
+   * The state the server renders, for hydration: createServerState(eventTimezone). It must return the
+   * SAME object on every call (useSyncExternalStore requires a cached snapshot) and must not depend on
+   * anything only the browser knows (localStorage, IndexedDB, navigator, the clock).
+   */
+  getServerState?(): StoreState;
+}
+
+/**
+ * The store state as rendered on the server and during hydration (see the invariants above): nothing
+ * loaded, nothing queued, connection 'live', session 'unknown', default prefs. Build it once per store and
+ * return that same object from getServerState().
+ */
+export function createServerState(eventTimezone: string): StoreState {
+  return {
+    hydrated: false,
+    hasData: false,
+    confirmed: new Map(),
+    pending: new Map(),
+    outbox: [],
+    outboxPrompt: null,
+    connection: 'live',
+    syncing: false,
+    lastSyncAt: null,
+    session: { status: 'unknown', staffName: null, team: null, staff: null, expiresAt: null },
+    myIds: new Set(),
+    prefs: { ...DEFAULT_PREFS },
+    toasts: [],
+    snackbar: null,
+    updateReady: false,
+    offlineReady: false,
+    generation: 0,
+    eventTimezone,
+    durableStorage: true,
+  };
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -310,18 +380,24 @@ export function useAppStore(): AppStore {
  */
 export function useStoreSelector<T>(selector: (state: StoreState) => T, isEqual: (a: T, b: T) => boolean = Object.is): T {
   const store = useAppStore();
-  const getSnapshot = useMemo(() => memoizedSnapshot(store, selector, isEqual), [store, selector, isEqual]);
-  return useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot);
+  const getSnapshot = useMemo(() => memoizedSnapshot(() => store.getState(), selector, isEqual), [store, selector, isEqual]);
+  // Server render and hydration read getServerState() when the store has it (server-render invariants
+  // above AppStore); React then re-renders with getSnapshot.
+  const getServerSnapshot = useMemo(() => {
+    const readServer = store.getServerState?.bind(store);
+    return readServer ? memoizedSnapshot(readServer, selector, isEqual) : getSnapshot;
+  }, [store, selector, isEqual, getSnapshot]);
+  return useSyncExternalStore(store.subscribe, getSnapshot, getServerSnapshot);
 }
 
 /**
  * A snapshot function with its own memo: reused while the state is unchanged, and the previous value is
  * kept when a recomputed one is equal, so useSyncExternalStore always sees a stable snapshot.
  */
-function memoizedSnapshot<T>(store: AppStore, selector: (state: StoreState) => T, isEqual: (a: T, b: T) => boolean): () => T {
+function memoizedSnapshot<T>(read: () => StoreState, selector: (state: StoreState) => T, isEqual: (a: T, b: T) => boolean): () => T {
   let memo: { state: StoreState; value: T } | null = null;
   return () => {
-    const state = store.getState();
+    const state = read();
     if (memo && memo.state === state) return memo.value;
     const value = selector(state);
     memo = { state, value: memo && isEqual(memo.value, value) ? memo.value : value };

@@ -1,6 +1,6 @@
 # Build spec v2: "Is my friend in medical?" (EDC Orlando 2026)
 
-This is the single contract for every agent building the app. Version 2 adds the findings from the GPT-6 Astra (Codex) and Claude Fable 5.1 plan reviews. §13 (v2.1) and §14 (v2.2, the Phase 1a review) override anything above them.
+This is the single contract for every agent building the app. Version 2 adds the findings from the GPT-6 Astra (Codex) and Claude Fable 5.1 plan reviews. §13 (v2.1), §14 (v2.2, the Phase 1a review) and §15 (v2.3, the Phase 1a verification) override anything above them.
 
 - **When documents disagree:**
   - This file wins on engineering questions.
@@ -743,6 +743,13 @@ Remembered name and team skip to step 2. `?next=` is honoured, and only same-ori
 | Reopen | Added to the ⋯ menu for closed requests (the transitions already allowed it) |
 | Discharged | Confirmed by Jeffrey. Only from the ⋯ menu while In medical. |
 
+**Exceptions versus this spec's own earlier text** are recorded as amendments in §15:
+
+| Earlier text said | Now |
+|---|---|
+| §5 `lp_update_fields`: the audit holds "only the changed keys" | A35: a merged display field (name, post) is recorded whole, the unchanged half included |
+| §4 idempotent repeat (implicitly only for settable statuses) | A36: holds for every current status, legacy included; the whitelist applies only to real changes |
+
 ## 13. v2.1 amendments (OVERRIDE anything above; from the Codex + Fable re-reviews)
 
 **A1 · DTOs (frozen in `lib/api-types.ts`).**
@@ -984,3 +991,39 @@ Unknown params are ignored.
 - **Legacy queue items** (`edc_pending_queue`) are converted at import by `createBodyFromLegacyQueueItem`, which joins `first_name` and `last_name` into `name` and keeps `client_mutation_id`.
 
 **A34 · SESSION_SECRET.** There is one reader, `sessionSecretFromEnv()` in `lib/server/session-token.ts`, which trims the value. Both the proxy and `serverEnv()` use it, so a value pasted with a trailing newline can't cause a sign-in loop.
+
+## 15. v2.3 amendments (OVERRIDE anything above; from the Phase 1a verification)
+
+**A35 · Edit audit pairs** (a recorded exception to §5 `lp_update_fields` "only the changed keys").
+
+- **Rule.** `previous_value` / `new_value` hold the changed keys, except that a merged display field is recorded **whole**:
+  - a change to `first_name` or `last_name` records both
+  - a change to `reporting_location` or `other_location` records both
+- The unchanged half has the same value on both sides. Example: changing only the last name records `{first_name: "Dana", last_name: "Kim"}` → `{first_name: "Dana", last_name: "Lee"}`.
+- **Why.** Each audit row can show "Name" and "Post" on its own. An edit of only `other_location` would otherwise carry no post to show (Other/'Gate' → Other/'Gate 2' has no `reporting_location` change). `domain.displayChanges()` merges the pairs and drops rows whose merged value didn't change.
+- `AuditFieldValues` (`lib/api-types.ts`) documents this. The server's audit mapper passes the pairs through.
+
+**A36 · Idempotent repeat covers legacy statuses** (refines §4 and `lp_set_status`).
+
+- **Order.** `lp_set_status` locks the row, then returns `{changed: false, row}` when `status = p_status`, and only then checks `p_status` against the §4 values. A row in `Bring friend to medical` asked for `Bring friend to medical` returns `changed: false`, not `P0422 invalid_field`.
+- **New writes stay canonical.** No status is written on that path, and any real change still has to name a §4 value. The API's `setStatusSchema` still accepts only settable statuses.
+- **Covered** by `scripts/verify-migration.sh`, which checks a legacy-status repeat and a bogus target.
+
+**A37 · Sync cursors in URLs** (refines §6 `GET /api/sync` and A7).
+
+- **The problem.** Every cursor the database returns (`serverTime`, `next.at`) carries a `+` offset, because sessions run in UTC (`2026-11-06T23:10:04.123456+00:00`). Interpolated raw into a query string, the `+` decodes as a space, and every delta poll would 400. A 400 never moves the connection to `error`, so the list would silently stop updating.
+- **Client.** Pass cursors verbatim and URL-encoded. Build every sync URL with `syncPath()` (`lib/client/api-paths.ts`), which uses `URLSearchParams`.
+- **Server.** `syncQuerySchema` reads `since` and `afterAt` through `syncCursorSchema`. That schema restores a trailing ` hh:mm` offset to `+hh:mm` before the ISO check, as a tolerance only.
+
+**A38 · Server render of the store** (refines §7 Store; frozen in `lib/client/store-contract.ts`).
+
+- **Why.** `StoreProvider` renders on the server too: `AppShell` is a client component returned by a server page. `ShellBanners` and `ShellHosts` put store state into the HTML the service worker caches.
+- **Pure construction.** Building the store starts nothing: no timers, fetch, IndexedDB, `navigator`, window listeners, BroadcastChannel or locks.
+- **`AppStore.start?(): () => void`.** All side effects begin here. `StoreProvider` calls it from `useEffect`, and the returned function stops them. Stop and start again must work, because StrictMode runs effects twice.
+- **`AppStore.getServerState?(): StoreState`.** It returns `createServerState(eventTimezone)`, the same object every time: connection `live`, empty outbox, session `unknown` and `DEFAULT_PREFS`. `useStoreSelector` passes it to `useSyncExternalStore` as the server snapshot. An offline reload of the cached shell therefore hydrates cleanly, then shows the offline banner. The real store implements it, because `state.prefs` starts as `readPrefs()` (A29), which differs between the server and the phone.
+
+**A39 · Field errors in the needs-attention editor** (refines A33).
+
+- `OutboxItem.lastError.field?` holds `ApiError.error.field` (camelCase), copied by the store on a definitive 4xx.
+- `RequestFormProps.errors?` is a `Partial<Record<keyof RequestFormValues, string>>` shown on the matching inputs.
+- `formErrorsFromField(field, message)` (`lib/client/form-values.ts`) builds it. `firstName` and `lastName` map to `name`, and fields the form doesn't show give `{}`, so the view falls back to a `notice`.

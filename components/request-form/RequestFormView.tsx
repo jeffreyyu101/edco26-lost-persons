@@ -3,7 +3,9 @@
 //   ?new=1                       → mode 'new'
 //   ?r=<id>&edit=person|friend|all → mode 'edit' (prefilled, sends only changed keys with the base version)
 //   ?outbox=<mutationId>         → mode 'outbox' (fix and resend a needs-attention item, same mutationId):
-//                                  prefill formValuesFromCreateBody(item.payload); photos read-only; save with
+//                                  prefill formValuesFromCreateBody(item.payload); photos read-only; point at
+//                                  the rejected field with errors={formErrorsFromField(item.lastError?.field,
+//                                  item.lastError.message)}; save with
 //                                  actions.outbox.update(id, toCreateBody(values, id)) then outbox.resend(id)
 // PLACEHOLDER (Phase 1a): the exported name and props are FINAL; F (Phase 2) builds it with the draft.
 import { Text } from '@radix-ui/themes';

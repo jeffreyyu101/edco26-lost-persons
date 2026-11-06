@@ -712,7 +712,8 @@ end
 $fn$;
 
 -- lp_set_status: the only way a status changes (except cancel).
---   Locks the row. Already at p_status → {changed: false, row}, no audit (two liaisons, same answer).
+--   Locks the row. Already at p_status → {changed: false, row}, no audit (two liaisons, same answer),
+--   for any current status including legacy ones; only then is p_status checked against the §4 values.
 --   Version mismatch → P0409 (HINT = current status). Illegal transition → P0422.
 --   Cancelled → Added is creator-only → P0403.
 --   found_at: set on the first entry into Found – Awaiting Reunion; never overwritten or cleared.
@@ -740,8 +741,7 @@ begin
   if p_expected_version is null then
     raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:expected_version';
   end if;
-  if p_status is null or p_status not in ('Added', 'Checked – Not Found', 'Found – Awaiting Reunion',
-                                          'Reunited – Closed', 'Found – Discharged', 'Cancelled') then
+  if p_status is null then
     raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:status';
   end if;
   if p_kind is null or p_kind not in ('answer', 'change', 'reunite', 'discharge', 'undo', 'reopen') then
@@ -753,8 +753,17 @@ begin
     raise exception using errcode = 'P0002', message = 'not_found';
   end if;
 
+  -- Idempotent repeat (spec §4), checked BEFORE the target whitelist so it holds for every status the
+  -- row can be in, legacy ones included ('Bring friend to medical' → 'Bring friend to medical' is
+  -- {changed: false}, not invalid_field). Nothing is written, so no non-canonical value can get in.
   if v_row.status = p_status then
     return pg_catalog.jsonb_build_object('changed', false, 'row', public.lp_row(v_row));
+  end if;
+
+  -- New writes stay canonical (A30): only the §4 statuses are valid targets.
+  if p_status not in ('Added', 'Checked – Not Found', 'Found – Awaiting Reunion',
+                      'Reunited – Closed', 'Found – Discharged', 'Cancelled') then
+    raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:status';
   end if;
 
   if v_row.row_version <> p_expected_version then
@@ -822,7 +831,10 @@ $fn$;
 --   both first_name and last_name. Omitted = unchanged, null = clear.
 --   Version mismatch → P0409. Unchanged keys are skipped; nothing changed → {changed: false, row}, no audit.
 --   Field rules apply to the keys sent; the post rule applies to the merged row (Other needs
---   other_location; any other post clears it). Audit patient_updated with only the changed keys.
+--   other_location; any other post clears it). Audit patient_updated with the changed keys, except that
+--   a merged display field is recorded whole (spec A35): a change to either half of the name records
+--   first_name AND last_name, and a change to either half of the post records reporting_location AND
+--   other_location, the unchanged half included, so each audit row can show "Name" / "Post" on its own.
 create function public.lp_update_fields(p_id uuid, p_patch jsonb, p_expected_version bigint, p_staff text)
 returns jsonb
 language plpgsql
@@ -889,8 +901,10 @@ begin
     return pg_catalog.jsonb_build_object('changed', false, 'row', public.lp_row(v_row));
   end if;
 
-  -- Merged display fields are audited whole: a name change records both first_name and last_name,
-  -- a post change records both reporting_location and other_location (the trail shows "Name" / "Post").
+  -- Merged display fields are audited whole (spec A35, a recorded exception to "only the changed keys"):
+  -- a name change records both first_name and last_name, a post change records both reporting_location
+  -- and other_location, so the trail can show "Name" / "Post" from this row alone (an other_location-only
+  -- edit would otherwise have no post to show). The unchanged half is the same in previous and new.
   if v_changes ? 'first_name' or v_changes ? 'last_name' then
     v_changes := pg_catalog.jsonb_build_object(
       'first_name', coalesce(v_changes -> 'first_name', v_current -> 'first_name'),

@@ -190,14 +190,27 @@ export type SignInInput = z.output<typeof signInSchema>;
 export const isoDateTimeSchema = z.iso.datetime({ offset: true });
 
 /**
+ * A sync cursor read from a query string (`since`, `afterAt`). Every cursor the database returns carries a
+ * '+' offset ("…04.123456+00:00"). A client that interpolates it into the URL without encoding sends a raw
+ * '+', which URLSearchParams decodes as a space ("…04.123456 00:00"). That form is restored to '+' here, so
+ * such a poll still works instead of failing with 400 on every delta. Clients should still encode cursors
+ * (lib/client/api-paths.ts syncPath()). The result must then be a valid isoDateTimeSchema value.
+ */
+export const syncCursorSchema = z
+  .string()
+  .transform((s) => s.replace(/ (\d{2}:?\d{2})$/, '+$1'))
+  .pipe(isoDateTimeSchema);
+
+/**
  * GET /api/sync query. Either `ids` (≤200, comma-separated) alone, or `since` (absent = full fetch) with
- * optional `reconcile`, and `afterAt` + `afterId` together for the next page.
+ * optional `reconcile`, and `afterAt` + `afterId` together for the next page. `since` and `afterAt` go
+ * through syncCursorSchema (an unencoded '+' that arrived as a space is restored).
  */
 export const syncQuerySchema = z
   .strictObject({
-    since: isoDateTimeSchema.optional(),
+    since: syncCursorSchema.optional(),
     reconcile: z.enum(['0', '1']).optional(),
-    afterAt: isoDateTimeSchema.optional(),
+    afterAt: syncCursorSchema.optional(),
     afterId: uuidSchema.optional(),
     limit: z.coerce.number().int().min(1).max(1000).optional(),
     ids: z

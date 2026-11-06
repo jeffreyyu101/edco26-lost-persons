@@ -140,6 +140,23 @@ export function toPatch(base: RequestFormValues, values: RequestFormValues): Req
   return Object.keys(patch).length > 0 ? patch : null;
 }
 
+const FORM_KEYS: ReadonlySet<string> = new Set(Object.keys(EMPTY_FORM_VALUES));
+
+/**
+ * Field-level errors for RequestForm `errors` from a server rejection: an ApiError's `field` (camelCase)
+ * or OutboxItem.lastError.field. firstName / lastName point at the single Name input. A field the form
+ * doesn't show (expectedVersion, clientMutationId, …) or no field at all gives {} (show `message` as a
+ * notice instead).
+ */
+export function formErrorsFromField(
+  field: string | null | undefined,
+  message: string,
+): Partial<Record<keyof RequestFormValues, string>> {
+  if (!field) return {};
+  const key = field === 'firstName' || field === 'lastName' ? 'name' : field;
+  return FORM_KEYS.has(key) ? { [key as keyof RequestFormValues]: message } : {};
+}
+
 /** Jeffrey's name split, as found on his offline queue items. */
 interface LegacyNameFields {
   first_name?: unknown;

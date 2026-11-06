@@ -4,6 +4,7 @@ import {
   EMPTY_FORM_VALUES,
   canSend,
   createBodyFromLegacyQueueItem,
+  formErrorsFromField,
   formValuesFromCreateBody,
   formValuesFromRequest,
   hasAnyDetail,
@@ -235,6 +236,22 @@ describe('form values', () => {
     // A non-Other post never keeps an other location; an invalid post reads as unchosen.
     expect(formValuesFromCreateBody({ clientMutationId: CMID, reportingLocation: 'Base', otherLocation: 'x' }).otherLocation).toBe('');
     expect(formValuesFromCreateBody({ clientMutationId: CMID, reportingLocation: 'FA 3' as 'Base' }).reportingLocation).toBe('');
+  });
+
+  it('maps a server-rejected field onto the form (needs-attention editor, A39)', () => {
+    expect(formErrorsFromField('otherLocation', 'Say where (Other post)')).toEqual({ otherLocation: 'Say where (Other post)' });
+    expect(formErrorsFromField('contactPhone', 'Too long')).toEqual({ contactPhone: 'Too long' });
+    expect(formErrorsFromField('lastName', 'Too long')).toEqual({ name: 'Too long' });
+    expect(formErrorsFromField('expectedVersion', 'Bad')).toEqual({});
+    expect(formErrorsFromField('clientMutationId', 'Bad')).toEqual({});
+    expect(formErrorsFromField(undefined, 'Bad')).toEqual({});
+    expect(formErrorsFromField('', 'Bad')).toEqual({});
+    // Only the form's own keys: nothing inherited from Object.prototype.
+    expect(formErrorsFromField('toString', 'Bad')).toEqual({});
+    const item: Pick<OutboxItem, 'lastError'> = {
+      lastError: { code: 'invalid', message: 'Say where (Other post)', status: 422, field: 'otherLocation' },
+    };
+    expect(formErrorsFromField(item.lastError?.field, item.lastError?.message ?? '')).toEqual({ otherLocation: 'Say where (Other post)' });
   });
 
   it('joins a legacy first_name / last_name into name', () => {
