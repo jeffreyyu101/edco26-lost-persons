@@ -6,6 +6,7 @@
 -- 21 requests that match the mockups (design/screens/*): 4 Waiting for check, 3 In medical (one with the
 -- legacy status 'Bring friend to medical'), 2 Not in medical, 10 Reunited, 1 Discharged, 1 Cancelled.
 -- Times are relative to now() so wait badges look like the mockups whenever the seed is loaded.
+-- Age and gender are free text (Jeffrey, 2026-11-06): LP-1010 'early 20s', LP-1008 'mid-20s', LP-1009 'Non-binary'.
 -- LP-0996 and LP-0997 (and LP-1005's events) use Jeffrey's legacy audit formats: full-row patient_created,
 -- medical_search, medical_search_found, check_completed, full-row status_changed / patient_updated, and a
 -- photo with photo_timing 'unsure' and no thumbnail.
@@ -54,97 +55,97 @@ insert into public.patients (
   updated_by, created_at, updated_at, found_at, reunion_started_at, closed_at, row_version
 ) values
   -- Waiting for check
-  (pg_temp.pid(1013), gen_random_uuid(), 1013, 'T.R.', null, 24, 'Male', null, 'Blond buzz cut', null, null,
+  (pg_temp.pid(1013), gen_random_uuid(), 1013, 'T.R.', null, '24', 'Male', null, 'Blond buzz cut', null, null,
    'Near the circuitGROUNDS entrance', 'Red hoodie, blond buzz cut, green wristband', null, 'FA 4 – Oasis', null,
    'Chris P.', '(407) 555-0110', 'Friend', null, 'Added', pg_temp.staff('lee'), pg_temp.staff('lee'),
    pg_temp.ago(1), pg_temp.ago(1), null, null, null, 0),
-  (pg_temp.pid(1012), gen_random_uuid(), 1012, 'Kayla', 'Martinez', 19, 'Female', null, 'Blond, two braids', null,
+  (pg_temp.pid(1012), gen_random_uuid(), 1012, 'Kayla', 'Martinez', '19', 'Female', null, 'Blond, two braids', null,
    'Pink cowboy hat, silver fringe top, braids. Last seen Kinetic Field rail.', 'kineticFIELD rail, ~10:30',
    'Pink cowboy hat, silver fringe top, white shorts', null, 'FA 3 – Kinetic', null,
    'Maya R.', '(407) 555-0142', 'Best friend', null, 'Added', pg_temp.staff('dana'), pg_temp.staff('dana'),
    pg_temp.ago(12), pg_temp.ago(9), null, null, null, 3),
-  (pg_temp.pid(1011), gen_random_uuid(), 1011, 'D.F.', null, 28, 'Male', 'Tall, slim', null, null, null,
+  (pg_temp.pid(1011), gen_random_uuid(), 1011, 'D.F.', null, '28', 'Male', 'Tall, slim', null, null, null,
    'Ferris wheel line', 'Black cap, glow necklace, cargo shorts', null, 'Command', null,
    'Priya S.', '407-555-0123', 'Sister', null, 'Added', pg_temp.staff('lee'), pg_temp.staff('lee'),
    pg_temp.ago(16), pg_temp.ago(16), null, null, null, 0),
-  (pg_temp.pid(1010), gen_random_uuid(), 1010, 'B.W.', null, 23, 'Female', null, null, null, null,
+  (pg_temp.pid(1010), gen_random_uuid(), 1010, 'B.W.', null, 'early 20s', 'Female', null, null, null, null,
    'stereoBLOOM, left side', 'Neon green bikini top, white platform boots, red bandana', null, 'FA 4 – Oasis', null,
    'Tasha W.', '(407) 555-0177', 'Cousin', 'Has her phone but it is dead', 'Added', pg_temp.staff('lee'),
    pg_temp.staff('lee'), pg_temp.ago(24), pg_temp.ago(24), null, null, null, 0),
 
   -- Not in medical
-  (pg_temp.pid(1009), gen_random_uuid(), 1009, 'A.N.', null, 21, 'Female', null, null, null, null,
+  (pg_temp.pid(1009), gen_random_uuid(), 1009, 'A.N.', null, '21', 'Non-binary', null, null, null, null,
    'neonGARDEN', 'Light-up butterfly wings, black shorts', null, 'FA 3 – Kinetic', null,
    'Jo N.', '(407) 555-0164', 'Partner', null, 'Checked – Not Found', pg_temp.staff('dana'), pg_temp.staff('rae'),
    pg_temp.ago(38), pg_temp.ago(20), null, null, null, 1),
-  (pg_temp.pid(1008), gen_random_uuid(), 1008, 'N.G.', null, 27, 'Male', null, 'Black, curly', null, null,
+  (pg_temp.pid(1008), gen_random_uuid(), 1008, 'N.G.', null, 'mid-20s', 'Male', null, 'Black, curly', null, null,
    'Main stage food court', 'White tee, camo pants', null, 'FA 4 – Oasis', null,
    null, null, null, null, 'Checked – Not Found', pg_temp.staff('lee'), pg_temp.staff('sam'),
    pg_temp.ago(45), pg_temp.ago(30), null, null, null, 1),
 
   -- In medical · friend coming
-  (pg_temp.pid(1007), gen_random_uuid(), 1007, 'Jordan', 'Diaz', 22, 'Male', null, null, 'Sleeve tattoo, left arm', null,
+  (pg_temp.pid(1007), gen_random_uuid(), 1007, 'Jordan', 'Diaz', '22', 'Male', null, null, 'Sleeve tattoo, left arm', null,
    'Taken to medical', 'Kandi to elbows, white tank, sleeve tattoo', null, 'FA 4 – Oasis', null,
    'Ty B.', '(407) 555-0131', 'Friend', null, 'Found – Awaiting Reunion', pg_temp.staff('lee'), pg_temp.staff('rae'),
    pg_temp.ago(32), pg_temp.ago(2), pg_temp.ago(2), pg_temp.ago(2), null, 1),
-  (pg_temp.pid(1005), 'c0ffee00-0000-4000-8000-000000001005', 1005, 'M.P.', null, 26, 'Male', null, null, 'Round glasses', null,
+  (pg_temp.pid(1005), 'c0ffee00-0000-4000-8000-000000001005', 1005, 'M.P.', null, '26', 'Male', null, null, 'Round glasses', null,
    'Bass pod, kineticFIELD', 'Gold sequin jacket, round glasses', null, 'FA 3 – Kinetic', null,
    'Ana P.', '(407) 555-0105', 'Girlfriend', null, 'Bring friend to medical', pg_temp.staff('alex'), pg_temp.staff('alex'),
    pg_temp.ago(80), pg_temp.ago(60), pg_temp.ago(60), null, null, 3),
-  (pg_temp.pid(1004), gen_random_uuid(), 1004, 'S.L.', null, 20, 'Female', null, null, null, null,
+  (pg_temp.pid(1004), gen_random_uuid(), 1004, 'S.L.', null, '20', 'Female', null, null, null, null,
    'kineticFIELD, near the bridge', 'Green bucket hat, mesh top', null, 'FA 3 – Kinetic', null,
    'Jess T.', '(407) 555-0187', 'Friend', null, 'Found – Awaiting Reunion', pg_temp.staff('dana'), pg_temp.staff('rae'),
    pg_temp.ago(51), pg_temp.ago(3), pg_temp.ago(3), pg_temp.ago(3), null, 2),
 
   -- Closed today
-  (pg_temp.pid(1006), gen_random_uuid(), 1006, 'L.W.', null, 25, 'Female', null, null, null, null,
+  (pg_temp.pid(1006), gen_random_uuid(), 1006, 'L.W.', null, '25', 'Female', null, null, null, null,
    'Command tent', 'Blue sequin dress', null, 'Command', null,
    'Rob W.', '(407) 555-0106', 'Brother', null, 'Reunited – Closed', pg_temp.staff('lee'), pg_temp.staff('sam'),
    pg_temp.ago(70), pg_temp.ago(40), pg_temp.ago(55), pg_temp.ago(55), pg_temp.ago(40), 2),
-  (pg_temp.pid(1003), gen_random_uuid(), 1003, 'C.H.', null, 25, 'Male', null, null, null, null,
+  (pg_temp.pid(1003), gen_random_uuid(), 1003, 'C.H.', null, '25', 'Male', null, null, null, null,
    'circuitGROUNDS', 'Orange jersey, silver chain', null, 'FA 4 – Oasis', null,
    'Lia H.', '(407) 555-0103', 'Friend', null, 'Reunited – Closed', pg_temp.staff('lee'), pg_temp.staff('sam'),
    pg_temp.ago(65), pg_temp.ago(34), pg_temp.ago(50), pg_temp.ago(50), pg_temp.ago(34), 2),
-  (pg_temp.pid(1002), gen_random_uuid(), 1002, 'Dani', 'V.', 20, 'Female', null, null, null, null,
+  (pg_temp.pid(1002), gen_random_uuid(), 1002, 'Dani', 'V.', '20', 'Female', null, null, null, null,
    'neonGARDEN', 'Holographic skirt, white sneakers', null, 'FA 3 – Kinetic', null,
    'Marco V.', '(407) 555-0102', 'Brother', null, 'Found – Discharged', pg_temp.staff('dana'), pg_temp.staff('sam'),
    pg_temp.ago(82), pg_temp.ago(45), pg_temp.ago(70), pg_temp.ago(70), pg_temp.ago(45), 2),
-  (pg_temp.pid(1001), gen_random_uuid(), 1001, 'R.K.', null, 31, 'Male', null, null, null, null,
+  (pg_temp.pid(1001), gen_random_uuid(), 1001, 'R.K.', null, '31', 'Male', null, null, null, null,
    null, 'Grey hoodie', null, 'Base', null,
    null, null, null, null, 'Cancelled', pg_temp.staff('lee'), pg_temp.staff('lee'),
    pg_temp.ago(93), pg_temp.ago(90), null, null, pg_temp.ago(90), 1),
 
   -- Closed yesterday (weekday-prefixed times in the list)
-  (pg_temp.pid(1000), gen_random_uuid(), 1000, 'Z.A.', null, 22, 'Female', null, null, null, null,
+  (pg_temp.pid(1000), gen_random_uuid(), 1000, 'Z.A.', null, '22', 'Female', null, null, null, null,
    'kineticFIELD', 'White fringe jacket', null, 'FA 3 – Kinetic', null,
    'Omar A.', '(407) 555-0100', 'Friend', null, 'Reunited – Closed', pg_temp.staff('dana'), pg_temp.staff('sam'),
    pg_temp.ago(1500), pg_temp.ago(1460), pg_temp.ago(1480), pg_temp.ago(1480), pg_temp.ago(1460), 2),
-  (pg_temp.pid(999), gen_random_uuid(), 999, 'O.B.', null, 24, 'Male', null, null, null, null,
+  (pg_temp.pid(999), gen_random_uuid(), 999, 'O.B.', null, '24', 'Male', null, null, null, null,
    null, 'Black mesh shirt', null, 'FA 4 – Oasis', null,
    null, null, null, null, 'Reunited – Closed', pg_temp.staff('lee'), pg_temp.staff('rae'),
    pg_temp.ago(1530), pg_temp.ago(1490), pg_temp.ago(1510), pg_temp.ago(1510), pg_temp.ago(1490), 2),
-  (pg_temp.pid(998), gen_random_uuid(), 998, 'J.H.', null, 27, 'Female', null, 'Pink', null,
+  (pg_temp.pid(998), gen_random_uuid(), 998, 'J.H.', null, '27', 'Female', null, 'Pink', null,
    'Black tank, pink hair, glitter on face', 'Info booth', 'Black tank, pink hair, glitter on face', null,
    'FA 4 – Oasis', null, 'Kim H.', '(407) 555-0198', 'Sister', null, 'Reunited – Closed', pg_temp.staff('lee'),
    pg_temp.staff('rae'), pg_temp.ago(1560), pg_temp.ago(1500), pg_temp.ago(1530), pg_temp.ago(1530),
    pg_temp.ago(1500), 2),
-  (pg_temp.pid(997), 'c0ffee00-0000-4000-8000-000000000997', 997, 'Q.T.', '', 30, 'Male', null, null, null, null,
+  (pg_temp.pid(997), 'c0ffee00-0000-4000-8000-000000000997', 997, 'Q.T.', '', '30', 'Male', null, null, null, null,
    'Near the info booth by the main gate', 'Tie-dye shirt', 'Friend says he wanders off', 'Other', 'Info booth',
    'Vic T.', '4075550197', 'Friend', null, 'Reunited – Closed', pg_temp.staff('alex'), pg_temp.staff('alex'),
    pg_temp.ago(1620), pg_temp.ago(1540), pg_temp.ago(1570), pg_temp.ago(1570), pg_temp.ago(1540), 4),
-  (pg_temp.pid(996), 'c0ffee00-0000-4000-8000-000000000996', 996, 'G.M.', '', 19, 'Female', null, null, null, null,
+  (pg_temp.pid(996), 'c0ffee00-0000-4000-8000-000000000996', 996, 'G.M.', '', '19', 'Female', null, null, null, null,
    null, 'Purple wig', null, 'FA 4 – Oasis', null,
    'Hal M.', '(407) 555-0196', 'Father', null, 'Reunited – Closed', pg_temp.staff('alex'), pg_temp.staff('alex'),
    pg_temp.ago(1650), pg_temp.ago(1580), pg_temp.ago(1610), pg_temp.ago(1610), pg_temp.ago(1580), 3),
-  (pg_temp.pid(995), gen_random_uuid(), 995, 'Sky', 'N.', 23, 'Female', null, null, null, null,
+  (pg_temp.pid(995), gen_random_uuid(), 995, 'Sky', 'N.', '23', 'Female', null, null, null, null,
    null, 'Silver bodysuit', null, 'Command', null,
    null, null, null, null, 'Reunited – Closed', pg_temp.staff('lee'), pg_temp.staff('sam'),
    pg_temp.ago(1680), pg_temp.ago(1620), pg_temp.ago(1650), pg_temp.ago(1650), pg_temp.ago(1620), 2),
-  (pg_temp.pid(994), gen_random_uuid(), 994, 'Ben', 'A.', 26, 'Male', null, null, null, null,
+  (pg_temp.pid(994), gen_random_uuid(), 994, 'Ben', 'A.', '26', 'Male', null, null, null, null,
    null, 'Yellow raincoat', null, 'FA 3 – Kinetic', null,
    null, null, null, null, 'Reunited – Closed', pg_temp.staff('dana'), pg_temp.staff('sam'),
    pg_temp.ago(1700), pg_temp.ago(1640), pg_temp.ago(1670), pg_temp.ago(1670), pg_temp.ago(1640), 2),
-  (pg_temp.pid(993), gen_random_uuid(), 993, 'Mo', 'E.', 21, 'Male', null, null, null, null,
+  (pg_temp.pid(993), gen_random_uuid(), 993, 'Mo', 'E.', '21', 'Male', null, null, null, null,
    null, 'Green visor', null, 'Base', null,
    null, null, null, null, 'Reunited – Closed', pg_temp.staff('lee'), pg_temp.staff('rae'),
    pg_temp.ago(1720), pg_temp.ago(1660), pg_temp.ago(1690), pg_temp.ago(1690), pg_temp.ago(1660), 2);
@@ -280,10 +281,16 @@ select pg_temp.status(993, pg_temp.staff('rae'), pg_temp.ago(1660), 'Found – A
 --   medical_search: new_value = {outcome: 'not_found', notes}; medical_search_found: new_value = {}
 --   photo_uploaded: new_value = {photo_id, photo_timing}
 -- ---------------------------------------------------------------------------------------------------
+-- Jeffrey's app stored age as a number (smallint), so his blobs carry 24, not "24".
+create function pg_temp.legacy_age(p_age text) returns jsonb
+language sql immutable as $$
+  select case when p_age ~ '^[0-9]+$' then to_jsonb(p_age::integer) else to_jsonb(p_age) end
+$$;
+
 create function pg_temp.legacy_record(p_case integer) returns jsonb
 language sql stable as $$
   select jsonb_strip_nulls(jsonb_build_object(
-    'first_name', p.first_name, 'last_name', p.last_name, 'age', p.age, 'gender', p.gender,
+    'first_name', p.first_name, 'last_name', p.last_name, 'age', pg_temp.legacy_age(p.age), 'gender', p.gender,
     'height_build', p.height_build, 'hair', p.hair, 'identifying_features', p.identifying_features,
     'physical_description', p.physical_description, 'last_seen', p.last_seen, 'clothing', p.clothing,
     'additional_notes', p.additional_notes, 'reporting_location', p.reporting_location,
@@ -299,6 +306,7 @@ create function pg_temp.legacy_row(p_case integer, p_status text, p_updated time
                                    p_found timestamptz, p_reunion timestamptz, p_closed timestamptz) returns jsonb
 language sql stable as $$
   select (to_jsonb(p) - 'row_version')
+         || jsonb_build_object('age', pg_temp.legacy_age(p.age))
          || jsonb_build_object('status', p_status, 'updated_at', p_updated, 'updated_by', p.created_by,
                                'found_at', p_found, 'reunion_started_at', p_reunion, 'closed_at', p_closed)
   from public.patients p where p.id = pg_temp.pid(p_case)

@@ -69,15 +69,49 @@ describe('createRequestSchema', () => {
     expect(createRequestSchema.safeParse({ ...base, reportingLocation: 'Other', otherLocation: 'x'.repeat(81) }).success).toBe(false);
   });
 
-  it('validates age and gender', () => {
+  it('age is free text (Jeffrey, 2026-11-06): trimmed, blank → null, ≤40; a number becomes its text', () => {
     const base = { clientMutationId: CMID, reportingLocation: 'Base' as const };
-    expect(createRequestSchema.safeParse({ ...base, age: 0 }).success).toBe(true);
-    expect(createRequestSchema.safeParse({ ...base, age: 120 }).success).toBe(true);
-    expect(createRequestSchema.safeParse({ ...base, age: 121 }).success).toBe(false);
-    expect(createRequestSchema.safeParse({ ...base, age: 19.5 }).success).toBe(false);
-    expect(createRequestSchema.safeParse({ ...base, age: '19' }).success).toBe(false);
-    expect(createRequestSchema.safeParse({ ...base, gender: 'Female' }).success).toBe(true);
-    expect(createRequestSchema.safeParse({ ...base, gender: 'female' }).success).toBe(false);
+    const age = (v: unknown) => createRequestSchema.parse({ ...base, age: v }).age;
+    expect(age('mid-20s')).toBe('mid-20s');
+    expect(age('  24 ')).toBe('24');
+    expect(age('early 30s, maybe 35')).toBe('early 30s, maybe 35');
+    expect(age('   ')).toBeNull();
+    expect(age('')).toBeNull();
+    expect(age(null)).toBeNull();
+    // Older clients (and requests already queued on a phone) send a number.
+    expect(age(24)).toBe('24');
+    expect(age(0)).toBe('0');
+    expect(age(121)).toBe('121');
+    expect(age('x'.repeat(40))).toBe('x'.repeat(40));
+    expect(createRequestSchema.safeParse({ ...base, age: 'x'.repeat(41) }).success).toBe(false);
+    expect(createRequestSchema.safeParse({ ...base, age: '😀'.repeat(40) }).success).toBe(true);
+    expect(createRequestSchema.safeParse({ ...base, age: true }).success).toBe(false);
+    expect(createRequestSchema.safeParse({ ...base, age: ['24'] }).success).toBe(false);
+    expect(requestPatchSchema.parse({ age: 'mid-20s' })).toEqual({ age: 'mid-20s' });
+    expect(requestPatchSchema.parse({ age: 24 })).toEqual({ age: '24' });
+    expect(requestPatchSchema.parse({ age: null })).toEqual({ age: null });
+    expect(requestPatchSchema.safeParse({ age: 'x'.repeat(41) }).success).toBe(false);
+  });
+
+  it('gender is free text: trimmed, blank → null, ≤40; the old Male / Female / Other still work', () => {
+    const base = { clientMutationId: CMID, reportingLocation: 'Base' as const };
+    const gender = (v: unknown) => createRequestSchema.parse({ ...base, gender: v }).gender;
+    for (const g of ['Male', 'Female', 'Other']) expect(gender(g)).toBe(g);
+    expect(gender('female')).toBe('female');
+    expect(gender(' Non-binary ')).toBe('Non-binary');
+    expect(gender('')).toBeNull();
+    expect(gender(null)).toBeNull();
+    expect(gender('x'.repeat(40))).toBe('x'.repeat(40));
+    expect(createRequestSchema.safeParse({ ...base, gender: 'x'.repeat(41) }).success).toBe(false);
+    expect(createRequestSchema.safeParse({ ...base, gender: 1 }).success).toBe(false);
+    expect(requestPatchSchema.parse({ gender: 'woman' })).toEqual({ gender: 'woman' });
+  });
+
+  it('phone is never rejected for its format, only for its length', () => {
+    const base = { clientMutationId: CMID, reportingLocation: 'Base' as const };
+    for (const phone of ['555', 'ask at FA 4', '+44 20 7946 0958 ext 2', 'none']) {
+      expect(createRequestSchema.parse({ ...base, contactPhone: phone }).contactPhone).toBe(phone);
+    }
   });
 
   it('rejects unknown and server-owned keys', () => {
@@ -225,7 +259,7 @@ describe('text PostgreSQL cannot store (NUL, unpaired surrogates)', () => {
 
   it('refuses them in every request text field, with a clear message on that field', () => {
     for (const bad of [NUL, ...LONE]) {
-      for (const key of ['name', 'clothing', 'lastSeen', 'hair', 'contactName', 'contactPhone', 'additionalNotes']) {
+      for (const key of ['name', 'age', 'gender', 'clothing', 'lastSeen', 'hair', 'contactName', 'contactPhone', 'additionalNotes']) {
         const r = createRequestSchema.safeParse({ ...base, [key]: bad });
         expect(r.success, `${key}=${JSON.stringify(bad)}`).toBe(false);
         expect(issue(r)).toContain(`${key}: Contains a character that cannot be saved`);
