@@ -280,10 +280,10 @@ export function RequestForm(props: RequestFormProps) {
 
           {section !== 'friend' ? (
             <>
-              <Text as="div" size="2" weight="medium" color="gray" className="lp-rf-lbl">
+              <Text as="div" size="2" weight="medium" color="gray" className="lp-rf-lbl" id={id('person')}>
                 Missing person
               </Text>
-              <div className="lp-rf-grp">
+              <div className="lp-rf-grp" role="group" aria-labelledby={id('person')}>
                 <div className="lp-rf-pcard">
                   {photoSlot}
                   <div className="lp-rf-pc">
@@ -454,10 +454,10 @@ export function RequestForm(props: RequestFormProps) {
 
           {section !== 'person' ? (
             <>
-              <Text as="div" size="2" weight="medium" color="gray" className="lp-rf-lbl">
+              <Text as="div" size="2" weight="medium" color="gray" className="lp-rf-lbl" id={id('friend')}>
                 Friend or family
               </Text>
-              <div className="lp-rf-grp">
+              <div className="lp-rf-grp" role="group" aria-labelledby={id('friend')}>
                 <TextRow
                   inputId={id('contactName')}
                   label="Name"
@@ -539,7 +539,7 @@ export function RequestForm(props: RequestFormProps) {
                 )}
               </button>
               {showMore ? (
-                <div className="lp-rf-grp" id={id('more')} ref={moreRef}>
+                <div className="lp-rf-grp" id={id('more')} ref={moreRef} role="group" aria-label="More details">
                   {moreFields.map((key) => {
                     const row = MORE_ROWS[key];
                     return (
