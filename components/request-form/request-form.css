@@ -891,6 +891,20 @@ textarea.lp-rf-in {
     padding-top: 9px;
   }
 }
+/* Gender quick-fill chips (F1) under the boxed Gender field: no phone label indent, spaced like the
+   place chips. */
+.lp-rf-dlg .lp-rf-gq,
+.lp-rf-dlg .lp-rf-gq[data-indent] {
+  gap: 6px;
+  padding: 6px 0 0;
+}
+@media (pointer: coarse) {
+  .lp-rf-dlg .lp-rf-gq,
+  .lp-rf-dlg .lp-rf-gq[data-indent] {
+    gap: 18px 6px;
+    padding-top: 9px;
+  }
+}
 .lp-rf-dlg .lp-rf-dup {
   margin-top: 2px;
 }

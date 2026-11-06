@@ -206,7 +206,8 @@ test.describe('desktop 1440 × 900', () => {
   test('the dashboard: a request opened over another still closes in one Esc', async ({ page }) => {
     await createRequests(page, 2);
     await page.goto('/?dashboard=1');
-    const recent = page.locator('[data-desk-main] section[aria-labelledby="lp-dash-recent"] button');
+    // F1's dashboard: the Recently updated region's rows (its heading is a "Show all requests" button).
+    const recent = page.locator('[data-desk-main]').getByRole('region', { name: 'Recently updated' }).locator('button[data-request-id]');
     await expect(recent.nth(1)).toBeVisible({ timeout: 15_000 });
     await recent.nth(0).click();
     await expect.poll(() => paramOf(page, 'r')).not.toBeNull();
@@ -289,7 +290,9 @@ test.describe('desktop 1440 × 900', () => {
     await page.getByTestId('desk-sidebar').getByTestId('account-trigger').click();
     const menu = page.getByRole('dialog', { name: 'Account' });
     await expect(menu).toBeVisible();
-    for (const item of ['Dashboard', 'Export CSV', 'Sign out']) await expect(menu.getByText(item, { exact: true })).toBeVisible();
+    // F1's avatar menu: Alerts moved in from the bell, Export CSV is gone (Jeffrey exports from Supabase).
+    for (const item of ['Alerts', 'Dashboard', 'Sign out']) await expect(menu.getByText(item, { exact: true })).toBeVisible();
+    await expect(menu.getByText('Export CSV', { exact: true })).toHaveCount(0);
     await page.keyboard.press('Escape');
     await expect(menu).toBeHidden();
   });
