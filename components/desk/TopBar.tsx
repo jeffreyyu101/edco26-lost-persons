@@ -74,7 +74,7 @@ function ListLive() {
   const store = useAppStore();
   const live = useLiveStatus();
   const refresh = useCallback(() => refreshSync(store), [store]);
-  return <LiveIndicator className={d.live} line={live} onRefresh={refresh} />;
+  return <LiveIndicator className={d.liveLine} line={live} onRefresh={refresh} />;
 }
 
 const noRefresh = () => Promise.resolve();
@@ -83,7 +83,7 @@ const noRefresh = () => Promise.resolve();
 function DashboardLive() {
   const dash = useDashboardLive();
   const live = useLiveStatus({ syncedAt: dash?.syncedAt ?? null, failing: dash?.failing ?? false, subject: 'Dashboard' });
-  return <LiveIndicator className={d.live} line={live} onRefresh={dash?.refresh ?? noRefresh} />;
+  return <LiveIndicator className={d.liveLine} line={live} onRefresh={dash?.refresh ?? noRefresh} />;
 }
 
 function SearchField({ main }: DeskTopProps) {

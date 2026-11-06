@@ -487,8 +487,8 @@
 
 /* The live line next to the title (components/ui/LiveIndicator.tsx; live-indicator.html Desktop frame: the dot
    10 px after the count). It gives way first when the column is narrow: its words clip with an ellipsis, the
-   dot and Refresh now stay. */
-.live {
+   dot and Refresh now stay. (Not `.live`: that is the lockup's corner dot above.) */
+.liveLine {
   flex: 0 1 auto;
   margin-left: 4px;
 }
