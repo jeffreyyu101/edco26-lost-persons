@@ -1158,3 +1158,41 @@ Brian and Jeffrey decided these after the app went live (`design/DECISIONS.md` "
 - **The live dot only appears when the app is offline or reconnecting** (`connection` is `offline` or `error`; amber when offline). While live it is not rendered. Tapping it still syncs now, and the offline and "Can't reach the log" banners are unchanged.
 - **"Newest first" goes.** The order is A46's.
 
+**A52 · System notifications for alerts, by device** (extends §7 Alerts and A51; `design/DECISIONS.md` v2.2 row 10; Brian, 2026-11-06: "alerts should depend on the device — if it's desktop use regular notifications through Chrome"). **No server change:** no Web Push, no VAPID keys, no new route or table. The page that sees the change shows the notification through its own service worker registration, so it works only while the app is open (a background tab or a minimised window counts). Code: `lib/client/system-notify.ts`.
+
+- **Supported** when `'Notification' in window` and the page has an active service worker registration (`navigator.serviceWorker.ready`; none in development), **except a Safari tab on iPhone or iPad** (iPhone, iPad or iPod in the user agent, or `MacIntel` with touch points, and not standalone). That is desktop Chrome, Edge, Firefox and Safari, Android Chrome, and the iPhone Home Screen app (iOS 16.4+). Always `registration.showNotification()`, **never the `Notification` constructor** (Android Chrome throws). An unsupported device keeps today's toast + chime and is never prompted; its avatar menu and sheets are unchanged.
+- **Permission** is asked only inside a tap, never on load:
+  - turning **Alerts** on in the avatar menu, while the permission is still `default`;
+  - a one-tap **Allow notifications** row, on supported devices, in the avatar menu (under Alerts) and in the "Alerts are on" sheet. It is there with Alerts off too, because "my request was answered" alerts always run.
+
+  `granted` shows **System notifications on**. `denied` shows a quiet, grey **Blocked in browser**, with no button and no instructions, and the app never asks again (a screen reader hears "System notifications are blocked in this browser."). On supported devices the sheet shows this row instead of the iPhone Home Screen tip. The permission is re-read on focus, on `visibilitychange`, and on the Permissions API `change` event where the browser has one, so a change in the site settings shows without a reload.
+- **Delivery** (`routeAlert`, decided once per batch in the store's `emitAlerts`, after the existing filters):
+
+  | Permission | Page | Alert |
+  |---|---|---|
+  | not `granted`, or unsupported | any | toast + chime (as before) |
+  | `granted` | `document.visibilityState === 'hidden'` | system notification |
+  | `granted` | visible, desktop (`(hover: hover) and (pointer: fine)`), `document.hasFocus()` false | system notification |
+  | `granted` | visible and focused, or a phone in front | toast + chime |
+
+  **Never both.** A notification has no toast and is not passed to `subscribeAlerts` listeners (no chime, no vibration: the system plays its own sound). If `showNotification` fails (the permission was withdrawn, the worker is gone), the toast + chime carry that alert instead.
+- **Content** (the lock screen and the notification centre see it):
+
+  | Alert | Title | Body |
+  |---|---|---|
+  | My request moved to In medical | "LP-1004 · In medical" | "S.L. · FA 3", then "Bring the friend to Main Med" |
+  | Any other status change of my request | "LP-1004 · Not in medical" (the status's short label: Reunited, Waiting for check, Cancelled, …) | "S.L. · FA 3" |
+  | New request (Alerts on) | "New request · LP-1013" | "T.R. · FA 4" |
+  | 3 or more at once | "3 new requests" when all are new, else "3 updates" | the LP numbers, up to 4, then "+N" |
+
+  Initials and the post only. **Never** a phone number, the contact's name, relation or notes, the full name, the age or the gender.
+- **Options:** `tag` = the request id (`lp-alerts` for a combined one), so a later alert for the same request replaces it; `renotify: true` on every alert, so each one sounds as its chime would (a changed answer must not silently replace "In medical"); `requireInteraction: true` for In medical, sticky like its toast; `icon` `/icons/icon-192.png`; `data: {url, key}`, where `url` is `/?r=<id>` (`/` when combined) and `key` is the alert's `(id, rowVersion)`.
+- **Dedupe and staleness.** The `(id, rowVersion)` dedupe and the "more than 2 at once combine" rule are unchanged; routing happens after them, so a burst is one notification. A notification with the same `key` already showing (another tab of the same browser) is not shown again. A status notification is closed, by its `key` only (never a newer one of the same request), when its alert goes out of date (`alertStillCurrent`, as for the toast) and when the next alert for that request is shown as a toast. Sign-out and a different staff signing in close every notification of the app.
+- **Click** (`public/sw.js`, `notificationclick`): close the notification, then pick an open window of the app (the focused one on `/`, else any on `/`, else another page such as `/signin`) and `focus()` it. A window on `/` is sent `{type: 'lp-open', url}`; the page (`lib/client/sw-client.ts`) opens that view in place with `navigate` (no reload, so an open form or sheet keeps its state) and answers `{ok: true}`. A window that is not on `/`, or does not answer within 1.5 s (an older build), is `navigate()`d to the URL. With no window, or if navigation is refused, `clients.openWindow(url)`. The worker's precache, fetch and update behaviour is unchanged.
+- **Limits** (`HANDOFF.md` Known limits): a background tab polls once a minute, so a notification can be up to a minute late; phones freeze background pages (iPhone almost at once, Android Chrome after a few minutes), so phone notifications are best effort and desktop is the main use.
+- **Tests:**
+  - `tests/unit/client/system-notify.test.ts`: the support matrix (a mocked `Notification`, service worker registration and visibility; an iPhone tab and Home Screen app, iPad, Android, macOS), permission requests (asked once, never when denied or unsupported), routing, the content (no contact details), and the browser host with stubbed globals.
+  - `tests/unit/client/store-notify.test.ts`: through the real store, never both, the combine and dedupe rules, the toast fallback, and closing stale notifications.
+  - `tests/unit/client/notify-open.test.ts` and `tests/unit/sw/notification-click.test.ts`: the click, on both sides.
+  - `tests/e2e/notify.spec.ts` (Chromium, a desktop context with `context.grantPermissions(['notifications'])` and a spy on `registration.showNotification`): a hidden page notifies and shows no toast, a visible page toasts and does not notify, denied shows "Blocked in browser" and is never prompted, and the iPhone 14 layout is unchanged (Chromium and WebKit).
+

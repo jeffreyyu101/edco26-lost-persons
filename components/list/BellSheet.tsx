@@ -1,10 +1,13 @@
 'use client';
 // "Alerts are on" (spec §7 Alerts, states.html Alerts): shown the first time the bell is turned on.
-// Alerts show while this app is open; then the Home Screen tip (skipped inside the Home Screen app).
-// No lock-screen promise.
+// Alerts show while this app is open. Where the device has system notifications (desktop, Android, the
+// iPhone Home Screen app; v2.5 A52), "Allow notifications" or its answer follows; an iPhone Safari tab gets
+// the Home Screen tip instead (skipped inside the Home Screen app). No lock-screen promise on the tab.
 import { Button, Flex, Text } from '@radix-ui/themes';
 import { BellRing, Share, SquarePlus } from 'lucide-react';
+import { NotifySheetRow } from '@/components/ui/NotifyStatus';
 import { Sheet, SheetDescription, SheetTitle } from '@/components/ui/Sheet';
+import { useNotifyState } from '@/lib/client/system-notify';
 import s from './list.module.css';
 
 export interface BellSheetProps {
@@ -23,6 +26,8 @@ export function isStandalone(): boolean {
 const ICON = { strokeWidth: 1.75, 'aria-hidden': true } as const;
 
 export function BellSheet({ open, onOpenChange, standalone }: BellSheetProps) {
+  const notify = useNotifyState();
+  const tip = !standalone && !notify.supported;
   return (
     // The visible heading and line name and describe the sheet (no hidden copy read twice).
     <Sheet open={open} onOpenChange={onOpenChange} titleInContent>
@@ -37,7 +42,8 @@ export function BellSheet({ open, onOpenChange, standalone }: BellSheetProps) {
       <SheetDescription size="3" mt="3">
         New requests alert you while this app is open.
       </SheetDescription>
-      {standalone ? null : (
+      <NotifySheetRow state={notify} />
+      {!tip ? null : (
         <>
           <ol className={s.steps} aria-label="Add it to your Home Screen">
             <li className={s.step}>
@@ -60,7 +66,7 @@ export function BellSheet({ open, onOpenChange, standalone }: BellSheetProps) {
           </Text>
         </>
       )}
-      <Button size="3" highContrast mt={standalone ? '4' : '0'} className="lp-hit" style={{ width: '100%' }} onClick={() => onOpenChange(false)}>
+      <Button size="3" highContrast mt={tip ? '0' : '4'} className="lp-hit" style={{ width: '100%' }} onClick={() => onOpenChange(false)}>
         Got it
       </Button>
     </Sheet>

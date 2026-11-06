@@ -8,7 +8,12 @@
 // which installs a new worker: it waits, and the store shows "Update ready · Reload".
 // A tab that stays open across a deploy finds out by fetching `/` now and then (visible only, throttled) and
 // comparing the script set.
+//
+// Notification clicks (v2.5 A52). public/sw.js focuses this window and posts {type: 'lp-open', url}; the
+// page opens that view in place (no reload, so an open form or sheet is not lost) and answers {ok: true}.
+// A page that does not answer (a sign-in page, an older build) is navigated by the worker instead.
 import { SYNC } from './constants';
+import { hrefFor, navigate, parseView, viewToParams } from './nav';
 
 const STATIC_PREFIX = '/_next/static/';
 const DEPLOY_CHECK_MS = 10 * 60_000;
@@ -68,6 +73,53 @@ export function collectAssetUrls(): string[] {
   return [...urls];
 }
 
+/** The message public/sw.js posts when a notification is clicked. */
+export const OPEN_MESSAGE = 'lp-open';
+
+/**
+ * Open `url` (a path + query of `/`, e.g. "/?r=<id>") as an in-app view. False when it is not a view of
+ * this page (another origin or path): the worker then navigates the window.
+ */
+export function openFromNotification(url: string): boolean {
+  if (typeof window === 'undefined') return false;
+  let target: URL;
+  try {
+    target = new URL(url, window.location.origin);
+  } catch {
+    return false;
+  }
+  if (target.origin !== window.location.origin || target.pathname !== '/') return false;
+  const params = viewToParams(parseView(target.searchParams));
+  // Already showing it: no second history entry (Back would land on the same view).
+  if (hrefFor(params) === `${window.location.pathname}${window.location.search}`) return true;
+  navigate(params);
+  return true;
+}
+
+/** Answers the worker's {type: 'lp-open', url} messages. Returns the remover. */
+export function listenForNotificationOpens(
+  container: Pick<ServiceWorkerContainer, 'addEventListener' | 'removeEventListener'>,
+  open: (url: string) => boolean = openFromNotification,
+): () => void {
+  const onMessage = (event: Event) => {
+    const { data, ports } = event as MessageEvent<{ type?: unknown; url?: unknown } | null>;
+    if (!data || data.type !== OPEN_MESSAGE || typeof data.url !== 'string') return;
+    let ok = false;
+    try {
+      ok = open(data.url);
+    } catch {
+      ok = false;
+    }
+    try {
+      ports?.[0]?.postMessage({ ok });
+    } catch {
+      // The worker stopped waiting.
+    }
+  };
+  container.addEventListener('message', onMessage);
+  return () => container.removeEventListener('message', onMessage);
+}
+
 export interface SwHooks {
   onUpdateReady(): void;
   onOfflineReady(): void;
@@ -104,6 +156,7 @@ export function startServiceWorker(hooks: SwHooks): SwController | null {
   const buildId = buildIdFrom(INITIAL_SCRIPTS);
   if (!buildId) return null;
   const sw = navigator.serviceWorker;
+  const stopOpens = listenForNotificationOpens(sw);
   let reg: ServiceWorkerRegistration | null = null;
   let stopped = false;
   let wantReload = false;
@@ -191,6 +244,7 @@ export function startServiceWorker(hooks: SwHooks): SwController | null {
       clearInterval(interval);
       document.removeEventListener('visibilitychange', onVisible);
       sw.removeEventListener('controllerchange', onControllerChange);
+      stopOpens();
     },
     activateWaiting() {
       const waiting = (reg as ServiceWorkerRegistration | null)?.waiting;

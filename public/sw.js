@@ -29,6 +29,12 @@
  * Only 200 same-origin "basic" responses are cached: never redirects or opaque responses. The cached `/`
  * is stored whole (headers included, so its CSP nonce matches its scripts) and contains no request data:
  * every row is fetched by the client.
+ *
+ * Notifications (v2.5 A52): the page shows an alert as a system notification through this registration
+ * while the app is in the background (lib/client/system-notify.ts). There is no push: this worker only
+ * handles the click. It closes the notification, focuses an open window of the app and has it open the
+ * request (`/?r=<id>`, `/` for a combined one) in place; a window that does not answer is navigated there;
+ * with no window, one opens.
  */
 'use strict';
 
@@ -43,6 +49,9 @@ const HASHED_PREFIX = '/_next/static/';
 const NAV_TIMEOUT_MS = 4000;
 // Most URLs a page may post in one precache message (A15).
 const MAX_PRECACHE = 400;
+// How long a window may take to answer "open this request" before it is navigated instead (A52).
+const OPEN_REPLY_MS = 1500;
+const OPEN_MESSAGE = 'lp-open';
 const CORE = [
   '/manifest.webmanifest',
   '/icons/icon-192.png',
@@ -487,4 +496,79 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname === '/manifest.webmanifest') {
     event.respondWith(networkFirst(request));
   }
+});
+
+// ---- Notification clicks (A52) ------------------------------------------------------------------------
+
+/** The same-origin path + query a notification opens: its data.url, or `/`. */
+function notificationTarget(data) {
+  const raw = data && typeof data.url === 'string' ? data.url : '/';
+  try {
+    const url = new URL(raw, self.location.origin);
+    return url.origin === self.location.origin ? url.pathname + url.search : '/';
+  } catch (e) {
+    return '/';
+  }
+}
+
+/** A window's same-origin pathname, or null. */
+function windowPath(client) {
+  try {
+    const url = new URL(client.url);
+    return url.origin === self.location.origin ? url.pathname : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Ask an app window to open `url` itself, without a reload. True once it says it did. */
+function askToOpen(client, url) {
+  return new Promise((resolve) => {
+    let channel;
+    try {
+      channel = new MessageChannel();
+    } catch (e) {
+      resolve(false);
+      return;
+    }
+    const finish = (ok) => {
+      clearTimeout(timer);
+      channel.port1.onmessage = null;
+      channel.port1.close();
+      resolve(ok);
+    };
+    const timer = setTimeout(() => finish(false), OPEN_REPLY_MS);
+    channel.port1.onmessage = (event) => finish(!!(event.data && event.data.ok === true));
+    try {
+      client.postMessage({ type: OPEN_MESSAGE, url }, [channel.port2]);
+    } catch (e) {
+      finish(false);
+    }
+  });
+}
+
+async function openFromNotification(url) {
+  const windows = (await self.clients.matchAll({ type: 'window', includeUncontrolled: true })).filter((c) => windowPath(c) !== null);
+  // The app page `/` beats /signin; matchAll lists the most recently focused window first.
+  const client = windows.find((c) => c.focused && windowPath(c) === '/') || windows.find((c) => windowPath(c) === '/') || windows[0];
+  if (client) {
+    let target = client;
+    try {
+      target = (await client.focus()) || client;
+    } catch (e) {
+      // Focus needs the click's user activation; the window still opens the request.
+    }
+    if (windowPath(target) === '/' && (await askToOpen(target, url))) return;
+    try {
+      if (await target.navigate(url)) return;
+    } catch (e) {
+      // navigate() only works on a window this worker controls: open a new one.
+    }
+  }
+  if (self.clients.openWindow) await self.clients.openWindow(url);
+}
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(openFromNotification(notificationTarget(event.notification.data)).catch(() => undefined));
 });
