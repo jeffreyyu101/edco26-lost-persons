@@ -18,6 +18,7 @@ import {
   logNumberRanges,
   logRowLabel,
   mineFreshTone,
+  narrowStatusLabel,
   minutesPhrase,
   outboxDisplay,
   queuedStepper,
@@ -219,6 +220,11 @@ describe('list helpers', () => {
     expect(logNumberRanges(998, [[0, 2]])).toEqual([]);
     expect(closedFoldLabel(1)).toBe('Closed 1 request');
     expect(closedFoldLabel(6)).toBe('Closed 6 requests');
+    // On a narrow phone only the long open label gets shorter, so the name keeps its room (review fix).
+    expect(narrowStatusLabel(STATUS.waiting)).toBe('Waiting');
+    for (const st of [STATUS.inMedical, STATUS.legacyBringFriend, STATUS.notInMedical, STATUS.reunited, STATUS.discharged, STATUS.cancelled, 'Some legacy value']) {
+      expect(narrowStatusLabel(st)).toBeNull();
+    }
     // Not in medical is closed and grey everywhere, the stepper included.
     expect(stepperModel(STATUS.notInMedical).color).toBe('var(--gray-9)');
     expect(isClosed(STATUS.notInMedical)).toBe(true);
@@ -352,21 +358,40 @@ describe('list views render', () => {
       .replace(/\s+/g, ' ')
       .trim();
   };
-  /** What LP-n's row shows in one column: the cell's text without the screen-reader-only words. */
-  const shown = (html: string, n: number, col: string) => {
+  /** LP-n's cell in one column, as HTML (cells hold no nested data-col). */
+  const cellHtml = (html: string, n: number, col: string) => {
     const at = html.indexOf(`data-request-id="${idOf(n)}"`);
     const button = html.slice(at, html.indexOf('</button>', at));
     const start = button.indexOf(`data-col="${col}"`);
     if (start < 0) return null;
     const cell = button.slice(button.indexOf('>', start) + 1);
-    // The cell ends where the next column starts (cells hold no nested data-col).
+    // The cell ends where the next column starts.
     const end = cell.search(/<span [^>]*data-col="/);
-    return (end < 0 ? cell : cell.slice(0, end))
-      .replace(/<span class="[^"]*vh[^"]*">[^<]*<\/span>/g, '')
+    return end < 0 ? cell : cell.slice(0, end);
+  };
+  const text = (cell: string) =>
+    cell
       .replace(/<svg[^]*?<\/svg>/g, '')
       .replace(/<[^>]+>/g, '')
       .replace(/<!-- -->/g, '')
       .trim();
+  /**
+   * What LP-n's row shows in one column from 400 px up: the cell's text without the screen-reader-only words
+   * and without the narrow-phone label.
+   */
+  const shown = (html: string, n: number, col: string) => {
+    const cell = cellHtml(html, n, col);
+    if (cell === null) return null;
+    return text(cell.replace(/<span class="[^"]*vh[^"]*">[^<]*<\/span>/g, '').replace(/<span class="[^"]*stNarrow[^"]*">[^<]*<\/span>/g, ''));
+  };
+  /** The status label LP-n's row shows under 400 px instead ("Waiting"), or null when it keeps its label. */
+  const narrow = (html: string, n: number) => {
+    const cell = cellHtml(html, n, 'status') ?? '';
+    const m = /<span class="[^"]*stNarrow[^"]*">([^<]*)<\/span>/.exec(cell);
+    if (!m) return null;
+    // Narrow and wide labels come as a pair, so CSS can show exactly one of them.
+    expect(cell).toMatch(/<span class="[^"]*stWide[^"]*">[^<]+<\/span>/);
+    return m[1];
   };
 
   it('All (option B): queued on top, open rows newest first, every closed one folded into "Closed N"', () => {
@@ -382,9 +407,11 @@ describe('list views render', () => {
     expect(html).not.toContain('New-request alerts');
     expect(html).not.toContain('live-dot');
     expect(html).not.toContain('connection-indicator');
-    // One quiet column header.
+    // One quiet column header. "Created" and "Updated" are one pair over both time columns, so the wider
+    // "Updated" never sizes its column on its own (review fix: it took the names' room).
     const cols = html.slice(html.indexOf('data-testid="log-columns"'));
     expect(cols).toMatch(/^[^]*?>#<[^]*?>Friend<[^]*?>Status<[^]*?>Created<[^]*?>Updated</);
+    expect(cols).toMatch(/^[^]*?<span class="[^"]*c45[^"]*"><span>Created<\/span><span>Updated<\/span><\/span>/);
 
     const queued = html.indexOf('Waiting to send');
     const attention = html.indexOf('Needs attention');
@@ -442,12 +469,15 @@ describe('list views render', () => {
     expect(shown(html, 1013, 'number')).toBe('1013');
     expect(shown(html, 1013, 'name')).toBe('T.R.');
     expect(shown(html, 1013, 'status')).toBe('Waiting for check');
+    // Under 400 px it reads "Waiting" (the name keeps its room); the sentence above still says it in full.
+    expect(narrow(html, 1013)).toBe('Waiting');
     expect(shown(html, 1013, 'created')).toBe(created);
     expect(shown(html, 1013, 'updated')).toBe('—');
     expect(html.slice(html.indexOf(`data-request-id="${idOf(1013)}"`))).toMatch(/^[^]*?data-col="status" data-tone="blue"/);
     // Jordan Diaz (LP-1007) moved to In medical 2 minutes ago: green, "2m" (or 1m/3m at a minute edge).
     expect(spoken(html, 1007)).toMatch(/^LP-1007, Jordan Diaz, In medical, friend coming, created \S+ (AM|PM), updated [123] minutes? ago$/);
     expect(shown(html, 1007, 'status')).toBe('In medical');
+    expect(narrow(html, 1007)).toBeNull();
     expect(shown(html, 1007, 'updated')).toMatch(/^[123]m$/);
     expect(html.slice(html.indexOf(`data-request-id="${idOf(1007)}"`))).toMatch(/^[^]*?data-col="status" data-tone="green"/);
     // Kayla Martinez (LP-1012) was logged with 2 photos and edited since: updated.

@@ -1,7 +1,9 @@
 'use client';
 // The All requests log (log option B, design/screens/polish-v7.html ColH / Row / fold, v7-log.png): one
 // grid for the whole list, so every column lines up and sizes to its content, and each request is one
-// 48 px line:  #  ·  Friend  ·  Status  ·  Created  ·  Updated. Only the name shrinks (with an ellipsis).
+// 48 px line:  #  ·  Friend  ·  Status  ·  Created  ·  Updated. The name takes the room that is left, with
+// an 80 px floor: on a narrow phone the status label gets shorter ("Waiting"), and only past the floor is it
+// cut. The number and the times never shrink.
 // Queued requests (states.html Offline) and search results (states.html SRow) use the same grid.
 import { CircleAlert, ChevronDown } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
@@ -19,6 +21,7 @@ import {
   logNumber,
   logNumberRanges,
   logRowLabel,
+  narrowStatusLabel,
   outboxDisplay,
   outboxRowLabel,
   searchLogLabel,
@@ -59,8 +62,12 @@ export function ColumnHeader() {
       <span className={s.c1}>#</span>
       <span className={s.c2}>Friend</span>
       <span className={s.c3}>Status</span>
-      <span className={`${s.c4} ${s.end}`}>Created</span>
-      <span className={`${s.c5} ${s.end}`}>Updated</span>
+      {/* One right-aligned pair over both time columns: "Updated" is wider than anything under it ("—", "2m",
+          "now"), so on its own it would widen that column and take the room from the names. */}
+      <span className={s.c45}>
+        <span>Created</span>
+        <span>Updated</span>
+      </span>
     </div>
   );
 }
@@ -83,12 +90,14 @@ interface LogCellsProps {
   glyph: ReactNode;
   tone: string;
   statusLabel: string;
+  /** A shorter label for narrow phones ("Waiting"), or null to keep the label everywhere. */
+  statusNarrow?: string | null;
   created: string;
   updated: string;
 }
 
 /** The visible cells of a row (hidden from screen readers: the row's sentence says it all). */
-function LogCells({ number, name, glyph, tone, statusLabel, created, updated }: LogCellsProps) {
+function LogCells({ number, name, glyph, tone, statusLabel, statusNarrow, created, updated }: LogCellsProps) {
   return (
     <>
       <span className={`${s.c1} ${s.num}`} data-col="number" aria-hidden>
@@ -99,7 +108,16 @@ function LogCells({ number, name, glyph, tone, statusLabel, created, updated }: 
       </span>
       <span className={`${s.c3} ${s.stc}`} data-col="status" data-tone={tone} aria-hidden>
         {glyph}
-        <span className={s.stl}>{statusLabel}</span>
+        <span className={s.stl}>
+          {statusNarrow ? (
+            <>
+              <span className={s.stWide}>{statusLabel}</span>
+              <span className={s.stNarrow}>{statusNarrow}</span>
+            </>
+          ) : (
+            statusLabel
+          )}
+        </span>
       </span>
       <span className={`${s.c4} ${s.tm}`} data-col="created" aria-hidden>
         {created}
@@ -140,6 +158,7 @@ export const LogRow = memo(function LogRow({ row, created, updated, updatedSaid 
         glyph={<StatusGlyph status={row.status} className={s.lg} />}
         tone={meta.tone}
         statusLabel={meta.shortLabel}
+        statusNarrow={narrowStatusLabel(row.status)}
         created={created}
         updated={updated}
       />
@@ -177,6 +196,7 @@ export const SearchLogRow = memo(function SearchLogRow({ hit, created, updated, 
         glyph={<StatusGlyph status={row.status} className={s.lg} />}
         tone={meta.tone}
         statusLabel={meta.shortLabel}
+        statusNarrow={narrowStatusLabel(row.status)}
         created={created}
         updated={updated}
       />

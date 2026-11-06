@@ -108,7 +108,11 @@ test('All: the large title is the view menu; a new request is the top row and op
   await expect(page.getByTestId('log-columns')).toHaveText(/^#\s*Friend\s*Status\s*Created\s*Updated$/);
   await expect(cell(page, r.id, 'number')).toHaveText(String(r.caseNumber));
   await expect(cell(page, r.id, 'name')).toHaveText(r.name);
-  await expect(cell(page, r.id, 'status')).toHaveText('Waiting for check');
+  // iPhone 14 is 390 px wide: under 400 px "Waiting for check" reads "Waiting" (the blue ring says the rest,
+  // the row's sentence says it in full), so the name keeps its room.
+  await expect(cell(page, r.id, 'status')).toHaveText('Waiting', { useInnerText: true });
+  await page.setViewportSize({ width: 430, height: 932 });
+  await expect(cell(page, r.id, 'status')).toHaveText('Waiting for check', { useInnerText: true });
   // The header declutter: no "Newest first", no ×, no bell, no live dot while the app is live.
   await expect(page.getByText('Newest first')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Back to all requests' })).toHaveCount(0);
@@ -190,29 +194,75 @@ test('All (option B): closed requests fold into "Closed N"; the fold opens in pl
   await expect(row(page, notIn.id)).toHaveCount(0);
 });
 
-test('at 375 px only names shrink: every other cell fits, and the page never scrolls sideways', async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 812 });
-  const r = await createRequest(page, { name: `${TAG} Kayla Alexandra Martinez-Rodriguez` });
-  await page.goto('/');
-  await expect(row(page, r.id)).toBeVisible({ timeout: 10_000 });
-  await fold(page).click();
-  await expect(page.getByTestId('closed-rows')).toBeVisible();
-  const report = await page.evaluate(() => {
-    const cut = [...document.querySelectorAll<HTMLElement>('[data-testid="request-list"] [data-col]')]
-      .filter((el) => el.dataset.col !== 'name' && el.scrollWidth > el.clientWidth + 0.5)
-      .map((el) => `${el.dataset.col}: ${el.textContent}`);
-    const name = document.querySelector<HTMLElement>('[data-testid="request-list"] [data-col="name"]');
+/**
+ * The log's columns at the current viewport: every name's width, every cell that is cut (other than names),
+ * the grid's tracks, whether the page scrolls sideways.
+ */
+async function logLayout(page: Page) {
+  return page.evaluate(() => {
+    const log = document.querySelector<HTMLElement>('[data-testid="request-list"]')!;
+    const cut = (el: Element) => el.scrollWidth > el.clientWidth + 0.5;
+    const names = [...log.querySelectorAll<HTMLElement>('[data-col="name"]')];
+    // A status label (the span after the glyph) may be cut, but only in a row whose name is at its floor.
+    const labels = [...log.querySelectorAll<HTMLElement>('[data-col="status"] > span')].map((el) => ({
+      text: el.innerText,
+      cut: cut(el),
+      name: el.closest('[data-request-id], [data-outbox-id]')!.querySelector<HTMLElement>('[data-col="name"]')!.getBoundingClientRect().width,
+    }));
+    const updated = [...log.querySelectorAll<HTMLElement>('[data-col="updated"]')].map((el) => el.getBoundingClientRect().width);
+    const tracks = getComputedStyle(log).gridTemplateColumns.split(' ').map(parseFloat);
     return {
-      cut,
+      nameWidths: names.map((el) => el.getBoundingClientRect().width),
+      nameEllipsis: names[0] ? getComputedStyle(names[0]).textOverflow : '',
+      cutCells: [...log.querySelectorAll<HTMLElement>('[data-col]')]
+        .filter((el) => el.dataset.col !== 'name' && el.dataset.col !== 'match' && cut(el))
+        .map((el) => `${el.dataset.col}: ${el.textContent}`),
+      cutLabels: labels.filter((l) => l.cut),
+      // The Updated column's own width (its track minus the row's 16 px right padding) and its widest value.
+      updatedTrack: tracks.at(-1)! - 16,
+      updatedWidest: Math.max(28, ...updated),
       pageScrolls: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-      nameEllipsis: name ? getComputedStyle(name).textOverflow : '',
     };
   });
-  expect(report.cut).toEqual([]);
-  expect(report.pageScrolls).toBe(false);
-  expect(report.nameEllipsis).toBe('ellipsis');
-  const name = cell(page, r.id, 'name');
-  expect(await name.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+}
+
+// Review fix (2026-11-06): on a 375 px iPhone the names were cut to 1–4 letters, and after midnight to 2:
+// the "Updated" header sized its column, and once one row read "Fri 11:02 PM" Created widened for every row.
+test('at 375 px after midnight the name keeps at least 80 px; numbers and times are never cut', async ({ page }) => {
+  // A day later in this page: every request was logged on an earlier event day ("Fri 11:02 PM").
+  const later = Date.now() + 86_400_000;
+  await page.clock.setFixedTime(later);
+  await page.setViewportSize({ width: 375, height: 812 });
+  const r = await createRequest(page, { name: `${TAG} Kayla Alexandra Martinez-Rodriguez` });
+  const notIn = await setStatus(page, await createRequest(page), 'Checked – Not Found', 'answer');
+  await page.goto('/');
+  await expect(row(page, r.id)).toBeVisible({ timeout: 10_000 });
+  const created = formatCreatedTime(r.createdAt, later, TZ);
+  expect(created).toMatch(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2}:\d{2} (AM|PM)$/);
+  await expect(cell(page, r.id, 'created')).toHaveText(created);
+  await expect(cell(page, r.id, 'status')).toHaveText('Waiting', { useInnerText: true });
+
+  // Folded (the default view): every name has at least 80 px, nothing else is cut, and the "Updated" header
+  // no longer widens its column past its values ("—", "2m", "1d").
+  let layout = await logLayout(page);
+  expect(Math.min(...layout.nameWidths)).toBeGreaterThanOrEqual(79.5);
+  expect(layout.cutCells).toEqual([]);
+  expect(layout.cutLabels).toEqual([]);
+  expect(layout.updatedTrack).toBeLessThanOrEqual(layout.updatedWidest + 0.5);
+  expect(layout.pageScrolls).toBe(false);
+  expect(layout.nameEllipsis).toBe('ellipsis');
+  expect(await cell(page, r.id, 'name').evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+
+  // Closed rows open too (the widest statuses): the name still keeps its 80 px, the number and the times are
+  // never cut, and a status label is cut only where the name is down to its floor.
+  await fold(page).click();
+  await expect(row(page, notIn.id)).toBeVisible();
+  await expect(cell(page, notIn.id, 'created')).toHaveText(formatCreatedTime(notIn.createdAt, later, TZ));
+  layout = await logLayout(page);
+  expect(Math.min(...layout.nameWidths)).toBeGreaterThanOrEqual(79.5);
+  expect(layout.cutCells).toEqual([]);
+  for (const label of layout.cutLabels) expect(label.name, `"${label.text}" cut`).toBeLessThanOrEqual(80.5);
+  expect(layout.pageScrolls).toBe(false);
 });
 
 test('view switcher: Pending and My requests with counts, the same large title, the menu returns to All', async ({ page }) => {

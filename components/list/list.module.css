@@ -353,11 +353,15 @@
 /* ---- All requests: the log (polish-v7.html .cols / .colh / .row / .fold) ------------------------- */
 
 /* One grid for the whole list: every row (and the column header) is a subgrid of it, so the columns line up
-   and size to their widest value. Only the name column shrinks; everything else keeps its content width. */
+   and size to their widest value. The name takes what is left, and never less than 80 px (or a quarter of
+   a phone narrower than 320 px): the number and both times keep their content width, and the status gives
+   way instead, first with a shorter label under 400 px, then with an ellipsis once the name is at its floor
+   (at 375 px that takes the closed rows open, a "Not in medical" and an earlier day's time together).
+   Gap as polish-v7.html. */
 .log {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
-  column-gap: 7px;
+  grid-template-columns: auto minmax(min(80px, 25%), 1fr) auto auto auto;
+  column-gap: 5px;
 }
 
 /* A row of the log: spans every column and takes them from the log (subgrid). Every cell is placed in
@@ -375,9 +379,18 @@
 .c2,
 .c3,
 .c4,
-.c5 {
+.c5,
+.c45 {
   grid-row: 1;
   min-width: 0;
+}
+
+/* The number and the times are never squeezed: their content is their minimum. */
+.c1,
+.c4,
+.c5,
+.c45 {
+  min-width: auto;
 }
 
 .c1 {
@@ -400,8 +413,13 @@
   grid-column: 5;
 }
 
-.end {
+/* "Created  Updated": one right-aligned pair over both time columns (rows.tsx ColumnHeader). It only widens
+   them when the pair is wider than both together. */
+.c45 {
+  grid-column: 4 / 6;
   justify-self: end;
+  display: flex;
+  gap: 6px;
 }
 
 /* "#  Friend  Status  Created  Updated": small, quiet, sticky right under the header. */
@@ -419,7 +437,7 @@
   white-space: nowrap;
 }
 
-/* "Friend" sits over the only column that shrinks: on a very narrow phone it is cut like the names. */
+/* "Friend" sits over the names' column: cut like them, should that ever be narrower than the word. */
 .colh > .c2 {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -491,8 +509,9 @@ button.lr:focus-visible {
 }
 
 /* Status: the glyph and its label. Only the two open states have colour (blue, green); every closed state
-   and a queued request are grey. */
+   and a queued request are grey. The glyph always shows; the label is what gives way. */
 .stc {
+  min-width: 20px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -534,11 +553,28 @@ button.lr:focus-visible {
   border: 0;
 }
 
-/* A label longer than any status this app writes (an unknown legacy value) is cut, not the layout. */
+/* A label longer than any status this app writes (an unknown legacy value) is cut, not the layout. So is
+   any label once the name is down to its floor. */
 .stl {
   max-width: 10.5em;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Under 400 px "Waiting for check" reads "Waiting" (list-helpers.narrowStatusLabel): with a created time
+   from an earlier day ("Fri 11:02 PM") the full label would leave the name two letters. */
+.stNarrow {
+  display: none;
+}
+
+@media (max-width: 399.98px) {
+  .stWide {
+    display: none;
+  }
+
+  .stNarrow {
+    display: inline;
+  }
 }
 
 /* Created and updated: tabular, right-aligned on the name's line. */
@@ -548,6 +584,13 @@ button.lr:focus-visible {
   color: var(--gray-11);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* Updated is at least 28 px wide (mobbin-lists-dashboards.txt: a fixed 28 pt column), so a short "2m" or "—"
+   keeps clear of the created time before it. */
+.c5.tm {
+  min-width: 28px;
+  text-align: right;
 }
 
 /* The matched text of a search result, under the name and running to the right edge. */

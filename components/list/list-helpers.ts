@@ -266,6 +266,15 @@ export function updatedSince(
   return row.status === STATUS.waiting && onlyOwnPhotos ? null : row.updatedAt;
 }
 
+/**
+ * The status label the log shows on a narrow phone (under 400 px wide), where "Waiting for check" would take
+ * the name's room: "Waiting" (the blue ring says the rest). Null when the label is already short. The row's
+ * sentence always says the full status.
+ */
+export function narrowStatusLabel(status: string): string | null {
+  return status === STATUS.waiting ? 'Waiting' : null;
+}
+
 /** The status as a screen reader says it: "Waiting for check", "In medical, friend coming". */
 export function statusPhrase(status: string): string {
   return statusMeta(status).label.replace(/\s*·\s*/g, ', ');
