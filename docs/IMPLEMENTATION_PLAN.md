@@ -1,146 +1,143 @@
-# Implementation plan
+# Implementation plan v2
 
-Companion to `docs/BUILD_SPEC.md`. It covers the order of work, who builds what, and how each step is checked.
+Companion to `docs/BUILD_SPEC.md` (v2). It folds in the Codex (GPT-6 Astra) and Claude Fable 5.1 plan reviews.
 
-**Time box:** about 6 hours overnight, done before Brian and Jeffrey wake up and deploy to Vercel for EDC Orlando on Nov 6.
+## Ground rules for every agent
 
-## Phase 0: plan review (now)
+- **Read first:** `docs/BUILD_SPEC.md`, `design/DECISIONS.md` and the mockups that apply to you.
+- **Local services:**
+  - **One** local Supabase stack runs for the whole build. Phase 1a starts it from the main checkout with `supabase start`.
+  - **Worktree agents must never** start, stop or reset it, and must not run `supabase db reset`. Only the Phase 1a, 1b-server, Integrate and QA agents may reset it, and only when no other agent is running.
+  - Tests that mutate data create their own uniquely named synthetic rows (`TEST-<agent>-<n>`).
+  - Each agent uses its own Next port: 1a uses 3100, server 3101, client 3102, sign-in 3103, list 3104, form 3105, profile 3106, integrate and QA 3100.
+- **Environment.** Never read `.env.local`. Use `.env.test`. The helpers refuse non-local hosts.
+- **Dependencies.** No new ones after Phase 1a. If you need one, stop and report it.
+- **Commits.** Commit to your own branch with clear messages. Your final reply must list:
+  - the branch name and last commit SHA
+  - what was built
+  - the test results
+  - anything a later agent must wire up
+  - anything you could not finish
 
-Two independent reviews read the spec, this plan, `design/DECISIONS.md`, the mockups and Jeffrey's original code:
+## Phase 0: plan review (done)
 
-- **GPT-6 Astra** (Codex, top reasoning setting)
-- **Claude Fable 5.1** (max reasoning)
+Codex and Fable reviewed the plan and their findings are merged into spec v2. Next comes a short confirmation re-review by both, running **in parallel with Phase 1a**. If they find blockers, they get patched into the contracts before Phase 1b starts.
 
-Their findings get merged into the spec before any code is written.
+## Phase 1a: contracts and toolchain (1 agent, on `rework/ui` in the main checkout, about 45 min)
 
-## Phase 1: foundation (1 agent, sequential, on `rework/ui`)
+1. **Background installs.** Run `npx playwright install chromium webkit` in the background.
+2. **Clean out the old app.** Delete the old app's `app/page.tsx`, `app/ui.tsx`, `app/styles.css`, `app/api/**` and `lib/*` (keep `lib/supabase-url.js` logic by moving it into `lib/server/env.ts`) and `tests/supabase-url.test.cjs` (port it to vitest).
+3. **Upgrade and configure.**
+   - Next 16.4, React 19.3, and the spec §2 dependencies.
+   - `tsconfig` strict.
+   - ESLint flat config.
+   - `vitest.config.ts` with the projects `unit` and `integration`.
+   - `playwright.config.ts`: `workers: 1`, Chromium iPhone 14 plus WebKit, `baseURL` from `PORT`.
+   - Scripts: `dev`, `build`, `start`, `typecheck`, `lint`, `test`, `test:int`, `test:e2e`, `db:reset`.
+4. **Supabase local:**
+   - `supabase/config.toml` (project_id `lp-local`, the private bucket `patient-photos`, 6 MB, jpeg/png/webp).
+   - The renamed migration chain (§5).
+   - A **complete** `20261106000000_rework.sql` with every function.
+   - `supabase/seed.sql` (synthetic, about 21 rows across every status, plus 2 legacy-format rows).
+   - `scripts/db-reset.sh` with the host guard.
+   - `supabase start`, reset, and prove the migration runs twice.
+   - `.env.test` with the local keys.
+5. **Contracts.** Frozen after this phase; later agents may add to them, never change them.
+   - `lib/domain.ts`, complete, with unit tests.
+   - `lib/api-types.ts`: `RequestSummary`, `RequestDetail`, `AuditEvent` with normalized legacy actions, `Stats`, `ApiError`, `SyncResponse`, `OutboxItem`.
+   - `lib/validation.ts`: zod for every body.
+   - `lib/format.ts`: event timezone, `h:mm`, weekday, durations, `LP-1004`.
+   - `lib/client/store-contract.ts`: the store's public TypeScript interface (state shape, selectors, `setStatus`, `create`, `updateFields`, `cancel`, `addPhotos`, `syncNow`, `outbox` API, `connection`) and a **stub** implementation good enough for UI agents to render against seeded fake data.
+   - Component **stubs** with final props: `RequestForm`, `PostPicker`, `AccountMenu`, `StatusGlyph`, `Sheet`, `Toast`/`Snackbar`, `Banner`, `ViewSwitcher`, `AppHeader`.
+6. **App skeleton:**
+   - `app/layout.tsx` (Inter, the no-flash theme script with the nonce, Radix Theme).
+   - `app/signin/page.tsx` (placeholder).
+   - `app/page.tsx`: the store provider and a view router that uses search params and `history.pushState`, with placeholder views.
+   - A `proxy.ts` that adds the CSP nonce, the security headers and the auth redirects, with the matcher from §6.
+   - `public/manifest.webmanifest`, icons (192 and 512 maskable, plus `apple-touch-icon` generated from the EDC and GC logos on a dark background), and `public/logos/*`.
+7. **Gate:** `typecheck`, `lint`, `build` and `unit` pass, and the migration is applied locally twice. Commit.
 
-Owns these shared files. Later agents must not restructure them, and may only add to them.
-
-1. **Toolchain.**
-   - Upgrade to Next 16.4 and React 19.3.
-   - Add the deps from spec §2.
-   - Scripts: `dev`, `build`, `start`, `typecheck`, `lint`, `test` (vitest unit), `test:int` (vitest integration against local Supabase), `test:e2e` (playwright), `db:start`, `db:reset`.
-   - TypeScript strict. ESLint flat config.
-2. **Local Supabase.**
-   - `supabase/config.toml`, with the private bucket.
-   - The migration `20261106_rework.sql` (spec §5), applied on top of `schema.sql` and the two existing migrations.
-   - `seed.sql` (synthetic).
-   - A `scripts/db-reset.sh` that rebuilds the local database from scratch.
-   - Prove the migration is idempotent by running it twice.
-3. **Server core** (`lib/server/`):
-   - `env.ts` (zod)
-   - `supabase.ts` (server client)
-   - `session.ts` (JWT cookie)
-   - `password.ts` (plain or bcrypt, constant time)
-   - `http.ts` (error shape, Origin check, body limits, SQLSTATE→HTTP mapping, no-PII logging)
-   - `rateLimit.ts`
-   - `mappers.ts` (DB row → `RequestSummary` / `RequestDetail`)
-4. **Shared code** (`lib/`):
-   - `domain.ts` (statuses, transitions, labels, colours, teams, posts, limits, name split, phone check, wait thresholds)
-   - `validation.ts` (zod for every API body)
-   - `api-types.ts` (the `RequestSummary`, `RequestDetail`, `AuditEvent` and `Stats` types used by both server and client)
-   - `format.ts` (event-timezone times, "12m" style durations, LP numbers)
-5. **Middleware.** CSP nonce, security headers, auth redirects.
-6. **Design system** (`components/ui/`):
-   - Theme provider with no-flash script.
-   - `StatusGlyph` (port the exact SVG from the mockups).
-   - `Icon` re-exports.
-   - `Sheet` (bottom sheet built on Radix Dialog).
-   - `Toast` / `Snackbar` system with `aria-live`.
-   - `Banner`.
-   - `AppHeader` (title, live dot, search, bell, avatar slots).
-   - `ViewSwitcher`.
-   - `EmptyState`.
-   - Skeleton blocks.
-   - Global CSS: tokens and the mockup CSS ported.
-   - Inter self-hosted.
-7. **Client core** (`lib/client/`):
-   - `api.ts` (typed fetch with errors, `If-None-Match`, abort)
-   - `store.tsx` (context, IndexedDB cache, delta polling, optimistic mutations, undo, outbox for new requests)
-   - `alerts.ts` (diffing, chime, vibrate, bell setting)
-   - `prefs.ts` (theme, name and team, last post)
-   - `image.ts` (compression to full and thumbnail)
-8. **App routes.**
-   - `app/(auth)/signin` placeholder.
-   - `app/(app)/layout.tsx` (store provider, header).
-   - Placeholder pages for `/`, `/new`, `/r/[id]` and `/dashboard`.
-   - Service worker registration and `public/sw.js` (spec §7).
-   - The manifest.
-9. **Test harness.**
-   - Vitest config: unit and integration projects.
-   - An integration helper that starts the Next route handlers against local Supabase, or runs `next start` on a test port.
-   - Playwright config: iPhone 14 profile, light and dark projects, and a global setup that resets the database and builds.
-10. **Commit.**
-
-**Gate:** typecheck, lint, build and unit tests pass, the migration is applied locally, and a smoke test of `/api/session` and `GET /api/requests` against the seed passes.
-
-## Phase 2: features (5 agents in parallel, each in its own git worktree off the foundation commit)
-
-**File ownership is strict.** An agent may **read** everything but only **write** its own files. Missing shared pieces go in the agent's report, and the integration agent adds them. No new dependencies.
+## Phase 1b: core (2 agents in parallel, each in its own worktree off the 1a commit)
 
 | Agent | Owns (writes) | Builds |
 |---|---|---|
-| **A. API** | `app/api/**`, `lib/server/**` (adding only), `tests/integration/**` | Every route in spec §6, calling the RPCs; integration tests for each route (spec §9.3) |
-| **B. Sign-in** | `app/(auth)/**`, `components/signin/**`, `public/logos/*` | Both steps, logos, credit, theme toggle, session-expiry landing, rate-limit message; e2e `signin.spec.ts` |
-| **C. List** | `app/(app)/page.tsx`, `components/list/**`, `components/search/**` | All, Pending (Friend coming and Waiting), My requests, view switcher wiring, search, empty / offline / error states, skeletons, undo snackbar, alert banners shown on the list; e2e `list.spec.ts` |
-| **D. New request** | `app/(app)/new/**`, `components/request-form/**` | The form (shared with Edit through a `mode` prop), post picker sheet, stage chips, photo capture and compression, draft, offline outbox UI; e2e `new-request.spec.ts` |
-| **E. Profile and dashboard** | `app/(app)/r/**`, `app/(app)/dashboard/**`, `components/profile/**`, `components/dashboard/**`, `components/account/**` | Profile (status block, details, Call, photos and viewer, audit trail, sticky actions, change answer, cancel dialog, conflict banner, edit through D's form component, which waits on D, or a stub on the shared props contract), dashboard, avatar menu, CSV; e2e `profile.spec.ts` and `dashboard.spec.ts` |
+| **S: server** | `app/api/**`, `lib/server/**`, `tests/integration/**`, `scripts/load-test.mjs` | Every route in §6. Env, session (sliding renewal), password, Origin check, error mapping, mappers including legacy audit normalization, CSV, the photo pipeline. **Every integration test in §9.3**, migration upgrade-fixture tests included. The load script (§9.7). May reset the database (it's the only database user in 1b). |
+| **C: client core** | `lib/client/**` (replacing the stub with the real store), `components/ui/**` (real implementations of the stubs), `public/sw.js`, `app/page.tsx` shell wiring, `tests/unit/client/**` | Store: sync and reconcile, overlays, per-id serialization, undo, the outbox with photos and `navigator.locks`, the draft in IndexedDB, session handling and legacy queue import. Alerts. Image compression. Prefs. The service worker with the update toast. The design-system components ported from the mockups. Unit tests for all of it, using a mocked fetch. |
 
-Each agent checks its own work before reporting:
+**Gate**, per agent: `typecheck`, `lint` and its own tests pass. Commit on its branch.
 
-1. Typecheck, lint and unit tests pass in its worktree.
-2. It starts the app against local Supabase and screenshots its screens at 390×844 in both themes, then compares them with the mockup PNG.
-3. It commits on its branch, `feat/<agent>`.
+## Merge 1 (1 agent, main checkout)
 
-## Phase 3: integrate (1 agent)
+1. Merge S and C into `rework/ui`.
+2. Run the full unit and integration suites.
+3. Smoke test the real store against the real API, through a scripted Playwright check: sign in, the seeded list renders, create, set status, sync.
+4. Fix anything broken.
+5. Commit.
 
-1. Merge A through E into `rework/ui`.
-2. Resolve conflicts.
-3. Wire the shared gaps that agents reported.
-4. Run the full gate: typecheck, lint, build, unit, integration and end-to-end.
-5. Fix everything until it's green.
+## Phase 2: screens (4 agents in parallel, worktrees off Merge 1)
+
+| Agent | Owns | Builds |
+|---|---|---|
+| **B: sign-in** | `app/signin/**`, `components/signin/**`, `tests/e2e/signin.spec.ts` | Both steps, exactly as in the mockup |
+| **L: lists** | `components/list/**`, `components/search/**`, `tests/e2e/list.spec.ts` | Header, All, Pending, My requests, view menu, filter chip, search, empty and skeleton states, banners on the list |
+| **F: form** | `components/request-form/**` (the real `RequestForm`, `PostPicker`), `tests/e2e/new-request.spec.ts` | Create and edit modes, stage chips, the photo slot, the draft wiring, the duplicate hint |
+| **P: profile and dashboard** | `components/profile/**`, `components/dashboard/**`, `components/account/**`, `tests/e2e/profile.spec.ts`, `tests/e2e/dashboard.spec.ts` | Profile (all of §8, using `RequestForm` for edit), photo viewer, audit trail, dashboard, avatar menu with CSV |
+
+Every Phase 2 agent:
+
+1. Renders its views against the real store and API on its own port.
+2. Screenshots them at 390×844 in light and dark, and compares them with the mockup PNG. A screenshot diff note goes in the report.
+3. Writes its end-to-end spec.
+4. Commits on its branch.
+
+## Merge 2 / Integrate (1 agent)
+
+1. Merge B, L, F and P.
+2. Wire any gaps.
+3. Run the **full gate (§9.1–9.4)** in a production build.
+4. Fix until green.
+5. Commit.
+
+## Phase 3: review loop (repeat until a round finds nothing new)
+
+1. **Claude reviewers, one per lens, in parallel:**
+   - security
+   - data integrity and races
+   - sync, offline and service worker
+   - UI fidelity (screenshots against mockups)
+   - iOS, mobile and accessibility
+   - performance and data use
+2. **Codex, GPT-6 Astra (ultra),** reviews the full branch diff.
+3. Each finding is checked by 2 adversarial verifiers. It survives only if both agree it's real.
+4. A fix agent fixes the confirmed findings and adds a regression test for each.
+5. Full gate.
 6. Commit.
 
-## Phase 4: review (parallel, then fix, repeated until a round finds nothing new)
+## Phase 4: browser QA (1 agent)
 
-1. **Claude reviewers, one per lens:**
-   - security (auth, CSRF, CSP, IDOR, injection, secrets, rate limit, bucket privacy)
-   - correctness and data integrity (transitions, races, idempotency, timestamps, timezones)
-   - offline and sync (polling, merge, outbox, service worker never caching the API, low data)
-   - UI fidelity against the mockups (screenshots)
-   - accessibility and mobile (tap targets, keyboards, iOS Safari quirks, safe areas)
-   - performance (bundle, renders, image sizes)
-2. **Adversarial verify.** Each finding is checked by 2 skeptics; it survives only if it's real.
-3. A fix agent fixes the confirmed findings, adds regression tests and reruns the gate.
-4. **Codex review (GPT-6 Astra, ultra)** of the whole branch diff. Its findings go through the same verify and fix steps.
+1. Run the full Playwright suite in Chromium and WebKit.
+2. Run a scripted festival-night scenario with 3 contexts (two front of house, one liaison), including offline and lie-fi.
+3. Final screenshot comparison against the mockups.
+4. Run the load check (§9.7).
 
-## Phase 5: browser QA (1 agent)
-
-1. Run the full Playwright suite in headed Chromium and WebKit.
-2. Explore manually through browser automation, following the operational script: two staff, front of house and liaison, through a whole night's flow, offline included.
-3. Do a final screenshot comparison against the mockups.
-
-## Phase 6: ship (me)
+## Phase 5: ship (lead)
 
 1. Final gate.
 2. Update the README and HANDOFF.
-3. Push `rework/ui` and open the PR with Jeffrey's migration steps.
-4. Link the PR.
+3. Push `rework/ui`.
+4. Open the PR with the migration steps and the manual checklist.
+5. Link it.
 
-## Phase 7: only if there's time, after the PR is pushed
+## Phase 6: only if there's time
 
-- An offline outbox for photos and status changes, with conflict handling.
-- Lock-screen Web Push (VAPID env, `push_subscriptions` table, sending from the routes).
+- Queued status changes, and photos added to existing requests while offline.
+- Lock-screen Web Push.
 
-Each goes in its own commit on the same PR, behind the same gate and review loop.
+Each one gets its own commits, the full gate and a review.
 
-## Risks and mitigations
+## Cut line, if time runs short
 
-| Risk | Mitigation |
+| | |
 |---|---|
-| Next 16 or React 19 incompatibility | Fall back to Next 15.5 latest plus React 19 only if the build fails, and note it in the PR. |
-| Merge conflicts between the parallel agents | Strict ownership, shared contracts frozen in phase 1, and the integration agent owns the glue. |
-| The production database differs from `schema.sql`, with legacy columns | The migration only adds things; the functions use only known columns. Jeffrey runs it once. |
-| iOS Safari quirks: viewport, `100dvh`, safe areas, bfcache, IndexedDB in private mode | Explicit tests on WebKit and the iPhone profile. Fall back to memory if IndexedDB is unavailable. |
-| Clock skew between server and phone | The cursor is always `serverTime` from the server, and the `since` window overlaps by 5 s. |
+| **Must ship** | sign-in, the three views, new request with photos, profile actions and undo, audit trail, CSV, offline create, security |
+| **May degrade** | dashboard polish, swiping in the photo viewer, the alerts sheet, skeleton polish, the load check (run it manually) |
