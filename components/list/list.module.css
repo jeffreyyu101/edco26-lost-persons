@@ -152,6 +152,13 @@
   transition: transform 0.15s;
 }
 
+/* The live indicator ("Updated 6s ago", components/ui/LiveIndicator.tsx) right under the title, lined up
+   with its first letter (live-indicator.html .live: 2 px under the title, 10 px above what follows). */
+.live {
+  margin-top: -12px;
+  padding: 0 16px 10px;
+}
+
 /* The offline / reconnecting button, search and the avatar. Every one has a 44 px tap area that never
    reaches into its neighbour's box. */
 .icons {
@@ -957,7 +964,7 @@ button.lr:focus-visible {
 
 .st[data-step='cur'] .dot {
   background: var(--tone);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 28%, transparent);
+  box-shadow: none;
 }
 
 .st[data-step='pend'] .dot {

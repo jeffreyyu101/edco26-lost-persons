@@ -2,7 +2,8 @@
 // Dashboard (?dashboard=1, spec §8 Dashboard): Jeffrey's global view, built from design/screens/polish-v7.html
 // (Dash, Tiles, Posts, Recent, Perf, Laptop; renders v7-dash.png and v7-laptop.png). GET /api/stats every 15 s
 // while open via useStats(true).
-//   title    ‹ Dashboard, large. A compact Offline / Retrying chip only while not live.
+//   title    ‹ Dashboard, large, with the live indicator under it (v2.2, design/screens/live-indicator.html):
+//            "Updated 6s ago" from the last stats fetch, "Reconnecting · …" while fetches fail, "Offline · …".
 //   tiles    Open (blue/green split bar) and Closed, big; Waiting for check, In medical, Not in medical, Reunited
 //            (+ discharged · cancelled when either is non-zero). Status tiles open All filtered (A22); Open opens
 //            Pending, which lists exactly the open requests.
@@ -12,9 +13,10 @@
 //            or missing (avgReuniteMinutes / loggedLastHour come from the v2.2 lp_stats).
 // ≥ 768 px: six tiles in one row, posts and recent side by side, performance rows in two columns.
 import { Skeleton, VisuallyHidden } from '@radix-ui/themes';
-import { ChevronLeft, ChevronRight, Clock, CloudOff, Inbox, RefreshCw, Timer, Users, type LucideIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, Inbox, Timer, Users, type LucideIcon } from 'lucide-react';
 import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { LiveIndicator } from '@/components/ui/LiveIndicator';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { Stats } from '@/lib/api-types';
 import { goBack, navigate } from '@/lib/client/nav';
@@ -48,10 +50,8 @@ export function DashboardView(_props: DashboardViewProps) {
 }
 
 function Dashboard({ onRetry }: { onRetry: () => void }) {
-  const { stats, error } = useStats(true);
+  const { stats, error, updatedAt } = useStats(true);
   const { connection } = useConnection();
-  const offline = connection === 'offline';
-  const state = offline ? 'offline' : connection === 'error' || error ? 'retrying' : 'live';
 
   return (
     <div className={s.app} data-testid="dashboard">
@@ -60,20 +60,8 @@ function Dashboard({ onRetry }: { onRetry: () => void }) {
           <ChevronLeft size={24} strokeWidth={2} aria-hidden />
         </button>
         <h1 className={s.title}>Dashboard</h1>
-        {/* Always in the tree so the change is announced; empty (and invisible) while live. */}
-        <span className={s.conn} role="status" data-state={state} data-testid="dashboard-connection">
-          {state === 'offline' ? (
-            <>
-              <CloudOff size={14} aria-hidden />
-              Offline
-            </>
-          ) : state === 'retrying' ? (
-            <>
-              <RefreshCw size={14} aria-hidden />
-              Retrying
-            </>
-          ) : null}
-        </span>
+        {/* Counts from the last stats fetch (the numbers on this page); its live region announces changes. */}
+        <LiveIndicator className={s.live} syncedAt={updatedAt} connection={connection} failing={error} subject="Dashboard" />
       </header>
       <main className={s.body}>
         {stats ? (

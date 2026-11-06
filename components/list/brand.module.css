@@ -1,193 +1,236 @@
-/* The brand card (BrandCard.tsx): Jeffrey's original header (git show 1f4580b:app/styles.css .topbar,
-   .hero-*, .brand-*, .topbar h1), on a phone-first card. Fixed colours, not theme tokens: it is the same dark
-   card in the light and the dark theme. Every text on it is checked at 4.5:1 or more against every
-   pixel behind it (tests/e2e/a11y.spec.ts), which is why the two glows are softer than his. */
+/* The brand row (BrandCard.tsx; design/screens/brand-compact.html option A): Jeffrey's original header colours
+   (git show 1f4580b:app/styles.css .topbar) in one row. Fixed colours, not theme tokens: it is the same dark
+   row in the light and the dark theme. Every text on it is checked at 4.5:1 or more against every pixel
+   behind it (tests/e2e/a11y.spec.ts), which is why the two glows are softer than his. No rings, no glow
+   around it. Its height is fixed, so the font or the logos loading never move the list. */
 
 .brand {
   position: relative;
   isolation: isolate;
   overflow: hidden;
   flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 56px;
   margin: calc(12px + env(safe-area-inset-top)) 12px 0;
-  padding: 18px 20px 18px;
-  border: 1px solid #44316c;
-  border-radius: 18px;
+  padding: 0 13px 0 14px;
+  border-radius: 14px;
   color: #fff;
   background:
-    radial-gradient(ellipse at 18% 110%, rgb(232 63 145 / 0.62) 0, transparent 36%),
-    radial-gradient(ellipse at 77% -20%, rgb(37 199 215 / 0.5) 0, transparent 34%),
+    radial-gradient(ellipse at 12% 140%, rgb(232 63 145 / 0.6) 0, transparent 45%),
+    radial-gradient(ellipse at 88% -40%, rgb(37 199 215 / 0.45) 0, transparent 42%),
     linear-gradient(112deg, #181329 4%, #36205a 55%, #211835 100%);
-  box-shadow: 0 14px 34px -12px rgb(38 22 59 / 0.35);
   color-scheme: dark;
-}
-
-/* Faint concentric rings in the top-right corner (his .hero-orbit). On a phone their centre sits just
-   outside the corner, so they stay clear of the kicker and the title. */
-.orbit {
-  position: absolute;
-  z-index: -1;
-  top: -168px;
-  right: -158px;
-  width: 260px;
-  height: 260px;
-  border: 1px solid rgb(255 255 255 / 0.14);
-  border-radius: 50%;
-  pointer-events: none;
-}
-
-.orbit::before,
-.orbit::after,
-.orbit span {
-  content: '';
-  position: absolute;
-  inset: 20px;
-  border: 1px solid rgb(255 255 255 / 0.125);
-  border-radius: 50%;
-}
-
-.orbit::after {
-  inset: 40px;
-  border-color: rgb(168 255 240 / 0.17);
-}
-
-.orbit span:nth-child(1) {
-  inset: 66px;
-  border-color: rgb(252 164 224 / 0.22);
-}
-
-.orbit span:nth-child(2) {
-  inset: 91px;
-  border-style: dashed;
-  border-color: rgb(255 255 255 / 0.23);
-}
-
-.orbit span:nth-child(3) {
-  inset: 114px;
-  border-color: rgb(255 255 255 / 0.29);
 }
 
 /* EDC Orlando (black artwork, made white here) | Ground Control (its own colours). */
 .logos {
+  flex: none;
   display: flex;
   align-items: center;
-  gap: 12px;
-  height: 34px;
+  gap: 10px;
 }
 
 .edc {
   display: block;
   width: auto;
-  height: 34px;
+  height: 19px;
   filter: brightness(0) invert(1);
-}
-
-.div {
-  width: 1px;
-  height: 26px;
-  background: rgb(255 255 255 / 0.33);
 }
 
 .gc {
   display: block;
   width: auto;
-  height: 28px;
+  height: 16px;
 }
 
-.kicker {
-  margin: 14px 0 0;
-  font-size: 10px;
-  line-height: 14px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: #d2c2f0;
-  white-space: nowrap;
+.div {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  background: rgb(255 255 255 / 0.28);
 }
 
-/* "Is my friend in medical?": about 30 px on a phone, larger on wider screens. "in medical?" never splits. */
+/* The second divider (logos | title) is for the one-line wide layout only. */
+.wideOnly {
+  display: none;
+}
+
+.words {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* "Is my friend in medical?" on one line, "in medical?" in cyan. */
 .title {
-  margin: 6px 0 0;
-  font-size: clamp(30px, calc(21px + 2.4vw), 42px);
-  line-height: 1.06;
+  margin: 0;
+  font-size: 16px;
+  line-height: 18px;
   font-weight: 700;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.02em;
   color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .accent {
   color: #8ef0e7;
   font-weight: 500;
+}
+
+.dates {
+  margin: 0;
+  font-size: 10px;
+  line-height: 13px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #cdb9f0;
   white-space: nowrap;
 }
 
-.credit {
-  margin: 10px 0 0;
-  font-size: 12px;
-  line-height: 16px;
-  color: #e6e0f0;
-  text-wrap: balance;
+.datesLong {
+  display: none;
 }
 
-.credit b {
-  font-weight: 600;
+/* The X: a 30 px circle with a 44 px tap area. */
+.hide {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.12);
   color: #fff;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
-/* Phones: the title is "Is my friend" over "in medical?", and the credit "Built by Jeffrey & Brian" over "for
-   Ground Control / Headliner Experience". Fixed breaks keep the card the same height whatever the font, so it
-   never moves the list when Inter swaps in. */
-@media (max-width: 639.98px) {
-  .accent,
-  .creditFor {
+.hide::before {
+  content: '';
+  position: absolute;
+  inset: -7px;
+}
+
+.hide:active {
+  background: rgb(255 255 255 / 0.22);
+}
+
+.hide:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* Smaller phones (360–389 px): the same row, a little smaller, so the title stays on one line. */
+@media (max-width: 389.98px) {
+  .brand {
+    gap: 8px;
+    padding-left: 12px;
+    padding-right: 11px;
+  }
+
+  .logos {
+    gap: 8px;
+  }
+
+  .edc {
+    height: 17px;
+  }
+
+  .gc {
+    height: 14px;
+  }
+
+  .div {
+    height: 16px;
+  }
+
+  .title {
+    font-size: 15px;
+  }
+}
+
+/* The narrowest phones (320–359 px). */
+@media (max-width: 359.98px) {
+  .brand {
+    gap: 7px;
+    margin-inline: 8px;
+    padding-left: 10px;
+    padding-right: 9px;
+  }
+
+  .logos {
+    gap: 6px;
+  }
+
+  .edc {
+    height: 15px;
+  }
+
+  .gc {
+    height: 12px;
+  }
+
+  .title {
+    font-size: 13.5px;
+    letter-spacing: -0.025em;
+  }
+
+  .dates {
+    letter-spacing: 0.1em;
+  }
+}
+
+/* Wide screens: one line, logos | title, then "November 6–8, 2026" beside it. */
+@media (min-width: 720px) {
+  .brand {
+    gap: 14px;
+    height: 60px;
+    padding: 0 15px 0 18px;
+  }
+
+  .edc {
+    height: 22px;
+  }
+
+  .gc {
+    height: 19px;
+  }
+
+  .div {
+    height: 20px;
+  }
+
+  .wideOnly {
     display: block;
   }
-}
 
-/* The narrowest phones (320 px): the kicker stays on one line. */
-@media (max-width: 359.98px) {
-  .kicker {
-    font-size: 9.5px;
-    letter-spacing: 0.06em;
-  }
-}
-
-@media (min-width: 640px) {
-  .brand {
-    padding: 24px 28px 22px;
+  .words {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 14px;
   }
 
-  .orbit {
-    top: -90px;
-    right: -80px;
-    width: 300px;
-    height: 300px;
+  .title {
+    font-size: 19px;
+    line-height: 22px;
   }
 
-  .orbit::before {
-    inset: 22px;
+  .datesShort {
+    display: none;
   }
 
-  .orbit::after {
-    inset: 46px;
-  }
-
-  .orbit span:nth-child(1) {
-    inset: 76px;
-  }
-
-  .orbit span:nth-child(2) {
-    inset: 105px;
-  }
-
-  .orbit span:nth-child(3) {
-    inset: 132px;
-  }
-
-  .kicker {
-    font-size: 11px;
-  }
-
-  .credit {
-    font-size: 13px;
+  .datesLong {
+    display: block;
   }
 }

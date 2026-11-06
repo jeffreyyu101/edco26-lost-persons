@@ -223,26 +223,26 @@ describe('dashboard render', () => {
     expect(render(storeWith(), <DashboardContent stats={missing} />)).toMatch(/data-testid="perf-reunite-value"><span[^>]*>—</);
   });
 
-  it('title: large "Dashboard" with Back; the connection chip is empty while live, Offline / Retrying otherwise', () => {
+  it('title: large "Dashboard" with Back, and the live indicator under it (empty until the first stats arrive)', () => {
     const live = render(storeWith(), <DashboardView />);
     expect(live).toMatch(/<h1[^>]*>Dashboard<\/h1>/);
     expect(live).toContain('aria-label="Back to requests"');
-    expect(live).toMatch(/role="status" data-state="live" data-testid="dashboard-connection"><\/span>/);
+    // The indicator follows the title inside the header; before the first stats it shows nothing (the line
+    // keeps its place) and its live region is silent. The old Offline / Retrying chip is gone.
+    expect(live).toMatch(/<\/h1><div class="[^"]*live[^"]*" data-state="none" data-testid="live-indicator"><span[^>]*role="status"[^>]*data-testid="live-announcement"[^>]*><\/span><\/div><\/header>/);
+    expect(live).not.toContain('dashboard-connection');
+    expect(live).not.toContain('Retrying');
     expect(live).not.toContain('>Live<');
     expect(live).not.toContain('Export CSV');
     // No stats yet: the skeleton.
     expect(live).toContain('aria-label="Loading dashboard"');
-
-    const offline = render(
-      storeWith((s) => ({ ...s, connection: 'offline' })),
-      <DashboardView />,
-    );
-    expect(offline).toMatch(/data-state="offline" data-testid="dashboard-connection">[\s\S]*?Offline<\/span>/);
-    const error = render(
-      storeWith((s) => ({ ...s, connection: 'error' })),
-      <DashboardView />,
-    );
-    expect(error).toMatch(/data-state="retrying" data-testid="dashboard-connection">[\s\S]*?Retrying<\/span>/);
+    for (const connection of ['offline', 'error'] as const) {
+      const html = render(
+        storeWith((s) => ({ ...s, connection })),
+        <DashboardView />,
+      );
+      expect(html, connection).toMatch(/data-state="none" data-testid="live-indicator"/);
+    }
   });
 
   it('renders the stub store’s own stats (the shape lp_stats returns)', async () => {

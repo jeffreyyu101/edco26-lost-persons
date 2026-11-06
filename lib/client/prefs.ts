@@ -16,6 +16,8 @@
 //     (spec §4 "Staff identity and ownership") and are cleared on sign-out. Prefs survive sign-out.
 //   * One pref lasts for the browser session only: `closedExpanded` (the All requests "Closed" fold, log
 //     option B, 2026-11-06) lives in sessionStorage.
+//   * `brandHidden` (v2.2, 2026-11-06 afternoon): the brand row over All requests was hidden with its X on
+//     this device; the avatar menu's "Show header" brings it back.
 //
 // FROZEN after Phase 1a: later phases may ADD exports, never change existing ones.
 import {
@@ -56,6 +58,8 @@ export interface Prefs {
    * so a new session starts folded.
    */
   closedExpanded: boolean;
+  /** The brand row over All requests was hidden with its X (on this device, until "Show header"). */
+  brandHidden: boolean;
 }
 
 export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
@@ -66,6 +70,7 @@ export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
   rememberedTeam: null,
   lastPost: null,
   closedExpanded: false,
+  brandHidden: false,
 });
 
 /** sessionStorage keys: prefs that last for this browser session only. */
@@ -85,6 +90,8 @@ export const PREF_STORAGE_KEYS = {
   bell: 'lp-bell',
   /** '1' once the "Alerts are on" sheet has been shown */
   bellIntroSeen: 'lp-bell-intro-seen',
+  /** '1' while the brand row over All requests is hidden; absent when shown */
+  brandHidden: 'lp-brand-hidden',
 } as const;
 
 const ALL_KEYS: ReadonlySet<string> = new Set(Object.values(PREF_STORAGE_KEYS));
@@ -188,6 +195,7 @@ export function readPrefs(): Prefs {
     rememberedTeam: identity?.team ?? null,
     lastPost: cleanLastPost(readJson(PREF_STORAGE_KEYS.lastPost)),
     closedExpanded: readSession(SESSION_PREF_KEYS.closedExpanded) === '1',
+    brandHidden: read(PREF_STORAGE_KEYS.brandHidden) === '1',
   };
 }
 
@@ -225,6 +233,11 @@ export function setBellIntroSeen(seen: boolean): void {
   write(PREF_STORAGE_KEYS.bellIntroSeen, seen ? '1' : null);
 }
 
+/** Hide (true) or show again (false) the brand row over All requests on this device. */
+export function setBrandHidden(hidden: boolean): void {
+  write(PREF_STORAGE_KEYS.brandHidden, hidden ? '1' : null);
+}
+
 /** Store the theme choice and apply it now (the same thing the pre-paint script reads). */
 export function setThemePref(theme: ThemePref): void {
   if (typeof window === 'undefined') return;
@@ -251,6 +264,9 @@ export function writePref<K extends keyof Prefs>(key: K, value: Prefs[K]): void 
       return;
     case 'closedExpanded':
       setClosedExpanded(value as boolean);
+      return;
+    case 'brandHidden':
+      setBrandHidden(value as boolean);
       return;
     case 'rememberedName':
     case 'rememberedTeam': {

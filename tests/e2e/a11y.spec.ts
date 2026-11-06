@@ -105,10 +105,10 @@ async function audit(page: Page, view: string): Promise<Audit> {
 const clean = (a: Audit): Audit => ({ view: a.view, axe: [], small: [], overlaps: [] });
 
 /**
- * Text on the brand card (components/list/BrandCard.tsx) lies on a gradient with two glows and faint rings,
- * which axe can only mark "needs review". So this measures it: the card is captured with its text made
- * transparent, and each run of text is compared with every pixel behind its line box. Returns one line per
- * run under 4.5:1 (the bar for small text, applied to the title too).
+ * Text on the brand row (components/list/BrandCard.tsx) lies on a gradient with two glows, which axe can only
+ * mark "needs review". So this measures it: the row is captured with its text made transparent, and each run
+ * of text is compared with every pixel behind its line box. Returns one line per run under 4.5:1 (the bar for
+ * small text, applied to the title too).
  */
 async function brandContrast(page: Page): Promise<string[]> {
   const card = page.getByTestId('brand-card');
@@ -126,7 +126,8 @@ async function brandContrast(page: Page): Promise<string[]> {
     }
     return { width: box.width, runs };
   });
-  expect(layout.runs.length).toBeGreaterThanOrEqual(5);
+  // "Is my friend", "in medical?" and the dates (the long dates on a wide screen instead of the short ones).
+  expect(layout.runs.length).toBeGreaterThanOrEqual(3);
   const hide = await page.addStyleTag({ content: '[data-testid="brand-card"] * { color: transparent !important; }' });
   const png = await card.screenshot({ animations: 'disabled' });
   await hide.evaluate((el) => (el as Element).remove());
@@ -230,12 +231,16 @@ for (const theme of ['light', 'dark'] as const) {
         // ---- Lists, header, menus and sheets
         await visit('/', 'All', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
 
-        // The brand card: every text at 4.5:1 or more against every pixel behind it (axe can't judge
-        // text on its gradient). The card is dark in both themes, so both runs measure the same card.
+        // The brand row: every text at 4.5:1 or more against every pixel behind it (axe can't judge text on
+        // its gradient). The row is dark in both themes, so both runs measure the same row; then the same at
+        // 1280 px, where the long dates sit beside the title.
         await expect
           .poll(() => page.getByTestId('brand-card').evaluate((el) => [...el.querySelectorAll('img')].every((img) => img.complete && img.naturalWidth > 0)))
           .toBe(true);
-        expect.soft(await brandContrast(page), `brand card (${theme})`).toEqual([]);
+        expect.soft(await brandContrast(page), `brand row (${theme})`).toEqual([]);
+        await page.setViewportSize({ width: 1280, height: 800 });
+        expect.soft(await brandContrast(page), `brand row, 1280 px (${theme})`).toEqual([]);
+        await page.setViewportSize({ width: 390, height: 664 });
 
         // Log option B: the closed requests open in place under "Archived N", greyed (contrast, spec §7).
         await page.getByTestId('closed-fold').click();

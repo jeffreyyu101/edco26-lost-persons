@@ -437,3 +437,40 @@
   font-weight: 650;
   letter-spacing: -0.01em;
 }
+
+/* The live indicator (LiveIndicator.tsx; design/screens/live-indicator.html): a plain solid 7 px dot (no ring,
+   no glow) and one quiet line. The text is gray-11, not the mockup's gray-10, for 4.5:1 in both themes
+   (DECISIONS.md, accessibility pass). The line keeps its height while it is empty (before the first sync). */
+.live {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 16px;
+  font-size: 12.5px;
+  line-height: 16px;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.liveDot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green-9);
+}
+.live[data-state='reconnecting'] .liveDot {
+  background: var(--amber-9);
+}
+.live[data-state='offline'] .liveDot {
+  background: var(--gray-8);
+}
+.liveText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.live[data-state='reconnecting'] .liveLead {
+  color: var(--amber-11);
+}
