@@ -350,6 +350,8 @@ test.describe('sign-in with the real server @api', () => {
 
     // Session expiry: the cookie is gone; opening the app goes to step 2, prefilled, and comes back.
     await context.clearCookies({ name: 'lp_session' });
+    // Leave the app first: its next poll would 401 and redirect, racing (aborting) the goto below.
+    await page.goto('about:blank');
     await page.goto('/?view=pending');
     await expect(page).toHaveURL(/\/signin\?next=%2F%3Fview%3Dpending$/);
     await expect(stepTwoHeading(page)).toBeVisible();

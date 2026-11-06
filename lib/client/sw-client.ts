@@ -123,7 +123,16 @@ export function startServiceWorker(hooks: SwHooks): SwController | null {
   sw.addEventListener('controllerchange', onControllerChange);
 
   const checkWaiting = (r: ServiceWorkerRegistration) => {
-    if (!stopped && r.waiting && sw.controller) hooks.onUpdateReady();
+    const waiting = r.waiting;
+    const controller = sw.controller;
+    if (stopped || !waiting || !controller) return;
+    // The same build id (same ?v=) is not an update the user has to load: a second install of the same
+    // worker (seen when two tabs install at once) takes over quietly, without "Update ready".
+    if (waiting.scriptURL === controller.scriptURL) {
+      waiting.postMessage({ type: 'skip-waiting' });
+      return;
+    }
+    hooks.onUpdateReady();
   };
   const watch = (r: ServiceWorkerRegistration) => {
     checkWaiting(r);
