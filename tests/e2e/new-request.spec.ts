@@ -2,6 +2,7 @@ import { deflateSync } from 'node:zlib';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { testBaseUrl } from '../../scripts/test-env.mjs';
 import { addSessionCookie } from './helpers/session';
+import { syncRows } from './helpers/sync';
 
 // New request / Edit / Needs-attention editor (spec §8 New request, §9.4, v2.1 A10/A13/A20/A33).
 // Runs at integration against the real store and API (`npm run build:test`, then `npm run test:e2e`).
@@ -108,10 +109,7 @@ async function apiDetail(request: APIRequestContext, id: string): Promise<Row & 
 }
 
 async function rowsNamed(request: APIRequestContext, name: string): Promise<Row[]> {
-  const res = await request.get('/api/sync');
-  expect(res.ok()).toBe(true);
-  const body = (await res.json()) as { rows: Row[] };
-  return body.rows.filter((r) => r.name === name);
+  return (await syncRows<Row>(request)).filter((r) => r.name === name);
 }
 
 // ---- Setup ----------------------------------------------------------------------------------------
@@ -359,4 +357,92 @@ test('offline: Save offline queues the request and it sends once back online', a
   await expect.poll(async () => (await rowsNamed(page.request, name)).length, { timeout: 30_000 }).toBe(1);
   const [sent] = await rowsNamed(page.request, name);
   await expect.poll(async () => (await apiDetail(page.request, sent!.id)).photos.length, { timeout: 30_000 }).toBe(1);
+});
+
+// Edit concurrency (A10): a change made elsewhere that touches nothing the form holds (a liaison's answer)
+// never asks for a review and never makes Save fail. /api/sync is held with page.route to make the
+// timing exact, so the worker is blocked (WebKit's page.route can't see requests a worker makes).
+test.describe('edit after a status change elsewhere', () => {
+  test.use({ serviceWorkers: 'block' });
+
+  async function answerInMedical(request: APIRequestContext, row: Row): Promise<Row> {
+    const res = await request.post(`/api/requests/${row.id}/status`, {
+      headers: { Origin: ORIGIN },
+      data: { status: 'Found – Awaiting Reunion', expectedVersion: row.rowVersion, kind: 'answer' },
+    });
+    expect(res.ok()).toBe(true);
+    return ((await res.json()) as { request: Row }).request;
+  }
+
+  function trackPatches(page: Page, id: string): number[] {
+    const statuses: number[] = [];
+    page.on('response', (res) => {
+      if (res.request().method() === 'PATCH' && res.url().endsWith(`/api/requests/${id}`)) statuses.push(res.status());
+    });
+    return statuses;
+  }
+
+  test('a reload into Edit from the cache: the first sync brings an answer, Save still works first time', async ({ page }) => {
+    const name = uniqueName('cached edit');
+    const row = await apiCreate(page.request, { name, clothing: 'TEST-F grey hoodie' });
+    // The phone has this row (at its first version) in its cache.
+    await page.goto('/');
+    await expect(page.locator(`[data-request-id="${row.id}"]`).first()).toBeVisible({ timeout: 15_000 });
+    await page.waitForTimeout(800);
+
+    // Meanwhile the liaison answers In medical (a newer version; no form field changed).
+    const answered = await answerInMedical(page.request, row as Row);
+    expect(answered.rowVersion).toBeGreaterThan(row.rowVersion);
+
+    // Reload straight into Edit, with the first sync held for longer than Edit waits for it.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let synced!: () => void;
+    const firstSyncDone = new Promise<void>((resolve) => (synced = resolve));
+    let first = true;
+    await page.route('**/api/sync**', async (route) => {
+      if (!first) return route.fallback();
+      first = false;
+      await held;
+      await route.fallback();
+      setTimeout(synced, 300);
+    });
+    const patches = trackPatches(page, row.id);
+    await page.goto(`/?r=${row.id}&edit=person`);
+    // While the first sync is pending, Edit waits instead of capturing the cached version…
+    await expect(page.getByRole('heading', { name: `Edit LP-${String(row.caseNumber).padStart(4, '0')}` })).toBeVisible();
+    await expect(submit(page)).toHaveCount(0);
+    // …then opens from the cache after a few seconds, and the held sync arrives after that.
+    await expect(submit(page)).toBeVisible({ timeout: 6_000 });
+    await expect(page.getByLabel('Wearing')).toHaveValue('TEST-F grey hoodie');
+    release();
+    await firstSyncDone;
+    await expect(page.getByText('Updated by someone else')).toHaveCount(0);
+
+    await page.getByLabel('Wearing').fill('TEST-F grey hoodie, red cap');
+    await submit(page).click();
+    await expect(page).toHaveURL(new RegExp(`\\?r=${row.id}$`));
+    expect(patches).toEqual([200]);
+    expect(await apiDetail(page.request, row.id)).toMatchObject({ clothing: 'TEST-F grey hoodie, red cap', status: 'Found – Awaiting Reunion' });
+  });
+
+  test('Save right after an answer elsewhere: the 409 is resent once on the new version, no review', async ({ page }) => {
+    const name = uniqueName('answer mid-edit');
+    const row = await apiCreate(page.request, { name, clothing: 'TEST-F blue scarf' });
+    await page.goto(`/?r=${row.id}&edit=person`);
+    await expect(submit(page)).toBeVisible();
+    // No poll may bring the answer before Save: hold every delta poll from here on (the store's own
+    // fetch of one row after a 409, ?ids=, goes through).
+    await page.route('**/api/sync**', (route) => (new URL(route.request().url()).searchParams.has('ids') ? route.fallback() : undefined));
+    await answerInMedical(page.request, row as Row);
+
+    const patches = trackPatches(page, row.id);
+    await page.getByLabel('Wearing').fill('TEST-F blue scarf, white shoes');
+    await submit(page).click();
+    await expect(page).toHaveURL(new RegExp(`\\?r=${row.id}$`));
+    expect(patches).toEqual([409, 200]);
+    await expect(page.getByText('Someone else just updated this')).toHaveCount(0);
+    expect(await apiDetail(page.request, row.id)).toMatchObject({ clothing: 'TEST-F blue scarf, white shoes', status: 'Found – Awaiting Reunion' });
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+  });
 });

@@ -108,7 +108,7 @@ function PostPickerBody({ value, onDone }: { value: PostChoice | null; onDone: (
           </div>
         ) : null}
       </div>
-      <Button type="submit" size="3" highContrast mt="4" style={{ width: '100%' }} disabled={!choice}>
+      <Button type="submit" size="3" highContrast mt="4" className="lp-hit" style={{ width: '100%' }} disabled={!choice}>
         Done
       </Button>
     </form>

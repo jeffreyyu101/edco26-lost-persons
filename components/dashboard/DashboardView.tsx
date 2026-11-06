@@ -13,7 +13,7 @@ import { EXPORT_CSV_PATH, handleExportClick } from '@/components/account/export-
 import type { Stats } from '@/lib/api-types';
 import { goBack, navigate } from '@/lib/client/nav';
 import { useConnection, useEventTimezone, useNow, useStats } from '@/lib/client/store-contract';
-import { STATUS, postFull, statusMeta, toneColorVar } from '@/lib/domain';
+import { STATUS, postFilterKey, postFilterLabel, statusMeta, toneColorVar } from '@/lib/domain';
 import { formatCaseNumber } from '@/lib/format';
 import { barPercent, closedSubline, formatAgo, formatMinutes } from './dashboard-model';
 import s from './dashboard.module.css';
@@ -177,18 +177,22 @@ function Content({ stats, offline }: { stats: Stats; offline: boolean }) {
         </div>
         <div className={s.bars}>
           {stats.byPost.map((p) => {
-            const label = postFull(p.reportingLocation, p.otherLocation) || p.postShort;
+            // One filter key per bar: an Other location named like a fixed post ("Base"), or a legacy
+            // 'FA 3' row, gets its own bar, label and filter (postFilterKey).
+            const key = postFilterKey(p.reportingLocation, p.otherLocation);
+            const label = postFilterLabel(p.reportingLocation, p.otherLocation) || p.postShort;
             return (
               <button
-                key={`${p.reportingLocation}|${p.otherLocation ?? ''}`}
+                key={key}
                 type="button"
                 className={`${s.tap} ${s.bar}`}
-                onClick={() => showAll({ post: p.postShort })}
-                aria-label={`${label}: ${p.count} open`}
+                onClick={() => showAll({ post: key })}
+                // Starts with what the bar shows, "FA 3 – Kinetic 24" (WCAG 2.5.3).
+                aria-label={`${label} ${p.count} open`}
               >
                 <Text size="2" color="gray">
                   {label}
-                </Text>
+                </Text>{' '}
                 <span className={s.track} aria-hidden>
                   {p.count > 0 ? <span className={s.fill} style={{ width: `${barPercent(p.count, maxPost)}%` }} /> : null}
                   <span className={s.bv}>{p.count}</span>
@@ -232,7 +236,7 @@ function Content({ stats, offline }: { stats: Stats; offline: boolean }) {
           Export CSV
         </Button>
       ) : (
-        <Button asChild size="2" variant="soft" color="gray" style={{ width: '100%' }}>
+        <Button asChild size="2" variant="soft" color="gray" className="lp-hit" style={{ width: '100%' }}>
           <a href={EXPORT_CSV_PATH} download onClick={handleExportClick}>
             <Download size={15} aria-hidden />
             Export CSV

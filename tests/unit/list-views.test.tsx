@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { AllView, MineView, PendingView, SearchView } from '@/components/list/ListViews';
+import { switcherLabel } from '@/components/list/ViewSwitcher';
 import {
   NO_NAME,
   cardDescription,
@@ -16,8 +17,10 @@ import {
   outboxDisplay,
   queuedStepper,
   resultCount,
+  outboxRowLabel,
   rowLabel,
   searchDisplay,
+  searchRowLabel,
   snippet,
   statusSince,
   stepperModel,
@@ -163,7 +166,25 @@ describe('list helpers', () => {
     expect(minutesPhrase(0)).toBe('less than a minute');
     expect(minutesPhrase(1)).toBe('1 minute');
     expect(minutesPhrase(125)).toBe('2 hours');
-    expect(rowLabel(byCase(1012), '10:58')).toBe('Kayla Martinez, 19 F. Waiting for check. FA 3, LP-1012. Logged 10:58.');
+    expect(rowLabel(byCase(1012), '10:58')).toBe('Kayla Martinez, 19 F, 10:58. Waiting for check, FA 3, LP-1012.');
+  });
+
+  it('row names start with the visible text, in the order shown (WCAG 2.5.3)', () => {
+    // axe's label-content-name-mismatch: the visible words must be a contiguous run of the name's words.
+    const words = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim().split(' ').filter(Boolean);
+    const startsWith = (name: string, visible: string) => {
+      const n = words(name);
+      const v = words(visible);
+      return v.every((w, i) => n[i] === w);
+    };
+    const r = byCase(1012);
+    expect(startsWith(rowLabel(r, '10:58'), `${r.name} 19 F 10:58 Waiting for check · FA 3 · LP-1012`)).toBe(true);
+    const d = outboxDisplay(outboxItem());
+    expect(startsWith(outboxRowLabel(d, '11:02'), `${d.name} ${d.ageGender} 11:02 Waiting to send · FA 3 · Not sent`)).toBe(true);
+    expect(startsWith(searchRowLabel(r, '…pink braids'), `${r.name} 19 F LP-1012 …pink braids Waiting for check`)).toBe(true);
+    expect(startsWith(searchRowLabel(r, ''), `${r.name} 19 F LP-1012 Waiting for check`)).toBe(true);
+    expect(switcherLabel('Pending', 4)).toBe('Pending 4, change view');
+    expect(switcherLabel('All requests', null)).toBe('All requests, change view');
   });
 });
 
@@ -194,14 +215,16 @@ describe('search, filter and sort', () => {
     expect(searchRequests(rows, '   ')).toEqual([]);
   });
 
-  it('All is newest first; the status filter treats legacy Bring friend as In medical; post matches postShort', () => {
+  it('All is newest first; the status filter treats legacy Bring friend as In medical; post matches the post key', () => {
     const all = sortNewestFirst(rows);
     expect(all[0]?.caseNumber).toBe(1013);
     for (let i = 1; i < all.length; i++) expect(Date.parse(all[i - 1]!.createdAt)).toBeGreaterThanOrEqual(Date.parse(all[i]!.createdAt));
     expect(filterAll(all, { status: STATUS.inMedical, post: null }).map((r) => r.caseNumber)).toEqual([1007, 1004, 1005]);
     expect(filterAll(all, { status: STATUS.notInMedical, post: null }).map((r) => r.caseNumber)).toEqual([1009, 1008]);
-    expect(filterAll(all, { status: null, post: 'fa 3' }).every((r) => r.postShort === 'FA 3')).toBe(true);
-    expect(filterAll(all, { status: STATUS.inMedical, post: 'FA 3' }).map((r) => r.caseNumber)).toEqual([1004, 1005]);
+    const fa3 = filterAll(all, { status: null, post: 'FA 3 – Kinetic' });
+    expect(fa3.length).toBeGreaterThan(0);
+    expect(fa3.every((r) => r.reportingLocation === 'FA 3 – Kinetic')).toBe(true);
+    expect(filterAll(all, { status: STATUS.inMedical, post: 'FA 3 – Kinetic' }).map((r) => r.caseNumber)).toEqual([1004, 1005]);
   });
 
   it('Pending: Friend coming and Waiting for check, both oldest first', () => {
@@ -261,7 +284,7 @@ describe('list views render', () => {
     const store = storeWith((s) => ({ ...s, outbox: [outboxItem()] }));
     const html = render(store, <AllView status={STATUS.notInMedical} post={null} />);
     expect(html).toContain('data-testid="status-chip"');
-    expect(html).toContain('Not in medical: 2 shown. Clear this filter');
+    expect(html).toContain('Not in medical 2 shown. Clear this filter');
     expect(html).not.toContain('Waiting to send');
   });
 

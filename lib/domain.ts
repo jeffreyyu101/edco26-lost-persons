@@ -368,6 +368,54 @@ export function postFull(reportingLocation: string | null | undefined, otherLoca
 }
 
 // ---------------------------------------------------------------------------------------------------
+// Post filter (?post=, A22) — one key per dashboard "Open by post" bar (A31)
+// ---------------------------------------------------------------------------------------------------
+// postShort can't be the key: an Other location typed as "Base" and the fixed Base post share it, and so
+// do a legacy 'FA 3' row and FA 3 – Kinetic. The key is the post value itself, or "Other:<where>" for
+// Other, and matches rows exactly the way lp_stats groups them: the value as stored (legacy values too),
+// and Other by other_location, trimmed and case-insensitive.
+
+const OTHER_KEY_PREFIX = `${OTHER_POST}:`;
+
+/** "FA 3 – Kinetic", "Base", a legacy value as stored, or "Other:Gate 9". */
+export function postFilterKey(reportingLocation: string | null | undefined, otherLocation?: string | null): string {
+  if (!reportingLocation) return '';
+  if (reportingLocation === OTHER_POST) return `${OTHER_KEY_PREFIX}${otherLocation?.trim() ?? ''}`;
+  return reportingLocation;
+}
+
+/** The post a filter key stands for. */
+export function parsePostFilterKey(key: string): { reportingLocation: string; otherLocation: string | null } {
+  if (key.startsWith(OTHER_KEY_PREFIX)) return { reportingLocation: OTHER_POST, otherLocation: key.slice(OTHER_KEY_PREFIX.length).trim() };
+  return { reportingLocation: key, otherLocation: null };
+}
+
+/**
+ * What a post bar and its filter chip say: the fixed and legacy posts by name ("FA 3 – Kinetic", "FA 3"),
+ * and Other locations as "Other · Gate 9", so an Other location can never read like a fixed post.
+ */
+export function postFilterLabel(reportingLocation: string | null | undefined, otherLocation?: string | null): string {
+  if (!reportingLocation) return '';
+  if (reportingLocation === OTHER_POST) {
+    const where = otherLocation?.trim();
+    return where ? `${OTHER_POST} · ${where}` : OTHER_POST;
+  }
+  return reportingLocation;
+}
+
+/** True when the row is at the post the key stands for (see postFilterKey). */
+export function matchesPostFilter(
+  row: { reportingLocation: string | null | undefined; otherLocation?: string | null },
+  key: string,
+): boolean {
+  const want = parsePostFilterKey(key);
+  if (want.reportingLocation === OTHER_POST) {
+    return row.reportingLocation === OTHER_POST && (row.otherLocation ?? '').trim().toLowerCase() === (want.otherLocation ?? '').toLowerCase();
+  }
+  return row.reportingLocation === want.reportingLocation;
+}
+
+// ---------------------------------------------------------------------------------------------------
 // Fields and limits (validated in zod and in SQL lp_clean_fields)
 // ---------------------------------------------------------------------------------------------------
 

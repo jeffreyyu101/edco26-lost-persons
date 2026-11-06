@@ -26,6 +26,7 @@ import {
 } from '@/lib/client/selectors';
 import { createStubStore } from '@/lib/client/store-stub';
 import { STUB_SESSION, stubRows } from '@/lib/client/stub-data';
+import { parsePostFilterKey, postFilterKey, postFilterLabel, postShort } from '@/lib/domain';
 import { createRequestSchema, requestPatchSchema } from '@/lib/validation';
 
 const NOW = Date.parse('2026-11-07T03:10:00Z');
@@ -128,7 +129,44 @@ describe('selectors', () => {
     expect(sorted[0]?.caseNumber).toBe(1013);
     expect(sorted.at(-1)?.caseNumber).toBe(993);
     expect(filterAll(rows, { status: 'Found – Awaiting Reunion', post: null }).map((r) => r.caseNumber).sort()).toEqual([1004, 1005, 1007]);
-    expect(filterAll(rows, { status: null, post: 'info booth' }).map((r) => r.caseNumber)).toEqual([997]);
+    expect(filterAll(rows, { status: null, post: 'Other:info booth' }).map((r) => r.caseNumber)).toEqual([997]);
+  });
+
+  it('filters by post key: an Other location named like a fixed post, or a legacy value, is its own post', () => {
+    const at = (n: number, reportingLocation: string, otherLocation: string | null): RequestSummary => ({
+      ...byCase(1013),
+      id: `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
+      caseNumber: n,
+      reportingLocation,
+      otherLocation,
+      postShort: postShort(reportingLocation, otherLocation),
+    });
+    const base = at(1, 'Base', null);
+    const otherBase = at(2, 'Other', 'Base');
+    const otherBaseCase = at(3, 'Other', ' base ');
+    const fa3 = at(4, 'FA 3 – Kinetic', null);
+    const legacyFa3 = at(5, 'FA 3', null);
+    const list = [base, otherBase, otherBaseCase, fa3, legacyFa3];
+    // The old postShort match would have put 1 and 2 (and 4 and 5) under one bar.
+    expect(new Set(list.map((r) => r.postShort)).size).toBe(3);
+    const ids = (post: string) => filterAll(list, { status: null, post }).map((r) => r.caseNumber);
+    expect(ids(postFilterKey('Base', null))).toEqual([1]);
+    expect(ids(postFilterKey('Other', 'Base'))).toEqual([2, 3]);
+    expect(ids(postFilterKey('FA 3 – Kinetic', null))).toEqual([4]);
+    expect(ids(postFilterKey('FA 3', null))).toEqual([5]);
+    // Each key survives the URL round trip (?post=) unchanged.
+    for (const r of list) {
+      const key = postFilterKey(r.reportingLocation, r.otherLocation);
+      const view = parseView(new URLSearchParams(hrefFor({ post: key }).slice(2)));
+      expect(view).toEqual({ name: 'all', status: null, post: key.trim() });
+    }
+    // Labels never read like another post.
+    expect(postFilterLabel('Base', null)).toBe('Base');
+    expect(postFilterLabel('Other', 'Base')).toBe('Other · Base');
+    expect(postFilterLabel('FA 3 – Kinetic', null)).toBe('FA 3 – Kinetic');
+    expect(postFilterLabel('FA 3', null)).toBe('FA 3');
+    expect(postFilterLabel('Other', '  ')).toBe('Other');
+    expect(parsePostFilterKey(postFilterKey('Other', 'Gate 9'))).toEqual({ reportingLocation: 'Other', otherLocation: 'Gate 9' });
   });
 
   it('groups Pending: friend coming then waiting, oldest first', () => {

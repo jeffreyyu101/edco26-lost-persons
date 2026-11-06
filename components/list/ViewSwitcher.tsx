@@ -28,6 +28,11 @@ export const VIEWS = {
 
 const ORDER = ['all', 'pending', 'mine'] as const;
 
+/** The switcher's name starts with what it shows, "Pending 4" (WCAG 2.5.3), then what it does. */
+export function switcherLabel(title: string, count: number | null): string {
+  return count === null ? `${title}, change view` : `${title} ${count}, change view`;
+}
+
 export function ViewSwitcher({ view, counts, onSelect, children }: ViewSwitcherProps) {
   const { title, Icon } = VIEWS[view];
   return (
@@ -35,9 +40,14 @@ export function ViewSwitcher({ view, counts, onSelect, children }: ViewSwitcherP
       <div className={s.vrow}>
         <DropdownMenu.Root>
           <DropdownMenu.Trigger>
-            <button type="button" className={s.vsw} aria-label={`Showing ${title}. Change`} data-testid="view-switcher">
+            <button
+              type="button"
+              className={`${s.vsw} lp-hit`}
+              aria-label={switcherLabel(title, counts ? counts[view] : null)}
+              data-testid="view-switcher"
+            >
               <Icon size={16} strokeWidth={1.75} aria-hidden />
-              <span className={s.vtitle}>{title}</span>
+              <span className={s.vtitle}>{title}</span>{' '}
               {counts ? (
                 <span className={s.vc}>{counts[view]}</span>
               ) : (

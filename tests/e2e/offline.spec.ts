@@ -1,6 +1,7 @@
 import { deflateSync } from 'node:zlib';
 import { expect, test, type APIRequestContext, type Page, type Route } from '@playwright/test';
 import { addSessionCookie } from './helpers/session';
+import { syncRows } from './helpers/sync';
 
 // Offline, lie-fi and service-worker gates (spec §7 Service worker "Gate", §9.4, v2.1 A13/A15/A17).
 // Runs only against a production build (`npm run build:test`): the service worker registers only there.
@@ -63,7 +64,8 @@ function syntheticPng(width = 96, height = 128): Buffer {
 const submit = (page: Page) => page.getByTestId('request-form-submit');
 const form = (page: Page) => page.getByTestId('request-form');
 const personName = (page: Page) => page.getByRole('group', { name: 'Missing person' }).getByLabel('Name', { exact: true });
-const queuedRow = (page: Page, name: string) => page.getByRole('group', { name: new RegExp(`^${name}\\. Waiting to send\\.`) });
+// The row's name starts with what it shows: "<name>, 7:03. Waiting to send, FA 3, Not sent."
+const queuedRow = (page: Page, name: string) => page.getByRole('group', { name: new RegExp(`^${name}, [^.]+\\. Waiting to send, `) });
 const updateToast = (page: Page) => page.locator('.lp-toast').filter({ hasText: 'Update ready' });
 /** The controlling worker's URL ('' while none, or while the page is between documents during a reload). */
 const controllerUrl = (page: Page) => page.evaluate(() => navigator.serviceWorker.controller?.scriptURL ?? '').catch(() => '');
@@ -76,9 +78,7 @@ interface Row {
 
 /** Rows with this exact name, read through the API with the same session (not affected by setOffline). */
 async function rowsNamed(request: APIRequestContext, name: string): Promise<Row[]> {
-  const res = await request.get('/api/sync');
-  expect(res.ok()).toBe(true);
-  return ((await res.json()) as { rows: Row[] }).rows.filter((r) => r.name === name);
+  return (await syncRows<Row>(request)).filter((r) => r.name === name);
 }
 
 async function photoCount(request: APIRequestContext, id: string): Promise<number> {

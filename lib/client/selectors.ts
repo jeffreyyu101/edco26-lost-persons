@@ -2,7 +2,7 @@
 // store-contract.ts. No React, no I/O.
 // FROZEN after Phase 1a: later phases may ADD exports, never change existing ones.
 import type { OutboxItem, RequestSummary } from '../api-types';
-import { STATUS, isInMedical, postFull, sameStaff } from '../domain';
+import { STATUS, isInMedical, matchesPostFilter, postFull, sameStaff } from '../domain';
 import { formatCaseNumber, parseCaseNumberQuery } from '../format';
 import type { Overlay } from './store-contract';
 
@@ -34,18 +34,21 @@ export function sortNewestFirst(rows: readonly RequestSummary[]): RequestSummary
 export interface AllFilter {
   /** Database status value; In medical also matches the legacy Bring-friend status. */
   status: string | null;
-  /** Matches postShort, case-insensitive. */
+  /**
+   * A post filter key (domain.postFilterKey): the post value, or "Other:<where>". Matches the rows one
+   * dashboard bar counts, never a different post with the same short form.
+   */
   post: string | null;
 }
 
 export function filterAll(rows: readonly RequestSummary[], filter: AllFilter): RequestSummary[] {
-  const post = filter.post?.trim().toLowerCase() || null;
+  const post = filter.post?.trim() || null;
   return rows.filter((r) => {
     if (filter.status) {
       const ok = filter.status === STATUS.inMedical ? isInMedical(r.status) : r.status === filter.status;
       if (!ok) return false;
     }
-    if (post && r.postShort.toLowerCase() !== post) return false;
+    if (post && !matchesPostFilter(r, post)) return false;
     return true;
   });
 }

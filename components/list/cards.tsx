@@ -11,7 +11,6 @@ import { navigate } from '@/lib/client/nav';
 import { STATUS, ageGender, statusMeta, waitTone } from '@/lib/domain';
 import { formatCaseNumber, formatDuration, minutesSince } from '@/lib/format';
 import {
-  DIM_OPACITY,
   cardDescription,
   displayName,
   isClosed,
@@ -26,8 +25,6 @@ import {
   type StepperModel,
 } from './list-helpers';
 import s from './list.module.css';
-
-const dim = (closed: boolean): CSSProperties | undefined => (closed ? { opacity: DIM_OPACITY } : undefined);
 
 // ---------------------------------------------------------------------------------------------------
 // Thumbnails
@@ -99,10 +96,14 @@ function OutboxThumb({ item }: { item: OutboxItem }) {
 // Pieces
 // ---------------------------------------------------------------------------------------------------
 
-/** Wait badge: grey under 10 min, amber 10–19, red at 20 or more (requests.html Wait). */
+/**
+ * Wait badge: grey under 10 min, amber 10–19, red at 20 or more (requests.html Wait). Amber and red use
+ * the scale's step 12 for the text: step 11 on its own tint is under 4.5:1 (spec §7).
+ */
 export function WaitBadge({ minutes }: { minutes: number }) {
+  const tone = waitTone(minutes);
   return (
-    <Badge size="1" variant="soft" color={waitTone(minutes)} style={{ flex: 'none' }}>
+    <Badge size="1" variant="soft" color={tone} highContrast={tone !== 'gray'} style={{ flex: 'none' }}>
       <Clock size={12} strokeWidth={1.75} aria-hidden className={s.badgeIcon} />
       {formatDuration(minutes)}
     </Badge>
@@ -213,7 +214,7 @@ export const ComingCard = memo(function ComingCard({ row, now, offline, onTap }:
           variant="soft"
           color="gray"
           highContrast
-          className={s.actions}
+          className={`${s.actions} ${s.answer} lp-hit`}
           {...offlineProps(offline)}
           aria-describedby={offline ? `${nameId} ${reasonId}` : nameId}
           onClick={() => onTap(row.id, STATUS.reunited, 'reunite')}
@@ -258,6 +259,7 @@ export const CheckCard = memo(function CheckCard({ row, now, offline, onTap }: A
           size="2"
           variant="soft"
           color="gray"
+          className={`${s.answer} lp-hit`}
           {...offlineProps(offline)}
           aria-describedby={describedBy}
           onClick={() => onTap(row.id, STATUS.notInMedical, 'answer')}
@@ -268,6 +270,7 @@ export const CheckCard = memo(function CheckCard({ row, now, offline, onTap }: A
         <Button
           size="2"
           color="green"
+          className={`${s.answer} lp-hit lp-solid-accent`}
           {...offlineProps(offline)}
           aria-describedby={describedBy}
           onClick={() => onTap(row.id, STATUS.inMedical, 'answer')}
@@ -295,9 +298,8 @@ export const MineCard = memo(function MineCard({ row, now, freshTone }: { row: R
   return (
     <Card
       size="2"
-      className={`${s.card} ${freshTone ? s.fresh : ''}`}
+      className={`${s.card} ${freshTone ? s.fresh : ''} ${closed ? s.dimCard : ''}`}
       data-tone={freshTone ?? undefined}
-      style={dim(closed)}
       data-testid="mine-card"
     >
       <OpenButton id={row.id} label={label} />

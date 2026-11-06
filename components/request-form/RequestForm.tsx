@@ -221,7 +221,7 @@ export function RequestForm(props: RequestFormProps) {
   return (
     <div className="lp-rf" data-mode={mode} data-testid="request-form">
       <header className="lp-rf-nav">
-        <Button type="button" variant="ghost" color="gray" size="2" onClick={props.onCancel} disabled={busy}>
+        <Button type="button" variant="ghost" color="gray" size="2" className="lp-hit" onClick={props.onCancel} disabled={busy}>
           Cancel
         </Button>
         <Heading as="h1" size="3" weight="medium" className="lp-rf-title">
@@ -262,8 +262,10 @@ export function RequestForm(props: RequestFormProps) {
                 <span className="lp-rf-lv">
                   <Text size="1" color="gray">
                     Reporting from
-                  </Text>
-                  <Text size="3" weight="medium" color={postMissing ? 'amber' : undefined}>
+                  </Text>{' '}
+                  {/* Step 12 amber on the amber highlight: step 11 there is ~4.2:1 (spec §7). The {' '}
+                      keeps "Reporting from" and the post apart as words for the aria-label match. */}
+                  <Text size="3" weight="medium" color={postMissing ? 'amber' : undefined} highContrast={postMissing}>
                     {postMissing ? 'Choose post' : postLabel}
                   </Text>
                 </span>
@@ -358,6 +360,7 @@ export function RequestForm(props: RequestFormProps) {
                           <SegmentedControl.Item
                             key={g}
                             value={g}
+                            className="lp-hit"
                             // Tapping the chosen gender again clears it (Radix keeps one selected).
                             onClick={() => {
                               if (values.gender === g) set('gender', '');
@@ -425,7 +428,7 @@ export function RequestForm(props: RequestFormProps) {
                           variant="soft"
                           color="gray"
                           radius="full"
-                          className="lp-rf-chip"
+                          className="lp-rf-chip lp-hit"
                           {...chipHandlers(chip)}
                         >
                           {chip}
@@ -441,6 +444,7 @@ export function RequestForm(props: RequestFormProps) {
                   size="1"
                   variant="soft"
                   color="amber"
+                  highContrast
                   radius="full"
                   className="lp-rf-dup"
                   onClick={() => navigate({ r: props.duplicateOf?.id })}
@@ -523,7 +527,7 @@ export function RequestForm(props: RequestFormProps) {
             <>
               <button
                 type="button"
-                className="lp-rf-more"
+                className="lp-rf-more lp-hit"
                 aria-expanded={showMore}
                 aria-controls={id('more')}
                 onClick={() => {
@@ -570,7 +574,7 @@ export function RequestForm(props: RequestFormProps) {
       <footer className="lp-rf-foot">
         <div className="lp-rf-foot-in">
           {props.onDiscard ? (
-            <Button type="button" size="3" variant="soft" color="red" onClick={props.onDiscard} disabled={busy}>
+            <Button type="button" size="3" variant="soft" color="red" className="lp-hit" onClick={props.onDiscard} disabled={busy}>
               Discard
             </Button>
           ) : null}
@@ -581,6 +585,7 @@ export function RequestForm(props: RequestFormProps) {
             disabled={props.submitDisabled || busy}
             loading={busy}
             onClick={props.onSubmit}
+            className="lp-hit"
             style={{ width: '100%' }}
             data-testid="request-form-submit"
           >

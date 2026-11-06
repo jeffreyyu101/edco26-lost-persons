@@ -7,16 +7,38 @@ import { Dialog, VisuallyHidden } from '@radix-ui/themes';
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import styles from './ui.module.css';
 
-export interface SheetProps {
+interface SheetBase {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Always required for screen readers; shown as the sheet heading unless hideTitle. */
-  title: string;
-  hideTitle?: boolean;
-  /** Optional screen-reader description. */
-  description?: string;
   children: ReactNode;
 }
+
+export type SheetProps = SheetBase &
+  (
+    | {
+        /** Always required for screen readers; shown as the sheet heading unless hideTitle. */
+        title: string;
+        hideTitle?: boolean;
+        /** Optional screen-reader description. */
+        description?: string;
+        titleInContent?: never;
+      }
+    | {
+        /**
+         * The children render the visible heading as <SheetTitle> (and any visible description line as
+         * <SheetDescription>), which name and describe the dialog. Nothing is repeated in hidden text.
+         */
+        titleInContent: true;
+        title?: never;
+        hideTitle?: never;
+        description?: never;
+      }
+  );
+
+/** The sheet's visible heading, when the content lays it out itself (Sheet titleInContent). */
+export const SheetTitle = Dialog.Title;
+/** A visible line that describes the sheet (Sheet titleInContent). */
+export const SheetDescription = Dialog.Description;
 
 /** Height of the on-screen keyboard (0 when closed or unknown). */
 function useKeyboardInset(active: boolean): number {
@@ -37,14 +59,17 @@ function useKeyboardInset(active: boolean): number {
   return inset;
 }
 
-export function Sheet({ open, onOpenChange, title, hideTitle, description, children }: SheetProps) {
+export function Sheet(props: SheetProps) {
+  const { open, onOpenChange, title, hideTitle, description, titleInContent, children } = props;
   const keyboard = useKeyboardInset(open);
   const style = { '--lp-kb': `${keyboard}px` } as CSSProperties;
+  // Radix points aria-describedby at a Description it finds; without one, say so (no console warning).
+  const describedBy = description || titleInContent ? {} : { 'aria-describedby': undefined };
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content className={`lp-sheet ${styles.sheet}`} style={style} {...(description ? {} : { 'aria-describedby': undefined })}>
+      <Dialog.Content className={`lp-sheet ${styles.sheet}`} style={style} {...describedBy}>
         <div className={styles.handle} aria-hidden />
-        {hideTitle ? (
+        {titleInContent ? null : hideTitle ? (
           <VisuallyHidden>
             <Dialog.Title>{title}</Dialog.Title>
           </VisuallyHidden>

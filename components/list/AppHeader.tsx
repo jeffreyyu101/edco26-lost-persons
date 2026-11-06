@@ -2,7 +2,7 @@
 // List-view header (requests.html .top): the title "Is my friend in medical?", the live dot (tap to sync
 // now; amber offline or when the log can't be reached, grey while loading), then search, the bell and the
 // avatar (account menu, owned by components/account).
-import { Flex, Heading, IconButton } from '@radix-ui/themes';
+import { Heading, IconButton } from '@radix-ui/themes';
 import { BellOff, BellRing, Search } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { Connection } from '@/lib/client/store-contract';
@@ -57,7 +57,7 @@ export function AppHeader({ connection, syncing, onSyncNow, onOpenSearch, bellOn
           <span className={s.live} data-state={state} />
         </button>
       </div>
-      <Flex align="center" gap="4" flexShrink="0">
+      <div className={s.icons}>
         <IconButton className={s.hit} variant="ghost" color="gray" aria-label="Search" onClick={onOpenSearch}>
           <Search {...ICON} />
         </IconButton>
@@ -74,7 +74,7 @@ export function AppHeader({ connection, syncing, onSyncNow, onOpenSearch, bellOn
           {bellOn ? <BellRing {...ICON} /> : <BellOff {...ICON} />}
         </IconButton>
         {account}
-      </Flex>
+      </div>
     </header>
   );
 }

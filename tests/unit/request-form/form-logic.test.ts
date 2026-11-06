@@ -3,7 +3,7 @@
 // Synthetic data only.
 import { describe, expect, it, vi } from 'vitest';
 import type { RequestSummary } from '@/lib/api-types';
-import { EMPTY_FORM_VALUES, toPatch, type RequestFormValues } from '@/lib/client/form-values';
+import { EMPTY_FORM_VALUES, formValuesFromRequest, toPatch, type RequestFormValues } from '@/lib/client/form-values';
 import { LIMITS, STATUS, isUuid } from '@/lib/domain';
 import {
   MORE_FIELDS,
@@ -11,10 +11,12 @@ import {
   changedKeys,
   findDuplicate,
   lastSeenWithChip,
+  legacyPostOf,
   moreFieldsFor,
   moreStartsOpen,
   nameKey,
   newUuid,
+  onlyOutsideFormChanged,
   photoIntake,
   rebaseOnConflict,
   sameDuplicate,
@@ -203,6 +205,31 @@ describe('409 review (rebaseOnConflict)', () => {
 
   it('lists nothing when only the status or photos changed', () => {
     expect(rebaseOnConflict(started, started, started, 'all')).toEqual({ values: started, theirs: [] });
+  });
+});
+
+describe('edit carries on silently past changes outside the form (A10, onlyOutsideFormChanged)', () => {
+  // Edit opened from the phone's cache at v3; the first sync then brings a newer version.
+  const cached = row({ name: 'TEST-F Dana Kim', firstName: 'TEST-F Dana', lastName: 'Kim', clothing: 'Red hoodie', rowVersion: 3 });
+  const base = formValuesFromRequest(cached);
+  const legacy = legacyPostOf(cached);
+
+  it('a liaison answer, a reunion or a photo is not a reason to review', () => {
+    const answered = { ...cached, status: STATUS.inMedical, foundAt: '2026-11-06T23:05:00Z', reunionStartedAt: '2026-11-06T23:05:00Z', updatedBy: 'TEST-F Rae · Medical', rowVersion: 4 };
+    expect(onlyOutsideFormChanged(base, legacy, answered)).toBe(true);
+    expect(onlyOutsideFormChanged(base, legacy, { ...answered, status: STATUS.reunited, closedAt: '2026-11-06T23:20:00Z', rowVersion: 5 })).toBe(true);
+    expect(onlyOutsideFormChanged(base, legacy, { ...cached, firstPhotoId: '11111111-1111-4111-8111-111111111111', photoCount: 1, rowVersion: 4 })).toBe(true);
+  });
+
+  it('any field the form holds is reviewed, the post and a legacy post included', () => {
+    expect(onlyOutsideFormChanged(base, legacy, { ...cached, clothing: 'Blue hoodie', rowVersion: 4 })).toBe(false);
+    expect(onlyOutsideFormChanged(base, legacy, { ...cached, contactPhone: '407 555 0100', rowVersion: 4 })).toBe(false);
+    expect(onlyOutsideFormChanged(base, legacy, { ...cached, reportingLocation: 'Other', otherLocation: 'Gate 9', rowVersion: 4 })).toBe(false);
+    const old = row({ reportingLocation: 'FA 3', postShort: 'FA 3' });
+    expect(legacyPostOf(old)).toBe('FA 3');
+    // Legacy 'FA 3' → canonical FA 3 – Kinetic: the form shows a different post now.
+    expect(onlyOutsideFormChanged(formValuesFromRequest(old), legacyPostOf(old), { ...old, reportingLocation: 'FA 3 – Kinetic' })).toBe(false);
+    expect(onlyOutsideFormChanged(formValuesFromRequest(old), legacyPostOf(old), { ...old, status: STATUS.notInMedical })).toBe(true);
   });
 });
 

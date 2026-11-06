@@ -16,9 +16,6 @@ import { formatCaseNumber } from '@/lib/format';
 /** Shown where a request has no name (a photo or description alone is a valid request). */
 export const NO_NAME = 'No name';
 
-/** Rows and cards in the `closed` bucket are dimmed to this opacity (A3: closed only). */
-export const DIM_OPACITY = 0.55;
-
 /** Cards that changed this recently get the "fresh" outline (requests.html .fresh). */
 export const FRESH_MS = 60_000;
 
@@ -242,7 +239,21 @@ export function whoPhrase(row: Pick<RequestSummary, 'name' | 'age' | 'gender'>):
   return ag ? `${displayName(row.name)}, ${ag}` : displayName(row.name);
 }
 
-/** "Kayla Martinez, 19 F. Waiting for check. FA 3, LP-1012. Logged 10:58." */
+// Row labels say the visible text first, in the order it is shown (WCAG 2.5.3 label in name: what a
+// voice-control user reads off the row is the start of its name), then anything only a screen reader needs.
+
+/** All: "Kayla Martinez, 19 F, 10:58. Waiting for check, FA 3, LP-1012." */
 export function rowLabel(row: RequestSummary, time: string): string {
-  return `${whoPhrase(row)}. ${statusMeta(row.status).label}. ${row.postShort}, ${formatCaseNumber(row.caseNumber)}. Logged ${time}.`;
+  return `${whoPhrase(row)}, ${time}. ${statusMeta(row.status).label}, ${row.postShort}, ${formatCaseNumber(row.caseNumber)}.`;
+}
+
+/** A queued request: "Kayla Martinez, 19 F, 10:58. Waiting to send, FA 3, Not sent." (+ how to fix it). */
+export function outboxRowLabel(d: OutboxDisplay, time: string): string {
+  const who = d.ageGender ? `${d.name}, ${d.ageGender}` : d.name;
+  return `${who}, ${time}. ${d.label}, ${d.post}, ${d.caseText}.${d.needsAttention ? ' Open to fix and resend.' : ''}`;
+}
+
+/** A search result: "Kayla Martinez, 19 F, LP-1012. …pink hair, glitter. Waiting for check." */
+export function searchRowLabel(row: RequestSummary, line: string): string {
+  return `${whoPhrase(row)}, ${formatCaseNumber(row.caseNumber)}.${line ? ` ${line}.` : ''} ${statusMeta(row.status).label}.`;
 }

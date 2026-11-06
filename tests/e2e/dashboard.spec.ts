@@ -20,10 +20,11 @@ async function api<T>(request: APIRequestContext, origin: string, method: 'GET' 
   return (await res.json()) as T;
 }
 
-async function createRequest(page: Page, origin: string, reportingLocation: string): Promise<RequestSummary> {
+async function createRequest(page: Page, origin: string, reportingLocation: string, otherLocation?: string): Promise<RequestSummary> {
   const { request } = await api<CreateResponse>(page.request, origin, 'POST', '/api/requests', {
     clientMutationId: randomUUID(),
     reportingLocation,
+    ...(otherLocation ? { otherLocation } : {}),
     name: unique(),
     age: 22,
     gender: 'Male',
@@ -45,7 +46,7 @@ async function numbers(page: Page) {
     open: Number(await page.getByTestId('open-count').innerText()),
     waiting: await count(page.getByTestId('legend-waiting')),
     inMedical: await count(page.getByTestId('legend-in-medical')),
-    fa4: await count(page.getByRole('button', { name: /^FA 4 – Oasis: \d+ open$/ })),
+    fa4: await count(page.getByRole('button', { name: /^FA 4 – Oasis \d+ open$/ })),
   };
 }
 
@@ -111,14 +112,52 @@ test('open counts move by the deltas of this test, and tiles, legend and bars op
   await expect(page).toHaveURL(/\?status=Found\+%E2%80%93\+Awaiting\+Reunion$/);
   await expect(page.locator(`[data-request-id="${row.id}"]`)).toBeVisible();
   await page.goBack();
-  await page.getByRole('button', { name: /^FA 4 – Oasis: \d+ open$/ }).click();
-  await expect(page).toHaveURL(/\?post=FA\+4$/);
+  await page.getByRole('button', { name: /^FA 4 – Oasis \d+ open$/ }).click();
+  await expect(page).toHaveURL(/\?post=FA\+4\+%E2%80%93\+Oasis$/);
+  await expect(page.getByTestId('post-chip')).toContainText('FA 4 – Oasis');
   await expect(page.locator(`[data-request-id="${row.id}"]`)).toBeVisible();
   await page.goBack();
 
   // Back to the list.
   await page.getByRole('button', { name: 'Back to requests' }).click();
   await expect(page.getByTestId('dashboard')).toHaveCount(0);
+});
+
+test('an Other location named like a fixed post gets its own bar and filter', async ({ context, page, baseURL }) => {
+  const origin = baseURL as string;
+  await addSessionCookie(context, FRONT);
+  const fixed = await createRequest(page, origin, 'Base');
+  const other = await createRequest(page, origin, 'Other', 'Base');
+  await page.goto('/?dashboard=1');
+  const baseBar = page.getByRole('button', { name: /^Base \d+ open$/ });
+  const otherBar = page.getByRole('button', { name: /^Other · Base \d+ open$/ });
+  await expect(baseBar).toBeVisible();
+  await expect(otherBar).toBeVisible();
+  await expect(otherBar).toContainText('Other · Base');
+
+  // Each bar lists exactly its own rows: the open ones in the list are the bar's count (closed ones at
+  // the same post are listed too, dimmed, as in any All filter).
+  const openListed = async () => {
+    await expect(page.getByTestId('request-list')).toBeVisible();
+    const labels = await page.locator('[data-testid="request-list"] [data-request-id]').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label') ?? ''));
+    return labels.filter((l) => /\. (Waiting for check|In medical)/.test(l)).length;
+  };
+  const otherCount = await count(otherBar);
+  await otherBar.click();
+  await expect(page).toHaveURL(/\?post=Other%3ABase$/);
+  await expect(page.getByTestId('post-chip')).toHaveAccessibleName(/^Other · Base \d+ shown\. Clear this filter$/);
+  await expect(page.locator(`[data-request-id="${other.id}"]`)).toBeVisible();
+  await expect(page.locator(`[data-request-id="${fixed.id}"]`)).toHaveCount(0);
+  expect(await openListed()).toBe(otherCount);
+  await page.goBack();
+
+  const baseCount = await count(baseBar);
+  await baseBar.click();
+  await expect(page).toHaveURL(/\?post=Base$/);
+  await expect(page.getByTestId('post-chip')).toHaveAccessibleName(/^Base \d+ shown\. Clear this filter$/);
+  await expect(page.locator(`[data-request-id="${fixed.id}"]`)).toBeVisible();
+  await expect(page.locator(`[data-request-id="${other.id}"]`)).toHaveCount(0);
+  expect(await openListed()).toBe(baseCount);
 });
 
 test('Export CSV downloads the log with this test’s row in it', async ({ context, page, baseURL }) => {

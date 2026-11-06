@@ -69,7 +69,13 @@ export function AccountMenu({ size = '2' }: AccountMenuProps) {
     <>
       <Popover.Root open={open} onOpenChange={setOpen}>
         <Popover.Trigger>
-          <button type="button" className={s.trigger} aria-label={name ? `Account: ${name}` : 'Account'} data-testid="account-trigger">
+          {/* The name starts with the initials the avatar shows (WCAG 2.5.3): "DK, account: Dana Kim". */}
+          <button
+            type="button"
+            className={s.trigger}
+            aria-label={name ? `${initials}, account: ${name}` : 'Account'}
+            data-testid="account-trigger"
+          >
             <Avatar size={size} radius="full" variant="solid" color="gray" highContrast fallback={initials} />
           </button>
         </Popover.Trigger>
@@ -102,7 +108,7 @@ export function AccountMenu({ size = '2' }: AccountMenuProps) {
               aria-labelledby={themeLabelId}
             >
               {THEMES.map(([value, label]) => (
-                <SegmentedControl.Item key={value} value={value}>
+                <SegmentedControl.Item key={value} value={value} className="lp-hit">
                   {label}
                 </SegmentedControl.Item>
               ))}
@@ -171,7 +177,7 @@ export function AccountMenu({ size = '2' }: AccountMenuProps) {
                 Keep
               </Button>
             </AlertDialog.Cancel>
-            <Button size="3" color="red" loading={busy} onClick={() => void signOut(true)}>
+            <Button size="3" color="red" className="lp-solid-accent" loading={busy} onClick={() => void signOut(true)}>
               Discard &amp; sign out
             </Button>
           </div>

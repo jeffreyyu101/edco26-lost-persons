@@ -215,7 +215,7 @@ function PhotoManager({ open, onOpenChange, photos, timing, canAdd, preparing, o
         <SegmentedControl.Item value="today">{PHOTO_TIMING_LABEL.today}</SegmentedControl.Item>
         <SegmentedControl.Item value="older">{PHOTO_TIMING_LABEL.older}</SegmentedControl.Item>
       </SegmentedControl.Root>
-      <Button type="button" size="3" highContrast mt="4" style={{ width: '100%' }} onClick={() => onOpenChange(false)}>
+      <Button type="button" size="3" highContrast mt="4" className="lp-hit" style={{ width: '100%' }} onClick={() => onOpenChange(false)}>
         Done
       </Button>
     </Sheet>

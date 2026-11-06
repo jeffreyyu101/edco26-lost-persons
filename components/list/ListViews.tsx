@@ -32,7 +32,7 @@ import {
   useStoreSelector,
   type StoreState,
 } from '@/lib/client/store-contract';
-import { statusMeta } from '@/lib/domain';
+import { parsePostFilterKey, postFilterLabel, statusMeta } from '@/lib/domain';
 import { formatListTime } from '@/lib/format';
 import { BellSheet, isStandalone } from './BellSheet';
 import { CheckCard, ComingCard, MineCard, OutboxCard } from './cards';
@@ -124,7 +124,7 @@ function Chrome({ view, chips, filtered = false, skeleton, children }: ChromePro
       </div>
       <main className={s.body}>{body}</main>
       {snackbar ? null : (
-        <Button className={s.fab} size="3" radius="full" highContrast onClick={() => navigate({ new: true })}>
+        <Button className={`${s.fab} lp-hit`} size="3" radius="full" highContrast onClick={() => navigate({ new: true })}>
           <Plus size={16} strokeWidth={1.75} aria-hidden /> New request
         </Button>
       )}
@@ -144,24 +144,28 @@ function Chrome({ view, chips, filtered = false, skeleton, children }: ChromePro
 export interface AllViewProps {
   /** Status filter (database value) from ?status=, shown as a chip. */
   status: string | null;
-  /** Post filter (postShort) from ?post=, shown as a chip. */
+  /** Post filter key (domain.postFilterKey) from ?post=, shown as a chip. */
   post: string | null;
 }
 
+// Chip names start with what the chip shows, "Not in medical 3" (WCAG 2.5.3); {' '} keeps the label and
+// the count apart as words without adding space to the layout.
 function FilterChips({ status, post, count }: { status: string | null; post: string | null; count: number }) {
   const statusLabel = status ? statusMeta(status).shortLabel : '';
+  const postPlace = post ? parsePostFilterKey(post) : null;
+  const postLabel = postPlace ? postFilterLabel(postPlace.reportingLocation, postPlace.otherLocation) : '';
   return (
     <div className={s.chips}>
       {status ? (
         <button
           type="button"
           className={s.chip}
-          aria-label={`${statusLabel}: ${count} shown. Clear this filter`}
+          aria-label={post ? `${statusLabel}. Clear this filter` : `${statusLabel} ${count} shown. Clear this filter`}
           onClick={() => navigate(post ? { post } : {}, { replace: true })}
           data-testid="status-chip"
         >
           <StatusGlyph status={status} size={12} />
-          <span className={s.chipLabel}>{statusLabel}</span>
+          <span className={s.chipLabel}>{statusLabel}</span>{' '}
           {post ? null : <span className={s.chipCount}>{count}</span>}
           <span className={s.chipX}>
             <X size={14} strokeWidth={2} aria-hidden />
@@ -172,12 +176,12 @@ function FilterChips({ status, post, count }: { status: string | null; post: str
         <button
           type="button"
           className={s.chip}
-          aria-label={`Post ${post}: ${count} shown. Clear this filter`}
+          aria-label={`${postLabel} ${count} shown. Clear this filter`}
           onClick={() => navigate(status ? { status } : {}, { replace: true })}
           data-testid="post-chip"
         >
           <MapPin size={13} strokeWidth={2} aria-hidden />
-          <span className={s.chipLabel}>{post}</span>
+          <span className={s.chipLabel}>{postLabel}</span>{' '}
           <span className={s.chipCount}>{count}</span>
           <span className={s.chipX}>
             <X size={14} strokeWidth={2} aria-hidden />
@@ -385,7 +389,7 @@ export function SearchView({ q }: SearchViewProps) {
               </button>
             ) : null}
           </div>
-          <Button type="button" variant="ghost" color="gray" onClick={cancel}>
+          <Button type="button" variant="ghost" color="gray" className="lp-hit" onClick={cancel}>
             Cancel
           </Button>
         </form>

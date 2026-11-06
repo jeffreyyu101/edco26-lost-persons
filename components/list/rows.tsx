@@ -16,9 +16,10 @@ import {
   isClosed,
   labelColor,
   outboxDisplay,
+  outboxRowLabel,
   rowLabel,
   searchDisplay,
-  whoPhrase,
+  searchRowLabel,
   type Ranges,
 } from './list-helpers';
 import s from './list.module.css';
@@ -40,6 +41,10 @@ export function Highlight({ text, ranges }: { text: string; ranges: Ranges }) {
   );
 }
 
+// The {' '} between the text pieces of a row render nothing (white space between flex items is dropped);
+// they keep the pieces apart as words, so the row's text reads "Kayla Martinez 19 F 10:58 …" and its
+// aria-label can start with exactly that (WCAG 2.5.3).
+
 /** One request in All: glyph · name, age/sex · time / status label · post · LP number. */
 export const RequestRow = memo(function RequestRow({ row, time }: { row: RequestSummary; time: string }) {
   const meta = statusMeta(row.status);
@@ -59,19 +64,19 @@ export const RequestRow = memo(function RequestRow({ row, time }: { row: Request
         <span className={s.l1}>
           <Text size="2" weight="medium">
             {displayName(row.name)}
-          </Text>
+          </Text>{' '}
           {ag ? (
             <Text size="2" color="gray" className={s.nowrap}>
               {ag}
             </Text>
-          ) : null}
+          ) : null}{' '}
           <span className={s.sp} />
           <span className={s.t}>{time}</span>
-        </span>
+        </span>{' '}
         <span className={s.l2}>
           <Text size="1" weight="medium" color={labelColor(meta.tone)} className={s.nowrap}>
             {meta.label}
-          </Text>
+          </Text>{' '}
           <span className={s.meta}>
             · {row.postShort} · {formatCaseNumber(row.caseNumber)}
           </span>
@@ -87,7 +92,7 @@ export const RequestRow = memo(function RequestRow({ row, time }: { row: Request
  */
 export function OutboxRow({ item, time }: { item: OutboxItem; time: string }) {
   const d = outboxDisplay(item);
-  const label = `${d.ageGender ? `${d.name}, ${d.ageGender}` : d.name}. ${d.label}. ${d.post}, ${d.caseText}. Saved ${time}.${d.needsAttention ? ' Open to fix and resend.' : ''}`;
+  const label = outboxRowLabel(d, time);
   const content = (
     <>
       <span className={s.g}>
@@ -101,19 +106,19 @@ export function OutboxRow({ item, time }: { item: OutboxItem; time: string }) {
         <span className={s.l1}>
           <Text size="2" weight="medium">
             {d.name}
-          </Text>
+          </Text>{' '}
           {d.ageGender ? (
             <Text size="2" color="gray" className={s.nowrap}>
               {d.ageGender}
             </Text>
-          ) : null}
+          ) : null}{' '}
           <span className={s.sp} />
           <span className={s.t}>{time}</span>
-        </span>
+        </span>{' '}
         <span className={s.l2}>
           <Text size="1" weight="medium" color={d.needsAttention ? 'red' : undefined} className={s.nowrap}>
             {d.label}
-          </Text>
+          </Text>{' '}
           <span className={s.meta}>
             · {d.post} · {d.caseText}
           </span>
@@ -153,7 +158,7 @@ export const SearchRow = memo(function SearchRow({ hit }: { hit: SearchHit }) {
       type="button"
       className={`${s.row} ${isClosed(row.status) ? s.muted : ''}`}
       data-request-id={row.id}
-      aria-label={`${whoPhrase(row)}. ${lp}. ${meta.label}.${d.line ? ` ${d.line}` : ''}`}
+      aria-label={searchRowLabel(row, d.line)}
       onClick={() => navigate({ r: row.id })}
     >
       <span className={s.g}>
@@ -163,22 +168,22 @@ export const SearchRow = memo(function SearchRow({ hit }: { hit: SearchHit }) {
         <span className={s.l1}>
           <Text size="2" weight="medium">
             <Highlight text={displayName(row.name)} ranges={row.name ? d.nameRanges : []} />
-          </Text>
+          </Text>{' '}
           {ag ? (
             <Text size="2" color="gray" className={s.nowrap}>
               {ag}
             </Text>
-          ) : null}
+          ) : null}{' '}
           <span className={s.sp} />
           <span className={s.t}>
             <Highlight text={lp} ranges={d.caseRanges} />
           </span>
-        </span>
+        </span>{' '}
         {d.line ? (
           <span className={s.desc}>
             <Highlight text={d.line} ranges={d.lineRanges} />
           </span>
-        ) : null}
+        ) : null}{' '}
         <span className={s.l2}>
           <Text size="1" weight="medium" color={labelColor(meta.tone)} className={s.nowrap}>
             {meta.label}

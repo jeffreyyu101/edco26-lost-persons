@@ -30,12 +30,21 @@ export function Banner({ tone, icon, children, action }: BannerProps) {
       role="status"
       className={`lp-banner ${styles.banner}`}
       data-tone={tone}
-      style={{ background: `var(--${tone}-a3)`, color: `var(--${tone}-11)` }}
+      // Step 12 text on the step-3 tint: step 11 there is ~4.2:1 for amber (spec §7: 4.5:1 in both themes).
+      style={{ background: `var(--${tone}-a3)`, color: `var(--${tone}-12)` }}
     >
       <Icon size={16} aria-hidden style={{ flex: 'none' }} />
       <span className={styles.bannerText}>{children}</span>
       {action ? (
-        <Button size="1" variant="soft" color={tone} className={styles.bannerAction} onClick={action.onClick} disabled={action.disabled}>
+        <Button
+          size="1"
+          variant="soft"
+          color={tone}
+          highContrast
+          className={`${styles.bannerAction} lp-hit`}
+          onClick={action.onClick}
+          disabled={action.disabled}
+        >
           {action.label}
         </Button>
       ) : null}

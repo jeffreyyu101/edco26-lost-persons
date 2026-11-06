@@ -438,11 +438,11 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh }: ProfileP
           ) : null}
           <div className={s.btns}>
             <AlertDialog.Cancel>
-              <Button size="3" variant="soft" color="gray" disabled={cancelState?.busy}>
+              <Button size="3" variant="soft" color="gray" className="lp-hit" disabled={cancelState?.busy}>
                 Keep
               </Button>
             </AlertDialog.Cancel>
-            <Button size="3" color="red" loading={cancelState?.busy} onClick={() => void doCancel()}>
+            <Button size="3" color="red" className="lp-hit lp-solid-accent" loading={cancelState?.busy} onClick={() => void doCancel()}>
               Cancel request
             </Button>
           </div>
@@ -522,8 +522,9 @@ function Portrait({ row, photoCount, canOpen, onOpen }: { row: RequestSummary; p
   );
   const count = photoCount === 1 ? '1 photo' : `${photoCount} photos`;
   if (canOpen) {
+    // Starts with the count the badge shows, "2 photos, open viewer" (WCAG 2.5.3).
     return (
-      <button type="button" className={s.portrait} aria-label={`Open photos (${count})`} onClick={onOpen}>
+      <button type="button" className={s.portrait} aria-label={`${count}, open viewer`} onClick={onOpen}>
         {content}
       </button>
     );
@@ -570,8 +571,10 @@ function StatusBlock({
   if (waiting) {
     sub = `Logged ${formatListTime(row.createdAt, now, timeZone)}`;
     const minutes = minutesSince(row.createdAt, now);
+    const tone = waitTone(minutes);
+    // Amber and red badges use step 12 text: step 11 on its own tint is under 4.5:1 (spec §7).
     badge = (
-      <Badge size="2" variant="soft" color={waitTone(minutes)} data-testid="wait-badge">
+      <Badge size="2" variant="soft" color={tone} highContrast={tone !== 'gray'} data-testid="wait-badge">
         <Clock size={13} aria-hidden />
         <VisuallyHidden>Waiting </VisuallyHidden>
         {formatDuration(minutes)}
@@ -588,7 +591,8 @@ function StatusBlock({
     <div className={s.status} data-tone={meta.tone} data-testid="status-block">
       <StatusGlyph status={row.status} size={18} />
       <div className={s.sx}>
-        <Text size="3" weight="medium" color={meta.tone}>
+        {/* Step 12 of the status colour on its step-3 tint: step 11 is ~4.3:1 there (spec §7). */}
+        <Text size="3" weight="medium" color={meta.tone} highContrast={meta.tone !== 'gray'}>
           {meta.label}
         </Text>
         {sub ? (
@@ -700,11 +704,12 @@ function Details({ row }: { row: RequestSummary }) {
 }
 
 function ActionButton({ action, disabled, onClick }: { action: StatusAction; disabled: boolean; onClick: () => void }) {
-  const common = { size: '3' as const, disabled, onClick };
+  // 40 px buttons with a 44 px tap target (.lp-hit); In medical in the accessible green (.lp-solid-accent).
+  const common = { size: '3' as const, disabled, onClick, className: 'lp-hit' };
   switch (action.id) {
     case 'inMedical':
       return (
-        <Button {...common} color="green">
+        <Button {...common} color="green" className="lp-hit lp-solid-accent">
           <Check size={16} aria-hidden />
           {action.label}
         </Button>

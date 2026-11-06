@@ -38,14 +38,15 @@
   right: calc(18px + env(safe-area-inset-right));
 }
 
-/* 44 px tap targets for the compact controls (theme toggle, Change, show password). */
+/* 44 px tap targets for the compact controls (theme toggle, Change, show password): each side under
+   44 px grows, centred (as .lp-hit in app/globals.css). */
 .hit {
   position: relative;
 }
 .hit::before {
   content: '';
   position: absolute;
-  inset: -6px;
+  inset: min(0px, calc((100% - 44px) / 2));
 }
 .hitSmall {
   position: relative;
@@ -94,7 +95,7 @@
   text-align: center;
   font-size: 11.5px;
   line-height: 1.45;
-  color: var(--gray-10);
+  color: var(--gray-11);
   text-wrap: balance;
 }
 

@@ -1,7 +1,7 @@
 // Pure helpers behind the request form (new / edit / needs-attention editor). No React, no I/O, so the
 // rules are unit-tested in node (tests/unit/request-form/form-logic.test.ts).
 import type { RequestSummary } from '@/lib/api-types';
-import { hasPost, parseAge, toPatch, type RequestFormValues } from '@/lib/client/form-values';
+import { formValuesFromRequest, hasPost, parseAge, toPatch, type RequestFormValues } from '@/lib/client/form-values';
 import {
   AGE_MAX,
   AGE_MIN,
@@ -9,6 +9,7 @@ import {
   MAX_PHOTOS,
   OTHER_POST,
   appendChip,
+  isPostValue,
   postFull,
   statusBucket,
   type EditSection,
@@ -128,8 +129,32 @@ const SECTION_KEYS: Readonly<Record<EditSection, ReadonlySet<string>>> = {
 
 const blankToNull = (s: string): string | null => (s.trim() === '' ? null : s.trim());
 
+/** A post value the form can't express (legacy 'FA 3', …), shown as it is until another post is picked. */
+export function legacyPostOf(row: Pick<RequestSummary, 'reportingLocation' | 'otherLocation'>): string | null {
+  return row.reportingLocation && !isPostValue(row.reportingLocation) ? postFull(row.reportingLocation, row.otherLocation) : null;
+}
+
 /**
- * A 409 on edit (A10): no automatic rebase and nothing is resent. The form shows the latest data, with the
+ * Edit concurrency (A10): true when `latest` differs from where editing started only outside the form —
+ * a status answer, a photo, the system fields — so the edit can carry on from latest's version with
+ * nothing to review (no "Updated by someone else", and Save doesn't 409). This is the common case when a
+ * reload opens Edit from the phone's cache and the first sync then brings a liaison's answer. Any
+ * difference in a field the form holds (a legacy post included) → false: that one is shown for review.
+ */
+export function onlyOutsideFormChanged(
+  base: RequestFormValues,
+  baseLegacyPost: string | null,
+  latest: RequestSummary,
+): boolean {
+  if (legacyPostOf(latest) !== baseLegacyPost) return false;
+  const now = formValuesFromRequest(latest);
+  return (Object.keys(base) as FormKey[]).every((key) => base[key] === now[key]);
+}
+
+/**
+ * A 409 on edit (A10) because someone changed a form field: no automatic rebase and nothing is resent (a
+ * 409 caused only by changes outside the form is resent once instead: onlyOutsideFormChanged). The form
+ * shows the latest data, with the
  * fields the user changed (versus the version they started from) kept as they typed them, and lists what
  * the other person changed. Saving again diffs against `latest`, so only the user's own edits are sent and
  * the other person's changes are never reverted.

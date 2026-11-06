@@ -119,7 +119,7 @@
   overflow-wrap: anywhere;
 }
 .lp-rf-their-v[data-empty] {
-  color: var(--gray-10);
+  color: var(--gray-11);
 }
 
 /* "Reporting from" — first, full width */
@@ -275,7 +275,8 @@ textarea.lp-rf-in {
 .lp-rf-sugg {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  /* Rows 44 px apart, so each 24 px chip's 44 px tap area (.lp-hit) never reaches into the next row. */
+  gap: 20px 6px;
   padding: 10px 12px 12px 14px;
 }
 .lp-rf-chip {
@@ -569,5 +570,5 @@ textarea.lp-rf-in {
   flex: 1;
   display: grid;
   place-items: center;
-  color: var(--gray-10);
+  color: var(--gray-11);
 }

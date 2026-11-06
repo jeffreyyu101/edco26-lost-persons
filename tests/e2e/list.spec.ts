@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
-import type { RequestSummary } from '../../lib/api-types';
+import type { RequestDetail, RequestSummary } from '../../lib/api-types';
 import { testBaseUrl } from '../../scripts/test-env.mjs';
+import { syntheticPng } from './helpers/png';
 import { addSessionCookie } from './helpers/session';
+import { syncRows } from './helpers/sync';
 
 // List views end to end (spec §8 List views, §9.4 "it appears in All and My requests", "a second context
 // sees it in Pending … taps In medical", "Friend coming → Reunited", "undo", "search", "a tile filtering
@@ -80,7 +82,7 @@ test('view switcher: Pending and My requests with counts, × returns to All', as
   await expect(page).toHaveURL(/\?view=pending$/);
   await expect(checkCard(page, r.id)).toBeVisible();
   await expect(checkCard(page, r.id)).toContainText(`${lp(r)} · FA 3`);
-  await expect(page.getByRole('button', { name: 'Showing Pending. Change' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Pending \d+, change view$/ })).toBeVisible();
 
   await page.getByRole('button', { name: 'Back to all requests' }).click();
   await expect(page).toHaveURL(/\/$/);
@@ -116,7 +118,9 @@ test('Pending: In medical → Friend coming, Undo, then Reunited closes it (dimm
 
   await page.getByRole('button', { name: 'Back to all requests' }).click();
   await expect(row(page, r.id)).toContainText('Reunited');
-  await expect(row(page, r.id)).toHaveCSS('opacity', '0.55');
+  // Closed rows are dimmed by their glyph and gray-11 text, never by row opacity (contrast, spec §7).
+  await expect(row(page, r.id)).toHaveCSS('opacity', '1');
+  await expect(row(page, r.id).locator(':scope > span').first()).toHaveCSS('opacity', '0.55');
 });
 
 test('Not in medical leaves Pending; ?status= shows a filter chip that clears to All', async ({ page }) => {
@@ -163,6 +167,78 @@ test('search: name with highlight and count, LP number, Cancel returns', async (
 
   await page.getByRole('button', { name: 'Cancel' }).click();
   await expect(page).toHaveURL(/\?view=pending$/);
+});
+
+test('front of house logs a request with a photo; the liaison sees it in Pending, answers In medical, and the logger is alerted', async ({
+  browser,
+  page,
+}) => {
+  test.slow();
+  // Context B (this page): the medical liaison, already on Pending before the request exists.
+  await page.goto('/?view=pending');
+  await expect(page.getByTestId('view-switcher')).toBeVisible();
+  await expect(page.getByTestId('live-dot')).toHaveAttribute('data-state', 'live', { timeout: 15_000 });
+
+  // Context A: front of house (Dispatch) logs it through the form, with a photo.
+  const foh = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
+  await addSessionCookie(foh, { staffName: `${TAG} Front`, team: 'GC/HX - Dispatch' });
+  const a = await foh.newPage();
+  const name = `${TAG} FOH Kayla`;
+  // Assigned inside the poll below (a cast keeps TypeScript from narrowing it to null here).
+  let id = null as string | null;
+  try {
+    await a.goto('/?new=1');
+    await a.getByRole('button', { name: /^Reporting from/ }).click();
+    const sheet = a.getByRole('dialog', { name: 'Reporting from' });
+    await sheet.locator('label', { hasText: 'FA 4 – Oasis' }).click();
+    await sheet.getByRole('button', { name: 'Done' }).click();
+    await a.getByRole('group', { name: 'Missing person' }).getByLabel('Name', { exact: true }).fill(name);
+    await a.getByLabel('Wearing').fill(`Synthetic ${TAG} silver jacket`);
+    await a.locator('input[type=file]').setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: syntheticPng() });
+    await expect(a.getByRole('button', { name: /^1 photo/ })).toBeVisible();
+    await a.getByTestId('request-form-submit').click();
+    await expect(a.getByText(/^LP-\d{4,} saved$/)).toBeVisible();
+    await expect(a.getByTestId('request-form')).toHaveCount(0);
+    const savedAt = Date.now();
+
+    // The row, and its photo (uploaded after the create).
+    await expect
+      .poll(async () => {
+        const rows = (await syncRows<RequestSummary>(a.request)).filter((r) => r.name === name);
+        id = rows[0]?.id ?? null;
+        return rows.length;
+      })
+      .toBe(1);
+    const created = (await (await a.request.get(`/api/requests/${id}`)).json()) as RequestDetail;
+    const lpText = lp(created);
+
+    // B sees it in Pending within 8 s of the save (one poll), and answers In medical.
+    await expect(checkCard(page, id!)).toBeVisible({ timeout: Math.max(1_000, 8_000 - (Date.now() - savedAt)) });
+    await expect(checkCard(page, id!)).toContainText(`${lpText} · FA 4`);
+    await checkCard(page, id!).getByRole('button', { name: 'In medical', exact: true }).click();
+    await expect(comingCard(page, id!)).toBeVisible();
+
+    // A, back on the list, is alerted on its next poll: their own request moved to In medical.
+    const toast = a.locator('.lp-toast').filter({ hasText: new RegExp(`${lpText} · .+ is in medical`) });
+    await expect(toast).toBeVisible({ timeout: 15_000 });
+    await expect(toast).toContainText(/LP-\d+ · .+ is in medical/);
+    await expect(toast).toContainText('Bring the friend to Main Med');
+    await expect.poll(async () => ((await (await a.request.get(`/api/requests/${id}`)).json()) as RequestDetail).photos.length).toBe(1);
+  } finally {
+    if (id) {
+      // Leave nothing open for the other specs.
+      const row = (await (await a.request.get(`/api/requests/${id}`)).json()) as RequestDetail;
+      const close =
+        row.status === 'Added'
+          ? a.request.post(`/api/requests/${id}/cancel`, { headers: { origin: BASE }, data: { expectedVersion: row.rowVersion } })
+          : a.request.post(`/api/requests/${id}/status`, {
+              headers: { origin: BASE },
+              data: { status: 'Reunited – Closed', expectedVersion: row.rowVersion, kind: 'reunite' },
+            });
+      await close.catch(() => undefined);
+    }
+    await foh.close();
+  }
 });
 
 test('a request logged elsewhere shows up within one poll; tapping the live dot syncs now', async ({ page }) => {

@@ -149,6 +149,18 @@ References: `references/mobbin-forms.png` with notes in `references/mobbin-forms
   - My requests: cards with a progress line of four dots.
   - Profile: a portrait, the name lines, the status block and the detail rows. The action buttons are placeholders too, because the right buttons depend on the status, which hasn't loaded yet.
 
+## Accessibility pass (engineering, 2026-11-06; Brian to confirm against the mockups)
+
+The spec requires 4.5:1 text contrast in both themes and 44 px tap targets. The mockup CSS misses both in a
+few places, so the build differs from the mockups here:
+
+- Secondary text (row times and meta, counts, the dashboard sub-lines, the sign-in credit line) is gray-11, not gray-10.
+- Closed rows and cards dim their text to gray-11 and fade the status icon and photo, instead of fading the whole row.
+- The solid In medical button (and the red confirm buttons) use step 11 of their colour: white text in light mode, dark text in dark mode.
+- Amber and red badges, banners, the status block label and "Choose post" use step-12 text on their tint.
+- The Pending answer buttons are 40 px tall. Every small control gets an invisible hit area of at least 44 px, so the header icons sit 14 px apart and the Last seen place chips have 20 px between rows.
+- Dashboard bars for Other locations read "Other · Gate 9", so a location typed as "Base" can't look like the Base post.
+
 ## Jeffrey's answers (2026-11-06)
 
 1. Teams are Dispatch, GCHX Base, GCHX Med Transpo and Medical.

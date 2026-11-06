@@ -110,7 +110,22 @@
   transform: scale(1.4);
 }
 
-/* 44 px touch targets for the 32–34 px icon buttons without changing their layout. */
+/* Search, the bell and the avatar. Each has a 44 px tap target, so their centres sit 44 px or more apart
+   (14 px between the boxes, no ghost-button pull-in), and no tap area reaches into its neighbour. */
+.icons {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+.icons > .hit {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+/* 44 px touch targets for the compact icon buttons without changing their layout (as .lp-hit in
+   app/globals.css: each side under 44 px grows, centred). */
 .hit {
   position: relative;
 }
@@ -118,7 +133,7 @@
 .hit::before {
   content: '';
   position: absolute;
-  inset: -6px;
+  inset: min(0px, calc((100% - 44px) / 2));
 }
 
 /* ---- View bar (.vbar / .vsw / .vmenu) ---------------------------------------------------------- */
@@ -172,7 +187,7 @@
 }
 
 .vc {
-  color: var(--gray-10);
+  color: var(--gray-11);
   font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
@@ -324,7 +339,14 @@ button.row:focus-visible {
   outline-offset: -2px;
 }
 
+/* Closed rows (A3) are dimmed without losing text contrast (spec §7: 4.5:1 in both themes): the text
+   steps down from gray-12 to gray-11 and loses its status colour, and the glyph fades. Opacity on the
+   whole row would take the secondary text under 3:1. */
 .muted {
+  color: var(--gray-11);
+}
+
+.muted .g {
   opacity: 0.55;
 }
 
@@ -365,7 +387,7 @@ button.row:focus-visible {
   flex: none;
   min-width: 24px;
   font-size: 12px;
-  color: var(--gray-10);
+  color: var(--gray-11);
   text-align: right;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -374,7 +396,7 @@ button.row:focus-visible {
 .meta {
   min-width: 0;
   font-size: 12px;
-  color: var(--gray-10);
+  color: var(--gray-11);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -456,6 +478,28 @@ button.row:focus-visible {
 .actions {
   position: relative;
   z-index: 2;
+}
+
+/* Pending answers (Not in medical, In medical, Reunited) are the liaison's main taps: 40 px tall, with
+   the .lp-hit area taking them to 44. */
+.answer {
+  --base-button-height: 40px;
+}
+
+/* A closed request's card in My requests: dimmed like .muted rows (text to gray-11, pictures fade). */
+.dimCard {
+  color: var(--gray-11);
+}
+
+.dimCard .thumb,
+.dimCard .stat > svg,
+.dimCard .dot {
+  opacity: 0.55;
+}
+
+.dimCard .st[data-step='cur'] .lb,
+.dimCard .st[data-step='pend'] .lb {
+  color: var(--gray-11);
 }
 
 .fresh {
@@ -634,7 +678,7 @@ button.row:focus-visible {
 .lb {
   font-size: 11px;
   line-height: 1;
-  color: var(--gray-10);
+  color: var(--gray-11);
   white-space: nowrap;
   max-width: 100%;
   overflow: hidden;

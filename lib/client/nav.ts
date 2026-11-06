@@ -31,7 +31,7 @@ export interface NavParams {
   view?: 'pending' | 'mine';
   /** All, filtered by a status (database value) — shown as a chip. */
   status?: string;
-  /** All, filtered by post: matches RequestSummary.postShort, case-insensitive — shown as a chip. */
+  /** All, filtered by post: a domain.postFilterKey ("FA 4 – Oasis", "Other:Gate 9") — shown as a chip. */
   post?: string;
   /** Search text. */
   q?: string;

@@ -40,12 +40,14 @@ import {
   type StoreState,
 } from '@/lib/client/store-contract';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
-import { isPostValue, isUuid, postFull, type EditSection, type PhotoTiming } from '@/lib/domain';
+import { isPostValue, isUuid, type EditSection, type PhotoTiming } from '@/lib/domain';
 import { formatCaseNumber } from '@/lib/format';
 import {
   canSaveEdit,
   findDuplicate,
+  legacyPostOf,
   newUuid,
+  onlyOutsideFormChanged,
   rebaseOnConflict,
   sameDuplicate,
   visibleErrors,
@@ -110,12 +112,12 @@ function Confirm({ open, onOpenChange, title, keepLabel, confirmLabel, onConfirm
         </AlertDialog.Title>
         <Flex gap="3" justify="end">
           <AlertDialog.Cancel>
-            <Button variant="soft" color="gray" size="3">
+            <Button variant="soft" color="gray" size="3" className="lp-hit">
               {keepLabel}
             </Button>
           </AlertDialog.Cancel>
           <AlertDialog.Action>
-            <Button color="red" size="3" onClick={onConfirm}>
+            <Button color="red" size="3" className="lp-hit lp-solid-accent" onClick={onConfirm}>
               {confirmLabel}
             </Button>
           </AlertDialog.Action>
@@ -130,7 +132,7 @@ function FormFrame({ title, children }: { title: string; children?: ReactNode })
   return (
     <div className="lp-rf" data-testid="request-form">
       <header className="lp-rf-nav">
-        <Button type="button" variant="ghost" color="gray" size="2" onClick={() => goBack({})}>
+        <Button type="button" variant="ghost" color="gray" size="2" className="lp-hit" onClick={() => goBack({})}>
           Cancel
         </Button>
         <Heading as="h1" size="3" weight="medium" className="lp-rf-title">
@@ -345,9 +347,35 @@ function NewRequest() {
 // Edit (A10, A24)
 // ---------------------------------------------------------------------------------------------------
 
+/** How long Edit, opened by a reload or a link, waits for this page's first sync before using the cache. */
+export const EDIT_FIRST_SYNC_WAIT_MS = 3_000;
+
+const selectSynced = (s: StoreState) => s.lastSyncAt !== null;
+const selectConnectionState = (s: StoreState) => s.connection;
+
+/**
+ * Edit captures where editing starts (A10), so it should start from the server's latest, not from a
+ * cached row a reload brought back: until this page has synced once, wait (briefly, and only while the
+ * log is reachable). Latches: once ready, a later connection change never unmounts the form.
+ */
+function useReadyToEdit(): boolean {
+  const synced = useStoreSelector(selectSynced);
+  const connection = useStoreSelector(selectConnectionState);
+  const [timedOut, setTimedOut] = useState(false);
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (synced || ready) return;
+    const t = window.setTimeout(() => setTimedOut(true), EDIT_FIRST_SYNC_WAIT_MS);
+    return () => window.clearTimeout(t);
+  }, [synced, ready]);
+  if (!ready && (synced || timedOut || connection !== 'live')) setReady(true);
+  return ready || synced || timedOut || connection !== 'live';
+}
+
 function EditRequest({ id, section }: { id: string; section: EditSection }) {
   const row = useRequest(id);
   const loading = useIsLoading();
+  const ready = useReadyToEdit();
   if (!row) {
     return (
       <FormFrame title="Edit details">
@@ -355,12 +383,8 @@ function EditRequest({ id, section }: { id: string; section: EditSection }) {
       </FormFrame>
     );
   }
+  if (!ready) return <FormFrame title={`Edit ${formatCaseNumber(row.caseNumber)}`} />;
   return <EditForm id={id} section={section} row={row} />;
-}
-
-/** A post value the form can't express (legacy 'FA 3', …), shown as it is until another post is picked. */
-function legacyPostOf(row: RequestSummary): string | null {
-  return row.reportingLocation && !isPostValue(row.reportingLocation) ? postFull(row.reportingLocation, row.otherLocation) : null;
 }
 
 interface EditState {
@@ -413,11 +437,23 @@ function EditForm({ id, section, row }: { id: string; section: EditSection; row:
     inFlight.current = true;
     setBusy(true);
     setFailure(null);
-    let result: MutationResult;
-    try {
-      result = await actions.updateFields(id, patch, form.baseVersion, { quiet: true });
-    } catch {
-      result = { ok: false, reason: 'failed', message: "Couldn't save — check signal and try again" };
+    const send = async (version: number): Promise<MutationResult> => {
+      try {
+        return await actions.updateFields(id, patch, version, { quiet: true });
+      } catch {
+        return { ok: false, reason: 'failed', message: "Couldn't save — check signal and try again" };
+      }
+    };
+    let version = form.baseVersion;
+    let result = await send(version);
+    if (!result.ok && result.reason === 'conflict') {
+      // Only a status or a photo moved on since editing started: nothing to review, so send once more on
+      // the newer version (the server diffs per key, so nobody's change is overwritten).
+      const latest = result.latest ?? store.getState().confirmed.get(id);
+      if (latest && latest.rowVersion !== version && onlyOutsideFormChanged(form.base, form.legacyPost, latest)) {
+        version = latest.rowVersion;
+        result = await send(version);
+      }
     }
     if (result.ok) {
       close();
@@ -428,7 +464,7 @@ function EditForm({ id, section, row }: { id: string; section: EditSection; row:
     switch (result.reason) {
       case 'conflict': {
         const latest = result.latest ?? store.getState().confirmed.get(id);
-        if (latest && latest.rowVersion !== form.baseVersion) startReview(latest);
+        if (latest && latest.rowVersion !== version) startReview(latest);
         else setReview([]);
         return;
       }
@@ -447,8 +483,11 @@ function EditForm({ id, section, row }: { id: string; section: EditSection; row:
     else close();
   };
 
-  // Someone else saved while this was open (and no 409 review is showing yet).
-  const movedOn = row.rowVersion !== form.baseVersion && !busy;
+  // A newer version that changed nothing this form holds (a status answer, a photo): carry on from it,
+  // silently. Otherwise someone else changed a field while this was open: offer the review.
+  const outsideOnly = row.rowVersion !== form.baseVersion && !busy && review === null && onlyOutsideFormChanged(form.base, form.legacyPost, row);
+  if (outsideOnly) setForm((f) => ({ ...f, baseVersion: row.rowVersion }));
+  const movedOn = row.rowVersion !== form.baseVersion && !busy && !outsideOnly;
 
   // null when there is nothing to say, so the form adds no empty notice row.
   const notice = editNotice({
