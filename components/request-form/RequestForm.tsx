@@ -248,6 +248,7 @@ export function RequestForm(props: RequestFormProps) {
         onTimingChange={mode === 'outbox' ? undefined : props.onPhotoTimingChange}
         readOnly={mode === 'outbox'}
         disabled={locked}
+        popover={desk}
       />
     );
 

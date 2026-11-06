@@ -22,7 +22,7 @@ import { CircleAlert } from 'lucide-react';
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Banner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { goBack, navigate } from '@/lib/client/nav';
+import { goBack, navigate, type NavParams } from '@/lib/client/nav';
 import {
   EMPTY_FORM_VALUES,
   canSend,
@@ -160,10 +160,24 @@ function Confirm({ open, onOpenChange, title, keepLabel, confirmLabel, onConfirm
   );
 }
 
+/**
+ * Close the view once. Esc, x and a click outside can all land before the history pop does, and a second
+ * history.back() would step out of the list behind the dialog.
+ */
+function useLeaveOnce(): (fallback?: NavParams) => void {
+  const left = useRef(false);
+  return useCallback((fallback: NavParams = {}) => {
+    if (left.current) return;
+    left.current = true;
+    goBack(fallback);
+  }, []);
+}
+
 /** The frame without a form: while loading, or when the request / job is gone. */
 function FormFrame({ title, columns = 2, children }: { title: string; columns?: 1 | 2; children?: ReactNode }) {
   const presentation = usePresentation();
-  const close = () => goBack({});
+  const leave = useLeaveOnce();
+  const close = () => leave();
   return (
     <FormSurface presentation={presentation} title={title} onCancel={close} onDismiss={close} columns={columns}>
       <div className="lp-rf-scroll lp-rf-frame" style={{ display: 'flex', flexDirection: 'column' }}>
@@ -188,6 +202,7 @@ function NewRequest() {
   const store = useAppStore();
   const { actions } = store;
   const overlay = isOverlay(usePresentation());
+  const leave = useLeaveOnce();
   const offline = useStoreSelector(selectOffline);
   const durable = useStoreSelector(selectDurable);
   const [form, setForm] = useState<NewState | null>(null);
@@ -320,12 +335,12 @@ function NewRequest() {
     // The store has already announced the outcome ("LP-1014 saved" / "Saved on this phone").
     // A definitive rejection stays in the outbox: show it in the needs-attention editor, error pointed at.
     if (result.outcome === 'needs_attention') navigate({ outbox: result.mutationId }, { replace: true });
-    else goBack({});
+    else leave();
   };
 
   const cancel = () => {
     if (hasAnyDetail(form.values, form.photos.length)) setConfirmCancel(true);
-    else void clearDraft().then(() => goBack({}));
+    else void clearDraft().then(() => leave());
   };
 
   const noStorageOffline = offline && !durable;
@@ -359,7 +374,7 @@ function NewRequest() {
         onSubmit={() => void submit()}
         onCancel={cancel}
         // Leaving keeps the draft (flushed on unmount), as the phone's back button does.
-        onDismiss={() => goBack({})}
+        onDismiss={() => leave()}
         onPostPicked={(choice) => actions.setPref('lastPost', { reportingLocation: choice.reportingLocation, otherLocation: choice.otherLocation })}
       />
       <Confirm
@@ -368,7 +383,7 @@ function NewRequest() {
         title="Discard this request?"
         keepLabel="Keep"
         confirmLabel="Discard"
-        onConfirm={() => void clearDraft().then(() => goBack({}))}
+        onConfirm={() => void clearDraft().then(() => leave())}
       />
     </>
   );
@@ -445,8 +460,9 @@ function EditForm({ id, section, row }: { id: string; section: EditSection; row:
   // Remounts the form after a review so "More details" opens when the latest data needs it.
   const [revision, setRevision] = useState(0);
   const inFlight = useRef(false);
+  const leave = useLeaveOnce();
 
-  const close = () => goBack({ r: id });
+  const close = () => leave({ r: id });
 
   const startReview = (latestRow: RequestSummary) => {
     const latestValues = formValuesFromRequest(latestRow);

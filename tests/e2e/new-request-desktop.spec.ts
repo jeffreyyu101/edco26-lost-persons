@@ -230,6 +230,46 @@ test.describe('desktop, 1440 × 900', () => {
     expect(await rowsNamed(page.request, name)).toHaveLength(0);
   });
 
+  test('opened from the app, a double Esc steps back once, to the page it was opened from', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('html[data-hydrated="true"]')).toHaveCount(1);
+    // What the shell's New request button does (lib/client/nav navigate: a fresh state, one entry deeper).
+    await page.evaluate(() => window.history.pushState({ lpDepth: 1 }, '', '/?new=1'));
+    await expect(modal(page)).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+    await expect(form(page)).toHaveCount(0);
+    await page.waitForTimeout(400);
+    const url = new URL(page.url());
+    expect(url.origin + url.pathname + url.search).toBe(`${ORIGIN}/`);
+  });
+
+  test('the photo manager drops beside the slot; removing the last photo closes it', async ({ page }) => {
+    await openNew(page);
+    await page.locator('input[type=file]').setInputFiles([
+      { name: 'a.png', mimeType: 'image/png', buffer: syntheticPng() },
+      { name: 'b.png', mimeType: 'image/png', buffer: syntheticPng(100, 140) },
+    ]);
+    const slot = page.getByRole('button', { name: /^2 photos, today/ });
+    await expect(slot).toBeVisible();
+    await slot.click();
+    const photos = page.getByRole('dialog', { name: 'Photos' });
+    await expect(photos).toBeVisible();
+    // Beside the slot, inside the window (not a sheet rising from the bottom of the screen).
+    const slotBox = await box(page, slot);
+    const popBox = await box(page, photos);
+    expect(popBox.x).toBeGreaterThanOrEqual(slotBox.x + slotBox.width);
+    expect(popBox.y + popBox.height).toBeLessThanOrEqual(900);
+
+    await photos.getByRole('radio', { name: 'Not today' }).click();
+    await expect(page.getByRole('button', { name: /^2 photos, not today/ })).toBeVisible();
+    await photos.getByRole('button', { name: 'Remove photo 2' }).click();
+    await photos.getByRole('button', { name: 'Remove photo 1' }).click();
+    await expect(photos).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Add photo' })).toBeVisible();
+    await expect(modal(page)).toBeVisible();
+  });
+
   test('Tab stays inside the modal', async ({ page }) => {
     await openNew(page);
     for (let i = 0; i < 30; i += 1) {
@@ -304,7 +344,16 @@ test.describe('accessibility', () => {
           await expect(page.getByRole('dialog', { name: 'Reporting from' })).toBeVisible();
           await settle(page);
           expect(await axeViolations(page)).toEqual([]);
+          if (size.hasTouch) expect(await smallTargets(page, '.lp-rf-pop')).toEqual([]);
           await page.keyboard.press('Escape');
+
+          await page.locator('input[type=file]').setInputFiles({ name: 'a.png', mimeType: 'image/png', buffer: syntheticPng() });
+          await page.getByRole('button', { name: /^1 photo, today/ }).click();
+          await expect(page.getByRole('dialog', { name: 'Photos' })).toBeVisible();
+          await settle(page);
+          expect(await axeViolations(page)).toEqual([]);
+          expect(await overlappingTargets(page, '.lp-rf-photos')).toEqual([]);
+          if (size.hasTouch) expect(await smallTargets(page, '.lp-rf-photos')).toEqual([]);
         });
       });
     }

@@ -1038,6 +1038,17 @@ textarea.lp-rf-in {
     min-height: 44px;
   }
 }
+/* The photo manager dropping beside the slot */
+.lp-rf-photos.lp-rf-photos {
+  padding: 12px;
+}
+.lp-rf-photos .lp-rf-tiles {
+  margin: 0;
+}
+.lp-rf-photos form > .rt-Button,
+.lp-rf-photos > .rt-Button {
+  margin-top: 12px;
+}
 
 /* A mouse needs no enlarged hit areas: the mockup's tight chip rows would otherwise overlap theirs. */
 @media (pointer: fine) {

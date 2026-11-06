@@ -3,7 +3,9 @@
 // (file input, image/*, multiple, max 3). With photos, it shows the first one, a count badge and the
 // Today / Not today tag (tap toggles), and tapping the photo opens a small sheet to add or remove photos.
 // Read-only (needs-attention editor, A33): shows the job's photos, no add / remove / toggle.
-import { Button, IconButton, SegmentedControl, Spinner } from '@radix-ui/themes';
+// In the tablet / desktop dialog (`popover`), the add / remove manager drops beside the slot instead of
+// rising from the bottom of the screen.
+import { Button, IconButton, Popover, SegmentedControl, Spinner } from '@radix-ui/themes';
 import { Camera, Plus, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Sheet } from '@/components/ui/Sheet';
@@ -35,11 +37,13 @@ export interface PhotoSlotProps {
   onTimingChange?: (timing: PhotoTiming) => void;
   readOnly?: boolean;
   disabled?: boolean;
+  /** Tablet / desktop: the photo manager is a popover beside the slot (the phone keeps its sheet). */
+  popover?: boolean;
 }
 
 const otherTiming = (t: PhotoTiming): PhotoTiming => (t === 'today' ? 'older' : 'today');
 
-export function PhotoSlot({ photos, onPhotosChange, timing, onTimingChange, readOnly, disabled }: PhotoSlotProps) {
+export function PhotoSlot({ photos, onPhotosChange, timing, onTimingChange, readOnly, disabled, popover }: PhotoSlotProps) {
   const actions = useActions();
   const fileRef = useRef<HTMLInputElement>(null);
   const [preparing, setPreparing] = useState(false);
@@ -94,29 +98,59 @@ export function PhotoSlot({ photos, onPhotosChange, timing, onTimingChange, read
       ? `${count} ${count === 1 ? 'photo' : 'photos'}, ${timingLabel.toLowerCase()}`
       : `${count} ${count === 1 ? 'photo' : 'photos'}, ${timingLabel.toLowerCase()}. Add or remove`;
 
-  return (
+  const manager = {
+    photos,
+    timing,
+    canAdd,
+    preparing,
+    onAdd: pick,
+    onRemove: (photoId: string) => {
+      const next = photos.filter((p) => p.photoId !== photoId);
+      onPhotosChange?.(next);
+      if (next.length === 0) setManagerOpen(false);
+    },
+    onTimingChange: (t: PhotoTiming) => onTimingChange?.(t),
+  };
+  const asPopover = !!popover && !readOnly;
+
+  // Popover mode: the slot is the popover's trigger. An empty slot opens the file picker instead (its
+  // preventDefault stops the trigger's toggle), and only a slot with photos announces a popup.
+  const noPopup = asPopover && count === 0 ? { 'aria-haspopup': undefined, 'aria-expanded': undefined, 'aria-controls': undefined } : {};
+  const slotButton = (
+    <button
+      type="button"
+      className="lp-rf-slot"
+      data-has={count > 0 ? '' : undefined}
+      data-readonly={readOnly ? '' : undefined}
+      aria-label={slotLabel}
+      aria-disabled={readOnly || disabled || undefined}
+      {...noPopup}
+      onClick={(e) => {
+        if (readOnly || disabled) {
+          e.preventDefault();
+          return;
+        }
+        if (count === 0) {
+          e.preventDefault();
+          pick();
+        } else if (!asPopover) {
+          setManagerOpen(true);
+        }
+      }}
+    >
+      {first ? <BlobImage blob={first.thumbBlob} alt="" /> : null}
+      {preparing ? <Spinner size="2" /> : count === 0 ? <Camera size={20} strokeWidth={1.75} aria-hidden /> : null}
+      {count > 0 ? (
+        <span className="lp-rf-cnt" aria-hidden>
+          {count}
+        </span>
+      ) : null}
+    </button>
+  );
+
+  const slot = (
     <div className="lp-rf-slotw">
-      <button
-        type="button"
-        className="lp-rf-slot"
-        data-has={count > 0 ? '' : undefined}
-        data-readonly={readOnly ? '' : undefined}
-        aria-label={slotLabel}
-        aria-disabled={readOnly || disabled || undefined}
-        onClick={() => {
-          if (readOnly || disabled) return;
-          if (count === 0) pick();
-          else setManagerOpen(true);
-        }}
-      >
-        {first ? <BlobImage blob={first.thumbBlob} alt="" /> : null}
-        {preparing ? <Spinner size="2" /> : count === 0 ? <Camera size={20} strokeWidth={1.75} aria-hidden /> : null}
-        {count > 0 ? (
-          <span className="lp-rf-cnt" aria-hidden>
-            {count}
-          </span>
-        ) : null}
-      </button>
+      {asPopover ? <Popover.Trigger>{slotButton}</Popover.Trigger> : slotButton}
       {count > 0 ? (
         <button
           type="button"
@@ -140,30 +174,22 @@ export function PhotoSlot({ photos, onPhotosChange, timing, onTimingChange, read
           onChange={(e) => void onFiles(e.currentTarget.files)}
         />
       ) : null}
-      {!readOnly ? (
-        <PhotoManager
-          open={managerOpen}
-          onOpenChange={setManagerOpen}
-          photos={photos}
-          timing={timing}
-          canAdd={canAdd}
-          preparing={preparing}
-          onAdd={pick}
-          onRemove={(photoId) => {
-            const next = photos.filter((p) => p.photoId !== photoId);
-            onPhotosChange?.(next);
-            if (next.length === 0) setManagerOpen(false);
-          }}
-          onTimingChange={(t) => onTimingChange?.(t)}
-        />
-      ) : null}
+      {!readOnly && !asPopover ? <PhotoManager open={managerOpen} onOpenChange={setManagerOpen} {...manager} /> : null}
     </div>
+  );
+  if (!asPopover) return slot;
+
+  return (
+    <Popover.Root open={managerOpen} onOpenChange={setManagerOpen}>
+      {slot}
+      <Popover.Content className="lp-rf-pop lp-rf-photos" size="2" width="320px" side="right" align="start" sideOffset={10} aria-label="Photos">
+        <PhotoManagerBody {...manager} onDone={() => setManagerOpen(false)} touchTargets />
+      </Popover.Content>
+    </Popover.Root>
   );
 }
 
-interface PhotoManagerProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+interface PhotoManagerBodyProps {
   photos: readonly DraftPhoto[];
   timing: PhotoTiming;
   canAdd: boolean;
@@ -173,15 +199,36 @@ interface PhotoManagerProps {
   onTimingChange: (timing: PhotoTiming) => void;
 }
 
-function PhotoManager({ open, onOpenChange, photos, timing, canAdd, preparing, onAdd, onRemove, onTimingChange }: PhotoManagerProps) {
+interface PhotoManagerProps extends PhotoManagerBodyProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+function PhotoManager({ open, onOpenChange, ...body }: PhotoManagerProps) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange} title="Photos">
+      <PhotoManagerBody {...body} onDone={() => onOpenChange(false)} />
+    </Sheet>
+  );
+}
+
+interface PhotoManagerBodyExtra {
+  onDone: () => void;
+  /** 44 px hit areas on the small controls (the popover; the phone sheet is unchanged). */
+  touchTargets?: boolean;
+}
+
+/** Tiles with remove buttons and an add tile, the Today / Not today switch, and Done. */
+function PhotoManagerBody({ photos, timing, canAdd, preparing, onAdd, onRemove, onTimingChange, onDone, touchTargets }: PhotoManagerBodyProps & PhotoManagerBodyExtra) {
+  const hit = touchTargets ? 'lp-hit' : undefined;
+  return (
+    <>
       <div className="lp-rf-tiles">
         {photos.map((p, i) => (
           <div key={p.photoId} className="lp-rf-tile">
             <BlobImage blob={p.thumbBlob} alt={`Photo ${i + 1} of ${photos.length}`} />
             <IconButton
-              className="lp-rf-tile-x"
+              className={hit ? `lp-rf-tile-x ${hit}` : 'lp-rf-tile-x'}
               type="button"
               size="1"
               radius="full"
@@ -212,12 +259,16 @@ function PhotoManager({ open, onOpenChange, photos, timing, canAdd, preparing, o
         aria-label="When the photos were taken"
         style={{ width: '100%' }}
       >
-        <SegmentedControl.Item value="today">{PHOTO_TIMING_LABEL.today}</SegmentedControl.Item>
-        <SegmentedControl.Item value="older">{PHOTO_TIMING_LABEL.older}</SegmentedControl.Item>
+        <SegmentedControl.Item value="today" className={hit}>
+          {PHOTO_TIMING_LABEL.today}
+        </SegmentedControl.Item>
+        <SegmentedControl.Item value="older" className={hit}>
+          {PHOTO_TIMING_LABEL.older}
+        </SegmentedControl.Item>
       </SegmentedControl.Root>
-      <Button type="button" size="3" highContrast mt="4" className="lp-hit" style={{ width: '100%' }} onClick={() => onOpenChange(false)}>
+      <Button type="button" size="3" highContrast mt="4" className="lp-hit" style={{ width: '100%' }} onClick={onDone}>
         Done
       </Button>
-    </Sheet>
+    </>
   );
 }
