@@ -20,21 +20,57 @@ async function totalRows(): Promise<number> {
   return count ?? 0;
 }
 
+/** The route's page size when no limit is given (app/api/sync/route.ts DEFAULT_PAGE). */
+const FULL_PAGE = 500;
+
+/**
+ * Follows a full fetch's `next` cursor to the end and returns every row, the first page included. The shared
+ * local stack keeps every agent's TEST rows, so it can hold more than one page.
+ */
+async function restOfFullFetch(first: SyncResponse, cookie: string): Promise<SyncResponse['rows']> {
+  const rows = [...first.rows];
+  let page = first;
+  for (let i = 0; page.hasMore; i += 1) {
+    expect(i).toBeLessThan(1_000);
+    page = await sync(syncPath({ after: page.next }), cookie);
+    rows.push(...page.rows);
+  }
+  return rows;
+}
+
+/** The ids a full fetch returns, followed to the last page. */
+async function fullFetchIds(cookie: string): Promise<Set<string>> {
+  return new Set((await restOfFullFetch(await sync('/api/sync', cookie), cookie)).map((r) => r.id));
+}
+
 describe('GET /api/sync', () => {
   it('full fetch: every row, allowlisted keys only, a microsecond database cursor, no-store', async () => {
     const cookie = await cookieFor(newStaff());
+    const before = await totalRows();
     const res = await api<SyncResponse>('/api/sync', { cookie });
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
     expect(res.headers.get('etag')).toBeNull();
     const body = res.body;
-    expect(body.rows.length).toBe(await totalRows());
-    expect(body.hasMore).toBe(false);
-    expect(body.next).toBeNull();
+    // One page of up to 500 rows; a bigger table pages on with next (exactly 500, next = the last row).
+    if (body.hasMore) {
+      expect(body.rows).toHaveLength(FULL_PAGE);
+      expect(body.next?.id).toBe(body.rows.at(-1)?.id);
+    } else {
+      expect(body.rows.length).toBeLessThanOrEqual(FULL_PAGE);
+      expect(body.next).toBeNull();
+    }
     expect(body.versions).toBeUndefined();
     expect(body.serverTime).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,6})?[+-]\d\d:\d\d$/);
-    for (const row of body.rows) expect(Object.keys(row).sort()).toEqual(REQUEST_SUMMARY_KEYS);
-    const seed = body.rows.find((r) => r.caseNumber === 1012);
+    const rows = await restOfFullFetch(body, cookie);
+    const after = await totalRows();
+    // Every row: rows are never deleted, so all `before` rows are there, and at most the ones other test
+    // files created meanwhile on top (on a quiet database before = after, the exact count).
+    const ids = new Set(rows.map((r) => r.id));
+    expect(ids.size).toBeGreaterThanOrEqual(before);
+    expect(ids.size).toBeLessThanOrEqual(after);
+    for (const row of rows) expect(Object.keys(row).sort()).toEqual(REQUEST_SUMMARY_KEYS);
+    const seed = rows.find((r) => r.caseNumber === 1012);
     expect(seed).toMatchObject({ name: 'Kayla Martinez', postShort: 'FA 3', photoCount: 2, status: 'Added' });
   });
 
@@ -83,7 +119,7 @@ describe('GET /api/sync', () => {
 
   it('keyset paging: pages of 5 cover the full fetch exactly, keeping the same since', async () => {
     const cookie = await cookieFor(newStaff());
-    const full = await sync('/api/sync', cookie);
+    const full = await fullFetchIds(cookie);
     const seen: string[] = [];
     let after: SyncResponse['next'] = null;
     let pages = 0;
@@ -101,12 +137,18 @@ describe('GET /api/sync', () => {
       expect(page.rows).toHaveLength(5);
       expect(page.next?.id).toBe(page.rows[4]?.id);
       after = page.next;
-      expect(pages).toBeLessThan(500);
+      // A runaway guard that grows with the shared stack (every agent's TEST rows stay in it).
+      expect(pages).toBeLessThan(Math.ceil(full.size / 5) + 100);
     }
+    const fullAfter = await fullFetchIds(cookie);
     expect(new Set(seen).size).toBe(seen.length);
-    expect(new Set(seen)).toEqual(new Set(full.rows.map((r) => r.id)));
+    // The same rows as the full fetch: all of it, plus at most what other test files created during the walk
+    // (on a quiet database full = fullAfter, so this is the exact match).
+    const seenSet = new Set(seen);
+    expect([...full].filter((id) => !seenSet.has(id))).toEqual([]);
+    expect(seen.filter((id) => !fullAfter.has(id))).toEqual([]);
     // hasMore is exact (the function reads limit + 1 rows), so there is never a trailing empty page.
-    expect(pages).toBe(Math.max(1, Math.ceil(full.rows.length / 5)));
+    expect(pages).toBe(Math.max(1, Math.ceil(seen.length / 5)));
     // next.at is a verbatim database timestamp that round-trips through the URL.
     expect(firstServerTime).toContain('+');
   });

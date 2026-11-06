@@ -290,9 +290,16 @@ export function dbUrl(): string {
   return url;
 }
 
-/** Runs SQL through psql (local only); returns stdout (unaligned, tuples only). */
+/**
+ * Runs SQL through psql (local only); returns stdout (unaligned, tuples only). The buffer is 64 MB, not Node's
+ * 1 MB default: the shared local stack keeps every agent's TEST rows, and a whole-table json_agg (stats.test)
+ * outgrows 1 MB (ENOBUFS).
+ */
 export function psql(sql: string): string {
-  return execFileSync('psql', [dbUrl(), '-v', 'ON_ERROR_STOP=1', '-q', '-At', '-c', sql], { encoding: 'utf8' }).trim();
+  return execFileSync('psql', [dbUrl(), '-v', 'ON_ERROR_STOP=1', '-q', '-At', '-c', sql], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  }).trim();
 }
 
 /** Starts psql with a script and returns the running process (for two-connection timing tests). */
