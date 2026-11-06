@@ -1,11 +1,10 @@
 // Pure helpers behind the request form (new / edit / needs-attention editor). No React, no I/O, so the
 // rules are unit-tested in node (tests/unit/request-form/form-logic.test.ts).
 import type { RequestSummary } from '@/lib/api-types';
-import { formValuesFromRequest, hasPost, parseAge, toPatch, type RequestFormValues } from '@/lib/client/form-values';
+import { formValuesFromRequest, hasPost, toPatch, type RequestFormValues } from '@/lib/client/form-values';
 import {
-  AGE_MAX,
-  AGE_MIN,
   FIELD_LABELS,
+  GENDERS,
   MAX_PHOTOS,
   OTHER_POST,
   appendChip,
@@ -13,54 +12,60 @@ import {
   postFull,
   statusBucket,
   type EditSection,
+  type Gender,
 } from '@/lib/domain';
 
 export type FormKey = keyof RequestFormValues;
 export type FormErrors = Partial<Record<FormKey, string>>;
 
 // ---------------------------------------------------------------------------------------------------
-// Sections (v2.1 A24) and "More details"
+// Sections (v2.1 A24) and "More details" (Jeffrey, 2026-11-06: every group open, no disclosure row)
 // ---------------------------------------------------------------------------------------------------
 
-/** Behind "More details", in the mockup's order: Hair, Build, Features, Description, Contact notes, Other notes. */
+/**
+ * The "More details" group, in order: Hair, Build, Features, Description, Other notes. It follows the
+ * missing person and is always open. Contact notes belong to the Friend or family group.
+ */
 export const MORE_FIELDS = [
   'hair',
   'heightBuild',
   'identifyingFeatures',
   'physicalDescription',
-  'contactNotes',
   'additionalNotes',
 ] as const satisfies readonly FormKey[];
 export type MoreField = (typeof MORE_FIELDS)[number];
 
-/**
- * Which "More details" rows a section shows. Person: everything about the person (no contact notes).
- * Friend: none (contact notes sit in the Friend or family group instead, so a 4-field edit has no
- * disclosure row). All / create / outbox: all six.
- */
+/** Which "More details" rows a section shows: all of them with the person (person, all), none for friend. */
 export function moreFieldsFor(section: EditSection): readonly MoreField[] {
-  if (section === 'friend') return [];
-  if (section === 'person') return MORE_FIELDS.filter((k) => k !== 'contactNotes');
-  return MORE_FIELDS;
+  return section === 'friend' ? [] : MORE_FIELDS;
 }
 
-/** "More details" starts open when any of its fields already holds text (edit prefill, restored draft). */
-export function moreStartsOpen(values: RequestFormValues, section: EditSection): boolean {
-  return moreFieldsFor(section).some((k) => values[k].trim() !== '');
+// ---------------------------------------------------------------------------------------------------
+// Age and gender are free text (Jeffrey, 2026-11-06: "mid-20s" is an age)
+// ---------------------------------------------------------------------------------------------------
+
+/** Quick-fill chips under Gender (the domain's GENDERS). A tap writes the word into the free-text field. */
+export const GENDER_CHIPS: readonly Gender[] = GENDERS;
+
+/** The chip the typed gender matches (case and outer spaces ignored), shown as on; null for other text. */
+export function genderChipFor(gender: string): Gender | null {
+  const typed = gender.trim().toLowerCase();
+  return GENDER_CHIPS.find((chip) => chip.toLowerCase() === typed) ?? null;
+}
+
+/** Gender after a chip tap: the chip's word, or empty when that chip was already on (a second tap clears). */
+export function genderAfterChip(current: string, chip: Gender): string {
+  return genderChipFor(current) === chip ? '' : chip;
 }
 
 // ---------------------------------------------------------------------------------------------------
 // Validation shown on the form
 // ---------------------------------------------------------------------------------------------------
 
-/** Age keeps digits only (the keypad is numeric, but paste and hardware keyboards are not), at most 3. */
-export function sanitizeAge(input: string): string {
-  return input.replace(/\D/g, '').slice(0, 3);
-}
-
 /**
- * Errors to show: server errors (needs-attention item, 422) on fields still holding the rejected value,
- * plus the local age range check. A server error disappears as soon as its field is edited.
+ * Errors to show: server errors (needs-attention item, 422) on fields still holding the rejected value. A
+ * server error disappears as soon as its field is edited. Nothing is checked on the phone: every person and
+ * contact field is free text.
  */
 export function visibleErrors(
   serverErrors: FormErrors | undefined,
@@ -80,13 +85,11 @@ export function visibleErrors(
       if (unchanged) out[key] = message;
     }
   }
-  if (parseAge(values.age) === 'invalid') out.age = `${AGE_MIN}–${AGE_MAX}`;
   return out;
 }
 
-/** Edit: something changed, age is valid, and Other still says where (a legacy post may stay as it is). */
+/** Edit: something changed, and Other still says where (a legacy post may stay as it is). */
 export function canSaveEdit(base: RequestFormValues, values: RequestFormValues): boolean {
-  if (parseAge(values.age) === 'invalid') return false;
   if (values.reportingLocation === OTHER_POST && !hasPost(values)) return false;
   return toPatch(base, values) !== null;
 }
@@ -103,7 +106,18 @@ export function changedKeys(base: RequestFormValues, values: RequestFormValues):
 }
 
 export interface TheirChange {
-  key: 'name' | 'age' | 'gender' | 'post' | MoreField | 'clothing' | 'lastSeen' | 'contactName' | 'contactPhone' | 'contactRelationship';
+  key:
+    | 'name'
+    | 'age'
+    | 'gender'
+    | 'post'
+    | MoreField
+    | 'clothing'
+    | 'lastSeen'
+    | 'contactName'
+    | 'contactPhone'
+    | 'contactRelationship'
+    | 'contactNotes';
   label: string;
   /** The value now saved (display form); null = cleared. */
   value: string | null;
@@ -257,6 +271,38 @@ export function photoIntake(current: number, picked: number): { take: number; dr
   const room = Math.max(0, MAX_PHOTOS - current);
   const take = Math.min(room, Math.max(0, picked));
   return { take, dropped: Math.max(0, picked) - take };
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The on-screen keyboard (the form scrolls; Send stays pinned; the focused row stays in view)
+// ---------------------------------------------------------------------------------------------------
+
+/** The visual viewport is this much shorter than the layout viewport when a keyboard is up. */
+export const KEYBOARD_MIN_PX = 100;
+
+/**
+ * A keyboard covers part of the layout viewport: the visual viewport is shorter by more than
+ * KEYBOARD_MIN_PX at no zoom. A pinch zoom also shrinks the visual viewport, so it never counts.
+ */
+export function keyboardOpen(layoutHeight: number, visualHeight: number, scale: number): boolean {
+  return scale <= 1.01 && layoutHeight - visualHeight > KEYBOARD_MIN_PX;
+}
+
+interface VerticalBox {
+  top: number;
+  bottom: number;
+}
+
+/**
+ * How far to scroll the form so `box` (the focused row, with its chips and error line) sits inside `view`
+ * with `margin` to spare: up when it is above, down when it is below but never past its top (a row taller
+ * than the view shows its top). 0 when it is already in view.
+ */
+export function revealDelta(view: VerticalBox, box: VerticalBox, margin: number): number {
+  const up = box.top - margin - view.top;
+  if (up < 0) return up;
+  const down = box.bottom + margin - view.bottom;
+  return down > 0 ? Math.min(down, up) : 0;
 }
 
 // ---------------------------------------------------------------------------------------------------

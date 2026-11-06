@@ -15,6 +15,17 @@
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
 }
+/* On-screen keyboard up (use-keyboard-fit.ts): the form follows the visual viewport, so the pinned Send bar
+   sits just above the keyboard and the scroller can bring the focused row into view. The home-indicator
+   gap under Send is covered by the keyboard, so it goes. */
+.lp-rf[data-kb] {
+  top: var(--lp-rf-vv-top, 0px);
+  bottom: auto;
+  height: var(--lp-rf-vv-h, 100%);
+}
+.lp-rf[data-kb] .lp-rf-foot-in {
+  padding-bottom: 12px;
+}
 
 .lp-rf-nav {
   flex: none;
@@ -213,14 +224,13 @@
 .lp-rf-r[data-top] .lp-rf-k {
   padding-top: 13px;
 }
+/* One label column for every group, so the values line up down the whole form ("Description" and "Other
+   notes" are the widest labels). */
 .lp-rf-k {
-  width: 74px;
+  width: 80px;
   flex: none;
   font-size: 14px;
   color: var(--gray-11);
-}
-.lp-rf-k[data-wide] {
-  width: 104px;
 }
 .lp-rf-in {
   flex: 1;
@@ -265,7 +275,7 @@ textarea.lp-rf-in {
   color: var(--red-11);
 }
 .lp-rf-err[data-indent] {
-  padding-left: 98px;
+  padding-left: 104px;
 }
 
 /* Focus: the row (or the Last seen container) gets the mockup's inset ring */
@@ -284,6 +294,27 @@ textarea.lp-rf-in {
 .lp-rf-chip {
   touch-action: manipulation;
 }
+/* Gender quick-fill chips, under the Gender input and lined up with it. 10 px above and below keep each
+   chip's 44 px tap area (.lp-hit) inside this row, clear of the input. */
+.lp-rf-gq {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px 6px;
+  padding: 10px 12px 10px 14px;
+}
+.lp-rf-gq[data-indent] {
+  padding-left: 104px;
+}
+.lp-rf-gq .rt-Button {
+  gap: 4px;
+}
+
+/* "Optional" beside the Friend or family label */
+.lp-rf-optional {
+  margin-left: 4px;
+  vertical-align: 1px;
+  font-weight: 400;
+}
 
 /* ID-style person card: portrait photo slot + Name / Age / Gender */
 .lp-rf-pcard {
@@ -295,11 +326,6 @@ textarea.lp-rf-in {
 }
 .lp-rf-pc > * + * {
   border-top: 1px solid var(--gray-a4);
-}
-.lp-rf-seg {
-  flex: 1;
-  min-width: 0;
-  width: 100%;
 }
 .lp-rf-slotw {
   flex: none;
@@ -401,37 +427,7 @@ textarea.lp-rf-in {
   margin-top: 8px;
 }
 
-/* More details */
-.lp-rf-more {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 42px;
-  padding: 0 12px 0 14px;
-  margin: 10px 0 0;
-  border: 0;
-  border-radius: var(--radius-4);
-  background: transparent;
-  color: var(--gray-11);
-  box-shadow: inset 0 0 0 1px var(--gray-a4);
-  font: inherit;
-  font-size: 14px;
-  text-align: left;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.lp-rf-more[aria-expanded='true'] {
-  box-shadow: none;
-  min-height: 0;
-  padding: 11px 4px 6px;
-  margin: 0;
-  font-weight: 500;
-}
-.lp-rf-more:focus-visible {
-  outline: 2px solid var(--focus-8);
-  outline-offset: 2px;
-}
+/* Spacer (the post picker's option label grows into it) */
 .lp-rf-sp {
   flex: 1;
 }

@@ -1,12 +1,14 @@
 // RequestForm markup per mode and state (server render over the stub store): "Choose post" blocks Send,
-// Send needs a detail (a photo counts), the offline label, the sections of edit, the read-only outbox
-// job and field errors. Interaction (chips, picker, draft) is covered by tests/e2e/new-request.spec.ts.
+// Send needs a detail (a photo counts), the offline label, every group open in Jeffrey's order, free-text
+// age and gender (the gender chips), the sections of edit, the read-only outbox job and field errors.
+// Interaction (chips, picker, draft, keyboard) is covered by tests/e2e/new-request.spec.ts.
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { RequestForm, type RequestFormProps } from '@/components/request-form/RequestForm';
 import { EMPTY_FORM_VALUES, canSend, type RequestFormValues } from '@/lib/client/form-values';
 import { StoreContext, type DraftPhoto } from '@/lib/client/store-contract';
 import { createStubStore } from '@/lib/client/store-stub';
+import { LIMITS } from '@/lib/domain';
 
 const noop = () => undefined;
 
@@ -38,9 +40,17 @@ function render(overrides: Partial<RequestFormProps> = {}): string {
   );
 }
 
-const v = (patch: Partial<RequestFormValues>): RequestFormValues => ({ ...EMPTY_FORM_VALUES, ...patch });
+const v = (patch: Partial<RequestFormValues> = {}): RequestFormValues => ({ ...EMPTY_FORM_VALUES, ...patch });
 const submitTag = (html: string) => /<button[^>]*data-testid="request-form-submit"[^>]*>/.exec(html)?.[0] ?? '';
 const photo = (id: string): DraftPhoto => ({ photoId: id, blob: new Blob(['x']), thumbBlob: new Blob(['x']), width: 0, height: 0 });
+/** The <input> whose id ends in `-<key>` (useId prefixes every id). */
+const inputTag = (html: string, key: string) => new RegExp(`<input id="[^"]*-${key}"[^>]*>`).exec(html)?.[0] ?? '';
+/** The gender quick-fill chip with this label. */
+const chipTag = (html: string, label: string) =>
+  new RegExp(`<button[^>]*class="[^"]*lp-rf-chip[^"]*"[^>]*>(?:(?!</button>).)*${label}</button>`).exec(html)?.[0] ?? '';
+/** Text positions, to check the order groups and rows render in. */
+const order = (html: string, texts: string[]) => texts.map((t) => html.indexOf(t));
+const ascending = (positions: number[]) => positions.every((p, i) => p >= 0 && (i === 0 || p > (positions[i - 1] as number)));
 
 describe('RequestForm (create)', () => {
   it('asks for a post first and blocks Send without one', () => {
@@ -72,32 +82,78 @@ describe('RequestForm (create)', () => {
     expect(render({ values: v({ reportingLocation: 'Other', otherLocation: 'Info booth', name: 'X' }) })).toContain('Info booth');
   });
 
-  it('lays out the mockup rows with 16 px inputs and the placeholders from the spec', () => {
+  it('lays out the rows with 16 px inputs and the placeholders from the spec', () => {
     const html = render();
-    for (const text of ['Name or initials, e.g. J.D.', 'Clothing, colors, accessories', 'Where, roughly when', "Who&#x27;s looking", 'Phone number', 'Friend, partner, sibling…']) {
+    for (const text of [
+      'Name or initials, e.g. J.D.',
+      'Age, e.g. 24 or mid-20s',
+      'placeholder="Gender"',
+      'Clothing, colors, accessories',
+      'Where, roughly when',
+      'Height, build',
+      'Tattoos, piercings, glasses',
+      "Who&#x27;s looking",
+      'Phone number',
+      'Friend, partner, sibling…',
+    ]) {
       expect(html).toContain(text);
     }
-    expect(html).toContain('inputMode="numeric"');
-    expect(html).toContain('pattern="[0-9]*"');
     expect(html).toContain('type="tel"');
     expect(html).toContain('accept="image/*"');
     expect(html).toContain('multiple=""');
     // Stage chips only appear while Last seen has focus.
     expect(html).not.toContain('kineticFIELD');
-    // More details starts closed when its fields are empty.
-    expect(html).toContain('aria-expanded="false"');
-    expect(html).not.toContain('Tattoos, piercings, glasses');
   });
 
-  it('marks a valid phone with a check', () => {
+  it('shows every group open, in order: post, missing person, more details, friend or family (optional) last', () => {
+    const html = render();
+    // No disclosure row: nothing is collapsed and nothing needs a tap to show.
+    expect(html).not.toContain('aria-expanded');
+    expect(html).not.toContain('lp-rf-more');
+    expect(ascending(order(html, ['Reporting from', '>Missing person<', '>More details<', '>Friend or family']))).toBe(true);
+    // Missing person: the ID card, then Wearing and Last seen.
+    expect(ascending(order(html, ['-name"', '-age"', '-gender"', '>Wearing<', '>Last seen<']))).toBe(true);
+    // More details: Hair, Build, Features, Description, Other notes.
+    expect(ascending(order(html, ['>Hair<', '>Build<', '>Features<', '>Description<', '>Other notes<', '>Friend or family']))).toBe(true);
+    // Friend or family: Name, Phone, Relation, Notes, and it is the last group.
+    expect(ascending(order(html, ['>Friend or family', "Who&#x27;s looking", 'Phone number', '>Relation<', '>Notes<']))).toBe(true);
+    expect(html).not.toContain('Contact notes');
+    // Optional is said once, in the section label: a badge, no helper sentence.
+    expect(html).toMatch(/>Friend or family(?:<!-- -->)? <span[^>]*class="[^"]*lp-rf-optional[^"]*"[^>]*>Optional<\/span>/);
+    expect(html.match(/Optional/g)).toHaveLength(1);
+  });
+
+  it('takes age as free text with the normal keyboard', () => {
+    const age = inputTag(render({ values: v({ age: 'mid-20s' }) }), 'age');
+    expect(age).toContain('value="mid-20s"');
+    expect(age).toContain('type="text"');
+    expect(age).not.toContain('inputMode');
+    expect(age).not.toContain('pattern');
+    expect(age).not.toContain('aria-invalid');
+    expect(age).toContain(`maxLength="${LIMITS.age}"`);
+  });
+
+  it('takes gender as free text, with Male / Female / Other chips that fill it', () => {
+    const typed = render({ values: v({ gender: 'Non-binary' }) });
+    expect(inputTag(typed, 'gender')).toContain('value="Non-binary"');
+    expect(inputTag(typed, 'gender')).toContain(`maxLength="${LIMITS.gender}"`);
+    for (const chip of ['Male', 'Female', 'Other']) expect(chipTag(typed, chip)).toContain('aria-pressed="false"');
+    expect(typed).toContain('aria-label="Fill in gender"');
+
+    // The chip matching the text (any case) is on, with a check.
+    const female = render({ values: v({ gender: 'female' }) });
+    expect(chipTag(female, 'Female')).toContain('aria-pressed="true"');
+    expect(chipTag(female, 'Female')).toContain('<svg');
+    expect(chipTag(female, 'Male')).toContain('aria-pressed="false"');
+    expect(chipTag(female, 'Male')).not.toContain('<svg');
+  });
+
+  it('marks a valid phone with a check, and takes any other phone text as it is', () => {
     expect(render({ values: v({ contactPhone: '(407) 555-0142' }) })).toContain('aria-label="Valid number"');
-    expect(render({ values: v({ contactPhone: '555-0142' }) })).not.toContain('aria-label="Valid number"');
-  });
-
-  it('opens More details when one of its fields has text', () => {
-    const html = render({ values: v({ hair: 'Blond, two braids' }) });
-    expect(html).toContain('aria-expanded="true"');
-    expect(html).toContain('Tattoos, piercings, glasses');
+    const short = render({ values: v({ contactPhone: '555-0142 ext 2' }) });
+    expect(short).not.toContain('aria-label="Valid number"');
+    expect(inputTag(short, 'contactPhone')).toContain('value="555-0142 ext 2"');
+    expect(inputTag(short, 'contactPhone')).not.toContain('aria-invalid');
   });
 
   it('switches to Save offline with the offline banner', () => {
@@ -106,21 +162,28 @@ describe('RequestForm (create)', () => {
     expect(html).toContain('Save offline');
   });
 
-  it('shows the duplicate hint chip', () => {
-    expect(render({ duplicateOf: { id: 'x', caseNumber: 1009 } })).toContain('Similar open request: <!-- -->LP-1009');
+  it('shows the duplicate hint chip after the missing person, before More details', () => {
+    const html = render({ duplicateOf: { id: 'x', caseNumber: 1009 } });
+    expect(html).toContain('Similar open request: <!-- -->LP-1009');
+    expect(ascending(order(html, ['>Last seen<', 'Similar open request', '>More details<']))).toBe(true);
   });
 });
 
 describe('RequestForm (edit sections)', () => {
-  const values = v({ name: 'TEST-F Kayla', contactName: 'TEST-F Maya', contactNotes: 'After 11', reportingLocation: 'FA 4 – Oasis' });
+  const values = v({ name: 'TEST-F Kayla', age: 'mid-20s', contactName: 'TEST-F Maya', contactNotes: 'After 11', reportingLocation: 'FA 4 – Oasis' });
 
-  it('person: the person group with labelled rows, no post, no friend, no photo slot', () => {
+  it('person: the person group with labelled rows, then More details open; no post, no friend, no photo slot', () => {
     const html = render({ mode: 'edit', section: 'person', values, submitLabel: 'Save' });
     expect(html).toContain('Missing person');
     expect(html).not.toContain('Friend or family');
     expect(html).not.toContain('Reporting from');
     expect(html).not.toContain('lp-rf-slot');
-    expect(html).toMatch(/<label class="lp-rf-k"[^>]*>Name<\/label>/);
+    expect(html).not.toContain('aria-expanded');
+    for (const label of ['Name', 'Age', 'Gender']) expect(html).toMatch(new RegExp(`<label class="lp-rf-k"[^>]*>${label}</label>`));
+    expect(inputTag(html, 'age')).toContain('value="mid-20s"');
+    expect(html).toContain('e.g. 24 or mid-20s');
+    expect(html).toMatch(/class="lp-rf-gq" data-indent=""/);
+    expect(ascending(order(html, ['>Missing person<', '>Last seen<', '>More details<', '>Hair<', '>Other notes<']))).toBe(true);
   });
 
   it('friend: the friend group with contact notes, nothing else', () => {
@@ -129,14 +192,15 @@ describe('RequestForm (edit sections)', () => {
     expect(html).toContain('>Notes</label>');
     expect(html).not.toContain('Missing person');
     expect(html).not.toContain('More details');
+    expect(html).not.toContain('Optional');
   });
 
-  it('all: post, both groups and More details; a legacy post shows as it is', () => {
+  it('all: post, then the groups in the create order; a legacy post shows as it is', () => {
     const html = render({ mode: 'edit', section: 'all', values: { ...values, reportingLocation: '' }, legacyPost: 'FA 3', submitLabel: 'Save' });
-    expect(html).toContain('Reporting from');
     expect(html).toContain('>FA 3</span>');
     expect(html).not.toContain('Choose post');
-    expect(html).toContain('More details');
+    expect(ascending(order(html, ['Reporting from', '>Missing person<', '>More details<', '>Friend or family', '>Notes<']))).toBe(true);
+    expect(html).not.toContain('aria-expanded');
   });
 });
 
@@ -149,6 +213,19 @@ describe('RequestForm (needs-attention editor)', () => {
     expect(html).toContain('Resend');
   });
 
+  it('points at a rejected age or gender, and at a field in More details without a tap', () => {
+    const html = render({
+      mode: 'outbox',
+      values: v({ age: 'TEST-F long age', gender: 'TEST-F long gender', hair: 'x' }),
+      errors: { age: 'TEST-F age error', gender: 'TEST-F gender error', hair: 'TEST-F hair error' },
+      submitLabel: 'Resend',
+    });
+    expect(inputTag(html, 'age')).toContain('aria-invalid="true"');
+    expect(inputTag(html, 'gender')).toContain('aria-invalid="true"');
+    expect(inputTag(html, 'hair')).toContain('aria-invalid="true"');
+    for (const message of ['TEST-F age error', 'TEST-F gender error', 'TEST-F hair error']) expect(html).toContain(message);
+  });
+
   it('shows the job photos read-only', () => {
     const html = render({ mode: 'outbox', photos: [photo('a')], submitLabel: 'Resend' });
     expect(html).toContain('data-readonly=""');
@@ -156,10 +233,11 @@ describe('RequestForm (needs-attention editor)', () => {
     expect(html).toMatch(/class="lp-rf-when"[^>]*disabled=""/);
   });
 
-  it('read-only job: inputs cannot change', () => {
-    const html = render({ mode: 'outbox', readOnly: true, values: v({ name: 'TEST-F y' }), submitLabel: 'Send now' });
+  it('read-only job: inputs and gender chips cannot change', () => {
+    const html = render({ mode: 'outbox', readOnly: true, values: v({ name: 'TEST-F y', gender: 'Male' }), submitLabel: 'Send now' });
     expect(html).toMatch(/<input id="[^"]*-name"[^>]*readOnly=""[^>]*value="TEST-F y"/);
+    expect(inputTag(html, 'gender')).toContain('readOnly=""');
     expect(html).toMatch(/class="lp-rf-loc"[^>]*disabled=""/);
-    expect(html).toMatch(/rt-SegmentedControlRoot[^"]*disabled/);
+    for (const chip of ['Male', 'Female', 'Other']) expect(chipTag(html, chip)).toContain('disabled=""');
   });
 });

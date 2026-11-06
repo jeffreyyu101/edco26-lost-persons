@@ -1,12 +1,13 @@
 'use client';
-// The request form body (new-request.html v3): Cancel + title top bar, "Reporting from" row, the ID card
-// (photo slot, Name, Age, Gender), Wearing, Last seen (+ stage chips while focus is within the row), Friend
-// or family, More details, and the sticky Send button. Controlled: RequestFormView owns the values, the
-// draft and the store calls. Full-screen and scrolls whenever the content doesn't fit.
-import { Button, Heading, SegmentedControl, Text } from '@radix-ui/themes';
-import { ArrowUpRight, Check, ChevronDown, ChevronUp, CloudOff, MapPin, UserRoundSearch } from 'lucide-react';
+// The request form body (new-request.html v3, reordered by Jeffrey on 2026-11-06): Cancel + title top bar,
+// "Reporting from" row, Missing person (the ID card: photo slot, Name, Age, Gender + quick-fill chips; then
+// Wearing, Last seen + stage chips while focus is within the row), More details, Friend or family
+// (optional, last), and the pinned Send button. Every group is open; the form scrolls, and the focused row
+// stays above the on-screen keyboard (useKeyboardFit). Every person and contact field is free text.
+// Controlled: RequestFormView owns the values, the draft and the store calls.
+import { Badge, Button, Heading, Text } from '@radix-ui/themes';
+import { ArrowUpRight, Check, ChevronDown, CloudOff, MapPin, UserRoundSearch } from 'lucide-react';
 import {
-  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -20,21 +21,12 @@ import { navigate } from '@/lib/client/nav';
 import { visibleOutbox } from '@/lib/client/selectors';
 import { useStoreSelector, type DraftPhoto, type StoreState } from '@/lib/client/store-contract';
 import type { RequestFormValues } from '@/lib/client/form-values';
-import {
-  GENDERS,
-  LIMITS,
-  OTHER_POST,
-  STAGE_CHIPS,
-  isValidPhone,
-  postFull,
-  type EditSection,
-  type Gender,
-  type PhotoTiming,
-} from '@/lib/domain';
+import { LIMITS, OTHER_POST, STAGE_CHIPS, isValidPhone, postFull, type EditSection, type PhotoTiming } from '@/lib/domain';
 import { formatCaseNumber } from '@/lib/format';
-import { lastSeenWithChip, moreFieldsFor, moreStartsOpen, sanitizeAge, type MoreField } from './form-logic';
+import { GENDER_CHIPS, genderAfterChip, genderChipFor, lastSeenWithChip, moreFieldsFor, type MoreField } from './form-logic';
 import { PhotoSlot } from './PhotoSlot';
 import { PostPicker, type PostChoice } from './PostPicker';
+import { useKeyboardFit } from './use-keyboard-fit';
 import './request-form.css';
 
 export type RequestFormMode = 'create' | 'edit' | 'outbox';
@@ -98,7 +90,6 @@ const MORE_ROWS: Readonly<Record<MoreField, { label: string; placeholder: string
   heightBuild: { label: 'Build', placeholder: 'Height, build', multiline: false, max: LIMITS.heightBuild },
   identifyingFeatures: { label: 'Features', placeholder: 'Tattoos, piercings, glasses', multiline: false, max: LIMITS.identifyingFeatures },
   physicalDescription: { label: 'Description', placeholder: '', multiline: true, max: LIMITS.physicalDescription },
-  contactNotes: { label: 'Contact notes', placeholder: '', multiline: true, max: LIMITS.contactNotes },
   additionalNotes: { label: 'Other notes', placeholder: '', multiline: true, max: LIMITS.additionalNotes },
 };
 
@@ -118,30 +109,17 @@ export function RequestForm(props: RequestFormProps) {
   const uid = useId();
   const id = (key: string) => `${uid}-${key}`;
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(() => moreStartsOpen(values, section));
   const [lastSeenFocus, setLastSeenFocus] = useState(false);
-  const moreRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const scrollToMore = useRef(false);
   const chipDown = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const outboxCount = useStoreSelector(selectOutboxCount);
+  useKeyboardFit(rootRef, scrollRef);
 
   const set = <K extends keyof RequestFormValues>(key: K, value: RequestFormValues[K]) => onChange({ ...values, [key]: value });
+  const genderOn = genderChipFor(values.gender);
 
   const moreFields = moreFieldsFor(section);
-  const showMore = moreOpen || moreFields.some((k) => !!errors[k]);
-  // Opening "More details" scrolls just enough to show the new rows (never past their top).
-  useEffect(() => {
-    if (!showMore || !scrollToMore.current) return;
-    scrollToMore.current = false;
-    const scroller = scrollRef.current;
-    const group = moreRef.current;
-    if (!scroller || !group) return;
-    const view = scroller.getBoundingClientRect();
-    const box = group.getBoundingClientRect();
-    const delta = Math.min(box.bottom + 16 - view.bottom, box.top - 8 - view.top);
-    if (delta > 0) scroller.scrollBy({ top: delta, behavior: 'smooth' });
-  }, [showMore]);
 
   const err = (key: keyof RequestFormValues) => errors[key];
   const errId = (key: string) => id(`err-${key}`);
@@ -219,7 +197,7 @@ export function RequestForm(props: RequestFormProps) {
   const title = props.title ?? DEFAULT_TITLE[mode];
 
   return (
-    <div className="lp-rf" data-mode={mode} data-testid="request-form">
+    <div className="lp-rf" data-mode={mode} data-testid="request-form" ref={rootRef}>
       <header className="lp-rf-nav">
         <Button type="button" variant="ghost" color="gray" size="2" className="lp-hit" onClick={props.onCancel} disabled={busy}>
           Cancel
@@ -323,53 +301,75 @@ export function RequestForm(props: RequestFormProps) {
                             Age
                           </label>
                         ) : null}
+                        {/* Free text with the normal keyboard: "24", "mid-20s", "18–21". */}
                         <input
                           id={id('age')}
                           className="lp-rf-in"
                           aria-label={labelled ? undefined : 'Age'}
-                          placeholder={labelled ? '' : 'Age'}
+                          placeholder={labelled ? 'e.g. 24 or mid-20s' : 'Age, e.g. 24 or mid-20s'}
                           type="text"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
                           autoComplete="off"
+                          autoCorrect="off"
+                          autoCapitalize="none"
+                          spellCheck={false}
                           enterKeyHint="next"
-                          maxLength={3}
+                          maxLength={LIMITS.age}
                           readOnly={readOnly}
                           value={values.age}
-                          onChange={(e) => set('age', sanitizeAge(e.currentTarget.value))}
+                          onChange={(e) => set('age', e.currentTarget.value)}
                           {...invalid('age')}
                         />
                       </div>
                       {errLine('age', labelled)}
                     </div>
-                    <div className="lp-rf-r">
-                      {labelled ? (
-                        <span className="lp-rf-k" aria-hidden>
-                          Gender
-                        </span>
-                      ) : null}
-                      <SegmentedControl.Root
-                        className="lp-rf-seg"
-                        size="1"
-                        value={values.gender}
-                        onValueChange={(v) => set('gender', v as Gender)}
-                        aria-label="Gender"
-                        disabled={!!props.readOnly}
-                      >
-                        {GENDERS.map((g) => (
-                          <SegmentedControl.Item
-                            key={g}
-                            value={g}
-                            className="lp-hit"
-                            // Tapping the chosen gender again clears it (Radix keeps one selected).
-                            onClick={() => {
-                              if (values.gender === g) set('gender', '');
-                            }}
-                          >
-                            {g}
-                          </SegmentedControl.Item>
-                        ))}
-                      </SegmentedControl.Root>
+                    <div className="lp-rf-field">
+                      <div className="lp-rf-r">
+                        {labelled ? (
+                          <label className="lp-rf-k" htmlFor={id('gender')}>
+                            Gender
+                          </label>
+                        ) : null}
+                        <input
+                          id={id('gender')}
+                          className="lp-rf-in"
+                          aria-label={labelled ? undefined : 'Gender'}
+                          placeholder={labelled ? '' : 'Gender'}
+                          type="text"
+                          autoComplete="off"
+                          enterKeyHint="next"
+                          maxLength={LIMITS.gender}
+                          readOnly={readOnly}
+                          value={values.gender}
+                          onChange={(e) => set('gender', e.currentTarget.value)}
+                          {...invalid('gender')}
+                        />
+                      </div>
+                      {/* Quick fill: a chip writes its word into Gender; the chip matching the text is on, and
+                          tapping it again clears the field. */}
+                      <div className="lp-rf-gq" data-indent={labelled ? '' : undefined} role="group" aria-label="Fill in gender">
+                        {GENDER_CHIPS.map((chip) => {
+                          const on = genderOn === chip;
+                          return (
+                            <Button
+                              key={chip}
+                              type="button"
+                              size="1"
+                              variant={on ? 'solid' : 'soft'}
+                              color="gray"
+                              highContrast={on}
+                              radius="full"
+                              className="lp-rf-chip lp-hit"
+                              aria-pressed={on}
+                              disabled={!!props.readOnly}
+                              onClick={() => set('gender', genderAfterChip(values.gender, chip))}
+                            >
+                              {on ? <Check size={13} strokeWidth={2} aria-hidden /> : null}
+                              {chip}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                      {errLine('gender', labelled)}
                     </div>
                   </div>
                 </div>
@@ -454,6 +454,30 @@ export function RequestForm(props: RequestFormProps) {
                   <ArrowUpRight size={13} strokeWidth={1.75} aria-hidden />
                 </Button>
               ) : null}
+
+              <Text as="div" size="2" weight="medium" color="gray" className="lp-rf-lbl" id={id('more')}>
+                More details
+              </Text>
+              <div className="lp-rf-grp" role="group" aria-labelledby={id('more')}>
+                {moreFields.map((key) => {
+                  const row = MORE_ROWS[key];
+                  return (
+                    <TextRow
+                      key={key}
+                      inputId={id(key)}
+                      label={row.label}
+                      placeholder={row.placeholder}
+                      multiline={row.multiline}
+                      max={row.max}
+                      value={values[key]}
+                      onChange={(v) => set(key, v)}
+                      readOnly={readOnly}
+                      error={err(key)}
+                      errorId={errId(key)}
+                    />
+                  );
+                })}
+              </div>
             </>
           ) : null}
 
@@ -461,6 +485,15 @@ export function RequestForm(props: RequestFormProps) {
             <>
               <Text as="div" size="2" weight="medium" color="gray" className="lp-rf-lbl" id={id('friend')}>
                 Friend or family
+                {/* Marked optional only beside the other groups (the space keeps the group's name as words). */}
+                {section === 'all' ? (
+                  <>
+                    {' '}
+                    <Badge size="1" color="gray" variant="soft" radius="full" className="lp-rf-optional">
+                      Optional
+                    </Badge>
+                  </>
+                ) : null}
               </Text>
               <div className="lp-rf-grp" role="group" aria-labelledby={id('friend')}>
                 <TextRow
@@ -505,67 +538,19 @@ export function RequestForm(props: RequestFormProps) {
                   error={err('contactRelationship')}
                   errorId={errId('contactRelationship')}
                 />
-                {section === 'friend' ? (
-                  <TextRow
-                    inputId={id('contactNotes')}
-                    label="Notes"
-                    placeholder=""
-                    multiline
-                    max={LIMITS.contactNotes}
-                    value={values.contactNotes}
-                    onChange={(v) => set('contactNotes', v)}
-                    readOnly={readOnly}
-                    error={err('contactNotes')}
-                    errorId={errId('contactNotes')}
-                  />
-                ) : null}
+                <TextRow
+                  inputId={id('contactNotes')}
+                  label="Notes"
+                  placeholder=""
+                  multiline
+                  max={LIMITS.contactNotes}
+                  value={values.contactNotes}
+                  onChange={(v) => set('contactNotes', v)}
+                  readOnly={readOnly}
+                  error={err('contactNotes')}
+                  errorId={errId('contactNotes')}
+                />
               </div>
-            </>
-          ) : null}
-
-          {moreFields.length > 0 ? (
-            <>
-              <button
-                type="button"
-                className="lp-rf-more lp-hit"
-                aria-expanded={showMore}
-                aria-controls={id('more')}
-                onClick={() => {
-                  scrollToMore.current = !showMore;
-                  setMoreOpen(!showMore);
-                }}
-              >
-                <span>More details</span>
-                <span className="lp-rf-sp" />
-                {showMore ? (
-                  <ChevronUp size={16} strokeWidth={1.75} aria-hidden />
-                ) : (
-                  <ChevronDown size={16} strokeWidth={1.75} aria-hidden />
-                )}
-              </button>
-              {showMore ? (
-                <div className="lp-rf-grp" id={id('more')} ref={moreRef} role="group" aria-label="More details">
-                  {moreFields.map((key) => {
-                    const row = MORE_ROWS[key];
-                    return (
-                      <TextRow
-                        key={key}
-                        inputId={id(key)}
-                        label={row.label}
-                        wide
-                        placeholder={row.placeholder}
-                        multiline={row.multiline}
-                        max={row.max}
-                        value={values[key]}
-                        onChange={(v) => set(key, v)}
-                        readOnly={readOnly}
-                        error={err(key)}
-                        errorId={errId(key)}
-                      />
-                    );
-                  })}
-                </div>
-              ) : null}
             </>
           ) : null}
         </form>
@@ -617,7 +602,6 @@ interface TextRowProps {
   value: string;
   onChange: (value: string) => void;
   max: number;
-  wide?: boolean;
   multiline?: boolean;
   type?: 'text' | 'tel';
   inputMode?: 'text' | 'tel';
@@ -628,12 +612,12 @@ interface TextRowProps {
 }
 
 /** A label-left / value-right row (mockup .r) with its own error line. */
-function TextRow({ inputId, label, placeholder, value, onChange, max, wide, multiline, type = 'text', inputMode, trailing, readOnly, error, errorId }: TextRowProps) {
+function TextRow({ inputId, label, placeholder, value, onChange, max, multiline, type = 'text', inputMode, trailing, readOnly, error, errorId }: TextRowProps) {
   const a11y = error ? { 'aria-invalid': true as const, 'aria-describedby': errorId } : {};
   return (
     <div className="lp-rf-field">
       <div className="lp-rf-r" data-top={multiline ? '' : undefined}>
-        <label className="lp-rf-k" data-wide={wide ? '' : undefined} htmlFor={inputId}>
+        <label className="lp-rf-k" htmlFor={inputId}>
           {label}
         </label>
         {multiline ? (
@@ -667,7 +651,7 @@ function TextRow({ inputId, label, placeholder, value, onChange, max, wide, mult
         {trailing}
       </div>
       {error ? (
-        <span id={errorId} className="lp-rf-err" data-indent={wide ? undefined : ''} role="alert" style={wide ? { paddingLeft: 128 } : undefined}>
+        <span id={errorId} className="lp-rf-err" data-indent="" role="alert">
           {error}
         </span>
       ) : null}

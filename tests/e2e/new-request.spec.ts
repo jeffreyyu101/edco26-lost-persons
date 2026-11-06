@@ -1,10 +1,12 @@
 import { deflateSync } from 'node:zlib';
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { testBaseUrl } from '../../scripts/test-env.mjs';
 import { signedInAs } from './helpers/session';
 import { syncRows } from './helpers/sync';
 
-// New request / Edit / Needs-attention editor (spec §8 New request, §9.4, v2.1 A10/A13/A20/A33).
+// New request / Edit / Needs-attention editor (spec §8 New request, §9.4, v2.1 A10/A13/A20/A33), with
+// Jeffrey's 2026-11-06 changes: every group open in the order post → missing person → more details →
+// friend or family (optional, last), and free-text age ("mid-20s") and gender (typed or a quick-fill chip).
 // Runs at integration against the real store and API (`npm run build:test`, then `npm run test:e2e`).
 // Synthetic data only: every request is named TEST-F-<run>-<n>. Offline here means
 // context.setOffline() on an already loaded page (no service-worker reload; that gate lives in the
@@ -64,9 +66,47 @@ function syntheticPng(width = 120, height = 160): Buffer {
 const form = (page: Page) => page.getByTestId('request-form');
 const submit = (page: Page) => page.getByTestId('request-form-submit');
 const person = (page: Page) => page.getByRole('group', { name: 'Missing person' });
+const more = (page: Page) => page.getByRole('group', { name: 'More details' });
 const friend = (page: Page) => page.getByRole('group', { name: 'Friend or family' });
 const personName = (page: Page) => person(page).getByLabel('Name', { exact: true });
+const age = (page: Page) => person(page).getByLabel('Age', { exact: true });
+const gender = (page: Page) => person(page).getByLabel('Gender', { exact: true });
+const genderChip = (page: Page, chip: string) => person(page).getByRole('button', { name: chip, exact: true });
 const lastSeen = (page: Page) => page.getByRole('textbox', { name: 'Last seen' });
+
+/** Top and bottom of an element in page pixels. */
+async function edges(locator: Locator): Promise<{ top: number; bottom: number }> {
+  const box = await locator.boundingBox();
+  if (!box) throw new Error('not rendered');
+  return { top: box.y, bottom: box.y + box.height };
+}
+
+/**
+ * A stand-in for the on-screen keyboard: Playwright shows none, so window.visualViewport is replaced by a
+ * fake whose height `setKeyboard(page, px)` shrinks, firing `resize` as a phone does when the keyboard opens.
+ */
+async function fakeKeyboard(page: Page) {
+  await page.addInitScript(() => {
+    const vv = Object.assign(new EventTarget(), {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      offsetTop: 0,
+      offsetLeft: 0,
+      pageTop: 0,
+      pageLeft: 0,
+      scale: 1,
+    });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, get: () => vv });
+    Object.assign(window, {
+      __lpKeyboard: (px: number) => {
+        vv.height = window.innerHeight - px;
+        vv.dispatchEvent(new Event('resize'));
+      },
+    });
+  });
+}
+const setKeyboard = (page: Page, px: number) =>
+  page.evaluate((h) => (window as unknown as { __lpKeyboard: (px: number) => void }).__lpKeyboard(h), px);
 
 async function openNew(page: Page) {
   await page.goto('/?new=1');
@@ -176,8 +216,10 @@ test('creates a request with a photo; it shows in All and My requests', async ({
   await openNew(page);
   await pickPost(page, 'FA 4 – Oasis');
   await personName(page).fill(name);
-  await person(page).getByLabel('Age', { exact: true }).fill('19');
-  await page.getByRole('radio', { name: 'Female', exact: true }).click();
+  await age(page).fill('mid-20s');
+  await genderChip(page, 'Female').click();
+  await expect(gender(page)).toHaveValue('Female');
+  await expect(genderChip(page, 'Female')).toHaveAttribute('aria-pressed', 'true');
   await page.getByLabel('Wearing').fill('Pink cowboy hat, silver fringe top');
 
   // Stage chips show while Last seen has focus; a tap appends with ", " and keeps focus.
@@ -195,6 +237,7 @@ test('creates a request with a photo; it shows in All and My requests', async ({
   await page.locator('input[type=file]').setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: syntheticPng() });
   await expect(page.getByRole('button', { name: /^1 photo, today/ })).toBeVisible();
 
+  await expect(submit(page)).toBeEnabled();
   await submit(page).click();
   await expect(page.getByText(/^LP-\d{4,} saved$/)).toBeVisible();
   await expect(form(page)).toHaveCount(0);
@@ -205,7 +248,7 @@ test('creates a request with a photo; it shows in All and My requests', async ({
   const [created] = await rowsNamed(page.request, name);
   expect(created).toMatchObject({
     reportingLocation: 'FA 4 – Oasis',
-    age: '19',
+    age: 'mid-20s',
     gender: 'Female',
     clothing: 'Pink cowboy hat, silver fringe top',
     lastSeen: 'rail, ~10:30, kineticFIELD',
@@ -217,6 +260,112 @@ test('creates a request with a photo; it shows in All and My requests', async ({
 
   await page.goto('/?view=mine');
   await expect(page.getByText(name).first()).toBeVisible();
+});
+
+test('age, gender and phone take any text; a gender chip fills Gender, a second tap clears it', async ({ page }) => {
+  const name = uniqueName('free text');
+  await openNew(page);
+  await pickPost(page, 'Base');
+  await personName(page).fill(name);
+  await age(page).fill('early 30s');
+  await expect(age(page)).toHaveValue('early 30s');
+  await expect(age(page)).not.toHaveAttribute('inputmode', /.+/);
+
+  await genderChip(page, 'Other').click();
+  await expect(gender(page)).toHaveValue('Other');
+  await expect(genderChip(page, 'Other')).toHaveAttribute('aria-pressed', 'true');
+  await genderChip(page, 'Other').click();
+  await expect(gender(page)).toHaveValue('');
+  await gender(page).fill('Non-binary');
+  for (const chip of ['Male', 'Female', 'Other']) await expect(genderChip(page, chip)).toHaveAttribute('aria-pressed', 'false');
+
+  // Any phone text is kept; only a 10–15 digit number gets the check.
+  await friend(page).getByLabel('Phone').fill('555-0142 ext 2');
+  await expect(page.getByRole('img', { name: 'Valid number' })).toHaveCount(0);
+  await expect(submit(page)).toBeEnabled();
+
+  const post = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/api/requests'));
+  await submit(page).click();
+  expect((await post).postDataJSON()).toMatchObject({ age: 'early 30s', gender: 'Non-binary', contactPhone: '555-0142 ext 2' });
+  await expect(page.getByText(/^LP-\d{4,} saved$/)).toBeVisible();
+  await expect.poll(async () => (await rowsNamed(page.request, name)).length).toBe(1);
+  const [created] = await rowsNamed(page.request, name);
+  expect(created).toMatchObject({ age: 'early 30s', gender: 'Non-binary', contactPhone: '555-0142 ext 2' });
+
+  // Edit shows them as typed; a chip replaces the typed gender, and only that key is sent.
+  await page.goto(`/?r=${created!.id}&edit=person`);
+  await expect(submit(page)).toBeVisible();
+  await expect(age(page)).toHaveValue('early 30s');
+  await expect(gender(page)).toHaveValue('Non-binary');
+  await genderChip(page, 'Female').click();
+  await expect(gender(page)).toHaveValue('Female');
+  const patch = page.waitForRequest((r) => r.method() === 'PATCH' && r.url().endsWith(`/api/requests/${created!.id}`));
+  await submit(page).click();
+  expect((await patch).postDataJSON()).toEqual({ patch: { gender: 'Female' }, expectedVersion: created!.rowVersion });
+  await expect(page).toHaveURL(new RegExp(`\\?r=${created!.id}$`));
+});
+
+test('every group shows at once, in order, with Friend or family last; Send stays pinned', async ({ page }) => {
+  await openNew(page);
+  // Nothing to expand.
+  await expect(page.getByRole('button', { name: 'More details' })).toHaveCount(0);
+  await expect(page.locator('[aria-expanded]')).toHaveCount(0);
+
+  const post = await edges(page.getByRole('button', { name: /^Reporting from/ }));
+  const groups = [await edges(person(page)), await edges(more(page)), await edges(friend(page))];
+  expect(post.bottom).toBeLessThanOrEqual(groups[0]!.top);
+  expect(groups[0]!.bottom).toBeLessThanOrEqual(groups[1]!.top);
+  expect(groups[1]!.bottom).toBeLessThanOrEqual(groups[2]!.top);
+
+  // Missing person: photo, name, age, gender, wearing, last seen. More details: the person extras.
+  for (const label of ['Name', 'Age', 'Gender', 'Wearing', 'Last seen']) await expect(person(page).getByLabel(label, { exact: true })).toBeVisible();
+  await expect(person(page).getByRole('button', { name: 'Add photo' })).toBeVisible();
+  for (const label of ['Hair', 'Build', 'Features', 'Description', 'Other notes']) await expect(more(page).getByLabel(label, { exact: true })).toBeVisible();
+  for (const label of ['Name', 'Phone', 'Relation', 'Notes']) await expect(friend(page).getByLabel(label, { exact: true })).toBeVisible();
+  await expect(page.getByText('Optional', { exact: true })).toBeVisible();
+
+  // Enter walks the fields in that order (Last seen → Hair, Relation → Notes).
+  await lastSeen(page).focus();
+  await page.keyboard.press('Enter');
+  await expect(more(page).getByLabel('Hair', { exact: true })).toBeFocused();
+  await friend(page).getByLabel('Relation', { exact: true }).focus();
+  await page.keyboard.press('Enter');
+  const notes = friend(page).getByLabel('Notes', { exact: true });
+  await expect(notes).toBeFocused();
+
+  // The form scrolls to its last field while Send stays on screen.
+  await notes.fill('TEST-F call after 11');
+  await expect(notes).toBeInViewport();
+  await expect(submit(page)).toBeInViewport();
+});
+
+test('with the keyboard up, Send sits just above it and the focused row stays in view', async ({ page }) => {
+  await fakeKeyboard(page);
+  await openNew(page);
+  const KEYBOARD = 336; // iPhone 14 portrait
+  const visible = page.viewportSize()!.height - KEYBOARD;
+
+  await friend(page).getByLabel('Relation', { exact: true }).focus();
+  await setKeyboard(page, KEYBOARD);
+  await expect(form(page)).toHaveAttribute('data-kb', '');
+  await expect.poll(async () => (await edges(submit(page))).bottom).toBeLessThanOrEqual(visible);
+  const row = async (locator: Locator) => {
+    const box = await edges(locator);
+    const send = await edges(submit(page));
+    return box.top >= 0 && box.bottom <= send.top;
+  };
+  await expect.poll(() => row(friend(page).getByLabel('Relation', { exact: true }))).toBe(true);
+
+  // Another field, high up the form: its row, with the place chips it shows, comes into view.
+  await lastSeen(page).focus();
+  await expect(page.getByRole('button', { name: 'kineticFIELD' })).toBeVisible();
+  await expect.poll(() => row(page.getByRole('group', { name: 'Add a place to Last seen' }))).toBe(true);
+  await expect.poll(() => row(lastSeen(page))).toBe(true);
+
+  // Keyboard down: the form fills the screen again.
+  await setKeyboard(page, 0);
+  await expect(form(page)).not.toHaveAttribute('data-kb');
+  await expect.poll(async () => (await edges(submit(page))).bottom).toBeGreaterThan(visible);
 });
 
 test('a draft survives a reload, with its photo; Cancel discards it', async ({ page }) => {
@@ -260,7 +409,8 @@ test('edit sends only the changed keys with the version editing started from', a
   const row = await apiCreate(page.request, { name, clothing: 'TEST-F black tee', contactName: 'TEST-F Jo', contactPhone: '407 555 0100' });
   await page.goto(`/?r=${row.id}&edit=friend`);
   await expect(submit(page)).toBeDisabled();
-  await expect(page.getByRole('group', { name: 'Missing person' })).toHaveCount(0);
+  await expect(person(page)).toHaveCount(0);
+  await expect(more(page)).toHaveCount(0);
   await friend(page).getByLabel('Phone').fill('407 555 0199');
 
   const patchRequest = page.waitForRequest((r) => r.method() === 'PATCH' && r.url().endsWith(`/api/requests/${row.id}`));
@@ -286,7 +436,7 @@ test('a conflict keeps my edits, shows theirs, and saves again without reverting
   });
   expect(other.ok()).toBe(true);
 
-  await page.getByRole('button', { name: 'More details' }).click();
+  // More details is open in Edit too: Hair is there without a tap.
   await page.getByLabel('Hair').fill('TEST-F blond braids');
   await submit(page).click();
   await expect(page.getByText('Someone else just updated this. Your changes are kept below — review and save again.')).toBeVisible();

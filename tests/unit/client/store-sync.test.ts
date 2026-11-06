@@ -2,6 +2,7 @@
 // A7, A37, A38), against the in-memory fake API with fake-indexeddb and fake timers. Synthetic data only.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openKv } from '@/lib/client/persist';
+import { mergedRows, searchRequests } from '@/lib/client/selectors';
 import { createAppStore, type StoreEnv } from '@/lib/client/store-core';
 import { STATUS } from '@/lib/domain';
 import { advance, fakeEnv, settle, useStoreTimers, type EnvOptions } from './helpers/env';
@@ -355,6 +356,28 @@ describe('session', () => {
     // Sam's cache was empty: a full fetch, not Dana's cursor.
     expect(syncs(server).at(-1)?.query.get('since')).toBeNull();
     expect(second.s().confirmed.size).toBe(2);
+  });
+
+  it('a row cached while age was a number loads with its age as text, and search over it works', async () => {
+    // The smallint → text change touched neither updated_at nor row_version: a delta sync never refetches it.
+    const server = new FakeServer([makeRow(1, { name: 'Kayla M.' }), makeRow(2)]);
+    server.overlap = 0; // nothing changed on the server: the delta re-delivers no row
+    const first = boot(server);
+    await ready();
+    await advance(3_500); // the cache write
+    first.stop();
+    const kv = openKv(first.fe.dbName);
+    const key = `cache:edco26:${'dana kim · gc/hx - dispatch'}:rows`;
+    const cachedRows = (await kv?.get<Array<Record<string, unknown>>>(key)) ?? [];
+    expect(cachedRows).toHaveLength(2);
+    await kv?.set(key, cachedRows.map((r) => ({ ...r, age: 24 })));
+    const second = boot(server, { dbName: first.fe.dbName });
+    await ready();
+    // A delta sync (the cursor is fresh) that brought nothing: the rows are the cached ones.
+    expect(syncs(server).at(-1)?.query.get('since')).not.toBeNull();
+    const rows = mergedRows(second.s().confirmed, second.s().pending);
+    expect(rows.map((r) => r.age)).toEqual(['24', '24']);
+    expect(searchRequests(rows, 'kayla').map((h) => h.row.id)).toEqual([makeRow(1).id]);
   });
 });
 
