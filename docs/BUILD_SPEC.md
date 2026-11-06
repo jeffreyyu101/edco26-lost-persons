@@ -1054,3 +1054,14 @@ Unknown params are ignored.
 - **Integration rows.** The harness closes every request a test file created when the file ends (Waiting → Cancelled, In medical → Reunited). Photo fixtures are decodable images (`tests/helpers/images.ts`).
 - **CSP smoke.** `scripts/smoke-csp.mjs` waits for the view switcher by test id, and `tests/e2e/smoke.spec.ts` runs it, so it can't go stale.
 
+**A44 · Photo objects are immutable** (replaces the paths and `upsert: true` in §6 `POST /api/requests/:id/photos`; from the security review).
+
+- **The problem.** With `upsert: true` the objects were overwritten before `lp_add_photo` checked idempotency. A replay of an existing photoId with other bytes changed the image while SQL returned `created: false`: no attribution, rowVersion or audit change.
+- **Rule.** A stored photo object never changes.
+  1. If a photo row with this `photoId` exists, the route answers from `lp_add_photo` (`created: false`, or 422 `photoId` when it belongs to another request) without touching storage.
+  2. Otherwise it uploads to **content-addressed paths**, `{patientId}/{photoId}-{sha256}.jpg` and `{patientId}/{photoId}-{sha256}_thumb.jpg`, each hashed over its own bytes, with `upsert: false`. An object that already exists there holds the same bytes, so it counts as stored. That is the retry after a failed record or a partial upload.
+  3. Definitive rejections from `lp_add_photo` still delete the objects, and 503s still keep them for the retry, as in §6.
+- **Why hash the path.** Storage's `upsert: false` does not serialise concurrent writers. Two uploads to one path both succeed and the last one wins (checked against the local storage-api v1.60). With the hash in the name, other bytes always get another path, so a recorded row's object can't change even under a race. A losing upload is left as an orphan, which §6 allows.
+- **Other bytes under an unrecorded photoId** (only the sending phone knows it) are stored beside the earlier objects and recorded as sent, attributed and audited to their sender.
+- `GET /api/photos/:id` reads the path from the row, so legacy and seed photos are unaffected. `lp_add_photo` only checks the `{patientId}/` prefix and the 200-character limit; these paths are at most 148 characters.
+
