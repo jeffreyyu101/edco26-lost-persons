@@ -26,10 +26,19 @@ import type {
   Stats,
   SyncResponse,
 } from '../api-types';
-import { SETTABLE_STATUSES, STATUS, canonStaff, isUuid, statusMeta, staffString, undoTarget, type SettableStatus, type StatusKind } from '../domain';
+import { SETTABLE_STATUSES, STATUS, canonStaff, isUuid, sameStaff, statusMeta, staffString, undoTarget, type SettableStatus, type StatusKind } from '../domain';
 import { formatCaseNumber } from '../format';
 import { syncPath } from './api-paths';
-import { alertKey, alertToast, coalesceAlerts, diffAlerts, type AlertContext } from './alerts';
+import {
+  alertKey,
+  alertStillCurrent,
+  alertToast,
+  coalesceAlerts,
+  diffRaisedAlerts,
+  latestPerRequest,
+  type AlertContext,
+  type RaisedAlert,
+} from './alerts';
 import { DRAFT_DEBOUNCE_MS, LEGACY_QUEUE_KEY, MUTATION_TIMEOUT_MS, SYNC, UNDO_MS } from './constants';
 import { createBodyFromLegacyQueueItem, hasAnyDetail, toCreateBody } from './form-values';
 import { apiRequest, isDefinitive, type FetchLike, type HttpFailure, type HttpResult } from './http';
@@ -169,6 +178,8 @@ export const COPY = {
   finishDraft: 'Finish or cancel the new request first',
   waitOutbox: 'Saved requests are still sending',
   sessionEnded: 'Session ended',
+  /** Undo after this phone already changed the request again (never "someone else"). */
+  undoStale: "Can't undo — it changed since",
 } as const;
 
 const UNDOABLE_KINDS: ReadonlySet<StatusKind> = new Set(['answer', 'change', 'reunite']);
@@ -191,6 +202,14 @@ interface UndoRecord {
   id: string;
   to: SettableStatus;
   version: number;
+}
+
+/** What an alert toast on screen is about (one per request; see alerts.ts alertStillCurrent). */
+interface AlertToastMeta {
+  requestId: string;
+  kind: AlertEvent['kind'];
+  /** The row's status when the alert was raised. */
+  status: string | null;
 }
 
 class FetchError extends Error {
@@ -262,6 +281,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const undoRecords = new Map<string, UndoRecord>();
   let snackTimer: ReturnType<typeof setTimeout> | undefined;
   const toastTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Alert toasts on screen, by toast id. */
+  const alertToasts = new Map<string, AlertToastMeta>();
 
   // outbox
   let workerRunning = false;
@@ -303,6 +324,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     const t = toastTimers.get(id);
     if (t) clearTimeout(t);
     toastTimers.delete(id);
+    alertToasts.delete(id);
     if (id === updateToastId) updateToastId = null;
     if (state.toasts.some((x) => x.id === id)) set({ toasts: state.toasts.filter((x) => x.id !== id) });
   };
@@ -327,6 +349,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     const t = toastTimers.get(id);
     if (t) clearTimeout(t);
     toastTimers.delete(id);
+    alertToasts.delete(id);
   };
 
   const toastFailure = (title: string, tone: ToastItem['tone'] = 'red') =>
@@ -337,6 +360,22 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     snackTimer = undefined;
     undoRecords.clear();
     if (state.snackbar) set({ snackbar: null });
+  };
+
+  /**
+   * This phone changed request `id` again (an edit, cancel, photo, another answer): an Undo offered for an
+   * earlier version of it would only 409, so it goes. An unchanged repeat (same version) keeps it.
+   */
+  const dropUndoFor = (id: string, version: number) => {
+    for (const [snackId, record] of undoRecords) {
+      if (record.id !== id || record.version === version) continue;
+      undoRecords.delete(snackId);
+      if (state.snackbar?.id === snackId) {
+        if (snackTimer) clearTimeout(snackTimer);
+        snackTimer = undefined;
+        set({ snackbar: null });
+      }
+    }
   };
 
   // ---- connection ----
@@ -360,9 +399,35 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     seen,
   });
 
-  const emitAlerts = (alerts: AlertEvent[]) => {
-    for (const alert of coalesceAlerts(alerts)) {
-      showToast(alertToast(alert, (id) => navigate({ r: id })));
+  /** Closes the alert toasts of one request (a newer alert for it replaces them). */
+  const dismissAlertToastsFor = (requestId: string) => {
+    for (const [toastId, meta] of [...alertToasts]) if (meta.requestId === requestId) dismissToast(toastId);
+  };
+
+  /**
+   * Closes every alert toast that no longer matches its request's synced status: "is in medical" after
+   * the answer was changed or undone (by anyone, this phone included) must never stay on screen.
+   */
+  const pruneAlertToasts = () => {
+    for (const [toastId, meta] of [...alertToasts]) {
+      if (!state.toasts.some((t) => t.id === toastId)) {
+        alertToasts.delete(toastId);
+        continue;
+      }
+      if (!alertStillCurrent(meta.kind, meta.status, state.confirmed.get(meta.requestId))) dismissToast(toastId);
+    }
+  };
+
+  const emitAlerts = (raised: readonly RaisedAlert[]) => {
+    // One alert per request (the latest change wins), and only alerts still true for the synced row.
+    const current = latestPerRequest(raised).filter((r) =>
+      r.alert.requestId ? alertStillCurrent(r.alert.kind, r.status, state.confirmed.get(r.alert.requestId)) : true,
+    );
+    for (const r of raised) if (r.alert.requestId) dismissAlertToastsFor(r.alert.requestId);
+    const statusOf = new Map(current.map((r) => [r.alert, r.status]));
+    for (const alert of coalesceAlerts(current.map((r) => r.alert))) {
+      const toastId = showToast(alertToast(alert, (id) => navigate({ r: id })));
+      if (alert.requestId) alertToasts.set(toastId, { requestId: alert.requestId, kind: alert.kind, status: statusOf.get(alert) ?? null });
       for (const l of [...alertListeners]) {
         try {
           l(alert);
@@ -371,22 +436,22 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         }
       }
     }
+    pruneAlertToasts();
   };
 
   /** Rows from the server that may be someone else's changes: alert (once armed), then merge. */
-  const ingest = (rows: readonly RequestSummary[], collect?: AlertEvent[]) => {
+  const ingest = (rows: readonly RequestSummary[], collect?: RaisedAlert[]) => {
     const valid = rows.filter(isRow);
     if (valid.length === 0) return;
-    if (armed) {
-      const alerts = diffAlerts(state.confirmed, valid, alertCtx());
-      if (collect) collect.push(...alerts);
-      else if (alerts.length) emitAlerts(alerts);
-    }
+    const alerts = armed ? diffRaisedAlerts(state.confirmed, valid, alertCtx()) : [];
+    if (collect) collect.push(...alerts);
     const merged = mergeRows(state.confirmed, valid);
     if (merged) {
       set({ confirmed: merged, hasData: true });
       markRowsDirty();
     }
+    if (!collect && alerts.length) emitAlerts(alerts);
+    else if (merged) pruneAlertToasts();
   };
 
   const rememberOwn = (row: RequestSummary) => {
@@ -416,6 +481,11 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       patch.pending = pending;
     }
     if (Object.keys(patch).length) set(patch);
+    if (row && isRow(row)) {
+      const stored = state.confirmed.get(row.id);
+      dropUndoFor(row.id, stored?.rowVersion ?? row.rowVersion);
+      if (patch.confirmed) pruneAlertToasts();
+    }
   };
 
   const setOverlay = (id: string, overlay: Overlay) => {
@@ -653,7 +723,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     const reconcile = !full && reconcileDue;
     const since = full ? null : cursor;
     touchedDuringPoll.clear();
-    const alerts: AlertEvent[] = [];
+    const alerts: RaisedAlert[] = [];
     const fullRows: RequestSummary[] = [];
     let versions: Array<[string, number]> | undefined;
     let firstServerTime: string | null = null;
@@ -674,7 +744,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     }
     if (full) {
       const valid = fullRows;
-      if (armed) alerts.push(...diffAlerts(state.confirmed, valid, alertCtx()));
+      if (armed) alerts.push(...diffRaisedAlerts(state.confirmed, valid, alertCtx()));
       set({ confirmed: replaceAll(state.confirmed, valid, touchedDuringPoll), hasData: true });
       markRowsDirty();
     }
@@ -697,6 +767,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     }
     if (armed) {
       if (alerts.length) emitAlerts(alerts);
+      else pruneAlertToasts();
     } else {
       armed = true; // the first sync after load is the baseline: it alerts nothing
     }
@@ -790,6 +861,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       timeoutMs: MUTATION_TIMEOUT_MS,
     });
 
+  /** The row's latest version came from this phone, or from the same staff member on another phone. */
+  const changedByThisStaff = (row: RequestSummary) => ownKeys.has(alertKey(row)) || sameStaff(row.updatedBy, state.session.staff);
+
   const showUndo = (row: RequestSummary, from: string, to: SettableStatus) => {
     const back = undoTarget(from);
     if (!back || !isSettable(back) || back === to) return;
@@ -826,6 +900,15 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         showToast({ tone: 'amber', icon: 'alert', title: COPY.conflict, durationMs: 6_000 });
         return fail('conflict', COPY.conflict, latest ?? undefined);
       }
+    }
+    if (!res.ok && res.kind === 'http' && res.status === 409 && kind === 'undo') {
+      // Never retried (A12). Only say "someone else" when it was someone else.
+      dropOverlay(id);
+      const latest = await fetchRow(id);
+      if (gen !== state.generation) return fail('failed', COPY.failed);
+      const message = latest && changedByThisStaff(latest) ? COPY.undoStale : COPY.conflict;
+      showToast({ tone: 'amber', icon: 'alert', title: message, durationMs: 6_000 });
+      return fail('conflict', message, latest ?? undefined);
     }
     if (res.ok && isRow(res.data.request)) {
       const request = res.data.request;
@@ -1461,6 +1544,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     });
     for (const t of toastTimers.values()) clearTimeout(t);
     toastTimers.clear();
+    alertToasts.clear();
     clearSnackbar();
     cursor = null;
     cursorAt = 0;
@@ -1537,7 +1621,15 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       clearSnackbar();
       if (offlineNow()) return refuseOffline();
       // Never retried automatically (A12); expectedVersion = the version the original mutation returned.
-      return serialize(record.id, () => runStatus(record.id, record.to, 'undo', record.version));
+      return serialize(record.id, async () => {
+        // This phone changed the request again while the Undo was queued behind it: it would only 409.
+        const current = state.confirmed.get(record.id);
+        if (current && current.rowVersion !== record.version && ownKeys.has(alertKey(current))) {
+          showToast({ tone: 'amber', icon: 'alert', title: COPY.undoStale, durationMs: 6_000 });
+          return fail('conflict', COPY.undoStale, current);
+        }
+        return runStatus(record.id, record.to, 'undo', record.version);
+      });
     },
 
     dismissSnackbar: clearSnackbar,

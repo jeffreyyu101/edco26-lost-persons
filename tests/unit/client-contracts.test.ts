@@ -44,6 +44,7 @@ describe('nav (A22)', () => {
     expect(p('view=mine')).toEqual({ name: 'mine' });
     expect(p('status=Checked+%E2%80%93+Not+Found')).toEqual({ name: 'all', status: 'Checked – Not Found', post: null });
     expect(p('post=FA+3')).toEqual({ name: 'all', status: null, post: 'FA 3' });
+    expect(p('post=FA+3&open=1')).toEqual({ name: 'all', status: null, post: 'FA 3', open: true });
     expect(p('q=pink')).toEqual({ name: 'search', q: 'pink' });
     expect(p('q=')).toEqual({ name: 'search', q: '' });
     expect(p('new=1')).toEqual({ name: 'new' });
@@ -55,6 +56,9 @@ describe('nav (A22)', () => {
 
   it('ignores unknown or invalid params and applies precedence', () => {
     expect(p('foo=bar')).toEqual({ name: 'all', status: null, post: null });
+    // ?open= only qualifies a post filter (a dashboard bar); alone, or with any other value, it is ignored.
+    expect(p('open=1')).toEqual({ name: 'all', status: null, post: null });
+    expect(p('post=Base&open=yes')).toEqual({ name: 'all', status: null, post: 'Base' });
     expect(p('status=Bogus')).toEqual({ name: 'all', status: null, post: null });
     expect(p('r=not-a-uuid')).toEqual({ name: 'all', status: null, post: null });
     expect(p(`r=${ID}&edit=everything`)).toEqual({ name: 'profile', id: ID });
@@ -67,6 +71,7 @@ describe('nav (A22)', () => {
     const views: View[] = [
       { name: 'all', status: null, post: null },
       { name: 'all', status: 'Found – Awaiting Reunion', post: 'FA 4' },
+      { name: 'all', status: null, post: 'FA 4 – Oasis', open: true },
       { name: 'pending' },
       { name: 'mine' },
       { name: 'search', q: 'pink hat' },

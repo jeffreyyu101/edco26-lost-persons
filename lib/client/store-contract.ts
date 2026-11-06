@@ -493,7 +493,8 @@ export function useRequest(id: string | null): RequestSummary | null {
 /** All, optionally filtered by status / post (A22). */
 export function useAllRows(filter: AllFilter): RequestSummary[] {
   const { status, post } = filter;
-  const selector = useCallback((s: StoreState) => filterAll(selectMerged(s), { status, post }), [status, post]);
+  const open = !!filter.open;
+  const selector = useCallback((s: StoreState) => filterAll(selectMerged(s), { status, post, open }), [status, post, open]);
   return useStoreSelector(selector, shallowEqual);
 }
 

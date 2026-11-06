@@ -1,9 +1,12 @@
 // Security matrix (spec §6 "Every route", §9.6): every route requires a session (except POST /api/session),
 // every mutation requires same-origin, every JSON response is no-store, no CORS is granted, unknown API
 // paths are JSON 404s, RLS is on with no policies, anon can neither read the tables nor run the functions.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { createClient } from '@supabase/supabase-js';
 import { describe, expect, it } from 'vitest';
 import { STATUS } from '@/lib/domain';
+import { ROOT } from '../../scripts/test-env.mjs';
 import { ORIGIN, api, cookieFor, createBody, createRequest, newStaff, psql, randomUUID, withTestServer } from './harness';
 
 withTestServer();
@@ -17,7 +20,8 @@ function photoForm(): FormData {
   const f = new FormData();
   f.set('photoId', randomUUID());
   f.set('timing', 'today');
-  f.set('photo', new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0])], { type: 'image/jpeg' }), 'p.jpg');
+  // A real (decodable) JPEG, in case a refusal ever regressed into storing it.
+  f.set('photo', new Blob([new Uint8Array(readFileSync(join(ROOT, 'supabase', 'seed-photos', 'photo_thumb.jpg')))], { type: 'image/jpeg' }), 'p.jpg');
   return f;
 }
 

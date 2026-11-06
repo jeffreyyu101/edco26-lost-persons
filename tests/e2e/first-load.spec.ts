@@ -1,6 +1,6 @@
 import { gzipSync } from 'node:zlib';
 import { expect, test, type APIRequestContext } from '@playwright/test';
-import { mintSessionToken } from './helpers/session';
+import { sessionCookieHeader } from './helpers/session';
 
 // First-load JS budget (spec §7 Performance, v2.2 A25), measured the way the reviewer does: every
 // <script src> in the server HTML of the route, fetched from the production build and gzipped (zlib
@@ -29,7 +29,8 @@ const kb = (n: number) => `${(n / KB).toFixed(1)} KB`;
 
 test('first-load JS of / stays within the A25 budget', async ({ request }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium-iphone14', 'request-based; one project is enough');
-  const home = await scriptSizes(request, '/', `lp_session=${await mintSessionToken()}`);
+  // A real session (POST /api/session), as a phone has after sign-in.
+  const home = await scriptSizes(request, '/', await sessionCookieHeader({ staffName: 'TEST-e2e First Load', team: 'Medical' }));
   const signin = await scriptSizes(request, '/signin');
   const homeTotal = sum(home.values());
   const homeOnly = sum([...home].filter(([src]) => !signin.has(src)).map(([, n]) => n));

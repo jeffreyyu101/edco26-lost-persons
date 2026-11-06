@@ -7,14 +7,16 @@ import { describe, expect, it } from 'vitest';
 import type { ApiError, PhotoResponse, RequestDetail, SyncResponse } from '@/lib/api-types';
 import { syncPath } from '@/lib/client/api-paths';
 import { ROOT } from '../../scripts/test-env.mjs';
+import { TINY_WEBP, syntheticPng } from '../helpers/images';
 import { admin, api, cookieFor, createRequest, newStaff, randomUUID, staffOf, withTestServer } from './harness';
 
 withTestServer();
 
 const JPEG = readFileSync(join(ROOT, 'supabase', 'seed-photos', 'photo.jpg'));
 const JPEG_THUMB = readFileSync(join(ROOT, 'supabase', 'seed-photos', 'photo_thumb.jpg'));
-const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 1)]);
-const WEBP = Buffer.concat([Buffer.from('RIFF'), Buffer.from([0x40, 0, 0, 0]), Buffer.from('WEBPVP8 '), Buffer.alloc(64, 2)]);
+// Decodable synthetic images (tests/helpers/images.ts): nothing broken is left in the shared bucket.
+const PNG = syntheticPng(48, 64);
+const WEBP = TINY_WEBP;
 const BUCKET = 'patient-photos';
 
 interface UploadParts {

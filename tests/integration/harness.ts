@@ -8,7 +8,10 @@
 //     yourself is reused (its logs are checked only when LP_SERVER_LOG names its log file).
 //   * Sessions are minted with the .env.test SESSION_SECRET (synthetic identities only); the real sign-in
 //     route has its own tests. Every login test uses a unique fake IP and deletes its own attempts.
-//   * Direct database access uses the local service-role key (assertions and test setup only).
+//   * Direct database access uses the local service-role key (assertions, test setup and teardown only).
+//   * Every request a file creates through api() is closed again when the file ends (closeCreatedRequests):
+//     Waiting → Cancelled, In medical → Reunited. The local database is shared with e2e runs and manual QA,
+//     so no TEST-S row is left open in Pending.
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, openSync, readFileSync, closeSync } from 'node:fs';
@@ -112,6 +115,7 @@ export function withTestServer(): void {
   }, 90_000);
   afterAll(async () => {
     try {
+      await closeCreatedRequests();
       assertNoPiiInLogs();
     } finally {
       await stopServer();
@@ -209,7 +213,47 @@ export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise
       parsed = text;
     }
   }
+  if (method === 'POST' && path.split('?')[0] === '/api/requests' && (res.status === 200 || res.status === 201)) {
+    const id = (parsed as { request?: { id?: unknown } } | null)?.request?.id;
+    if (typeof id === 'string') createdIds.add(id);
+  }
   return { status: res.status, headers: res.headers, body: parsed as T, text };
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Cleanup: close what this file created
+// ---------------------------------------------------------------------------------------------------
+
+/** Request ids this file created through api() (and createRequest), not yet closed. */
+const createdIds = new Set<string>();
+
+/** The ids created so far and not yet closed (tests of the cleanup itself). */
+export function createdRequestIds(): ReadonlySet<string> {
+  return createdIds;
+}
+
+const OPEN_WAITING = ['Added'];
+const OPEN_IN_MEDICAL = ['Found – Awaiting Reunion', 'Bring friend to medical'];
+
+/**
+ * Closes every request this file created that is still open: Waiting → Cancelled, In medical → Reunited
+ * (closed_at set; the touch trigger bumps row_version, so open phones sync it). Answered and closed rows
+ * stay as the test left them. Direct service-role writes (teardown only), so no audit rows are added.
+ */
+export async function closeCreatedRequests(): Promise<void> {
+  const ids = [...createdIds];
+  createdIds.clear();
+  const closedAt = new Date().toISOString();
+  for (let i = 0; i < ids.length; i += 100) {
+    const batch = ids.slice(i, i + 100);
+    for (const [from, to] of [
+      [OPEN_WAITING, 'Cancelled'],
+      [OPEN_IN_MEDICAL, 'Reunited – Closed'],
+    ] as const) {
+      const { error } = await admin().from('patients').update({ status: to, closed_at: closedAt }).in('id', batch).in('status', [...from]);
+      if (error) throw new Error(`could not close test requests: ${error.code}`);
+    }
+  }
 }
 
 /** Set-Cookie headers of a response. */

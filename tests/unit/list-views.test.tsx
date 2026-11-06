@@ -30,7 +30,7 @@ import { filterAll, mineRows, pendingGroups, searchRequests, sortNewestFirst } f
 import { StoreContext, createServerState, type AppStore, type StoreState } from '@/lib/client/store-contract';
 import { createStubStore } from '@/lib/client/store-stub';
 import { STUB_SESSION, stubRows } from '@/lib/client/stub-data';
-import { STATUS } from '@/lib/domain';
+import { STATUS, postFilterKey, statusMeta } from '@/lib/domain';
 
 const NOW = Date.parse('2026-11-07T03:10:00Z');
 const rows = stubRows(NOW);
@@ -227,6 +227,22 @@ describe('search, filter and sort', () => {
     expect(filterAll(all, { status: STATUS.inMedical, post: 'FA 3 – Kinetic' }).map((r) => r.caseNumber)).toEqual([1004, 1005]);
   });
 
+  it('a dashboard bar (post + open) lists only the open rows it counts (regression)', () => {
+    const all = sortNewestFirst(rows);
+    for (const post of new Set(all.map((r) => postFilterKey(r.reportingLocation, r.otherLocation)))) {
+      const atPost = filterAll(all, { status: null, post });
+      const open = filterAll(all, { status: null, post, open: true });
+      // What lp_stats byPost counts for the bar: Waiting, In medical and legacy Bring friend at that post.
+      const counted = atPost.filter((r) => [STATUS.waiting, STATUS.inMedical, STATUS.legacyBringFriend].includes(r.status as never));
+      expect(open.map((r) => r.id)).toEqual(counted.map((r) => r.id));
+    }
+    const fa3 = filterAll(all, { status: null, post: 'FA 3 – Kinetic' });
+    const fa3Open = filterAll(all, { status: null, post: 'FA 3 – Kinetic', open: true });
+    expect(fa3.some((r) => statusMeta(r.status).bucket !== 'open')).toBe(true); // the fixture has closed rows there
+    expect(fa3Open.length).toBeLessThan(fa3.length);
+    expect(fa3Open.every((r) => statusMeta(r.status).bucket === 'open')).toBe(true);
+  });
+
   it('Pending: Friend coming and Waiting for check, both oldest first', () => {
     const { friendComing, waiting } = pendingGroups(rows);
     expect(friendComing.map((r) => r.caseNumber)).toEqual([1005, 1004, 1007]);
@@ -278,6 +294,24 @@ describe('list views render', () => {
     expect(row(1013)).not.toMatch(/muted/);
     expect(html).toContain('All requests');
     expect(html).toContain('Newest first');
+  });
+
+  it('All from a dashboard bar (post + open) shows an Open chip and a post chip with the open count', () => {
+    const store = storeWith((s) => s);
+    const all = [...store.getState().confirmed.values()];
+    const openAtFa3 = all.filter((r) => r.reportingLocation === 'FA 3 – Kinetic' && statusMeta(r.status).bucket === 'open');
+    const closedAtFa3 = all.filter((r) => r.reportingLocation === 'FA 3 – Kinetic' && statusMeta(r.status).bucket !== 'open');
+    expect(closedAtFa3.length).toBeGreaterThan(0);
+    const html = render(store, <AllView status={null} post="FA 3 – Kinetic" open />);
+    expect(html).toContain('data-testid="open-chip"');
+    expect(html).toContain('Open requests only. Clear this filter');
+    expect(html).toContain(`FA 3 – Kinetic ${openAtFa3.length} shown. Clear this filter`);
+    for (const r of openAtFa3) expect(html).toContain(`data-request-id="${r.id}"`);
+    for (const r of closedAtFa3) expect(html).not.toContain(`data-request-id="${r.id}"`);
+    // Without ?open=1 the post filter still lists every row at the post, and shows no Open chip.
+    const every = render(store, <AllView status={null} post="FA 3 – Kinetic" />);
+    expect(every).not.toContain('data-testid="open-chip"');
+    for (const r of closedAtFa3) expect(every).toContain(`data-request-id="${r.id}"`);
   });
 
   it('All with a status filter shows the chip and hides the outbox', () => {

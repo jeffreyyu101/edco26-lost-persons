@@ -1,7 +1,7 @@
 import { deflateSync } from 'node:zlib';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { testBaseUrl } from '../../scripts/test-env.mjs';
-import { addSessionCookie } from './helpers/session';
+import { signedInAs } from './helpers/session';
 import { syncRows } from './helpers/sync';
 
 // New request / Edit / Needs-attention editor (spec §8 New request, §9.4, v2.1 A10/A13/A20/A33).
@@ -117,8 +117,10 @@ async function rowsNamed(request: APIRequestContext, name: string): Promise<Row[
 const NETWORK_FAILURE = /^(Failed to load resource|Cannot load http|FetchEvent\.respondWith received an error: TypeError: Load failed)/;
 let errors: string[];
 
-test.beforeEach(async ({ context, page }) => {
-  await addSessionCookie(context, STAFF);
+// Signed in once through POST /api/session (A17).
+signedInAs(STAFF);
+
+test.beforeEach(async ({ page }) => {
   errors = [];
   // WebKit also reports a chunk fetch the offline worker couldn't serve as a page error.
   page.on('pageerror', (e) => {
@@ -163,7 +165,7 @@ test('Send needs a post and a detail; a photo counts; Other asks where', async (
   await expect(submit(page)).toBeEnabled();
 
   // The post is remembered for the next request.
-  await page.getByRole('button', { name: 'Cancel' }).click();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.getByRole('alertdialog').getByRole('button', { name: 'Discard' }).click();
   await openNew(page);
   await expect(page.getByRole('button', { name: 'Reporting from TEST-F gate 9. Change' })).toBeVisible();
@@ -233,7 +235,7 @@ test('a draft survives a reload, with its photo; Cancel discards it', async ({ p
   await expect(page.getByRole('button', { name: /^1 photo/ })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Reporting from Command. Change' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Cancel' }).click();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.getByRole('alertdialog')).toContainText('Discard this request?');
   await page.getByRole('alertdialog').getByRole('button', { name: 'Discard' }).click();
   await expect(form(page)).toHaveCount(0);

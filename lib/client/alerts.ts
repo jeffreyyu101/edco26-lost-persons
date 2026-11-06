@@ -3,6 +3,9 @@
 //   * New requests by others: only while the bell is on.
 //   * Never for this phone's own mutations; never for the first sync after load (the store's baseline).
 //   * Each alert is keyed by (id, rowVersion); more than 2 at once become one "3 updates" toast.
+//   * One alert toast per request: a later alert for it replaces the earlier toast, and a status toast
+//     closes once the row is in another status (alertStillCurrent), so a sticky "is in medical" never
+//     outlives a changed or undone answer.
 import type { RequestSummary } from '../api-types';
 import { STATUS, ageGender, initials, isInMedical, sameStaff, statusMeta } from '../domain';
 import { formatCaseNumber } from '../format';
@@ -79,6 +82,50 @@ export function diffAlerts(
     }
   }
   return out;
+}
+
+/** An alert together with the status of the row that raised it. */
+export interface RaisedAlert {
+  alert: AlertEvent;
+  /** The row's status when the alert was raised (null for alerts with no request). */
+  status: string | null;
+}
+
+/** The alerts of `rows`, each paired with the status of the row that raised it (see diffAlerts). */
+export function diffRaisedAlerts(
+  previous: ReadonlyMap<string, RequestSummary>,
+  rows: readonly RequestSummary[],
+  ctx: AlertContext,
+): RaisedAlert[] {
+  const out: RaisedAlert[] = [];
+  for (const row of rows) {
+    for (const alert of diffAlerts(previous, [row], ctx)) out.push({ alert, status: row.status });
+  }
+  return out;
+}
+
+/**
+ * One alert per request: when a batch (a reconnect, several pages) holds two changes of the same request,
+ * only the later one is still true. Keeps the order of the surviving alerts.
+ */
+export function latestPerRequest<T extends { alert: AlertEvent }>(items: readonly T[]): T[] {
+  const last = new Map<string, number>();
+  items.forEach((item, i) => {
+    if (item.alert.requestId) last.set(item.alert.requestId, i);
+  });
+  return items.filter((item, i) => !item.alert.requestId || last.get(item.alert.requestId) === i);
+}
+
+/**
+ * Whether an alert toast still tells the truth about its request. A status alert ("is in medical") is out
+ * of date as soon as the row is in another status (the answer was changed or undone), so it must not stay
+ * on screen. A new-request alert is about the request being logged, which stays true.
+ */
+export function alertStillCurrent(kind: AlertEvent['kind'], alertedStatus: string | null, row: Pick<RequestSummary, 'status'> | undefined): boolean {
+  if (!row || kind === 'new_request' || kind === 'combined') return true;
+  if (kind === 'in_medical') return isInMedical(row.status);
+  if (alertedStatus === null) return true;
+  return row.status === alertedStatus || (isInMedical(row.status) && isInMedical(alertedStatus));
 }
 
 /** More than 2 alerts at once (a reconnect) combine into one "N updates" alert. */

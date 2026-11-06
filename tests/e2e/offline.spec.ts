@@ -1,6 +1,6 @@
 import { deflateSync } from 'node:zlib';
 import { expect, test, type APIRequestContext, type Page, type Route } from '@playwright/test';
-import { addSessionCookie } from './helpers/session';
+import { signedInAs } from './helpers/session';
 import { syncRows } from './helpers/sync';
 
 // Offline, lie-fi and service-worker gates (spec §7 Service worker "Gate", §9.4, v2.1 A13/A15/A17).
@@ -110,8 +110,10 @@ async function deployNewWorker(page: Page, version: string) {
 
 let errors: string[];
 
-test.beforeEach(async ({ context, page }) => {
-  await addSessionCookie(context, STAFF);
+// Signed in once through POST /api/session (A17).
+signedInAs(STAFF);
+
+test.beforeEach(async ({ page }) => {
   errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (msg) => {

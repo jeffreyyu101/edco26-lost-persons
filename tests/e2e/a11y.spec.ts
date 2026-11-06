@@ -4,7 +4,7 @@ import type { ChangeResponse, CreateResponse, RequestDetail, RequestSummary } fr
 import { testBaseUrl } from '../../scripts/test-env.mjs';
 import { axeContrastUnder, axeViolations, overlappingTargets, smallTargets, type AxeFinding } from './helpers/a11y';
 import { syntheticPng } from './helpers/png';
-import { addSessionCookie } from './helpers/session';
+import { signedInAs } from './helpers/session';
 
 // Accessibility gates (spec §7 Accessibility: "tap targets of 44 px or more", "contrast passes in both
 // themes"; WCAG 2.5.3 label in name). Every view and its main states, in light and in dark:
@@ -130,103 +130,127 @@ for (const theme of ['light', 'dark'] as const) {
       for (const r of results) expect.soft(r, r.view).toEqual(clean(r));
     });
 
-    test(`signed-in views pass axe and have 44 px targets (${theme})`, async ({ context, page }) => {
-      test.slow();
-      await addSessionCookie(context, STAFF);
-      const waiting = await createRequest(page);
-      const answerMe = await createRequest(page);
-      const coming = await setStatus(page, await createRequest(page), 'Found – Awaiting Reunion', 'answer');
-      await setStatus(page, await createRequest(page), 'Checked – Not Found', 'answer');
-      await setStatus(page, await setStatus(page, await createRequest(page), 'Found – Awaiting Reunion', 'answer'), 'Reunited – Closed', 'reunite');
-      const other = await createRequest(page, { reportingLocation: 'Other', otherLocation: 'Base' });
-      // A photo, so the profile's portrait is a button (its name must start with the count it shows).
-      const png = syntheticPng(64, 64);
-      const upload = await page.request.post(`/api/requests/${waiting.id}/photos`, {
-        headers: { Origin: BASE },
-        multipart: {
-          photoId: randomUUID(),
-          timing: 'today',
-          photo: { name: 'photo.png', mimeType: 'image/png', buffer: png },
-          thumb: { name: 'thumb.png', mimeType: 'image/png', buffer: png },
-        },
+    test.describe('signed in', () => {
+      // Signed in once through POST /api/session (A17); the sign-in test above stays signed out.
+      signedInAs(STAFF);
+
+      test(`signed-in views pass axe and have 44 px targets (${theme})`, async ({ context, page }) => {
+        test.slow();
+        const waiting = await createRequest(page);
+        const answerMe = await createRequest(page);
+        const coming = await setStatus(page, await createRequest(page), 'Found – Awaiting Reunion', 'answer');
+        await setStatus(page, await createRequest(page), 'Checked – Not Found', 'answer');
+        await setStatus(page, await setStatus(page, await createRequest(page), 'Found – Awaiting Reunion', 'answer'), 'Reunited – Closed', 'reunite');
+        const other = await createRequest(page, { reportingLocation: 'Other', otherLocation: 'Base' });
+        // A photo, so the profile's portrait is a button (its name must start with the count it shows).
+        const png = syntheticPng(64, 64);
+        const upload = await page.request.post(`/api/requests/${waiting.id}/photos`, {
+          headers: { Origin: BASE },
+          multipart: {
+            photoId: randomUUID(),
+            timing: 'today',
+            photo: { name: 'photo.png', mimeType: 'image/png', buffer: png },
+            thumb: { name: 'thumb.png', mimeType: 'image/png', buffer: png },
+          },
+        });
+        expect(upload.ok(), `photo upload → ${upload.status()}`).toBe(true);
+
+        const results: Audit[] = [];
+        const visit = async (url: string, view: string, ready: () => Promise<void>) => {
+          await page.goto(url);
+          await ready();
+          results.push(await audit(page, view));
+        };
+        const row = (id: string) => page.locator(`[data-request-id="${id}"]`).first();
+
+        // ---- Lists, header, menus and sheets
+        await visit('/', 'All', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
+
+        await page.getByTestId('account-trigger').click();
+        await expect(page.getByRole('dialog', { name: 'Account' })).toBeVisible();
+        results.push(await audit(page, 'account menu'));
+        await page.keyboard.press('Escape');
+
+        await page.getByRole('button', { name: 'New-request alerts' }).click();
+        const bell = page.getByRole('dialog', { name: 'Alerts are on' });
+        await expect(bell).toBeVisible();
+        // Named and described by the visible heading and line, each in the sheet once (no hidden copy that
+        // a screen reader would read twice).
+        await expect(bell).toHaveAccessibleDescription('New requests alert you while this app is open.');
+        await expect(bell.getByText('Alerts are on', { exact: true })).toHaveCount(1);
+        await expect(bell.getByText('New requests alert you while this app is open.', { exact: true })).toHaveCount(1);
+        await expect(bell.getByRole('heading', { name: 'Alerts are on' })).toBeVisible();
+        results.push(await audit(page, 'bell sheet'));
+        await page.getByRole('button', { name: 'Got it' }).click();
+
+        await visit('/?view=pending', 'Pending', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
+        await page.locator(`[data-testid="check-card"]:has([data-request-id="${answerMe.id}"])`).getByRole('button', { name: 'Not in medical' }).click();
+        await expect(page.getByRole('button', { name: 'Undo' })).toBeVisible();
+        results.push(await audit(page, 'Pending + Undo snackbar'));
+
+        await visit('/?view=mine', 'My requests', () => expect(row(coming.id)).toBeVisible({ timeout: 15_000 }));
+        await visit(`/?q=${encodeURIComponent(TAG)}`, 'Search', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
+        await visit(`/?status=${encodeURIComponent('Checked – Not Found')}`, 'All, status filter', () => expect(page.getByTestId('status-chip')).toBeVisible());
+        await visit(`/?post=${encodeURIComponent('Other:Base')}`, 'All, post filter', () => expect(row(other.id)).toBeVisible({ timeout: 15_000 }));
+
+        // ---- New request: the form, the post picker, Last seen chips, the discard confirm
+        await visit('/?new=1', 'New request', () => expect(page.getByTestId('request-form-submit')).toBeVisible());
+        await page.getByRole('button', { name: /^Reporting from/ }).click();
+        await expect(page.getByRole('dialog', { name: 'Reporting from' })).toBeVisible();
+        results.push(await audit(page, 'post picker'));
+        await page.keyboard.press('Escape');
+        await page.getByRole('textbox', { name: 'Last seen' }).fill('rail');
+        await expect(page.getByRole('button', { name: 'kineticFIELD' })).toBeVisible();
+        results.push(await audit(page, 'Last seen chips'));
+        await page.getByRole('button', { name: 'Cancel', exact: true }).first().click();
+        await expect(page.getByRole('alertdialog')).toBeVisible();
+        results.push(await audit(page, 'discard confirm'));
+
+        // ---- Profile, its confirm, edit, dashboard
+        await visit(`/?r=${waiting.id}`, 'Profile (waiting)', async () => {
+          await expect(page.getByTestId('audit-item').first()).toBeVisible();
+          await expect(page.getByRole('button', { name: '1 photo, open viewer' })).toBeVisible();
+        });
+        await page.getByRole('button', { name: 'Cancel request' }).click();
+        await expect(page.getByRole('alertdialog')).toBeVisible();
+        results.push(await audit(page, 'cancel confirm'));
+        await page.getByRole('button', { name: 'Keep' }).click();
+        await visit(`/?r=${coming.id}`, 'Profile (in medical)', () => expect(page.getByTestId('audit-item').first()).toBeVisible());
+        await visit(`/?r=${waiting.id}&edit=all`, 'Edit', () => expect(page.getByTestId('request-form-submit')).toBeVisible());
+        await visit('/?dashboard=1', 'Dashboard', () => expect(page.getByTestId('open-count')).toBeVisible());
+
+        // ---- Offline: the banner, and answers that need a connection
+        await visit('/?view=pending', 'Pending (before offline)', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
+        await context.setOffline(true);
+        try {
+          await expect(page.getByTestId('live-dot')).toHaveAttribute('data-state', 'off', { timeout: 15_000 });
+          results.push(await audit(page, 'Pending offline'));
+        } finally {
+          await context.setOffline(false);
+        }
+
+        // ---- Offline forms: "Offline · N waiting to send" on New request, "Needs a connection" on Edit
+        await page.goto('/?new=1');
+        await expect(page.getByTestId('request-form-submit')).toBeVisible();
+        await context.setOffline(true);
+        try {
+          await expect(page.getByRole('status').filter({ hasText: /^Offline · \d+ waiting to send$/ })).toBeVisible({ timeout: 15_000 });
+          results.push(await audit(page, 'New request offline'));
+        } finally {
+          await context.setOffline(false);
+        }
+        await page.goto(`/?r=${waiting.id}&edit=all`);
+        await expect(page.getByTestId('request-form-submit')).toBeVisible();
+        await context.setOffline(true);
+        try {
+          await expect(page.getByRole('status').filter({ hasText: 'Needs a connection' })).toBeVisible({ timeout: 15_000 });
+          results.push(await audit(page, 'Edit offline'));
+        } finally {
+          await context.setOffline(false);
+        }
+
+        for (const r of results) expect.soft(r, r.view).toEqual(clean(r));
       });
-      expect(upload.ok(), `photo upload → ${upload.status()}`).toBe(true);
-
-      const results: Audit[] = [];
-      const visit = async (url: string, view: string, ready: () => Promise<void>) => {
-        await page.goto(url);
-        await ready();
-        results.push(await audit(page, view));
-      };
-      const row = (id: string) => page.locator(`[data-request-id="${id}"]`).first();
-
-      // ---- Lists, header, menus and sheets
-      await visit('/', 'All', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
-
-      await page.getByTestId('account-trigger').click();
-      await expect(page.getByRole('dialog', { name: 'Account' })).toBeVisible();
-      results.push(await audit(page, 'account menu'));
-      await page.keyboard.press('Escape');
-
-      await page.getByRole('button', { name: 'New-request alerts' }).click();
-      const bell = page.getByRole('dialog', { name: 'Alerts are on' });
-      await expect(bell).toBeVisible();
-      // Named and described by the visible heading and line, each in the sheet once (no hidden copy that
-      // a screen reader would read twice).
-      await expect(bell).toHaveAccessibleDescription('New requests alert you while this app is open.');
-      await expect(bell.getByText('Alerts are on', { exact: true })).toHaveCount(1);
-      await expect(bell.getByText('New requests alert you while this app is open.', { exact: true })).toHaveCount(1);
-      await expect(bell.getByRole('heading', { name: 'Alerts are on' })).toBeVisible();
-      results.push(await audit(page, 'bell sheet'));
-      await page.getByRole('button', { name: 'Got it' }).click();
-
-      await visit('/?view=pending', 'Pending', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
-      await page.locator(`[data-testid="check-card"]:has([data-request-id="${answerMe.id}"])`).getByRole('button', { name: 'Not in medical' }).click();
-      await expect(page.getByRole('button', { name: 'Undo' })).toBeVisible();
-      results.push(await audit(page, 'Pending + Undo snackbar'));
-
-      await visit('/?view=mine', 'My requests', () => expect(row(coming.id)).toBeVisible({ timeout: 15_000 }));
-      await visit(`/?q=${encodeURIComponent(TAG)}`, 'Search', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
-      await visit(`/?status=${encodeURIComponent('Checked – Not Found')}`, 'All, status filter', () => expect(page.getByTestId('status-chip')).toBeVisible());
-      await visit(`/?post=${encodeURIComponent('Other:Base')}`, 'All, post filter', () => expect(row(other.id)).toBeVisible({ timeout: 15_000 }));
-
-      // ---- New request: the form, the post picker, Last seen chips, the discard confirm
-      await visit('/?new=1', 'New request', () => expect(page.getByTestId('request-form-submit')).toBeVisible());
-      await page.getByRole('button', { name: /^Reporting from/ }).click();
-      await expect(page.getByRole('dialog', { name: 'Reporting from' })).toBeVisible();
-      results.push(await audit(page, 'post picker'));
-      await page.keyboard.press('Escape');
-      await page.getByRole('textbox', { name: 'Last seen' }).fill('rail');
-      await expect(page.getByRole('button', { name: 'kineticFIELD' })).toBeVisible();
-      results.push(await audit(page, 'Last seen chips'));
-      await page.getByRole('button', { name: 'Cancel' }).first().click();
-      await expect(page.getByRole('alertdialog')).toBeVisible();
-      results.push(await audit(page, 'discard confirm'));
-
-      // ---- Profile, its confirm, edit, dashboard
-      await visit(`/?r=${waiting.id}`, 'Profile (waiting)', async () => {
-        await expect(page.getByTestId('audit-item').first()).toBeVisible();
-        await expect(page.getByRole('button', { name: '1 photo, open viewer' })).toBeVisible();
-      });
-      await page.getByRole('button', { name: 'Cancel request' }).click();
-      await expect(page.getByRole('alertdialog')).toBeVisible();
-      results.push(await audit(page, 'cancel confirm'));
-      await page.getByRole('button', { name: 'Keep' }).click();
-      await visit(`/?r=${coming.id}`, 'Profile (in medical)', () => expect(page.getByTestId('audit-item').first()).toBeVisible());
-      await visit(`/?r=${waiting.id}&edit=all`, 'Edit', () => expect(page.getByTestId('request-form-submit')).toBeVisible());
-      await visit('/?dashboard=1', 'Dashboard', () => expect(page.getByTestId('open-count')).toBeVisible());
-
-      // ---- Offline: the banner, and answers that need a connection
-      await visit('/?view=pending', 'Pending (before offline)', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
-      await context.setOffline(true);
-      try {
-        await expect(page.getByTestId('live-dot')).toHaveAttribute('data-state', 'off', { timeout: 15_000 });
-        results.push(await audit(page, 'Pending offline'));
-      } finally {
-        await context.setOffline(false);
-      }
-
-      for (const r of results) expect.soft(r, r.view).toEqual(clean(r));
     });
   });
 }

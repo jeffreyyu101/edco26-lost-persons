@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { STATUS } from '@/lib/domain';
-import { alertToast, coalesceAlerts, diffAlerts, type AlertContext } from '@/lib/client/alerts';
+import { alertStillCurrent, alertToast, coalesceAlerts, diffAlerts, diffRaisedAlerts, latestPerRequest, type AlertContext } from '@/lib/client/alerts';
 import { apiRequest, isDefinitive, isUncertain } from '@/lib/client/http';
 import { MIN_FULL_EDGE, encodeWithinBudget, firstFullStep, fitSize, nextFullStep } from '@/lib/client/image';
 import {
@@ -151,6 +151,42 @@ describe('alerts diff (spec §7 Alerts)', () => {
     t.action?.run();
     expect(view).toHaveBeenCalledWith('r1');
     expect(alertToast({ kind: 'combined', title: '3 updates', count: 3 }, view).action).toBeUndefined();
+  });
+
+  it('pairs each alert with the status that raised it; one alert per request, the latest wins', () => {
+    const other = makeRow(5, { createdBy: STAFF.dana.staff, rowVersion: 1 });
+    const raised = diffRaisedAlerts(
+      map(mine, other),
+      [
+        { ...mine, status: STATUS.inMedical, rowVersion: 3, updatedBy: STAFF.rae.staff },
+        { ...other, status: STATUS.inMedical, rowVersion: 2, updatedBy: STAFF.rae.staff },
+      ],
+      ctx(),
+    );
+    expect(raised.map((r) => [r.alert.kind, r.status])).toEqual([
+      ['in_medical', STATUS.inMedical],
+      ['in_medical', STATUS.inMedical],
+    ]);
+    const later = { alert: { kind: 'not_in_medical' as const, requestId: mine.id, title: 'x', count: 1 }, status: STATUS.notInMedical };
+    const kept = latestPerRequest([...raised, later]);
+    expect(kept.map((r) => [r.alert.requestId, r.alert.kind])).toEqual([
+      [other.id, 'in_medical'],
+      [mine.id, 'not_in_medical'],
+    ]);
+    const combined = { alert: { kind: 'combined' as const, title: '3 updates', count: 3 }, status: null };
+    expect(latestPerRequest([combined, combined])).toHaveLength(2);
+  });
+
+  it('a status alert is current only while the row is still in that status (In medical incl. legacy)', () => {
+    expect(alertStillCurrent('in_medical', STATUS.inMedical, { status: STATUS.inMedical })).toBe(true);
+    expect(alertStillCurrent('in_medical', STATUS.inMedical, { status: STATUS.legacyBringFriend })).toBe(true);
+    expect(alertStillCurrent('in_medical', STATUS.inMedical, { status: STATUS.notInMedical })).toBe(false);
+    expect(alertStillCurrent('in_medical', STATUS.inMedical, { status: STATUS.waiting })).toBe(false);
+    expect(alertStillCurrent('in_medical', STATUS.inMedical, { status: STATUS.reunited })).toBe(false);
+    expect(alertStillCurrent('not_in_medical', STATUS.notInMedical, { status: STATUS.inMedical })).toBe(false);
+    expect(alertStillCurrent('status_changed', STATUS.waiting, { status: STATUS.waiting })).toBe(true);
+    expect(alertStillCurrent('new_request', STATUS.waiting, { status: STATUS.cancelled })).toBe(true);
+    expect(alertStillCurrent('in_medical', STATUS.inMedical, undefined)).toBe(true);
   });
 });
 

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type APIRequestContext, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import type { CreateResponse, ChangeResponse, RequestDetail, RequestSummary } from '../../lib/api-types';
-import { addSessionCookie } from './helpers/session';
+import { newSignedInContext, signedInAs } from './helpers/session';
 
 // Profile (spec §8 Profile, §9.4): answer, change answer, Reunited, Discharged and Reopen from the
 // profile; cancel (creator only, with the confirm) and reopen; edits in the audit trail with old → new;
@@ -11,6 +11,9 @@ import { addSessionCookie } from './helpers/session';
 
 const FRONT = { staffName: 'TEST-P Front', team: 'GC/HX - Dispatch' };
 const LIAISON = { staffName: 'TEST-P Liaison', team: 'Medical' };
+
+// Every test's own page is front of house, signed in once through POST /api/session (A17).
+signedInAs(FRONT);
 
 // A valid 1×1 JPEG (synthetic): passes the server's magic-byte sniffing and decodes in the browser.
 const JPEG = Buffer.from(
@@ -31,10 +34,9 @@ interface Staff {
   team: string;
 }
 
-/** A second signed-in person in their own browser context (session cookie minted with the .env.test secret). */
+/** A second signed-in person in their own browser context (signed in through POST /api/session). */
 async function otherPerson(browser: Browser, staff: Staff, baseURL: string): Promise<{ context: BrowserContext; page: Page }> {
-  const context = await browser.newContext({ baseURL, viewport: { width: 390, height: 844 } });
-  await addSessionCookie(context, staff);
+  const context = await newSignedInContext(browser, staff, { baseURL, viewport: { width: 390, height: 844 } });
   return { context, page: await context.newPage() };
 }
 
@@ -95,9 +97,8 @@ test.afterEach(async ({ baseURL }) => {
   }
 });
 
-test('renders from the request, answers, changes the answer, reunites, reopens and discharges', async ({ context, page, baseURL }) => {
+test('renders from the request, answers, changes the answer, reunites, reopens and discharges', async ({ page, baseURL }) => {
   const origin = baseURL as string;
-  await addSessionCookie(context, FRONT);
   const row = await createRequest(page, origin, { hair: 'Blond, two braids' });
 
   await page.goto(`/?r=${row.id}`);
@@ -151,9 +152,8 @@ test('renders from the request, answers, changes the answer, reunites, reopens a
   await expect(statusBlock(page)).toContainText('Discharged');
 });
 
-test('cancel is creator-only, asks once (Keep / Cancel request), and the creator can reopen', async ({ browser, context, page, baseURL }) => {
+test('cancel is creator-only, asks once (Keep / Cancel request), and the creator can reopen', async ({ browser, page, baseURL }) => {
   const origin = baseURL as string;
-  await addSessionCookie(context, FRONT);
   const row = await createRequest(page, origin);
 
   // Someone else: no Cancel anywhere.
@@ -191,9 +191,8 @@ test('cancel is creator-only, asks once (Keep / Cancel request), and the creator
   await expect(auditItems(page).first()).toContainText('Reopened');
 });
 
-test('edits show in the audit trail as old (struck) → new, and Edit opens the right section', async ({ context, page, baseURL }) => {
+test('edits show in the audit trail as old (struck) → new, and Edit opens the right section', async ({ page, baseURL }) => {
   const origin = baseURL as string;
-  await addSessionCookie(context, FRONT);
   const row = await createRequest(page, origin);
   const newName = `${row.name} Lee`;
   await api<ChangeResponse>(page.request, origin, 'PATCH', `/api/requests/${row.id}`, {
@@ -221,9 +220,8 @@ test('edits show in the audit trail as old (struck) → new, and Edit opens the 
   await expect(page).toHaveURL(new RegExp(`\\?r=${row.id}&edit=all$`));
 });
 
-test('photos open the full-screen viewer, and Add uploads another', async ({ context, page, baseURL }) => {
+test('photos open the full-screen viewer, and Add uploads another', async ({ page, baseURL }) => {
   const origin = baseURL as string;
-  await addSessionCookie(context, FRONT);
   const row = await createRequest(page, origin);
   const upload = await page.request.post(`/api/requests/${row.id}/photos`, {
     headers: { Origin: origin },
@@ -257,9 +255,8 @@ test('photos open the full-screen viewer, and Add uploads another', async ({ con
   await expect(page.getByRole('button', { name: 'Photo 2 of 2, Not today' })).toBeVisible({ timeout: 15_000 });
 });
 
-test("another person's answer shows the conflict banner and the new status within a poll", async ({ browser, context, page, baseURL }) => {
+test("another person's answer shows the conflict banner and the new status within a poll", async ({ browser, page, baseURL }) => {
   const origin = baseURL as string;
-  await addSessionCookie(context, FRONT);
   const row = await createRequest(page, origin);
   await page.goto(`/?r=${row.id}`);
   await expect(statusBlock(page)).toContainText('Waiting for check');
@@ -276,7 +273,6 @@ test("another person's answer shows the conflict banner and the new status withi
 
 test('offline disables the answer buttons with "Needs a connection"', async ({ context, page, baseURL }) => {
   const origin = baseURL as string;
-  await addSessionCookie(context, FRONT);
   const row = await createRequest(page, origin);
   await page.goto(`/?r=${row.id}`);
   const answer = page.getByRole('button', { name: 'In medical', exact: true });
@@ -289,9 +285,8 @@ test('offline disables the answer buttons with "Needs a connection"', async ({ c
   await expect(answer).toBeEnabled({ timeout: 15_000 });
 });
 
-test('closing a deep-linked profile shows the list', async ({ context, page, baseURL }) => {
+test('closing a deep-linked profile shows the list', async ({ page, baseURL }) => {
   const origin = baseURL as string;
-  await addSessionCookie(context, FRONT);
   const row = await createRequest(page, origin);
   await page.goto(`/?r=${row.id}`);
   await expect(page.getByTestId('profile')).toBeVisible();

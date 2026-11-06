@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 import type { RequestDetail, RequestSummary } from '../../lib/api-types';
 import { testBaseUrl } from '../../scripts/test-env.mjs';
 import { syntheticPng } from './helpers/png';
-import { addSessionCookie } from './helpers/session';
+import { newSignedInContext, signedInAs } from './helpers/session';
 import { syncRows } from './helpers/sync';
 
 // List views end to end (spec §8 List views, §9.4 "it appears in All and My requests", "a second context
@@ -42,8 +42,10 @@ const lp = (r: RequestSummary) => `LP-${String(r.caseNumber).padStart(4, '0')}`;
 
 let errors: string[];
 
-test.beforeEach(async ({ context, page }) => {
-  await addSessionCookie(context, STAFF);
+// Signed in once through POST /api/session (A17); every test's page is the liaison.
+signedInAs(STAFF);
+
+test.beforeEach(async ({ page }) => {
   errors = [];
   page.on('console', (msg) => {
     // Photo thumbnails of seeded rows may 404 locally; anything else is a bug.
@@ -165,7 +167,7 @@ test('search: name with highlight and count, LP number, Cancel returns', async (
   await input.fill(`Synthetic ${TAG} jacket ${seq}`);
   await expect(row(page, r.id).locator('mark')).toHaveText(`Synthetic ${TAG} jacket ${seq}`);
 
-  await page.getByRole('button', { name: 'Cancel' }).click();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page).toHaveURL(/\?view=pending$/);
 });
 
@@ -180,8 +182,7 @@ test('front of house logs a request with a photo; the liaison sees it in Pending
   await expect(page.getByTestId('live-dot')).toHaveAttribute('data-state', 'live', { timeout: 15_000 });
 
   // Context A: front of house (Dispatch) logs it through the form, with a photo.
-  const foh = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
-  await addSessionCookie(foh, { staffName: `${TAG} Front`, team: 'GC/HX - Dispatch' });
+  const foh = await newSignedInContext(browser, { staffName: `${TAG} Front`, team: 'GC/HX - Dispatch' }, { baseURL: BASE, viewport: { width: 390, height: 844 } });
   const a = await foh.newPage();
   const name = `${TAG} FOH Kayla`;
   // Assigned inside the poll below (a cast keeps TypeScript from narrowing it to null here).
@@ -224,6 +225,20 @@ test('front of house logs a request with a photo; the liaison sees it in Pending
     await expect(toast).toContainText(/LP-\d+ · .+ is in medical/);
     await expect(toast).toContainText('Bring the friend to Main Med');
     await expect.poll(async () => ((await (await a.request.get(`/api/requests/${id}`)).json()) as RequestDetail).photos.length).toBe(1);
+
+    // Regression: B changes the answer (past the Undo window). A's sticky "is in medical" must not outlive
+    // it: on A's next poll the new answer replaces it, so nobody walks the friend to Main Med for nothing.
+    await page.waitForTimeout(6_500);
+    const inMedical = (await (await page.request.get(`/api/requests/${id}`)).json()) as RequestDetail;
+    const changed = await page.request.post(`/api/requests/${id}/status`, {
+      headers: { origin: BASE },
+      data: { status: 'Checked – Not Found', expectedVersion: inMedical.rowVersion, kind: 'change' },
+    });
+    expect(changed.ok(), `change answer → ${changed.status()}`).toBe(true);
+    const notInMedical = a.locator('.lp-toast').filter({ hasText: new RegExp(`${lpText} · .+ — not in medical`) });
+    await expect(notInMedical).toBeVisible({ timeout: 15_000 });
+    await expect(toast).toHaveCount(0);
+    await expect(a.locator('.lp-toast').filter({ hasText: 'Bring the friend to Main Med' })).toHaveCount(0);
   } finally {
     if (id) {
       // Leave nothing open for the other specs.

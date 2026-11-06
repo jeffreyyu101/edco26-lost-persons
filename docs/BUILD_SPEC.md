@@ -1,6 +1,6 @@
 # Build spec v2: "Is my friend in medical?" (EDC Orlando 2026)
 
-This is the single contract for every agent building the app. Version 2 adds the findings from the GPT-6 Astra (Codex) and Claude Fable 5.1 plan reviews. §13 (v2.1), §14 (v2.2, the Phase 1a review) and §15 (v2.3, the Phase 1a verification) override anything above them.
+This is the single contract for every agent building the app. Version 2 adds the findings from the GPT-6 Astra (Codex) and Claude Fable 5.1 plan reviews. §13 (v2.1), §14 (v2.2, the Phase 1a review), §15 (v2.3, the Phase 1a verification) and §16 (v2.4, the integrated QA) override anything above them.
 
 - **When documents disagree:**
   - This file wins on engineering questions.
@@ -1027,3 +1027,29 @@ Unknown params are ignored.
 - `OutboxItem.lastError.field?` holds `ApiError.error.field` (camelCase), copied by the store on a definitive 4xx.
 - `RequestFormProps.errors?` is a `Partial<Record<keyof RequestFormValues, string>>` shown on the matching inputs.
 - `formErrorsFromField(field, message)` (`lib/client/form-values.ts`) builds it. `firstName` and `lastName` map to `name`, and fields the form doesn't show give `{}`, so the view falls back to a `notice`.
+
+## 16. v2.4 amendments (OVERRIDE anything above; from the integrated QA)
+
+**A40 · One alert toast per request** (refines §7 Alerts).
+
+- **The problem.** The In medical toast stays until dismissed, and toasts were only replaced when their text matched. After a Change answer or an Undo, front of house kept the green "is in medical / Bring the friend to Main Med" toast while the row said Not in medical.
+- **Rule.** Alert toasts are keyed by request id. A new alert for a request replaces that request's earlier toast. Whenever synced or own rows merge, any status alert toast whose row is no longer in the status it announced closes (`alerts.ts` `alertStillCurrent`; In medical includes legacy Bring friend). That covers changes that raise no alert too: this phone's own tap, or the same staff on another phone.
+- **Batches.** When one sync brings two changes of the same request, only the latest alerts, and an alert already out of date when it is shown is dropped.
+
+**A41 · Undo after another change of the same request** (refines §7 Mutations 6 and A12).
+
+- When any other mutation of the same request commits on this phone (another answer, Discharge, edit, cancel, photo), the earlier Undo snackbar and its record are dropped, because its `expectedVersion` can only 409.
+- An Undo queued behind such a mutation sends nothing. A 409 on an Undo says "Updated by someone else" only when someone else made the change; when this phone, or the same staff on another phone, made it, the toast is "Can't undo — it changed since". An Undo is still never retried.
+
+**A42 · Dashboard post bars open the open requests they count** (refines §8 Dashboard and A22).
+
+- New navigation parameter `open=1`, honoured only together with `post=`: All filtered by post and to the `open` bucket (Waiting, In medical, legacy Bring friend), which are exactly the rows the bar counts (`lp_stats` byPost). Each bar opens `?post=<key>&open=1`.
+- The list shows an "Open" chip next to the post chip. The post chip's count matches the bar. Clearing Open shows every request at the post; clearing the post goes back to All.
+- **Open question for Brian.** The spec did not say whether a bar should open open requests only or every request at the post. Open-only was chosen because the bar's number and the list must agree.
+
+**A43 · Test hygiene and checks** (refines §9 and A17).
+
+- **Sign-in.** Playwright specs sign in through `POST /api/session` once per identity and reuse its `storageState` (`tests/e2e/helpers/session.ts`). No spec mints a session cookie. Each sign-in sends its own fake client IP, so login limits never carry over.
+- **Integration rows.** The harness closes every request a test file created when the file ends (Waiting → Cancelled, In medical → Reunited). Photo fixtures are decodable images (`tests/helpers/images.ts`).
+- **CSP smoke.** `scripts/smoke-csp.mjs` waits for the view switcher by test id, and `tests/e2e/smoke.spec.ts` runs it, so it can't go stale.
+

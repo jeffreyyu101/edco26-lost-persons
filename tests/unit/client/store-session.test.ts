@@ -135,6 +135,61 @@ describe('alerts through the store', () => {
   });
 });
 
+describe('alert toasts follow the request (regression: stale "is in medical")', () => {
+  const IN_MED = 'LP-1004 · S.L. is in medical';
+  const titles = (s: () => { toasts: readonly { title: string }[] }) => s().toasts.map((t) => t.title);
+
+  it('a changed answer replaces the sticky In medical toast, and nothing stale is left after it closes', async () => {
+    const mine = makeRow(4, { firstName: 'Sofia', lastName: 'Lopez', createdBy: STAFF.dana.staff });
+    const server = new FakeServer([mine]);
+    const { s } = boot(server);
+    await ready();
+    server.change(mine.id, { status: STATUS.inMedical });
+    await advance(6_000);
+    expect(titles(s)).toEqual([IN_MED]);
+    await advance(7_000); // past the liaison's Undo window: the green toast is still up (sticky)
+    expect(titles(s)).toEqual([IN_MED]);
+    server.change(mine.id, { status: STATUS.notInMedical }); // Change answer
+    await advance(6_000);
+    expect(titles(s)).toEqual(['LP-1004 · S.L. — not in medical']);
+    await advance(14_000);
+    expect(titles(s)).toEqual([]);
+    expect(s().confirmed.get(mine.id)?.status).toBe(STATUS.notInMedical);
+  });
+
+  it('an Undo after the phone already polled replaces it with "waiting for check"', async () => {
+    const mine = makeRow(4, { firstName: 'Sofia', lastName: 'Lopez', createdBy: STAFF.dana.staff });
+    const server = new FakeServer([mine]);
+    const { s } = boot(server);
+    await ready();
+    server.change(mine.id, { status: STATUS.inMedical });
+    await advance(6_000);
+    expect(titles(s)).toEqual([IN_MED]);
+    server.change(mine.id, { status: STATUS.waiting }); // the liaison's Undo
+    await advance(6_000);
+    expect(titles(s)).toEqual(['LP-1004 · S.L. — waiting for check']);
+  });
+
+  it('closes when the row leaves In medical without an alert (my own tap, or me on another phone)', async () => {
+    const mine = makeRow(4, { firstName: 'Sofia', lastName: 'Lopez', createdBy: STAFF.dana.staff });
+    const other = makeRow(5, { firstName: 'Ana', lastName: 'Diaz', createdBy: STAFF.dana.staff });
+    const server = new FakeServer([mine, other]);
+    const { a, s } = boot(server);
+    await ready();
+    server.change(mine.id, { status: STATUS.inMedical });
+    server.change(other.id, { status: STATUS.inMedical });
+    await advance(6_000);
+    expect(titles(s)).toEqual([IN_MED, 'LP-1005 · A.D. is in medical']);
+    // This phone taps Reunited: the alert for that request closes, the other one stays.
+    await finish(a.setStatus(mine.id, STATUS.reunited, 'reunite'));
+    expect(titles(s)).toEqual(['LP-1005 · A.D. is in medical']);
+    // The same staff changes the other on another phone: no alert (not "someone else"), the toast closes.
+    server.change(other.id, { status: STATUS.notInMedical }, STAFF.dana.staff);
+    await advance(6_000);
+    expect(titles(s)).toEqual([]);
+  });
+});
+
 describe('drafts (A20)', () => {
   it('saves debounced, flushes at once when a photo is added, survives a reload, clears after send', async () => {
     const server = new FakeServer([]);

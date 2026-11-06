@@ -64,7 +64,7 @@ function Dashboard({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-const showAll = (params: { status?: string; post?: string }) => navigate(params);
+const showAll = (params: { status?: string; post?: string; open?: true }) => navigate(params);
 
 function Content({ stats, offline }: { stats: Stats; offline: boolean }) {
   const timeZone = useEventTimezone();
@@ -186,7 +186,8 @@ function Content({ stats, offline }: { stats: Stats; offline: boolean }) {
                 key={key}
                 type="button"
                 className={`${s.tap} ${s.bar}`}
-                onClick={() => showAll({ post: key })}
+                // The bar counts open requests, so it opens exactly those (closed rows at the post stay out).
+                onClick={() => showAll({ post: key, open: true })}
                 // Starts with what the bar shows, "FA 3 – Kinetic 24" (WCAG 2.5.3).
                 aria-label={`${label} ${p.count} open`}
               >

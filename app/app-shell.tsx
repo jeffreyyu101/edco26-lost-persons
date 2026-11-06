@@ -56,7 +56,7 @@ function ViewRouter() {
   const view = useView();
   switch (view.name) {
     case 'all':
-      return <AllView status={view.status} post={view.post} />;
+      return <AllView status={view.status} post={view.post} open={!!view.open} />;
     case 'pending':
       return <PendingView />;
     case 'mine':

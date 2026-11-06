@@ -146,14 +146,17 @@ export interface AllViewProps {
   status: string | null;
   /** Post filter key (domain.postFilterKey) from ?post=, shown as a chip. */
   post: string | null;
+  /** ?open=1 with ?post= (a dashboard "Open by post" bar): open requests only, shown as a chip. */
+  open?: boolean;
 }
 
 // Chip names start with what the chip shows, "Not in medical 3" (WCAG 2.5.3); {' '} keeps the label and
 // the count apart as words without adding space to the layout.
-function FilterChips({ status, post, count }: { status: string | null; post: string | null; count: number }) {
+function FilterChips({ status, post, open, count }: { status: string | null; post: string | null; open: boolean; count: number }) {
   const statusLabel = status ? statusMeta(status).shortLabel : '';
   const postPlace = post ? parsePostFilterKey(post) : null;
   const postLabel = postPlace ? postFilterLabel(postPlace.reportingLocation, postPlace.otherLocation) : '';
+  const openOnly = open && !!post;
   return (
     <div className={s.chips}>
       {status ? (
@@ -161,12 +164,26 @@ function FilterChips({ status, post, count }: { status: string | null; post: str
           type="button"
           className={s.chip}
           aria-label={post ? `${statusLabel}. Clear this filter` : `${statusLabel} ${count} shown. Clear this filter`}
-          onClick={() => navigate(post ? { post } : {}, { replace: true })}
+          onClick={() => navigate(post ? { post, ...(openOnly ? { open: true as const } : {}) } : {}, { replace: true })}
           data-testid="status-chip"
         >
           <StatusGlyph status={status} size={12} />
           <span className={s.chipLabel}>{statusLabel}</span>{' '}
           {post ? null : <span className={s.chipCount}>{count}</span>}
+          <span className={s.chipX}>
+            <X size={14} strokeWidth={2} aria-hidden />
+          </span>
+        </button>
+      ) : null}
+      {openOnly && post ? (
+        <button
+          type="button"
+          className={s.chip}
+          aria-label="Open requests only. Clear this filter"
+          onClick={() => navigate({ ...(status ? { status } : {}), post }, { replace: true })}
+          data-testid="open-chip"
+        >
+          <span className={s.chipLabel}>Open</span>
           <span className={s.chipX}>
             <X size={14} strokeWidth={2} aria-hidden />
           </span>
@@ -192,8 +209,9 @@ function FilterChips({ status, post, count }: { status: string | null; post: str
   );
 }
 
-export function AllView({ status, post }: AllViewProps) {
-  const rows = useAllRows({ status, post });
+export function AllView({ status, post, open = false }: AllViewProps) {
+  const openOnly = open && !!post;
+  const rows = useAllRows({ status, post, open: openOnly });
   const outbox = useOutbox();
   const loading = useIsLoading();
   const tz = useEventTimezone();
@@ -201,13 +219,13 @@ export function AllView({ status, post }: AllViewProps) {
   const filtered = !!(status || post);
   // Requests saved on this phone sit on top of the unfiltered log (they have no status or LP number yet).
   const queued = filtered ? [] : outbox;
-  useScrollMemory(`all|${status ?? ''}|${post ?? ''}`, !loading);
+  useScrollMemory(`all|${status ?? ''}|${post ?? ''}|${openOnly ? 'open' : ''}`, !loading);
 
   return (
     <Chrome
       view="all"
       filtered={filtered}
-      chips={filtered ? <FilterChips status={status} post={post} count={rows.length} /> : null}
+      chips={filtered ? <FilterChips status={status} post={post} open={openOnly} count={rows.length} /> : null}
       skeleton={<AllSkeleton />}
     >
       {rows.length + queued.length === 0 ? (

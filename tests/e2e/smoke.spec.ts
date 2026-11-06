@@ -1,9 +1,12 @@
+import { execFile } from 'node:child_process';
 import { expect, test } from '@playwright/test';
-import { addSessionCookie } from './helpers/session';
+import { ROOT } from '../../scripts/test-env.mjs';
+import { signedInAs } from './helpers/session';
 
 // Phase 1a smoke: the sign-in route renders under the production CSP and hydrates; `/` without a session
 // redirects to sign-in with `next`; with a session, in-app navigation (push, replace, back) changes the
-// view. Feature specs live in their own files (signin, list, new-request, …).
+// view; and scripts/smoke-csp.mjs (the §9.6 CSP check, both engines) passes, so it can't go stale. Feature
+// specs live in their own files (signin, list, new-request, …).
 test('sign-in renders with a nonce CSP and hydrates', async ({ page }) => {
   const errors: string[] = [];
   page.on('console', (msg) => {
@@ -28,8 +31,10 @@ test.describe('signed-in navigation', () => {
   const KAYLA = '5eed0000-0000-4000-8000-000000001012';
   let errors: string[];
 
-  test.beforeEach(async ({ context, page }) => {
-    await addSessionCookie(context);
+  // Signed in once through POST /api/session (A17).
+  signedInAs({ staffName: 'TEST-e2e Smoke', team: 'Medical' });
+
+  test.beforeEach(async ({ page }) => {
     errors = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error') errors.push(msg.text());
@@ -61,7 +66,7 @@ test.describe('signed-in navigation', () => {
     // so the count is checked for its shape, and the seeded row for its presence.
     await expect(page.getByText(/^\d+ results?$/)).toBeVisible();
     await expect(page.locator(`[data-request-id="${KAYLA}"]`)).toBeVisible();
-    await page.getByRole('button', { name: 'Cancel' }).click();
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await expect(page).toHaveURL(/127\.0\.0\.1:\d+\/$/);
     await expect(page.getByTestId('request-list')).toBeVisible();
   });
@@ -77,4 +82,21 @@ test.describe('signed-in navigation', () => {
     await expect(page.getByTestId('request-list')).toBeVisible();
     await expect(page.getByTestId('profile')).toHaveCount(0);
   });
+});
+
+// scripts/smoke-csp.mjs drives Chromium and WebKit itself against this server, so one project runs it.
+test('scripts/smoke-csp.mjs passes against this production build', async ({ baseURL }, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium-iphone14', 'the script runs both engines itself');
+  test.setTimeout(180_000);
+  const port = new URL(baseURL as string).port;
+  const run = await new Promise<{ code: number; output: string }>((resolve) => {
+    execFile(process.execPath, ['scripts/smoke-csp.mjs'], { cwd: ROOT, env: { ...process.env, PORT: port }, timeout: 170_000 }, (error, stdout, stderr) => {
+      const code = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
+      resolve({ code, output: `${stdout}${stderr}` });
+    });
+  });
+  const output = run.output;
+  expect(run.code, output).toBe(0);
+  expect(output).toMatch(/^chromium: ok/m);
+  expect(output).toMatch(/^webkit: ok/m);
 });

@@ -2,7 +2,7 @@
 // store-contract.ts. No React, no I/O.
 // FROZEN after Phase 1a: later phases may ADD exports, never change existing ones.
 import type { OutboxItem, RequestSummary } from '../api-types';
-import { STATUS, isInMedical, matchesPostFilter, postFull, sameStaff } from '../domain';
+import { STATUS, isInMedical, matchesPostFilter, postFull, sameStaff, statusBucket } from '../domain';
 import { formatCaseNumber, parseCaseNumberQuery } from '../format';
 import type { Overlay } from './store-contract';
 
@@ -35,10 +35,15 @@ export interface AllFilter {
   /** Database status value; In medical also matches the legacy Bring-friend status. */
   status: string | null;
   /**
-   * A post filter key (domain.postFilterKey): the post value, or "Other:<where>". Matches the rows one
-   * dashboard bar counts, never a different post with the same short form.
+   * A post filter key (domain.postFilterKey): the post value, or "Other:<where>". Never matches a
+   * different post with the same short form.
    */
   post: string | null;
+  /**
+   * Only open requests (Waiting, In medical, legacy Bring friend). With `post`, these are exactly the rows
+   * one dashboard "Open by post" bar counts (lp_stats byPost).
+   */
+  open?: boolean;
 }
 
 export function filterAll(rows: readonly RequestSummary[], filter: AllFilter): RequestSummary[] {
@@ -49,6 +54,7 @@ export function filterAll(rows: readonly RequestSummary[], filter: AllFilter): R
       if (!ok) return false;
     }
     if (post && !matchesPostFilter(r, post)) return false;
+    if (filter.open && statusBucket(r.status) !== 'open') return false;
     return true;
   });
 }

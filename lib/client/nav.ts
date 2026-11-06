@@ -14,7 +14,7 @@ import { EDIT_SECTIONS, isStatus, isUuid, type EditSection } from '../domain';
  * Unknown or invalid params are ignored.
  */
 export type View =
-  | { name: 'all'; status: string | null; post: string | null }
+  | { name: 'all'; status: string | null; post: string | null; open?: true }
   | { name: 'pending' }
   | { name: 'mine' }
   | { name: 'search'; q: string }
@@ -33,6 +33,11 @@ export interface NavParams {
   status?: string;
   /** All, filtered by post: a domain.postFilterKey ("FA 4 – Oasis", "Other:Gate 9") — shown as a chip. */
   post?: string;
+  /**
+   * With `post`: only open requests (Waiting, In medical), the rows a dashboard "Open by post" bar counts.
+   * Ignored without `post`.
+   */
+  open?: true;
   /** Search text. */
   q?: string;
   new?: true;
@@ -80,10 +85,12 @@ export function parseView(params: Pick<URLSearchParams, 'get'>): View {
 
   const status = get(params, 'status');
   const post = get(params, 'post');
+  const open = post !== null && get(params, 'open') === '1';
   return {
     name: 'all',
     status: status && isStatus(status) ? status : null,
     post: post ?? null,
+    ...(open ? { open: true as const } : {}),
   };
 }
 
@@ -93,6 +100,7 @@ export function viewToParams(view: View): NavParams {
       const p: NavParams = {};
       if (view.status) p.status = view.status;
       if (view.post) p.post = view.post;
+      if (view.post && view.open) p.open = true;
       return p;
     }
     case 'pending':
@@ -125,6 +133,7 @@ export function hrefFor(params: NavParams): string {
   if (params.view) sp.set('view', params.view);
   if (params.status) sp.set('status', params.status);
   if (params.post) sp.set('post', params.post);
+  if (params.post && params.open) sp.set('open', '1');
   const s = sp.toString();
   return s ? `/?${s}` : '/';
 }

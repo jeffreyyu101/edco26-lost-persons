@@ -274,3 +274,88 @@ describe('quiet mutations (the screen shows the failure itself)', () => {
     expect(s().toasts).toHaveLength(0);
   });
 });
+
+describe('Undo after this phone changes the same request again (regression)', () => {
+  it('Mark discharged within the Undo window clears the In medical Undo; its id is used up', async () => {
+    const server = new FakeServer([R1]);
+    const { a, s } = boot(server);
+    await ready();
+    await finish(a.setStatus(R1.id, STATUS.inMedical, 'answer'));
+    const snack = s().snackbar;
+    expect(snack?.message).toBe('LP-1001 · In medical');
+    await finish(a.setStatus(R1.id, STATUS.discharged, 'discharge'));
+    expect(s().confirmed.get(R1.id)?.status).toBe(STATUS.discharged);
+    expect(s().snackbar).toBeNull();
+    expect(await a.undo(snack?.id ?? '')).toBeNull();
+    expect(statusPosts(server).map((r) => (r.body as { kind: string }).kind)).toEqual(['answer', 'discharge']);
+    expect(s().toasts.map((t) => t.title)).not.toContain(COPY.conflict);
+  });
+
+  it('an edit or a photo of the same request clears the Undo; another request keeps it', async () => {
+    const R2 = makeRow(2);
+    const server = new FakeServer([R1, R2]);
+    const { a, s } = boot(server);
+    await ready();
+    await finish(a.setStatus(R1.id, STATUS.notInMedical, 'answer'));
+    expect(s().snackbar).not.toBeNull();
+    await finish(a.updateFields(R2.id, { clothing: 'Other row' }, 1));
+    expect(s().snackbar).not.toBeNull();
+    await finish(a.updateFields(R1.id, { clothing: 'Blue jacket' }, 2));
+    expect(s().snackbar).toBeNull();
+
+    await finish(a.setStatus(R1.id, STATUS.inMedical, 'change'));
+    expect(s().snackbar?.message).toBe('LP-1001 · In medical');
+    const photos = await finish(a.addPhotos(R1.id, [photo('e0000000-0000-4000-8000-0000000000b1')], 'today'));
+    expect(photos).toEqual({ added: 1, failed: 0 });
+    expect(s().snackbar).toBeNull();
+  });
+
+  it('cancel of the same request clears the Undo', async () => {
+    const mine = makeRow(7, { createdBy: STAFF.dana.staff, status: STATUS.notInMedical });
+    const server = new FakeServer([mine]);
+    const { a, s } = boot(server);
+    await ready();
+    await finish(a.setStatus(mine.id, STATUS.inMedical, 'change'));
+    expect(s().snackbar).not.toBeNull();
+    // The real server only cancels from Waiting; the fake has no such check, which lets this test cover
+    // the cancel path's commit on its own.
+    await finish(a.cancel(mine.id));
+    expect(s().confirmed.get(mine.id)?.status).toBe(STATUS.cancelled);
+    expect(s().snackbar).toBeNull();
+  });
+
+  it('an Undo queued behind this phone’s own edit sends nothing and never says "someone else"', async () => {
+    const server = new FakeServer([R1]);
+    const { a, s } = boot(server);
+    await ready();
+    await finish(a.setStatus(R1.id, STATUS.inMedical, 'answer'));
+    const snackId = s().snackbar?.id ?? '';
+    const g = gate();
+    server.override = (req) => (req.method === 'PATCH' ? g.wait() : undefined);
+    const edit = a.updateFields(R1.id, { clothing: 'Green tee' }, 2);
+    await advance(0);
+    const undo = a.undo(snackId); // tapped while the edit is still in flight
+    await advance(0);
+    g.open();
+    server.override = null;
+    expect(await finish(edit)).toMatchObject({ ok: true, changed: true });
+    expect(await finish(undo)).toMatchObject({ ok: false, reason: 'conflict', message: COPY.undoStale });
+    expect(statusPosts(server)).toHaveLength(1);
+    const titles = s().toasts.map((t) => t.title);
+    expect(titles).toContain(COPY.undoStale);
+    expect(titles).not.toContain(COPY.conflict);
+    expect(s().confirmed.get(R1.id)?.status).toBe(STATUS.inMedical);
+  });
+
+  it('a 409 on Undo after the same staff changed it on another phone is not "Updated by someone else"', async () => {
+    const server = new FakeServer([R1]);
+    const { a, s } = boot(server);
+    await ready();
+    await finish(a.setStatus(R1.id, STATUS.inMedical, 'answer'));
+    server.change(R1.id, { clothing: 'Edited on my other phone' }, STAFF.dana.staff);
+    const res = await finish(a.undo(s().snackbar?.id ?? ''));
+    expect(res).toMatchObject({ ok: false, reason: 'conflict', message: COPY.undoStale });
+    expect(statusPosts(server)).toHaveLength(2); // sent once, never retried
+    expect(s().toasts.map((t) => t.title)).toEqual([COPY.undoStale]);
+  });
+});

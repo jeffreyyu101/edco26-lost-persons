@@ -91,10 +91,14 @@ npm run start:test                       # http://127.0.0.1:3100
 | `npm test` | Unit tests (vitest, no network or database) |
 | `npm run test:int` | Integration tests: every route, the SQL functions, concurrency, login limits and the migration, against the local stack through a production build on `PORT` (default 3100). If nothing listens there, the harness starts `next start` itself. Run `npm run build:test` first. |
 | `npm run test:e2e` | Playwright on the production build: sign-in, lists, the two-phone flow (log → Pending → In medical → alert), profile, edit and conflicts, dashboard, CSV, offline and lie-fi queueing, the service-worker update, the first-load JS budget, and accessibility (axe-core WCAG 2.1 A/AA in light and dark, plus 44 px tap targets). Run `npm run build:test` first. |
+| `node scripts/smoke-csp.mjs` | The production CSP and nonce in Chromium and WebKit: `/signin` hydrates with no violations, `/` redirects without a session, and with one the list, a profile and Back work. Needs the production build running on `PORT`. `npm run test:e2e` runs it too (`tests/e2e/smoke.spec.ts`). |
 | `npm run db:verify-migration` | Applies the rework migration twice to the local database and to an upgrade fixture built from Jeffrey's original schema, then smoke-tests the functions. |
 | `node scripts/load-test.mjs` | 30 simulated phones polling for 2 minutes against a running local production build (see the file header). |
 
-End-to-end runs take a lock (`/tmp/lp-e2e.lock`), so two suites never share the local stack at once.
+End-to-end runs take a lock (`/tmp/lp-e2e.lock`), so two suites never share the local stack at once. Every
+spec signs in through `POST /api/session` once per identity and reuses that session (`storageState`).
+Integration tests close the requests they create when each file ends, so nothing they leave shows in
+Pending.
 
 ## How it behaves
 
@@ -112,7 +116,8 @@ End-to-end runs take a lock (`/tmp/lp-e2e.lock`), so two suites never share the 
   when the bell is on. There are no lock-screen notifications.
 - **Offline.** A new request (with its photos) is saved on the phone first and sent when the signal is back.
   Answers, edits and adding photos to an existing request need a connection.
-- **Dashboard.** Open counts, answer times and open requests by post. Tiles, legend rows and bars open the
-  list filtered.
+- **Dashboard.** Open counts, answer times and open requests by post. Tiles and legend rows open the list
+  filtered by status; a post bar opens that post's open requests (the rows it counts), and clearing the
+  Open chip shows every request at the post.
 - **Export CSV** (avatar menu or dashboard) downloads every request. It holds personal details, so treat the
   file as sensitive.

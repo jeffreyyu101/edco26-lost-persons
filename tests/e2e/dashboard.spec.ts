@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import type { ChangeResponse, CreateResponse, RequestDetail, RequestSummary } from '../../lib/api-types';
-import { addSessionCookie } from './helpers/session';
+import { signedInAs } from './helpers/session';
 
 // Dashboard and account menu (spec §8 Dashboard / Avatar menu, §9.4 "dashboard numbers, and a tile filtering
 // All", "the CSV download"). The database is shared, so numbers are asserted as DELTAS from what the
@@ -9,6 +9,10 @@ import { addSessionCookie } from './helpers/session';
 // Runs at integration against the real store and API. Synthetic rows only (TEST-P-D…), closed afterwards.
 
 const FRONT = { staffName: 'TEST-P Dashboard', team: 'GC/HX - Base' };
+
+// Signed in once through POST /api/session (A17).
+signedInAs(FRONT);
+
 const POLL = { timeout: 40_000, intervals: [1_000, 2_000, 5_000] };
 
 const unique = () => `TEST-P-D${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -70,14 +74,17 @@ test.afterEach(async ({ baseURL }) => {
   }
 });
 
-test('open counts move by the deltas of this test, and tiles, legend and bars open All filtered', async ({ context, page, baseURL }) => {
+test('open counts move by the deltas of this test, and tiles, legend and bars open All filtered', async ({ page, baseURL }) => {
   const origin = baseURL as string;
-  await addSessionCookie(context, FRONT);
   await page.goto('/?dashboard=1');
   await expect(page.getByTestId('open-count')).toBeVisible();
   await expect(page.getByTestId('dashboard-live')).toHaveText('Live');
   const before = await numbers(page);
   expect(before.open).toBe(before.waiting + before.inMedical);
+
+  // A closed request at FA 4 (cancelled): the FA 4 bar never counts it, so its list must not show it.
+  const closed = await createRequest(page, origin, 'FA 4 – Oasis');
+  await api<ChangeResponse>(page.request, origin, 'POST', `/api/requests/${closed.id}/cancel`, { expectedVersion: closed.rowVersion });
 
   // A new request at FA 4: open +1, waiting +1, FA 4 +1.
   const row = await createRequest(page, origin, 'FA 4 – Oasis');
@@ -112,10 +119,20 @@ test('open counts move by the deltas of this test, and tiles, legend and bars op
   await expect(page).toHaveURL(/\?status=Found\+%E2%80%93\+Awaiting\+Reunion$/);
   await expect(page.locator(`[data-request-id="${row.id}"]`)).toBeVisible();
   await page.goBack();
-  await page.getByRole('button', { name: /^FA 4 – Oasis \d+ open$/ }).click();
-  await expect(page).toHaveURL(/\?post=FA\+4\+%E2%80%93\+Oasis$/);
+  // Regression: the bar opens the open requests it counts (?open=1), so the chip's count is the bar's.
+  const fa4Bar = page.getByRole('button', { name: /^FA 4 – Oasis \d+ open$/ });
+  const fa4Open = await count(fa4Bar);
+  await fa4Bar.click();
+  await expect(page).toHaveURL(/\?post=FA\+4\+%E2%80%93\+Oasis&open=1$/);
+  await expect(page.getByTestId('open-chip')).toBeVisible();
   await expect(page.getByTestId('post-chip')).toContainText('FA 4 – Oasis');
+  await expect(page.getByTestId('post-chip')).toHaveAccessibleName(`FA 4 – Oasis ${fa4Open} shown. Clear this filter`);
   await expect(page.locator(`[data-request-id="${row.id}"]`)).toBeVisible();
+  await expect(page.locator(`[data-request-id="${closed.id}"]`)).toHaveCount(0);
+  // Clearing Open widens it to every request at the post, closed ones included.
+  await page.getByTestId('open-chip').click();
+  await expect(page).toHaveURL(/\?post=FA\+4\+%E2%80%93\+Oasis$/);
+  await expect(page.locator(`[data-request-id="${closed.id}"]`)).toBeVisible();
   await page.goBack();
 
   // Back to the list.
@@ -123,9 +140,8 @@ test('open counts move by the deltas of this test, and tiles, legend and bars op
   await expect(page.getByTestId('dashboard')).toHaveCount(0);
 });
 
-test('an Other location named like a fixed post gets its own bar and filter', async ({ context, page, baseURL }) => {
+test('an Other location named like a fixed post gets its own bar and filter', async ({ page, baseURL }) => {
   const origin = baseURL as string;
-  await addSessionCookie(context, FRONT);
   const fixed = await createRequest(page, origin, 'Base');
   const other = await createRequest(page, origin, 'Other', 'Base');
   await page.goto('/?dashboard=1');
@@ -135,16 +151,18 @@ test('an Other location named like a fixed post gets its own bar and filter', as
   await expect(otherBar).toBeVisible();
   await expect(otherBar).toContainText('Other · Base');
 
-  // Each bar lists exactly its own rows: the open ones in the list are the bar's count (closed ones at
-  // the same post are listed too, dimmed, as in any All filter).
+  // Each bar lists exactly its own rows, the open ones it counts: every listed row is open, and there are
+  // as many as the bar says.
   const openListed = async () => {
     await expect(page.getByTestId('request-list')).toBeVisible();
     const labels = await page.locator('[data-testid="request-list"] [data-request-id]').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label') ?? ''));
-    return labels.filter((l) => /\. (Waiting for check|In medical)/.test(l)).length;
+    const open = labels.filter((l) => /\. (Waiting for check|In medical)/.test(l)).length;
+    expect(open, labels.join('\n')).toBe(labels.length);
+    return open;
   };
   const otherCount = await count(otherBar);
   await otherBar.click();
-  await expect(page).toHaveURL(/\?post=Other%3ABase$/);
+  await expect(page).toHaveURL(/\?post=Other%3ABase&open=1$/);
   await expect(page.getByTestId('post-chip')).toHaveAccessibleName(/^Other · Base \d+ shown\. Clear this filter$/);
   await expect(page.locator(`[data-request-id="${other.id}"]`)).toBeVisible();
   await expect(page.locator(`[data-request-id="${fixed.id}"]`)).toHaveCount(0);
@@ -153,16 +171,15 @@ test('an Other location named like a fixed post gets its own bar and filter', as
 
   const baseCount = await count(baseBar);
   await baseBar.click();
-  await expect(page).toHaveURL(/\?post=Base$/);
+  await expect(page).toHaveURL(/\?post=Base&open=1$/);
   await expect(page.getByTestId('post-chip')).toHaveAccessibleName(/^Base \d+ shown\. Clear this filter$/);
   await expect(page.locator(`[data-request-id="${fixed.id}"]`)).toBeVisible();
   await expect(page.locator(`[data-request-id="${other.id}"]`)).toHaveCount(0);
   expect(await openListed()).toBe(baseCount);
 });
 
-test('Export CSV downloads the log with this test’s row in it', async ({ context, page, baseURL }) => {
+test('Export CSV downloads the log with this test’s row in it', async ({ page, baseURL }) => {
   const origin = baseURL as string;
-  await addSessionCookie(context, FRONT);
   const row = await createRequest(page, origin, 'Command');
   await page.goto('/?dashboard=1');
   await expect(page.getByTestId('open-count')).toBeVisible();
@@ -174,8 +191,7 @@ test('Export CSV downloads the log with this test’s row in it', async ({ conte
   expect(csv).toContain(row.name);
 });
 
-test('the account menu shows who is signed in, switches theme, and opens the dashboard', async ({ context, page }) => {
-  await addSessionCookie(context, FRONT);
+test('the account menu shows who is signed in, switches theme, and opens the dashboard', async ({ page }) => {
   await page.goto('/');
   await page.getByTestId('account-trigger').click();
   const menu = page.getByRole('dialog', { name: 'Account' });

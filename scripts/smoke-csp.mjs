@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-// Production-build smoke check (Phase 1a gate): /signin serves the CSP, hydrates with no CSP violations,
-// and `/` with a valid session renders the shell and a lazily loaded view under the nonce CSP.
+// Production-build smoke check (spec §9.6 "the CSP and nonce work in a production build"): /signin serves
+// the CSP, hydrates with no CSP violations, and `/` with a valid session renders the shell and a lazily
+// loaded view under the nonce CSP, in Chromium and WebKit.
 // Run against a server started with: PORT=3100 node scripts/with-test-env.mjs next start
 //   node scripts/smoke-csp.mjs            (PORT from the environment or .env.test)
+// tests/e2e/smoke.spec.ts runs this script as part of `npm run test:e2e`, so its selectors can't go stale.
 import { chromium, webkit } from '@playwright/test';
 import { SignJWT } from 'jose';
 import { loadTestEnv, testBaseUrl } from './test-env.mjs';
@@ -59,8 +61,11 @@ async function check(browserType) {
     await page.waitForFunction(() => document.documentElement.dataset.hydrated === 'true', null, { timeout: 15_000 });
     await page.getByTestId('request-list').waitFor({ timeout: 15_000 });
     const rows = await page.locator('[data-request-id]').count();
-    if (rows < 1) failures.push('/: no rows rendered by the placeholder list');
-    await page.getByRole('button', { name: /Showing All requests/ }).waitFor();
+    if (rows < 1) failures.push('/: no rows rendered by the list');
+    // The view switcher ("All requests N, change view") renders once the list view chunk has loaded.
+    await page.getByTestId('view-switcher').waitFor({ timeout: 15_000 });
+    const switcher = (await page.getByTestId('view-switcher').getAttribute('aria-label')) ?? '';
+    if (!/^All requests\b/.test(switcher)) failures.push(`/: view switcher does not name All requests (${switcher})`);
     await page.locator('[data-request-id]').first().click();
     await page.getByTestId('profile').waitFor({ timeout: 15_000 });
     if (!page.url().includes('?r=')) failures.push('/: row click did not pushState ?r=');

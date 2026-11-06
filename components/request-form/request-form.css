@@ -81,7 +81,9 @@
   padding: 9px 12px;
   border-radius: var(--radius-3);
   background: var(--amber-a3);
-  color: var(--amber-11);
+  /* Step 12, as in every amber banner (components/ui/Banner.tsx): step 11 on the step-3 tint is ~4.2:1 in
+     light mode, under WCAG AA's 4.5:1 for 13 px text. */
+  color: var(--amber-12);
   font-size: 13px;
   font-weight: 500;
 }
