@@ -4,7 +4,9 @@ import { Theme } from '@radix-ui/themes';
 import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { setDashboardLive } from '@/components/dashboard/connection-signal';
 import { DeskFrame } from '@/components/desk/DeskFrame';
+import { BrandCard } from '@/components/list/BrandCard';
 import { DeskNav, DeskPane, DeskTop } from '@/components/desk/DeskChrome';
 import { useInDesk } from '@/components/desk/desk-context';
 import { ALL_VIEW, type MainView } from '@/components/desk/views';
@@ -76,6 +78,20 @@ describe('DeskFrame', () => {
     expect(brandAt).toBeGreaterThan(mainAt);
     expect(withBrand.indexOf('data-slot="brand"')).toBeGreaterThan(brandAt);
     expect(withBrand.indexOf('data-slot="top"')).toBeGreaterThan(withBrand.indexOf('data-slot="brand"'));
+
+    // The real row as the page draws it on the server (F1.1's compact row): its X has no handler of its own
+    // (the slot forwards its click, [data-brand-hide]) and its logos load lazily.
+    const real = render(
+      <DeskFrame desk brand={<BrandCard logoLoading="lazy" />} onHideBrand={() => {}} top={<i data-slot="top" />}>
+        <Probe />
+      </DeskFrame>,
+    );
+    const slot = real.slice(real.indexOf('data-testid="desk-brand"'), real.indexOf('data-slot="top"'));
+    expect(slot).toContain('data-testid="brand-card"');
+    expect(slot).toMatch(/<button type="button" class="[^"]*hide[^"]*" aria-label="Hide header" data-brand-hide="" data-testid="brand-hide">/);
+    expect(slot.match(/loading="lazy"/g)).toHaveLength(2);
+    expect(slot).not.toContain('Built by');
+    expect(slot).not.toMatch(/event op/i);
 
     const withForm = render(
       <DeskFrame desk form={<i data-slot="form" />}>
@@ -166,10 +182,42 @@ describe('DeskTop', () => {
     expect(search).toContain('data-searching=""');
   });
 
-  it('on the dashboard, its connection chip sits right after the title (empty while live); no chip elsewhere', () => {
-    const dash = render(<DeskTop main={main('dashboard=1')} />);
-    expect(dash).toMatch(/<h1[^>]*>Dashboard<\/h1><span[^>]*role="status" data-state="live" data-testid="dashboard-connection"><\/span>/);
-    expect(render(<DeskTop main={ALL_VIEW} />)).not.toContain('dashboard-connection');
+  it('the live line sits right after the title on every view (F1.2, live-indicator.html Desktop frame): minutes, Refresh now; no chip', () => {
+    const synced = storeWith((s) => ({ ...s, lastSyncLocalAt: Date.now() - 5_000 }));
+    for (const query of ['', 'view=pending', 'view=mine', 'q=kay', 'status=Added']) {
+      const html = render(<DeskTop main={main(query)} />, synced);
+      // Directly after the title, before search and New request.
+      expect(html, query).toMatch(/<\/h1><div class="[^"]*live[^"]*" data-state="healthy" data-testid="live-indicator">/);
+      expect(html.indexOf('data-testid="live-indicator"'), query).toBeLessThan(html.indexOf('data-testid="desk-new"'));
+      expect(html, query).toMatch(/data-testid="live-text">Updated just now<\/span>/);
+      expect(html, query).toContain('>List updated just now.</span>');
+      expect(html, query).toContain('aria-label="Refresh now"');
+      expect(html, query).not.toMatch(/\ds ago|seconds/);
+    }
+    // Before the first sync: the line keeps its place and shows nothing.
+    expect(render(<DeskTop main={ALL_VIEW} />, storeWith((s) => ({ ...s, lastSyncLocalAt: null })))).toMatch(
+      /<\/h1><div class="[^"]*live[^"]*" data-state="none" data-testid="live-indicator"><\/div>/,
+    );
+
+    // The dashboard: from its own last stats fetch, which the open dashboard publishes (nothing before it does).
+    const dash = () => render(<DeskTop main={main('dashboard=1')} />, synced);
+    expect(dash()).toMatch(/<h1[^>]*>Dashboard<\/h1><div class="[^"]*live[^"]*" data-state="none" data-testid="live-indicator"><\/div>/);
+    const refresh = () => Promise.resolve();
+    try {
+      setDashboardLive({ syncedAt: Date.now() - 20_000, failing: false, refresh });
+      expect(dash()).toMatch(/data-state="healthy" data-testid="live-indicator">.*data-testid="live-text">Updated just now<\/span>/);
+      expect(dash()).toContain('>Dashboard updated just now.</span>');
+      // Stats older than 30 s (it polls every 15 s), or a failing fetch: Reconnecting, with the clock time.
+      setDashboardLive({ syncedAt: Date.now() - 90_000, failing: false, refresh });
+      expect(dash()).toMatch(/data-state="reconnecting" data-testid="live-indicator">.*data-testid="live-text">Last updated /);
+      setDashboardLive({ syncedAt: Date.now() - 20_000, failing: true, refresh });
+      expect(dash()).toMatch(/data-state="reconnecting" data-testid="live-indicator">.*data-testid="live-text">Last updated /);
+    } finally {
+      setDashboardLive(null);
+    }
+    // The old Offline / Retrying chip is gone (F1.1: the line replaces it).
+    expect(dash()).not.toContain('dashboard-connection');
+    expect(render(<DeskTop main={ALL_VIEW} />, synced)).not.toContain('dashboard-connection');
   });
 });
 

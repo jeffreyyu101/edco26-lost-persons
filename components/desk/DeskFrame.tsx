@@ -8,15 +8,16 @@
 //   ≥ 1024  [rail 60 | main | pane 420]    the request docks on the right
 //   ≥ 1280  [sidebar 232 | main | pane 452]
 //
-// On All requests the main column opens with Jeffrey's brand card (the `brand` slot, above the top bar): it
+// On All requests the main column opens with Jeffrey's brand row (the `brand` slot, above the top bar): it
 // scrolls away and the top bar stays. The app shell renders it from the server on, so it is in place at the
 // first paint; under 768 px the slot is display: none and the shell drops it once hydrated (the phone's
-// list draws its own card).
+// list draws its own row). The row's X has no handler of its own (the server drew it): the slot catches its
+// click ([data-brand-hide]) and calls `onHideBrand`.
 //
 // The slot contents (sidebar / rail, top bar, pane header) come from the desk chunk
 // (components/desk/DeskChrome.tsx), loaded only on the desk; this file stays tiny because it is on the
 // first-load path of `/` (spec §7 Performance, the A25 budget).
-import { useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
+import { useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { DeskContext } from './desk-context';
 import f from './frame.module.css';
 
@@ -44,8 +45,10 @@ export interface DeskFrameProps {
   desk: boolean;
   /** Sidebar + rail (both rendered; CSS shows one). */
   nav?: ReactNode;
-  /** The brand card at the top of the main column, above the top bar (All requests only), or null. */
+  /** The brand row at the top of the main column, above the top bar (All requests only), or null. */
   brand?: ReactNode;
+  /** The brand row's X: hide it on this device (prefs.brandHidden). */
+  onHideBrand?: () => void;
   /** The main column's top bar. */
   top?: ReactNode;
   /** The detail pane (a request), or null when none is open. */
@@ -79,9 +82,22 @@ function useOccupied(ref: RefObject<HTMLElement | null>, active: boolean): boole
   return occupied;
 }
 
-export function DeskFrame({ desk, nav = null, brand = null, top = null, pane = null, form = null, children }: DeskFrameProps) {
+export function DeskFrame({ desk, nav = null, brand = null, onHideBrand, top = null, pane = null, form = null, children }: DeskFrameProps) {
   const formRef = useRef<HTMLDivElement>(null);
+  const topRef = useRef<HTMLDivElement>(null);
   const covered = useOccupied(formRef, form !== null);
+  const brandClick = (e: MouseEvent<HTMLDivElement>) => {
+    if (!onHideBrand || !(e.target instanceof Element) || !e.target.closest('[data-brand-hide]')) return;
+    // The X is about to go: keyboard focus moves on to the top bar's title instead of falling back to the page.
+    if (e.currentTarget.contains(document.activeElement)) {
+      const title = topRef.current?.querySelector<HTMLElement>('h1');
+      if (title) {
+        title.tabIndex = -1;
+        title.focus({ preventScroll: true });
+      }
+    }
+    onHideBrand();
+  };
   return (
     <DeskContext.Provider value={desk}>
       <div className={f.frame} data-desk={desk ? '' : undefined} data-pane={pane ? '' : undefined}>
@@ -90,11 +106,14 @@ export function DeskFrame({ desk, nav = null, brand = null, top = null, pane = n
         </div>
         <div className={f.main} data-desk-main="" inert={covered}>
           {brand ? (
-            <div className={f.brand} data-testid="desk-brand">
+            // The click handler only forwards the X's click (a real button, so keyboards reach it) bubbling up.
+            <div className={f.brand} data-testid="desk-brand" onClick={brandClick}>
               {brand}
             </div>
           ) : null}
-          <div className={f.top}>{top}</div>
+          <div className={f.top} ref={topRef}>
+            {top}
+          </div>
           <div className={f.content}>{children}</div>
         </div>
         {pane ? (

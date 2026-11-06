@@ -1098,7 +1098,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       cursor = firstServerTime;
       cursorAt = now();
       writeCursor(firstServerTime);
-      set({ lastSyncAt: firstServerTime, hasData: true });
+      set({ lastSyncAt: firstServerTime, lastSyncLocalAt: now(), hasData: true });
     }
     // The first sync after load is the baseline: it alerts nothing (runSync shows what later ones raise).
     setArmed(true);
@@ -1900,6 +1900,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       myIds: new Set(),
       hasData: false,
       lastSyncAt: null,
+      lastSyncLocalAt: null,
       toasts: [],
       snackbar: null,
       outboxPrompt: null,

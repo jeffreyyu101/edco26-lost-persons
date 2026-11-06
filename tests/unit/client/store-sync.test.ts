@@ -132,6 +132,27 @@ describe('sync loop', () => {
     expect(s().confirmed.get(makeRow(3).id)?.clothing).toBe('c3');
   });
 
+  it("records this phone's clock at each successful sync for the live indicator, and keeps it while syncs fail", async () => {
+    const server = new FakeServer([makeRow(1)]);
+    const { s } = boot(server);
+    expect(s().lastSyncLocalAt).toBeNull();
+    await ready();
+    const first = s().lastSyncLocalAt as number;
+    expect(first).toBeGreaterThan(Date.now() - 1_000);
+    expect(first).toBeLessThanOrEqual(Date.now());
+    await advance(7_000);
+    const second = s().lastSyncLocalAt as number;
+    expect(second).toBeGreaterThan(first);
+    expect(second).toBeLessThanOrEqual(Date.now());
+    // Failing syncs leave it where it was (the indicator counts from the last good one).
+    server.override = (req) => (req.path === '/api/sync' ? apiError(503, 'unavailable', 'Try again') : undefined);
+    await advance(30_000);
+    expect(s().lastSyncLocalAt).toBe(second);
+    server.override = null;
+    await advance(60_000);
+    expect(s().lastSyncLocalAt).toBeGreaterThan(second);
+  });
+
   it('reconciles every 10th poll and fetches rows whose version differs', async () => {
     const server = new FakeServer([makeRow(1), makeRow(2)]);
     server.overlap = 0;

@@ -21,8 +21,9 @@
 
 .nav {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 0 6px;
   width: 100%;
   max-width: 1156px;
   margin-inline: auto;
@@ -65,24 +66,21 @@
   letter-spacing: -0.022em;
   color: var(--gray-12);
 }
-/* Offline / Retrying: only while not live. Stays in the tree (empty) so a change is announced. */
-.conn {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 26px;
-  padding: 0 10px;
-  border-radius: 999px;
-  background: var(--amber-a3);
-  color: var(--amber-12);
-  font-size: 13px;
-  font-weight: 500;
-  white-space: nowrap;
+/* The line under the title (components/ui/LiveIndicator.tsx) on its own 32 px row, lined up with the title's
+   first letter (the Back chevron and the gap before the title are 30 px). */
+.live {
+  flex-basis: 100%;
+  margin: -2px 0 -4px;
+  padding-left: 30px;
 }
-.conn[data-state='live'] {
-  padding: 0;
-  background: none;
+
+/* The Reconnecting / Offline banner (ConnectionBanner) under the header, its text in line with the tiles. */
+.banner {
+  width: 100%;
+  max-width: 1156px;
+  margin-inline: auto;
+  padding-left: max(4px, calc(env(safe-area-inset-left) - 12px));
+  padding-right: max(4px, calc(env(safe-area-inset-right) - 12px));
 }
 
 .body {

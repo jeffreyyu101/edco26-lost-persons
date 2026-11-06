@@ -5,8 +5,10 @@ import { Theme } from '@radix-ui/themes';
 import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BRAND_CREDIT_FOR, BRAND_CREDIT_NAMES, BRAND_KICKER } from '@/components/list/BrandCard';
 import { DeskContext } from '@/components/desk/desk-context';
+import { ConnectionIndicator } from '@/components/list/AppHeader';
+import { BRAND_DATES_LONG, BRAND_DATES_SHORT, HIDE_HEADER_LABEL } from '@/components/list/BrandCard';
+import { ConnectionBanner } from '@/components/ui/Banner';
 import { AllView, MineView, PendingView, SearchView } from '@/components/list/ListViews';
 import { PENDING_TAB_KEY, readPendingTab } from '@/components/list/PendingTabs';
 import { switcherLabel } from '@/components/list/ViewSwitcher';
@@ -478,7 +480,7 @@ describe('list views render', () => {
     expect(rowTag(html, 1013)).not.toContain('data-closed');
   });
 
-  it('All requests opens with the brand card, above the sticky bar; Pending, My requests and Search do not (v8)', () => {
+  it('All requests opens with the compact brand row, above the sticky bar; Pending, My requests and Search do not (v8)', () => {
     const store = storeWith((s) => ({ ...s, myIds: new Set([...s.confirmed.keys()]) }));
     // Pending v8 (Brian, 2026-11-06 afternoon): Pending and My requests get just the large title.
     for (const node of [<PendingView key="pending" />, <MineView key="mine" />]) {
@@ -489,43 +491,62 @@ describe('list views render', () => {
       expect(html.indexOf('<header')).toBeLessThan(html.indexOf('data-testid="view-switcher"'));
       expect(html.slice(0, html.indexOf('<header'))).not.toMatch(/<img /);
     }
-    const views = [['All', <AllView key="all" status={null} post={null} />]] as const;
-    for (const [name, node] of views) {
+    for (const node of [<AllView key="all" status={null} post={null} />, <AllView key="filtered" status={STATUS.waiting} post={null} />]) {
       const html = render(store, node);
       const card = html.indexOf('data-testid="brand-card"');
       const title = html.indexOf('data-testid="view-switcher"');
-      expect(card, name).toBeGreaterThan(0);
-      // The first thing in the view: before the view's root has anything else in it, and before the title.
-      expect(html.slice(0, card), name).not.toContain('data-testid="view-switcher"');
-      expect(html.indexOf('data-testid="brand-card"', card + 1), name).toBe(-1);
-      expect(card, name).toBeLessThan(title);
-      // The card's own markup: up to the sticky bar's <header>, which follows it directly.
+      expect(card).toBeGreaterThan(0);
+      // The first thing in the view: before the title, once.
+      expect(html.slice(0, card)).not.toContain('data-testid="view-switcher"');
+      expect(html.indexOf('data-testid="brand-card"', card + 1)).toBe(-1);
+      expect(card).toBeLessThan(title);
+      // The row's own markup: up to the sticky bar's <header>, which follows it directly.
       const header = html.indexOf('<header', card);
-      expect(header, name).toBeLessThan(title);
+      expect(header).toBeLessThan(title);
       const brand = html.slice(html.lastIndexOf('<div', card), header).replace(/<!-- -->/g, '');
-      expect(brand, name).toMatch(/<\/p><\/div><div class="[^"]*sticky[^"]*">$/);
+      expect(brand).toMatch(/<\/button><\/div><div class="[^"]*sticky[^"]*">$/);
       // The real logos, sized up front (no shift when they load), EDC first, a divider, Ground Control.
-      expect(brand, name).toMatch(/<img [^>]*src="\/logos\/edc-orlando.png" alt="EDC Orlando" width="194" height="132"/);
-      expect(brand, name).toMatch(/<img [^>]*src="\/logos\/ground-control.png" alt="Ground Control" width="313" height="120"/);
-      expect(brand.indexOf('edc-orlando.png'), name).toBeLessThan(brand.indexOf('ground-control.png'));
-      // Event kicker (capitals come from CSS), the big title with "in medical?" in its own span, the credit.
-      expect(brand, name).toContain(`>${BRAND_KICKER}</p>`);
-      expect(BRAND_KICKER).toBe('Event operations · November 6–8, 2026');
-      expect(brand, name).toMatch(/>Is my friend <span class="[^"]*accent[^"]*">in medical\?<\/span><\/p>/);
-      expect(`${BRAND_CREDIT_NAMES} for ${BRAND_CREDIT_FOR}`).toBe('Jeffrey & Brian for Ground Control / Headliner Experience');
-      // On a phone the credit breaks before "for" (CSS), so the card's height never depends on the font.
-      expect(brand, name).toMatch(/>Built by <b>Jeffrey &amp; Brian<\/b> <span class="[^"]*creditFor[^"]*">for Ground Control \/ Headliner Experience<\/span><\/p>/);
-      // Decoration is hidden from screen readers; the card adds no heading (the view menu title stays the h1).
-      expect(brand, name).toMatch(/class="[^"]*orbit[^"]*" aria-hidden="true"/);
-      expect(brand, name).not.toMatch(/<h[1-6][\s>]/);
-      expect(html.match(/<h1[\s>]/g)?.length, name).toBe(1);
+      expect(brand).toMatch(/<img [^>]*src="\/logos\/edc-orlando.png" alt="EDC Orlando" width="194" height="132"/);
+      expect(brand).toMatch(/<img [^>]*src="\/logos\/ground-control.png" alt="Ground Control" width="313" height="120"/);
+      expect(brand.indexOf('edc-orlando.png')).toBeLessThan(brand.indexOf('ground-control.png'));
+      // The title with "in medical?" in its own span, then the dates (capitals come from CSS): short on a
+      // phone, long on a wide screen (CSS shows one of them).
+      expect(brand).toMatch(/>Is my friend <span class="[^"]*accent[^"]*">in medical\?<\/span><\/p>/);
+      expect(BRAND_DATES_SHORT).toBe('Nov 6–8');
+      expect(BRAND_DATES_LONG).toBe('November 6–8, 2026');
+      expect(brand).toMatch(new RegExp(`class="[^"]*datesShort[^"]*">${BRAND_DATES_SHORT}</p>`));
+      expect(brand).toMatch(new RegExp(`class="[^"]*datesLong[^"]*">${BRAND_DATES_LONG}</p>`));
+      // No "event operations" (or "event ops"), no credit line, no orbit rings.
+      expect(brand).not.toMatch(/event op/i);
+      expect(brand).not.toContain('Built by');
+      expect(brand).not.toContain('orbit');
+      // The X: a button named "Hide header".
+      expect(HIDE_HEADER_LABEL).toBe('Hide header');
+      // The desk's server-drawn copy has no handler: its slot catches the click by data-brand-hide.
+      expect(brand).toMatch(/<button type="button" class="[^"]*hide[^"]*" aria-label="Hide header" data-brand-hide="" data-testid="brand-hide">/);
+      // The row adds no heading (the view menu title stays the h1).
+      expect(brand).not.toMatch(/<h[1-6][\s>]/);
+      expect(html.match(/<h1[\s>]/g)?.length).toBe(1);
     }
-    // Search keeps its own bar (the field takes over the header), with no brand card.
-    expect(render(store, <SearchView q="" />)).not.toContain('brand-card');
-    expect(render(store, <SearchView q="pink" />)).not.toContain('brand-card');
+    for (const [name, node] of [
+      ['Pending', <PendingView key="pending" />],
+      ['My requests', <MineView key="mine" />],
+      ['Search', <SearchView key="search" q="" />],
+      ['Search results', <SearchView key="search-q" q="pink" />],
+    ] as const) {
+      expect(render(store, node), name).not.toContain('brand-card');
+    }
   });
 
-  it('the brand card is there before any data (skeletons and the error state), so nothing moves when rows load', () => {
+  it('hidden with its X: no brand row on All, and the avatar menu offers Show header (All only)', () => {
+    const hidden = storeWith((s) => ({ ...s, prefs: { ...s.prefs, brandHidden: true } }));
+    const html = render(hidden, <AllView status={null} post={null} />);
+    expect(html).not.toContain('brand-card');
+    // The view starts at its sticky bar.
+    expect(html).toMatch(/^<div[^>]*>(<div[^>]*>)*?<div class="[^"]*root[^"]*" data-view="all"><div class="[^"]*sticky[^"]*">/);
+  });
+
+  it('the brand row is there before any data (skeletons and the error state), so nothing moves when rows load', () => {
     const loading = render(storeWith((s) => ({ ...s, hasData: false, hydrated: false })), <AllView status={null} post={null} />);
     expect(loading).toContain('list-skeleton');
     expect(loading.indexOf('data-testid="brand-card"')).toBeGreaterThan(0);
@@ -537,6 +558,61 @@ describe('list views render', () => {
     const pending = render(storeWith((s) => ({ ...s, hasData: false, hydrated: true, connection: 'error' })), <PendingView />);
     expect(pending).toContain('Can&#x27;t reach the log');
     expect(pending).not.toContain('brand-card');
+  });
+
+  it('the line sits right under the title on All, Pending and My requests: a plain dot, "Updated just now", Refresh now', () => {
+    const store = storeWith((s) => ({ ...s, lastSyncLocalAt: Date.now() - 5_000 }));
+    for (const [name, node] of [
+      ['All', <AllView key="all" status={null} post={null} />],
+      ['Pending', <PendingView key="pending" />],
+      ['My requests', <MineView key="mine" />],
+    ] as const) {
+      const html = render(store, node);
+      const header = html.indexOf('</header>');
+      const live = html.indexOf('data-testid="live-indicator"');
+      expect(live, name).toBeGreaterThan(header);
+      // Directly after the header, inside the sticky bar, before the list.
+      expect(html.slice(header, live), name).toMatch(/^<\/header><div class="[^"]*live[^"]*"[^>]*data-state="healthy"\s*$/);
+      expect(live, name).toBeLessThan(html.indexOf('data-testid="request-list"'));
+      const line = html.slice(live, html.indexOf('</div>', live));
+      expect(line, name).toMatch(/<span class="[^"]*liveDot[^"]*" aria-hidden="true"><\/span>/);
+      // Minutes only: never seconds.
+      expect(line, name).toMatch(/aria-hidden="true" data-testid="live-text">Updated just now<\/span>/);
+      expect(line, name).not.toMatch(/\ds ago|seconds/);
+      // One full sentence for screen readers, then the button, right after the words.
+      expect(line, name).toContain('>List updated just now.</span>');
+      expect(line, name).toMatch(/<\/span><button type="button" class="[^"]*liveRefresh[^"]*" aria-label="Refresh now" data-testid="refresh-now"><svg[^>]*lucide-refresh-cw[^>]*aria-hidden="true"/);
+      // Healthy: no banner and no badge; the live region is there, silent until the state changes.
+      expect(html, name).not.toContain('connection-banner');
+      expect(html, name).not.toContain('connection-indicator');
+      expect(html.slice(html.indexOf('data-testid="live-announcement"') - 200), name).toMatch(/role="status"[^>]*data-testid="live-announcement"[^>]*><\/span>/);
+      expect(html.match(/data-testid="live-announcement"/g), name).toHaveLength(1);
+    }
+    // Search keeps its own bar, with no line.
+    expect(render(store, <SearchView q="" />)).not.toContain('live-indicator');
+  });
+
+  it('the line shows nothing before the first sync (and keeps its row): no words, no button', () => {
+    const before = render(storeWith((s) => ({ ...s, lastSyncLocalAt: null })), <PendingView />);
+    expect(before).toMatch(/data-state="none" data-testid="live-indicator"><\/div>/);
+    expect(before).not.toContain('Updated');
+    expect(before).not.toContain('Refresh now');
+  });
+
+  it('one state for the line, the banner and the badge: requests failing with a connection read Reconnecting everywhere', () => {
+    // The F1.1 review finding: the store calls two failed requests 'offline' even while the phone reports a
+    // connection. The line said Reconnecting while the banner said Offline; now all three say Reconnecting.
+    const at = Date.now() - 45_000;
+    const clock = formatCreatedTime(at, Date.now(), 'America/New_York');
+    for (const connection of ['offline', 'error'] as const) {
+      const html = render(storeWith((s) => ({ ...s, connection, lastSyncLocalAt: at })), <PendingView />);
+      expect(html, connection).toMatch(/data-state="reconnecting" data-testid="live-indicator"/);
+      expect(html, connection).toContain(`data-testid="live-text">Last updated ${clock}</span>`);
+      expect(html, connection).toContain(`>Reconnecting. List last updated at ${clock}.</span>`);
+      expect(html, connection).toMatch(/data-tone="amber" data-testid="connection-banner"[^>]*>.*?Reconnecting…<\/span>/);
+      expect(html, connection).not.toContain('waiting to send');
+      expect(html, connection).toMatch(/role="img" data-state="reconnecting" aria-label="Reconnecting" data-testid="connection-indicator"/);
+    }
   });
 
   it('only All archives: Pending lists no closed request; My requests shows the reporter theirs, unfolded', () => {
@@ -646,27 +722,48 @@ describe('list views render', () => {
     expect(html).toContain('Can&#x27;t reach the log');
   });
 
-  it('offline: a badge on the avatar in the header, and the banner between the header and the log', () => {
-    const store = storeWith((s) => ({ ...s, connection: 'offline', outbox: [outboxItem()] }));
+  it('a problem: a badge on the avatar in the header, the line under the title, the banner between them and the log', () => {
+    const store = storeWith((s) => ({ ...s, connection: 'error', outbox: [outboxItem()] }));
     const html = render(store, <AllView status={null} post={null} />);
     const title = html.indexOf('data-testid="view-switcher"');
     const avatar = html.indexOf('data-testid="account-trigger"');
     const indicator = html.indexOf('data-testid="connection-indicator"');
-    const banner = html.indexOf('Offline · <!-- -->1<!-- --> waiting to send');
+    const line = html.indexOf('data-testid="live-indicator"');
+    const banner = html.indexOf('data-testid="connection-banner"');
     const cols = html.indexOf('data-testid="log-columns"');
     expect(title).toBeGreaterThan(0);
-    expect(indicator).toBeGreaterThan(avatar);
     expect(avatar).toBeGreaterThan(title);
+    expect(indicator).toBeGreaterThan(avatar);
     const badge = html.slice(html.lastIndexOf('<span', indicator), indicator + 60);
     expect(badge).toContain('role="img"');
-    expect(badge).toContain('data-state="offline"');
-    expect(badge).toContain('aria-label="Offline"');
-    expect(banner).toBeGreaterThan(indicator);
+    expect(badge).toContain('data-state="reconnecting"');
+    expect(badge).toContain('aria-label="Reconnecting"');
+    expect(line).toBeGreaterThan(indicator);
+    expect(banner).toBeGreaterThan(line);
     expect(cols).toBeGreaterThan(banner);
-    // Can't reach the log: the badge turns red; live: nothing at all.
-    const error = render(storeWith((s) => ({ ...s, connection: 'error' })), <PendingView />);
-    expect(error).toMatch(/data-state="error"[^>]*aria-label="Can&#x27;t reach the log"|aria-label="Can&#x27;t reach the log"[^>]*data-state="error"/);
+    // The banner is not a live region itself (a new waiting count is never read out); the one live region is.
+    expect(html.slice(html.lastIndexOf('<div', banner), banner)).not.toContain('role=');
+    // Healthy: no badge at all.
     expect(render(storeWith((s) => s), <PendingView />)).not.toContain('connection-indicator');
+  });
+
+  it('offline: the gray banner keeps "Offline · N waiting to send", and the badge is gray with a crossed-out cloud', () => {
+    // A server render reads the phone as online, so the offline cues are rendered from the state directly.
+    const store = storeWith((s) => ({ ...s, outbox: [outboxItem()] }));
+    const offline = { state: 'offline' as const, text: 'Last updated 3:42 PM', sentence: 'Offline. List last updated at 3:42 PM.' };
+    const banner = render(store, <ConnectionBanner status={offline} />);
+    expect(banner).toMatch(/<div class="lp-banner [^"]*" data-tone="gray" data-testid="connection-banner" style="background:var\(--gray-a3\);color:var\(--gray-12\)"><svg[^>]*lucide-cloud-off/);
+    expect(banner).toContain('>Offline · 1 waiting to send</span>');
+    // The one live region follows the banner, silent until the state changes.
+    expect(banner).toMatch(/waiting to send<\/span><\/div><span[^>]*role="status"[^>]*data-testid="live-announcement"[^>]*><\/span>/);
+    const reconnecting = render(store, <ConnectionBanner status={{ ...offline, state: 'reconnecting' }} />);
+    expect(reconnecting).toMatch(/data-tone="amber" data-testid="connection-banner"[^>]*><svg[^>]*lucide-cloud-sync/);
+    expect(reconnecting).toContain('>Reconnecting…</span>');
+    expect(render(store, <ConnectionBanner status={{ ...offline, state: 'healthy' }} />)).not.toContain('connection-banner');
+    expect(renderToString(<ConnectionIndicator state="offline" />)).toMatch(
+      /^<span class="[^"]*conn[^"]*" role="img" data-state="offline" aria-label="Offline" data-testid="connection-indicator"><svg[^>]*lucide-cloud-off/,
+    );
+    expect(renderToString(<ConnectionIndicator state="healthy" />)).toBe('');
   });
 
   it('Pending and My requests use the same large title, with no separate ×', () => {
@@ -753,6 +850,8 @@ describe('list views render', () => {
     );
     expect(html).toContain('data-testid="pending-board"');
     expect(html).not.toContain('brand-card');
+    // The line under the title is the desk top bar's (components/desk/TopBar.tsx), not the list's.
+    expect(html).not.toContain('data-testid="live-indicator"');
     // Both columns, To check first, each with its header and count; the board's own control (for a narrow
     // main column) is there too, and the phone's is not in the sticky bar.
     expect(html.indexOf('data-testid="pending-column-check"')).toBeLessThan(html.indexOf('data-testid="pending-column-coming"'));

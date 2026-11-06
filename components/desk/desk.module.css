@@ -139,6 +139,7 @@
 .live[data-state='off'] {
   background: var(--amber-9);
 }
+.live[data-state='offline'],
 .live[data-state='loading'] {
   background: var(--gray-8);
 }
@@ -484,11 +485,12 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The dashboard's Offline / Retrying chip, beside the title (its look is the dashboard's .conn; doubled to
-   win over its margin-left: auto whatever the stylesheet order). */
-.conn.conn {
-  margin-left: 2px;
-  flex: none;
+/* The live line next to the title (components/ui/LiveIndicator.tsx; live-indicator.html Desktop frame: the dot
+   10 px after the count). It gives way first when the column is narrow: its words clip with an ellipsis, the
+   dot and Refresh now stay. */
+.live {
+  flex: 0 1 auto;
+  margin-left: 4px;
 }
 
 .kbd {

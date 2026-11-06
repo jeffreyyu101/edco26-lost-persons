@@ -2,7 +2,9 @@
 // Dashboard (?dashboard=1, spec §8 Dashboard): Jeffrey's global view, built from design/screens/polish-v7.html
 // (Dash, Tiles, Posts, Recent, Perf, Laptop; renders v7-dash.png and v7-laptop.png). GET /api/stats every 15 s
 // while open via useStats(true).
-//   title    ‹ Dashboard, large. A compact Offline / Retrying chip only while not live.
+//   title    ‹ Dashboard, large, with the line under it (v2.2 afternoon): "Updated just now" / "Updated 5 min
+//            ago" from the last stats fetch and Refresh now (fetches the stats at once); while fetches fail or
+//            the phone is offline, the Reconnecting / Offline banner under the header and "Last updated 3:42 PM".
 //   tiles    Open (blue/green split bar) and Closed, big; Waiting for check, In medical, Not in medical, Reunited
 //            (+ discharged · cancelled when either is non-zero). Status tiles open All filtered (A22); Open opens
 //            Pending, which lists exactly the open requests.
@@ -10,8 +12,9 @@
 //   recent   "Recently updated ›" opens All. Rows: number, name, status, updated; a row opens the profile.
 //   perf     Longest wait (opens that request), Time to answer, Time to reunite, Logged. "—" when a value is null
 //            or missing (avgReuniteMinutes / loggedLastHour come from the v2.2 lp_stats).
-// ≥ 768 px (inside the desk shell, components/desk): the shell's top bar is the title (and holds the
-//            Offline / Retrying chip, published through connection-signal.ts), so there is no title row here.
+// ≥ 768 px (inside the desk shell, components/desk): the shell's top bar is the title and holds the line and
+//            Refresh now beside it (the dashboard publishes their inputs through connection-signal.ts), so
+//            there is no title row here; the Reconnecting / Offline banner stays at the top of the column.
 //            Tiles are 3 × 2 (open statuses over closed ones), six in one row from 1024 px when the column
 //            has room (not with a request docked beside it); values share one line across a row. Open by
 //            post and Recently updated sit side by side and Performance rows in two columns when the column
@@ -20,11 +23,14 @@ import { Skeleton, VisuallyHidden } from '@radix-ui/themes';
 import { ChevronLeft, ChevronRight, Clock, Inbox, Timer, Users, type LucideIcon } from 'lucide-react';
 import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { useInDesk } from '@/components/desk/desk-context';
+import { ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { LiveIndicator } from '@/components/ui/LiveIndicator';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { Stats } from '@/lib/api-types';
 import { goBack, navigate } from '@/lib/client/nav';
-import { useConnection, useNow, useStats } from '@/lib/client/store-contract';
+import { useNow, useStats } from '@/lib/client/store-contract';
+import { useLiveStatus } from '@/lib/client/use-live-status';
 import { STATUS, postFilterKey, postFilterLabel, statusMeta, toneColorVar } from '@/lib/domain';
 import {
   NO_VALUE,
@@ -40,8 +46,7 @@ import {
   postsBusiestFirst,
   type ValuePart,
 } from './dashboard-model';
-import { setDashboardConnection } from './connection-signal';
-import { DashboardConnectionChip } from './ConnectionChip';
+import { setDashboardLive } from './connection-signal';
 import s from './dashboard.module.css';
 
 export type DashboardViewProps = Record<string, never>;
@@ -56,17 +61,17 @@ export function DashboardView(_props: DashboardViewProps) {
 }
 
 function Dashboard({ onRetry }: { onRetry: () => void }) {
-  const { stats, error } = useStats(true);
-  const { connection } = useConnection();
+  const { stats, error, updatedAt, refresh } = useStats(true);
   const inDesk = useInDesk();
-  const offline = connection === 'offline';
-  const state = offline ? 'offline' : connection === 'error' || error ? 'retrying' : 'live';
+  // The line, the banner and its live region share one status: the last stats fetch (the numbers on this page).
+  const live = useLiveStatus({ syncedAt: updatedAt, failing: error, subject: 'Dashboard' });
 
-  // On the desk the top bar shows the chip; it goes back to live when the dashboard closes.
+  // On the desk the top bar draws the line and Refresh now from the same inputs; it drops them when the
+  // dashboard closes.
   useEffect(() => {
-    if (inDesk) setDashboardConnection(state);
-  }, [inDesk, state]);
-  useEffect(() => () => setDashboardConnection('live'), []);
+    if (inDesk) setDashboardLive({ syncedAt: updatedAt, failing: error, refresh });
+  }, [inDesk, updatedAt, error, refresh]);
+  useEffect(() => () => setDashboardLive(null), []);
 
   return (
     <div className={s.app} data-testid="dashboard">
@@ -76,9 +81,12 @@ function Dashboard({ onRetry }: { onRetry: () => void }) {
             <ChevronLeft size={24} strokeWidth={2} aria-hidden />
           </button>
           <h1 className={s.title}>Dashboard</h1>
-          <DashboardConnectionChip state={state} />
+          <LiveIndicator className={s.live} line={live} onRefresh={refresh} />
         </header>
       )}
+      <div className={s.banner}>
+        <ConnectionBanner status={live} />
+      </div>
       <main className={s.body}>
         {stats ? (
           <DashboardContent stats={stats} />

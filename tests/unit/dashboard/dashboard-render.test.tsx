@@ -224,29 +224,35 @@ describe('dashboard render', () => {
     expect(render(storeWith(), <DashboardContent stats={missing} />)).toMatch(/data-testid="perf-reunite-value"><span[^>]*>—</);
   });
 
-  it('title: large "Dashboard" with Back; the connection chip is empty while live, Offline / Retrying otherwise', () => {
+  it('title: large "Dashboard" with Back, the line under it (empty until the first stats arrive), then the banner', () => {
     const live = render(storeWith(), <DashboardView />);
     expect(live).toMatch(/<h1[^>]*>Dashboard<\/h1>/);
     expect(live).toContain('aria-label="Back to requests"');
-    expect(live).toMatch(/role="status" data-state="live" data-testid="dashboard-connection"><\/span>/);
+    // The line follows the title inside the header; before the first stats it shows nothing (the row keeps its
+    // place). Under the header, the banner's slot holds only the silent live region while healthy. The old
+    // Offline / Retrying chip is gone.
+    expect(live).toMatch(
+      /<\/h1><div class="[^"]*live[^"]*" data-state="none" data-testid="live-indicator"><\/div><\/header><div class="[^"]*banner[^"]*"><span[^>]*role="status"[^>]*data-testid="live-announcement"[^>]*><\/span><\/div><main/,
+    );
+    expect(live).not.toContain('dashboard-connection');
+    expect(live).not.toContain('Retrying');
     expect(live).not.toContain('>Live<');
     expect(live).not.toContain('Export CSV');
     // No stats yet: the skeleton.
     expect(live).toContain('aria-label="Loading dashboard"');
-
-    const offline = render(
-      storeWith((s) => ({ ...s, connection: 'offline' })),
-      <DashboardView />,
-    );
-    expect(offline).toMatch(/data-state="offline" data-testid="dashboard-connection">[\s\S]*?Offline<\/span>/);
-    const error = render(
-      storeWith((s) => ({ ...s, connection: 'error' })),
-      <DashboardView />,
-    );
-    expect(error).toMatch(/data-state="retrying" data-testid="dashboard-connection">[\s\S]*?Retrying<\/span>/);
+    // The list's sync failing: the same Reconnecting banner as the lists (the line waits for the first stats).
+    for (const connection of ['offline', 'error'] as const) {
+      const html = render(
+        storeWith((s) => ({ ...s, connection })),
+        <DashboardView />,
+      );
+      expect(html, connection).toMatch(/data-state="none" data-testid="live-indicator"/);
+      expect(html, connection).toMatch(/<\/header><div class="[^"]*banner[^"]*"><div class="lp-banner[^"]*" data-tone="amber" data-testid="connection-banner"/);
+      expect(html, connection).toContain('>Reconnecting…</span>');
+    }
   });
 
-  it('in the desk shell: no title row (the top bar is the title and holds the chip), six desk-sized tile placeholders', () => {
+  it('in the desk shell: no title row and no line (the top bar is the title and holds the line), the banner stays, six desk-sized tile placeholders', () => {
     const desk = render(
       storeWith((s) => ({ ...s, connection: 'offline' })),
       <DeskContext.Provider value>
@@ -256,6 +262,10 @@ describe('dashboard render', () => {
     expect(desk).not.toContain('<h1');
     expect(desk).not.toContain('aria-label="Back to requests"');
     expect(desk).not.toContain('dashboard-connection');
+    expect(desk).not.toContain('data-testid="live-indicator"');
+    // The list's sync failing: the same Reconnecting banner at the top of the column, with its live region.
+    expect(desk).toMatch(/^(<[^>]*>)*?<div class="[^"]*app[^"]*" data-testid="dashboard"><div class="[^"]*banner[^"]*"><div class="lp-banner[^"]*" data-tone="amber" data-testid="connection-banner"/);
+    expect(desk).toContain('data-testid="live-announcement"');
     expect(desk).toContain('aria-label="Loading dashboard"');
     expect(desk.match(/height:92px/g) ?? []).toHaveLength(6);
   });

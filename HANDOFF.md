@@ -37,7 +37,7 @@ screenshots.
 - **The app no longer exports a CSV** (the button and its API route are gone). At the end of the event
   Jeffrey runs [`docs/export.sql`](docs/export.sql) in the Supabase SQL editor and downloads the results.
 - **Header:** the view switcher is the large page title, the bell moved into the avatar menu, the live dot
-  shows only when offline or reconnecting, and "Newest first" is gone.
+  shows only when offline or reconnecting, and "Newest first" is gone. (Superseded in the afternoon: see below.)
 - **New request is fully open** in Jeffrey's order (post, missing person, more details, then friend or family
   last and optional). **Age and gender are free text** ("mid-20s", "Non-binary"; Male / Female / Other are
   quick-fill chips), and search matches the age text. This needs the migration re-run below.
@@ -47,6 +47,18 @@ screenshots.
   browser asks only when someone turns Alerts on or taps "Allow notifications" in the avatar menu; refused
   shows "Blocked in browser". A notification shows the LP number, the status, initials and the post (no
   phone numbers), and a click opens the request. No server change: no push, no keys to set on Vercel.
+
+### 2026-11-06 afternoon (v2.2 afternoon, Brian)
+
+- **The brand card is one compact row on All requests only**, with an X that hides it on that phone ("Show
+  header" in the avatar menu brings it back).
+- **A live line under the title** on All requests, Pending, My requests and the dashboard. The dashboard's
+  Offline / Retrying chip is gone.
+- **F1.2 (the Apple Mail model):** the line counts minutes, never seconds ("Updated just now", "Updated 5 min
+  ago"), and has a Refresh now button. Problems are a banner, "Reconnecting…" (amber) or "Offline · N waiting
+  to send" (gray), and the line then shows "Last updated 3:42 PM". One state drives the line, the banner, the
+  avatar badge and the screen-reader announcements (design/DECISIONS.md items 15–17).
+- Client only: no migration, no new environment variable.
 
 ## The production migration
 

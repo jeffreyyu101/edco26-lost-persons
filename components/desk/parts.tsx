@@ -2,7 +2,9 @@
 // Small pieces shared by the sidebar, the rail and the top bar.
 import type { MouseEvent, ReactNode } from 'react';
 import { hrefFor, navigate, type NavParams } from '@/lib/client/nav';
-import { useActions, useAllRows, useConnection, useCounts, useIsLoading, usePrefs, type Connection } from '@/lib/client/store-contract';
+import type { LiveState } from '@/lib/client/live-status';
+import { useActions, useAllRows, useCounts, useIsLoading, usePrefs } from '@/lib/client/store-contract';
+import { useLiveStatus } from '@/lib/client/use-live-status';
 import type { MainView } from './views';
 import d from './desk.module.css';
 
@@ -53,29 +55,33 @@ export function useMainCount(view: MainView): number | null {
   }
 }
 
-const LIVE_LABEL: Readonly<Record<Connection, string>> = {
-  live: 'Live. Tap to sync now',
+const LIVE_LABEL: Readonly<Record<LiveState, string>> = {
+  healthy: 'Live. Tap to sync now',
+  reconnecting: 'Reconnecting. Tap to try again',
   offline: 'Offline. Tap to try again',
-  error: "Can't reach the log. Tap to try again",
 };
+
+/** The corner dot's state (desk.module.css .live): the line's colours, grey while nothing has loaded. */
+const MARK_STATE: Readonly<Record<LiveState, string>> = { healthy: 'live', reconnecting: 'off', offline: 'offline' };
 
 /**
  * The compact logo lockup at the top of the sidebar (EDC Orlando | Ground Control on the brand card's dark
- * gradient) or the rail (the two logos stacked on a square), with the phone header's live dot on its corner:
- * green live, amber offline or unreachable, grey while loading. Tap to sync now. The logos are decoration
+ * gradient) or the rail (the two logos stacked on a square), with a live dot on its corner. It reads the same
+ * live status as the top bar's line and the banner (useLiveStatus, F1.2), so they never disagree: green while
+ * healthy, amber while reconnecting, grey offline and while loading. Tap to sync now. The logos are decoration
  * here: the button is named by the live state.
  */
 export function LiveMark({ variant, className }: { variant: 'side' | 'rail'; className?: string }) {
   const actions = useActions();
-  const { connection } = useConnection();
+  const live = useLiveStatus();
   const loading = useIsLoading();
-  const state = loading && connection === 'live' ? 'loading' : connection === 'live' ? 'live' : 'off';
+  const state = loading && live.state === 'healthy' ? 'loading' : MARK_STATE[live.state];
   return (
     <button
       type="button"
       className={`${d.lockup} ${className ?? ''}`}
       onClick={actions.syncNow}
-      aria-label={state === 'loading' ? 'Syncing' : LIVE_LABEL[connection]}
+      aria-label={state === 'loading' ? 'Syncing' : LIVE_LABEL[live.state]}
       data-testid="desk-live"
       data-variant={variant}
       data-state={state}

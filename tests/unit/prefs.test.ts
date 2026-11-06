@@ -7,6 +7,7 @@ import {
   readPrefs,
   setBell,
   setBellIntroSeen,
+  setBrandHidden,
   setClosedExpanded,
   setLastPost,
   setThemePref,
@@ -32,9 +33,15 @@ function fakeBrowser() {
     removeItem: (k: string) => void session.delete(k),
   };
   const classes = new Set<string>();
+  const attributes = new Set<string>();
   const documentElement = {
     classList: { add: (c: string) => void classes.add(c), remove: (...cs: string[]) => cs.forEach((c) => classes.delete(c)) },
     style: { colorScheme: '' },
+    toggleAttribute: (name: string, force: boolean) => {
+      if (force) attributes.add(name);
+      else attributes.delete(name);
+      return force;
+    },
   };
   const listeners = new Set<(e: { key: string | null }) => void>();
   const window = {
@@ -46,7 +53,7 @@ function fakeBrowser() {
   };
   vi.stubGlobal('window', window);
   vi.stubGlobal('document', { documentElement });
-  return { data, session, classes, documentElement, fire: (key: string | null) => listeners.forEach((l) => l({ key })), listeners };
+  return { data, session, classes, attributes, documentElement, fire: (key: string | null) => listeners.forEach((l) => l({ key })), listeners };
 }
 
 describe('prefs (remembered on this phone)', () => {
@@ -161,6 +168,40 @@ describe('prefs (remembered on this phone)', () => {
       store.actions.setPref('closedExpanded', true);
       expect(store.getState().prefs.closedExpanded).toBe(true);
       expect(readPrefs()).toEqual({ ...store.getState().prefs });
+    });
+
+    it('the brand row over All requests: hidden with its X on this device (localStorage), until Show header', () => {
+      expect(DEFAULT_PREFS.brandHidden).toBe(false);
+      expect(readPrefs().brandHidden).toBe(false);
+      setBrandHidden(true);
+      expect(browser.data.get(PREF_STORAGE_KEYS.brandHidden)).toBe('1');
+      expect(PREF_STORAGE_KEYS.brandHidden).toBe('lp-brand-hidden');
+      expect(readPrefs().brandHidden).toBe(true);
+      // The desk's server-drawn row reads <html data-brand-hidden> before paint (lib/brand-pref.ts).
+      expect(browser.attributes.has('data-brand-hidden')).toBe(true);
+      writePref('brandHidden', false);
+      expect(browser.data.has(PREF_STORAGE_KEYS.brandHidden)).toBe(false);
+      expect(readPrefs().brandHidden).toBe(false);
+      expect(browser.attributes.has('data-brand-hidden')).toBe(false);
+      // Anything but '1' reads as shown.
+      browser.data.set(PREF_STORAGE_KEYS.brandHidden, 'yes');
+      expect(readPrefs().brandHidden).toBe(false);
+      browser.data.delete(PREF_STORAGE_KEYS.brandHidden);
+
+      // Through the store: setPref writes through, and another tab's change arrives through the storage event.
+      const store = createStubStore({ eventTimezone: 'America/New_York' });
+      store.actions.setPref('brandHidden', true);
+      expect(store.getState().prefs.brandHidden).toBe(true);
+      expect(readPrefs()).toEqual({ ...store.getState().prefs });
+      const seen: boolean[] = [];
+      const off = subscribePrefs((p) => seen.push(p.brandHidden));
+      expect(browser.attributes.has('data-brand-hidden')).toBe(true);
+      browser.data.delete(PREF_STORAGE_KEYS.brandHidden);
+      browser.fire(PREF_STORAGE_KEYS.brandHidden);
+      off();
+      expect(seen).toEqual([false]);
+      // Shown again from another tab: the mark goes too, or the desk's row would stay display: none.
+      expect(browser.attributes.has('data-brand-hidden')).toBe(false);
     });
 
     it('a browser without sessionStorage folds Closed and never throws', () => {

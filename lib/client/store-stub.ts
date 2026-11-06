@@ -74,6 +74,7 @@ export function createStubStore(options: StubOptions): AppStore {
     connection: 'live',
     syncing: false,
     lastSyncAt: new Date(now).toISOString(),
+    lastSyncLocalAt: now,
     session: { status: 'active', ...STUB_SESSION, expiresAt: new Date(now + 12 * 3600_000).toISOString() },
     myIds: new Set(),
     // Backed by lib/client/prefs.ts exactly as the real store is (DEFAULT_PREFS on the server / in tests).
@@ -154,7 +155,7 @@ export function createStubStore(options: StubOptions): AppStore {
   const actions: StoreActions = {
     syncNow() {
       set({ syncing: true });
-      setTimeout(() => set({ syncing: false, lastSyncAt: stamp() }), 300);
+      setTimeout(() => set({ syncing: false, lastSyncAt: stamp(), lastSyncLocalAt: Date.now() }), 300);
     },
     async setStatus(id, status, kind) {
       return applyStatus(id, status, kind);

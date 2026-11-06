@@ -348,33 +348,44 @@ test.describe('desktop 1440 × 900', () => {
     await expect(menu).toBeHidden();
   });
 
-  test('All requests opens with the brand card above the top bar; it scrolls away, the bar stays; no card on the other views; the logo lockup', async ({ page }) => {
+  test('All requests opens with the brand row above the top bar; it scrolls away, the bar stays; no row on the other views; the logo lockup', async ({ page }) => {
     const [one] = await createRequests(page, 1);
     await page.goto('/');
     await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
     const card = deskBrand(page);
     await expect(card).toBeVisible();
-    // One card: the desk's (the list's own is phone only).
+    // One row: the desk's (the list's own is phone only).
     await expect(page.getByTestId('brand-card')).toHaveCount(1);
     await expect(card.getByRole('img', { name: 'EDC Orlando' })).toBeVisible();
     await expect(card.getByRole('img', { name: 'Ground Control' })).toBeVisible();
-    await expect(card.locator('[class*="kicker"]')).toHaveText('EVENT OPERATIONS · NOVEMBER 6–8, 2026', { useInnerText: true });
-    await expect(card.locator('[class*="title"]')).toHaveText('Is my friend in medical?');
-    await expect(card.locator('p[class*="credit"]')).toHaveText('Built by Jeffrey & Brian for Ground Control / Headliner Experience');
+    // F1.1's compact row (design/screens/live-indicator.html, the Desktop frame): the title, the long dates
+    // beside it, the X; no kicker, no credit line, no rings.
+    await expect(card.locator('p[class*="title"]')).toHaveText('Is my friend in medical?');
+    await expect(card.locator('[class*="datesLong"]')).toHaveText('NOVEMBER 6–8, 2026', { useInnerText: true });
+    await expect(card.locator('[class*="datesShort"]')).toBeHidden();
+    await expect(card).not.toContainText(/event op/i);
+    await expect(card).not.toContainText('Built by');
+    await expect(card.locator('[class*="orbit"]')).toHaveCount(0);
+    await expect(card.getByRole('button', { name: 'Hide header' })).toBeVisible();
     // No heading of its own: the top bar's title is the page's one h1.
     await expect(card.getByRole('heading')).toHaveCount(0);
     await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
 
-    // The top of the main column, its width less 20 px a side; the title one line of 36-40 px.
+    // The top of the main column, lined up with the top bar's title (24 px in), 20 px from the right; one row
+    // about 60 px tall, the title one line of 19 px, the dates beside it.
     const column = (await main(page).boundingBox())!;
     const box = (await card.boundingBox())!;
-    expect(box.x).toBeCloseTo(column.x + 20, 0);
-    expect(box.width).toBeCloseTo(column.width - 40, 0);
-    expect(box.y).toBeCloseTo(16, 0);
+    expect(box.x).toBeCloseTo(column.x + 24, 0);
+    expect(box.width).toBeCloseTo(column.width - 44, 0);
+    expect(box.y).toBeCloseTo(14, 0);
+    expect(box.height).toBeLessThanOrEqual(64);
     const title = await brandTitle(card);
-    expect(title.size).toBeGreaterThanOrEqual(36);
-    expect(title.size).toBeLessThanOrEqual(40);
+    expect(title.size).toBe(19);
     expect(title.height).toBeLessThan(title.size * 1.5);
+    const dates = (await card.locator('[class*="datesLong"]').boundingBox())!;
+    expect(dates.x).toBeGreaterThan(title.right);
+    const heading = (await page.getByTestId('desk-topbar').getByRole('heading', { level: 1 }).boundingBox())!;
+    expect(Math.abs(box.x - heading.x)).toBeLessThanOrEqual(1);
     const bar = page.getByTestId('desk-topbar');
     expect((await bar.boundingBox())!.y).toBeGreaterThanOrEqual(box.y + box.height);
     // Every text on it at 4.5:1 or more against every pixel behind it, at this size too.
@@ -403,12 +414,13 @@ test.describe('desktop 1440 × 900', () => {
     expect(lock.y).toBeLessThan(20);
     expect(await lockup.evaluate((el) => getComputedStyle(el).backgroundImage)).toContain('linear-gradient');
 
-    // A request open beside the list: the card stays at the top of the narrower column, title one line.
+    // A request open beside the list: the row stays at the top of the narrower column, title one line.
     await page.goto(`/?r=${one!.id}`);
     await expect(page.getByTestId('desk-pane')).toBeVisible({ timeout: 15_000 });
     await expect(card).toBeVisible();
     const docked = await brandTitle(card);
     expect(docked.height).toBeLessThan(docked.size * 1.5);
+    expect(docked.right).toBeLessThanOrEqual((await card.getByRole('button', { name: 'Hide header' }).boundingBox())!.x);
     expect((await card.boundingBox())!.x + (await card.boundingBox())!.width).toBeLessThanOrEqual((await page.getByTestId('desk-pane').boundingBox())!.x);
 
     // Pending, My requests (Brian, 2026-11-06), Search and the dashboard have no card: the top bar is at the top.
@@ -423,6 +435,153 @@ test.describe('desktop 1440 × 900', () => {
       await expect(page.getByTestId('brand-card'), url).toHaveCount(0);
       expect((await bar.boundingBox())!.y, url).toBeCloseTo(0, 0);
     }
+  });
+
+  test('the brand row\'s X hides it on this device: never drawn after a reload (not even before hydration), Show header brings it back', async ({ page }) => {
+    await createRequests(page, 1);
+    await page.goto('/');
+    await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
+    const card = deskBrand(page);
+    await expect(card).toBeVisible();
+    const bar = page.getByTestId('desk-topbar');
+    const barBefore = (await bar.boundingBox())!;
+    // While it shows, the sidebar's account menu has no Show header.
+    const menu = page.getByRole('dialog', { name: 'Account' });
+    await page.getByTestId('desk-sidebar').getByTestId('account-trigger').click();
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole('button', { name: 'Show header' })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+
+    // The X (a keyboard press): the row goes, the top bar moves to the top, focus lands on the top bar's title.
+    await card.getByRole('button', { name: 'Hide header' }).focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('brand-card')).toHaveCount(0);
+    await expect(page.getByTestId('desk-brand')).toHaveCount(0);
+    expect((await bar.boundingBox())!.y).toBeLessThan(barBefore.y);
+    expect((await bar.boundingBox())!.y).toBeCloseTo(0, 0);
+    expect(await page.evaluate(() => document.activeElement?.closest('[data-testid="desk-topbar"]') !== null)).toBe(true);
+    expect(await page.evaluate(() => localStorage.getItem('lp-brand-hidden'))).toBe('1');
+    await expect(page.locator('html')).toHaveAttribute('data-brand-hidden', '');
+
+    // After a reload the server still draws the row (it can't know), but it never shows: the pre-paint script
+    // keeps it display: none until the shell drops it.
+    await page.addInitScript(() => {
+      const w = window as unknown as { __brandShown?: boolean };
+      w.__brandShown = false;
+      const check = () => {
+        const el = document.querySelector<HTMLElement>('[data-testid="desk-brand"]');
+        if (el && el.getBoundingClientRect().height > 0) w.__brandShown = true;
+      };
+      new MutationObserver(check).observe(document, { childList: true, subtree: true, attributes: true });
+      const tick = () => {
+        check();
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    await page.reload();
+    await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
+    await page.waitForTimeout(500);
+    expect(await page.evaluate(() => (window as unknown as { __brandShown?: boolean }).__brandShown)).toBe(false);
+    await expect(page.getByTestId('brand-card')).toHaveCount(0);
+    expect((await bar.boundingBox())!.y).toBeCloseTo(0, 0);
+
+    // Pending's menu doesn't offer it (the row lives on All); All's does, in the sidebar and in the rail.
+    await page.goto('/?view=pending');
+    await expect(page.getByRole('heading', { level: 1, name: /^Pending/ })).toBeVisible();
+    await page.getByTestId('desk-sidebar').getByTestId('account-trigger').click();
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole('button', { name: 'Show header' })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await page.goto('/');
+    await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
+    await page.evaluate(() => window.scrollTo(0, 400));
+    await page.getByTestId('desk-sidebar').getByTestId('account-trigger').click();
+    await menu.getByRole('button', { name: 'Show header' }).click();
+    await expect(menu).toHaveCount(0);
+    await expect(card).toBeVisible();
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    expect(await page.evaluate(() => localStorage.getItem('lp-brand-hidden'))).toBeNull();
+    expect(await page.locator('html').getAttribute('data-brand-hidden')).toBeNull();
+    await page.reload();
+    await expect(card).toBeVisible({ timeout: 15_000 });
+  });
+
+  test('the live line sits next to the top bar\'s title on every view; Refresh now syncs once; a failing sync: the banner, "Last updated", the amber lockup dot', async ({ page }) => {
+    test.slow();
+    await createRequests(page, 1);
+    await page.goto('/');
+    await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
+    const bar = page.getByTestId('desk-topbar');
+    const line = bar.getByTestId('live-indicator');
+    // One line on the page: the top bar's (the lists' own is phone chrome).
+    await expect(page.getByTestId('live-indicator')).toHaveCount(1);
+    await expect(line).toHaveAttribute('data-state', 'healthy');
+    await expect(line.getByTestId('live-text')).toHaveText('Updated just now');
+    await expect(line).toContainText('List updated just now.');
+    // Right after the title and its count, on its line, before search and New request; a plain dot.
+    const title = (await bar.getByRole('heading', { level: 1 }).boundingBox())!;
+    const box = (await line.boundingBox())!;
+    expect(box.x).toBeGreaterThan(title.x + title.width - 1);
+    expect(box.x).toBeLessThan(title.x + title.width + 24);
+    expect(Math.abs(box.y + box.height / 2 - (title.y + title.height / 2))).toBeLessThan(2);
+    expect(box.x + box.width).toBeLessThanOrEqual((await bar.getByRole('search').boundingBox())!.x);
+    await expect(line.locator('[class*="liveDot"]')).toHaveCSS('box-shadow', 'none');
+    for (const [url, heading] of [
+      ['/?view=pending', /^Pending/],
+      ['/?view=mine', /^My requests/],
+      ['/?q=TEST-shell', /^Search$/],
+    ] as const) {
+      await page.goto(url);
+      await expect(bar.getByRole('heading', { level: 1, name: heading }), url).toBeVisible();
+      await expect(line.getByTestId('live-text'), url).toHaveText('Updated just now', { timeout: 15_000 });
+      await expect(page.getByTestId('live-indicator'), url).toHaveCount(1);
+    }
+
+    // Refresh now: exactly one immediate /api/sync, never a reload.
+    await page.goto('/');
+    await expect(line.getByTestId('live-text')).toHaveText('Updated just now', { timeout: 15_000 });
+    await page.waitForResponse((r) => new URL(r.url()).pathname === '/api/sync');
+    await page.evaluate(() => {
+      (window as unknown as { __noReload: boolean }).__noReload = true;
+    });
+    const syncs: number[] = [];
+    const count = (r: { url(): string }) => {
+      if (new URL(r.url()).pathname === '/api/sync') syncs.push(Date.now());
+    };
+    page.on('request', count);
+    const refresh = line.getByRole('button', { name: 'Refresh now', exact: true });
+    const tapped = Date.now();
+    await refresh.click();
+    await expect(refresh).not.toHaveAttribute('data-refreshing', { timeout: 10_000 });
+    page.off('request', count);
+    expect(syncs).toHaveLength(1);
+    expect(syncs[0]! - tapped).toBeLessThan(1_000);
+    expect(await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload)).toBe(true);
+
+    // Every sync aborted while the device reports a connection: Reconnecting in the column, the line's clock
+    // time beside the title, and the lockup's dot amber (one state everywhere).
+    const lockup = page.getByTestId('desk-sidebar').getByTestId('desk-live');
+    await page.route('**/api/sync*', (route) => route.abort());
+    try {
+      for (let i = 0; i < 4 && (await page.getByTestId('connection-banner').count()) === 0; i += 1) {
+        await refresh.click();
+        await expect(refresh).not.toHaveAttribute('data-refreshing', { timeout: 15_000 });
+      }
+      await expect(main(page).getByTestId('connection-banner')).toHaveText('Reconnecting…', { timeout: 40_000 });
+      await expect(line).toHaveAttribute('data-state', 'reconnecting');
+      await expect(line.getByTestId('live-text')).toHaveText(/^Last updated \d{1,2}:\d{2} (AM|PM)$/);
+      await expect(lockup).toHaveAccessibleName('Reconnecting. Tap to try again');
+      await expect(lockup.locator('[data-state]')).toHaveAttribute('data-state', 'off');
+      await expect(page.getByText(/^Offline/)).toHaveCount(0);
+    } finally {
+      await page.unroute('**/api/sync*');
+    }
+    await refresh.click();
+    await expect(page.getByTestId('connection-banner')).toHaveCount(0, { timeout: 15_000 });
+    await expect(line.getByTestId('live-text')).toHaveText('Updated just now');
+    await expect(lockup).toHaveAccessibleName('Live. Tap to sync now');
   });
 
   test('the pane: the profile with its actions under the status (Change answer menu, Reunited), ⋯, previous / next, close; Undo stays in the list column', async ({ page }) => {
@@ -497,14 +656,15 @@ test.describe('desktop 1440 × 900', () => {
 test.describe('laptop 1024 × 768', () => {
   test.use({ viewport: { width: 1024, height: 768 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
 
-  test('the brand card fits its column: the title stays one line when a request docks beside the list; the rail lockup', async ({ page }) => {
+  test('the brand row fits its column: the title stays one line when a request docks beside the list; the rail lockup', async ({ page }) => {
     const [one] = await createRequests(page, 1);
     await page.goto('/');
     await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
     const card = deskBrand(page);
     const wide = await brandTitle(card);
-    expect(wide.size).toBeGreaterThanOrEqual(36);
+    expect(wide.size).toBe(19);
     expect(wide.height).toBeLessThan(wide.size * 1.5);
+    await expect(card.locator('[class*="datesLong"]')).toBeVisible();
 
     // The rail's lockup: a 44 px square with both logos.
     const lockup = page.getByTestId('desk-rail').getByTestId('desk-live');
@@ -512,15 +672,20 @@ test.describe('laptop 1024 × 768', () => {
     expect([lock.width, lock.height]).toEqual([44, 44]);
     await expect.poll(() => imagesLoaded(lockup)).toBe(true);
 
-    // A 544 px column next to the 420 px pane: smaller, still one line, inside the card.
+    // A 544 px column next to the 420 px pane: the short dates go back under the title, which stays one line,
+    // a little smaller, clear of the X.
     await page.goto(`/?r=${one!.id}`);
     await expect(page.getByTestId('desk-pane')).toBeVisible({ timeout: 15_000 });
     const docked = await brandTitle(card);
-    expect(docked.size).toBeGreaterThanOrEqual(33);
+    expect(docked.size).toBeGreaterThanOrEqual(16);
     expect(docked.size).toBeLessThanOrEqual(wide.size);
     expect(docked.height).toBeLessThan(docked.size * 1.5);
+    await expect(card.locator('[class*="datesShort"]')).toHaveText('NOV 6–8', { useInnerText: true });
+    await expect(card.locator('[class*="datesLong"]')).toBeHidden();
     const box = (await card.boundingBox())!;
-    expect(docked.right).toBeLessThanOrEqual(box.x + box.width - 20);
+    expect(box.height).toBeLessThanOrEqual(64);
+    expect(docked.right).toBeLessThanOrEqual((await card.getByRole('button', { name: 'Hide header' }).boundingBox())!.x);
+    expect(await brandContrast(page, card)).toEqual([]);
     expect(box.x + box.width).toBeLessThanOrEqual((await page.getByTestId('desk-pane').boundingBox())!.x);
     expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
   });
@@ -617,17 +782,16 @@ test.describe('iPad portrait 820 × 1180 (touch)', () => {
     expect(rows.map((r) => r.id)).toContain(order[1]);
   });
 
-  test('All requests opens with the brand card; the sheet answers under its status, and Undo shows at the foot of the sheet', async ({ page }) => {
+  test('All requests opens with the brand row; the sheet answers under its status, and Undo shows at the foot of the sheet', async ({ page }) => {
     const [one] = await createRequests(page, 1);
     await page.goto('/');
     await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
     const card = deskBrand(page);
     await expect(card).toBeVisible();
     const title = await brandTitle(card);
-    expect(title.size).toBeGreaterThanOrEqual(36);
-    expect(title.size).toBeLessThanOrEqual(40);
+    expect(title.size).toBe(19);
     expect(title.height).toBeLessThan(title.size * 1.5);
-    expect((await card.boundingBox())!.x).toBeCloseTo(60 + 20, 0);
+    expect((await card.boundingBox())!.x).toBeCloseTo(60 + 24, 0);
 
     await page.goto(`/?r=${one!.id}`);
     const pane = page.getByTestId('desk-pane');

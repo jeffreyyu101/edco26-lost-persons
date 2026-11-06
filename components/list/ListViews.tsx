@@ -3,12 +3,15 @@
 // header declutter of 2026-11-06, design/screens/polish-v7.html + v7-log.png). The page loads each export
 // with next/dynamic. Every action goes through the store contract; every view change through lib/client/nav.
 //
-// All requests opens with the brand card (Jeffrey, 2026-11-06 10:31: logos, event details and the big "Is my
-// friend in medical?"), which scrolls away; Pending and My requests open with just their large title (Pending
-// v8, Brian 2026-11-06 afternoon). Each view owns its sticky bar (the large title that is the view menu,
-// search, and the avatar with its offline / reconnecting badge), the offline / error banner under it, the
-// filter chips (Pending: its To check | Friend coming control), and the New request button. Skeletons show
-// only while there is no cached data yet.
+// All requests opens with the brand row (Jeffrey, 2026-11-06 10:31: logos, event details and "Is my friend in
+// medical?"; made one compact row with an X by Brian, 2026-11-06 afternoon), which scrolls away. Its X hides
+// it on this device, and the avatar menu's "Show header" brings it back. Pending and My requests start at
+// their large title (Pending v8, Brian 2026-11-06 afternoon). Each view owns its sticky bar (the large title
+// that is the view menu, search, and the avatar with its offline / reconnecting badge), the line under the
+// title ("Updated just now" and Refresh now), the Reconnecting / Offline banner (all four from one
+// useLiveStatus()), the filter chips (Pending: its To check | Friend coming control), and the New request
+// button. Skeletons show only while there is no cached data yet. From 768 px the desk shell draws the brand
+// row, the title and the line (in its top bar); the list keeps the banner and the chips.
 //
 // All requests (option B): queued requests on top, then open requests (newest first), then every closed
 // request folded into one "Archived N" row (Brian, 2026-11-06) that opens in place (remembered for the
@@ -21,6 +24,7 @@ import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useSt
 import { AccountMenu } from '@/components/account/AccountMenu';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { LiveIndicator } from '@/components/ui/LiveIndicator';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import { PendingBoard } from '@/components/desk/PendingBoard';
 import { LocationEditor, anchorFor, type LocationTarget, type Measurable } from '@/components/profile/LocationEditor';
@@ -30,6 +34,7 @@ import { splitOpenClosed } from '@/lib/client/selectors';
 import {
   useActions,
   useAllRows,
+  useAppStore,
   useConnection,
   useCounts,
   useEventTimezone,
@@ -45,6 +50,8 @@ import {
   useStoreSelector,
   type StoreState,
 } from '@/lib/client/store-contract';
+import { refreshSync } from '@/lib/client/refresh-now';
+import { useLiveStatus } from '@/lib/client/use-live-status';
 import { STATUS, parsePostFilterKey, postFilterLabel, statusMeta, type GlyphKind } from '@/lib/domain';
 import { formatCreatedTime, formatUpdatedAgo, updatedPhrase } from '@/lib/format';
 import { useInDesk } from '@/components/desk/desk-context';
@@ -53,7 +60,7 @@ import { BrandCard } from './BrandCard';
 import { CheckCard, ComingCard, MineCard, OutboxCard } from './cards';
 import { displayName } from './list-helpers';
 import { PendingTabs, pendingTabIds, usePendingTab } from './PendingTabs';
-import { primeKeyboard, useDelayedFlag, useScrollMemory, useStatusTap, useStickyHeight } from './hooks';
+import { primeKeyboard, useScrollMemory, useStatusTap, useStickyHeight } from './hooks';
 import { mineFreshTone, resultCount, searchDisplay, updatedSince } from './list-helpers';
 import { AllSkeleton, MineSkeleton, PendingSkeleton } from './ListSkeletons';
 import { ArchivedFold, ArchivedRows, ColumnHeader, LogGrid, LogRow, OutboxLogRow, SearchLogRow } from './rows';
@@ -61,9 +68,6 @@ import type { ListViewName } from './ViewSwitcher';
 import s from './list.module.css';
 
 const selectHydrated = (state: StoreState) => state.hydrated;
-
-/** A sync shorter than this doesn't turn the reconnecting arrow (no flicker on every quick retry). */
-const SLOW_SYNC_MS = 400;
 
 /** "New request": the 50 px capsule floating over the list (polish-v7.html .fab). */
 function NewRequestButton() {
@@ -86,18 +90,24 @@ interface ChromeProps {
 }
 
 function Chrome({ view, chips, filtered = false, skeleton, children }: ChromeProps) {
+  const store = useAppStore();
   const actions = useActions();
-  const { connection, syncing } = useConnection();
+  const { connection } = useConnection();
+  // The one live status of this view: the line, the banner, the avatar badge and the live region all show it.
+  const live = useLiveStatus();
+  const refresh = useCallback(() => refreshSync(store), [store]);
   const counts = useCounts();
   const loading = useIsLoading();
   const hydrated = useStoreSelector(selectHydrated);
   const snackbar = useSnackbar();
+  const prefs = usePrefs();
   const { rootRef, stickyRef } = useStickyHeight();
-  // From 768 px the desk shell draws the brand (its sidebar) and this view's chrome: the brand card is phone
-  // only, and only on All requests (Pending v8: Pending and My requests get just the large title).
+  // From 768 px the desk shell draws the brand row (above its top bar) and this view's chrome, the line under
+  // the title included (in its top bar): the list's own brand row and line are phone only.
   const inDesk = useInDesk();
-  // The reconnecting arrow turns only for a retry that takes a moment (no flicker on fast attempts).
-  const slowSync = useDelayedFlag(syncing, SLOW_SYNC_MS);
+  // The brand row is on All only (Pending v8: Pending and My requests get just the large title), unless its X
+  // hid it on this device.
+  const brand = !inDesk && view === 'all' && !prefs.brandHidden;
 
   const select = (next: ListViewName) => {
     if (next === view && !filtered) return;
@@ -121,23 +131,37 @@ function Chrome({ view, chips, filtered = false, skeleton, children }: ChromePro
     children
   );
 
+  const hideBrand = () => {
+    // The X is about to go: keyboard focus moves on to the view title instead of falling back to the page.
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && rootRef.current?.contains(focused) && !stickyRef.current?.contains(focused)) {
+      stickyRef.current?.querySelector<HTMLElement>('h1 button')?.focus();
+    }
+    actions.setPref('brandHidden', true);
+  };
+  // "Show header" in the avatar menu (All only, while hidden): back at the top of the page, where it is.
+  const showBrand = () => {
+    actions.setPref('brandHidden', false);
+    window.scrollTo(0, 0);
+  };
+
   return (
     <div className={s.root} data-view={view} ref={rootRef}>
-      {inDesk || view !== 'all' ? null : <BrandCard />}
+      {brand ? <BrandCard onHide={hideBrand} /> : null}
       <div className={s.sticky} ref={stickyRef}>
         <AppHeader
           view={view}
           counts={loading ? null : counts}
           onSelect={select}
-          connection={connection}
-          syncing={slowSync}
+          state={live.state}
           onOpenSearch={() => {
             primeKeyboard();
             navigate({ q: '' });
           }}
-          account={<AccountMenu />}
+          account={<AccountMenu onShowHeader={view === 'all' && prefs.brandHidden ? showBrand : undefined} />}
         />
-        {loading ? null : <ConnectionBanner />}
+        {inDesk ? null : <LiveIndicator className={s.live} line={live} onRefresh={refresh} />}
+        {loading ? null : <ConnectionBanner status={live} />}
         {chips}
       </div>
       <main className={s.body}>{body}</main>

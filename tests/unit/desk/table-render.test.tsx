@@ -211,10 +211,15 @@ describe('All requests table', () => {
     expect(text(empty)).toContain('No requests yet');
   });
 
-  it('offline with data: the amber banner over the table', () => {
-    const html = render(storeWith((s) => ({ ...s, connection: 'offline', outbox: [outboxItem()] })), <DeskAllTable status={null} post={null} />);
-    expect(text(html)).toContain('Offline · 1 waiting to send');
-    expect(html.indexOf('Offline')).toBeLessThan(html.indexOf('data-testid="request-list"'));
+  it('syncs failing with data: the amber banner over the table (F1.2: Reconnecting… while the device reports a connection)', () => {
+    // A server render always has the device online, so a failing sync reads Reconnecting; the gray "Offline · N
+    // waiting to send" (no connection at all) is covered by tests/unit/list-views.test.tsx and the offline e2e.
+    for (const connection of ['offline', 'error'] as const) {
+      const html = render(storeWith((s) => ({ ...s, connection, outbox: [outboxItem()] })), <DeskAllTable status={null} post={null} />);
+      expect(text(html), connection).toContain('Reconnecting…');
+      expect(html, connection).toMatch(/data-tone="amber" data-testid="connection-banner"/);
+      expect(html.indexOf('data-testid="connection-banner"'), connection).toBeLessThan(html.indexOf('data-testid="request-list"'));
+    }
   });
 });
 

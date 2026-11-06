@@ -11,9 +11,11 @@
 // sidebar / rail, top bar, pane header and keyboard come from the desk chunk, loaded only on the desk. All
 // requests, My requests and Search are the desk's request table there (components/desk/table, its own
 // chunk, also desk only); Pending and the dashboard render their views as they are.
-// All requests opens with Jeffrey's brand card above the top bar; it is drawn from the server on (no data
-// in it), so it is there at the first paint, and dropped once hydrated on a phone, whose list has its own
-// (until then it is display: none there, and its lazy logos are never fetched).
+// All requests opens with Jeffrey's brand row above the top bar (the phone's compact row, F1.1, with its X
+// and "Show header"); it is drawn from the server on (no data in it), so it is there at the first paint, and
+// dropped once hydrated on a phone, whose list has its own (until then it is display: none there, and its
+// lazy logos are never fetched), or when its X hid it on this device (lib/brand-pref.ts keeps that one
+// hidden before hydration too).
 // Under 768 px the view router renders exactly what it always did.
 import dynamic from 'next/dynamic';
 import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -28,7 +30,7 @@ import { Snackbar, Toaster } from '@/components/ui/Toast';
 import { installAudioUnlock, playChime, vibrate } from '@/lib/client/chime';
 import { useView, type View, type ViewName } from '@/lib/client/nav';
 import { StoreProvider } from '@/lib/client/store';
-import { useAppStore, usePrefs, useSnackbar, useStoreSelector, useToasts, type StoreState } from '@/lib/client/store-contract';
+import { useActions, useAppStore, usePrefs, useSnackbar, useStoreSelector, useToasts, type StoreState } from '@/lib/client/store-contract';
 import { followSystemTheme } from '@/lib/theme';
 
 const loadList = () => import('@/components/list/ListViews');
@@ -66,8 +68,8 @@ const DeskSearchTable = dynamic(() => loadDeskTable().then((m) => m.DeskSearchTa
 export interface AppShellProps {
   eventTimezone: string;
   /**
-   * The desk's brand card, rendered by the page (a server component): <BrandCard logoLoading="lazy" />. Shown
-   * above the top bar on All requests from 768 px.
+   * The desk's brand row, rendered by the page (a server component): <BrandCard logoLoading="lazy" />. Shown
+   * above the top bar on All requests from 768 px, unless its X hid it on this device.
    */
   brand?: ReactNode;
 }
@@ -91,17 +93,22 @@ function ViewRouter({ brand }: { brand: ReactNode }) {
   const main = useMainView(view);
   const hydrated = useHydrated();
   const paneId = desk ? paneRequestId(view) : null;
-  // All requests only (Brian, 2026-11-06: Pending and My requests get no brand card). The server draws it
+  const prefs = usePrefs();
+  const actions = useActions();
+  // All requests only (Brian, 2026-11-06: Pending and My requests get no brand row). The server draws it
   // for All at every width; the hydration render keeps whatever the HTML has (useBrandInHtml: the service
-  // worker's cached shell may have been drawn for another view); once hydrated, the desk only.
+  // worker's cached shell may have been drawn for another view; a row hidden on this device is in it too,
+  // display: none from the pre-paint script); once hydrated, the desk only, unless its X hid it.
   const brandInHtml = useBrandInHtml(main.name === 'all');
-  const showBrand = hydrated ? desk && main.name === 'all' : brandInHtml;
+  const showBrand = hydrated ? desk && main.name === 'all' && !prefs.brandHidden : brandInHtml;
+  const hideBrand = useCallback(() => actions.setPref('brandHidden', true), [actions]);
   return (
     <>
       <DeskFrame
         desk={desk}
         nav={desk ? <DeskNav main={main} /> : null}
         brand={showBrand ? brand : null}
+        onHideBrand={hideBrand}
         top={desk ? <DeskTop main={main} /> : null}
         pane={
           paneId ? (

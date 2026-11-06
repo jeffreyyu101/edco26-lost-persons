@@ -1,14 +1,14 @@
 'use client';
 // List-view header (design/screens/polish-v7.html LogTitle, v7-log.png): the large title is the view menu
 // ("All requests 13 ⌄"), then search and the avatar (account menu, owned by components/account, which also
-// holds the Alerts switch). There is no live dot while the app is live (2026-11-06 header declutter): only
-// while it is offline or reconnecting does a small badge sit on the avatar, like a presence dot, amber with a
-// crossed-out cloud when offline, red with a turning arrow while it can't reach the log. It takes no room
-// from the title, and the banner under the header says the same in words (with Try again).
+// holds the Alerts switch). There is no live dot while the app is healthy (2026-11-06 header declutter): only
+// while it is offline or reconnecting does a small badge sit on the avatar, like a presence dot, gray with a
+// crossed-out cloud when offline, amber with a still arrow while reconnecting (the banner's colours). It takes
+// no room from the title, and its state is the view's live status, the one the banner and the line show.
 import { CloudOff, RefreshCw, Search } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { stateCue, type LiveState } from '@/lib/client/live-status';
 import type { ViewCounts } from '@/lib/client/selectors';
-import type { Connection } from '@/lib/client/store-contract';
 import { ViewSwitcher, type ListViewName } from './ViewSwitcher';
 import s from './list.module.css';
 
@@ -18,43 +18,26 @@ export interface AppHeaderProps {
   counts: ViewCounts | null;
   /** The view menu picked a view. */
   onSelect: (view: ListViewName) => void;
-  connection: Connection;
-  /** A sync is in flight (while the log can't be reached, the badge's arrow turns: reconnecting). */
-  syncing: boolean;
+  /** The view's live status (useLiveStatus().state). */
+  state: LiveState;
   /** Opens search (the field takes over the header): navigate({q: ''}). */
   onOpenSearch: () => void;
   /** The avatar + menu, i.e. <AccountMenu />. */
   account: ReactNode;
 }
 
-const DOWN_LABEL: Readonly<Record<Exclude<Connection, 'live'>, string>> = {
-  offline: 'Offline',
-  error: "Can't reach the log",
-};
-
-/** The offline / reconnecting badge on the avatar. Nothing when live. */
-export function ConnectionIndicator({ connection, syncing }: Pick<AppHeaderProps, 'connection' | 'syncing'>) {
-  if (connection === 'live') return null;
-  const reconnecting = connection === 'error' && syncing;
+/** The offline / reconnecting badge on the avatar. Nothing while healthy. */
+export function ConnectionIndicator({ state }: Pick<AppHeaderProps, 'state'>) {
+  const { badge } = stateCue(state);
+  if (!badge) return null;
   return (
-    <span
-      className={s.conn}
-      role="img"
-      data-state={connection}
-      data-syncing={reconnecting ? '' : undefined}
-      aria-label={reconnecting ? 'Reconnecting' : DOWN_LABEL[connection]}
-      data-testid="connection-indicator"
-    >
-      {connection === 'offline' ? (
-        <CloudOff size={10} strokeWidth={2.5} aria-hidden />
-      ) : (
-        <RefreshCw size={9} strokeWidth={2.75} aria-hidden className={s.connSpin} />
-      )}
+    <span className={s.conn} role="img" data-state={state} aria-label={badge} data-testid="connection-indicator">
+      {state === 'offline' ? <CloudOff size={10} strokeWidth={2.5} aria-hidden /> : <RefreshCw size={9} strokeWidth={2.75} aria-hidden />}
     </span>
   );
 }
 
-export function AppHeader({ view, counts, onSelect, connection, syncing, onOpenSearch, account }: AppHeaderProps) {
+export function AppHeader({ view, counts, onSelect, state, onOpenSearch, account }: AppHeaderProps) {
   return (
     <header className={s.top}>
       <ViewSwitcher view={view} counts={counts} onSelect={onSelect} />
@@ -64,7 +47,7 @@ export function AppHeader({ view, counts, onSelect, connection, syncing, onOpenS
         </button>
         <span className={s.avatar}>
           {account}
-          <ConnectionIndicator connection={connection} syncing={syncing} />
+          <ConnectionIndicator state={state} />
         </span>
       </div>
     </header>

@@ -91,8 +91,12 @@ test('open counts move by the deltas of this test, and tiles and bars open All f
   await page.goto('/?dashboard=1');
   await expect(page.getByTestId('open-count')).toBeVisible();
   await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
-  // Live: no pill, no chip (the chip only appears offline or while retrying).
-  await expect(page.getByTestId('dashboard-connection')).toHaveText('');
+  // Healthy: no pill, no chip, no banner; the line under the title counts from the last stats fetch.
+  await expect(page.getByTestId('live-indicator')).toHaveAttribute('data-state', 'healthy');
+  await expect(page.getByTestId('live-text')).toHaveText('Updated just now');
+  await expect(page.getByTestId('live-indicator')).toContainText('Dashboard updated just now.');
+  await expect(page.getByTestId('connection-banner')).toHaveCount(0);
+  await expect(page.getByTestId('dashboard-connection')).toHaveCount(0);
   await expect(page.getByText('Live', { exact: true })).toHaveCount(0);
   // Export CSV is gone from the dashboard.
   await expect(page.getByRole('link', { name: 'Export CSV' })).toHaveCount(0);
@@ -339,20 +343,87 @@ test.describe('with /api/stats mocked', () => {
     await expect(value(page, 'tile-closed')).toHaveText('4');
   });
 
-  test('a compact Offline chip only while offline', async ({ page, context }) => {
+  test('the line under the title follows the list rules: "Updated just now", the Offline / Reconnecting banner with "Last updated <time>", Refresh now fetches the stats', async ({ page, context }) => {
+    test.slow();
     await page.goto('/?dashboard=1');
     await expect(page.getByTestId('open-count')).toBeVisible();
-    const chip = page.getByTestId('dashboard-connection');
-    await expect(chip).toHaveText('');
+    const line = page.getByTestId('live-indicator');
+    const text = page.getByTestId('live-text');
+    const banner = page.getByTestId('connection-banner');
+    const refresh = page.getByRole('button', { name: 'Refresh now', exact: true });
+    await expect(line).toHaveAttribute('data-state', 'healthy');
+    await expect(text).toHaveText('Updated just now');
+    await expect(banner).toHaveCount(0);
+    // Under the title, lined up with it; Refresh now right after the words.
+    const title = (await page.getByRole('heading', { level: 1, name: 'Dashboard' }).boundingBox())!;
+    const box = (await line.boundingBox())!;
+    expect(box.y).toBeGreaterThanOrEqual(title.y + title.height - 4);
+    expect(Math.abs(box.x + 30 - title.x)).toBeLessThan(2);
+    const words = (await text.boundingBox())!;
+    const button = (await refresh.boundingBox())!;
+    expect(button.x - (words.x + words.width)).toBeLessThan(4);
+
+    // Refresh now: exactly one immediate stats fetch (and no list sync, no reload); the glyph turns meanwhile.
+    await page.evaluate(() => {
+      (window as unknown as { __noReload: boolean }).__noReload = true;
+    });
+    const fetches: string[] = [];
+    page.on('request', (r) => {
+      const path = new URL(r.url()).pathname;
+      if (path === '/api/stats') fetches.push(path);
+    });
+    await page.route('**/api/stats', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(mockStats()) });
+    });
+    await refresh.click();
+    await expect(refresh).toHaveAttribute('data-refreshing', '');
+    await refresh.click();
+    await expect(refresh).not.toHaveAttribute('data-refreshing', { timeout: 10_000 });
+    expect(fetches).toHaveLength(1);
+    await expect(text).toHaveText('Updated just now');
+    expect(await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload)).toBe(true);
+
+    // Offline: the gray banner under the header, and the fixed clock time on the line.
     await context.setOffline(true);
     try {
-      await expect(chip).toHaveText('Offline', { timeout: 15_000 });
-      // The numbers stay on screen.
-      await expect(page.getByTestId('open-count')).toBeVisible();
+      await expect(line).toHaveAttribute('data-state', 'offline', { timeout: 15_000 });
+      await expect(banner).toHaveText(/^Offline · \d+ waiting to send$/);
+      await expect(banner).toHaveAttribute('data-tone', 'gray');
+      await expect(text).toHaveText(/^Last updated \d{1,2}:\d{2} (AM|PM)$/);
+      await expect(page.getByTestId('live-announcement')).toHaveText('Offline');
+      // The banner sits under the header, above the numbers, which stay on screen.
+      expect((await banner.boundingBox())!.y).toBeGreaterThan(box.y);
+      expect((await page.getByTestId('tile-open').boundingBox())!.y).toBeGreaterThan((await banner.boundingBox())!.y);
     } finally {
       await context.setOffline(false);
     }
-    await expect(chip).toHaveText('', { timeout: 20_000 });
+    // Back online, Refresh now: healthy at once (no waiting for the 15 s poll).
+    await refresh.click();
+    await expect(line).toHaveAttribute('data-state', 'healthy', { timeout: 15_000 });
+    await expect(banner).toHaveCount(0);
+    // (A tap while the glyph still turns is ignored: wait for it to settle.)
+    await expect(refresh).not.toHaveAttribute('data-refreshing', { timeout: 10_000 });
+
+    // Stats that fail: the amber Reconnecting banner and "Last updated <time>"; a refresh that fails changes
+    // nothing else (no toast).
+    await page.unroute('**/api/stats');
+    await page.route('**/api/stats', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":{"code":"unavailable","message":"Try again"}}' }));
+    await refresh.click();
+    await expect(banner).toHaveText('Reconnecting…', { timeout: 15_000 });
+    await expect(banner).toHaveAttribute('data-tone', 'amber');
+    await expect(line).toHaveAttribute('data-state', 'reconnecting');
+    await expect(text).toHaveText(/^Last updated \d{1,2}:\d{2} (AM|PM)$/);
+    await expect(page.getByTestId('live-announcement')).toHaveText('Reconnecting');
+    await expect(page.getByTestId('open-count')).toBeVisible();
+    await expect(page.locator('.lp-toast')).toHaveCount(0);
+    await page.unroute('**/api/stats');
+    await expect(refresh).not.toHaveAttribute('data-refreshing', { timeout: 10_000 });
+    await refresh.click();
+    await expect(line).toHaveAttribute('data-state', 'healthy', { timeout: 15_000 });
+    await expect(text).toHaveText('Updated just now');
+    await expect(banner).toHaveCount(0);
+    await expect(page.getByTestId('live-announcement')).toHaveText('Back online');
   });
 
   test('phone: two tiles per row, Open and Closed on one baseline, sections stacked; nothing but names cut', async ({ page }) => {
@@ -476,11 +547,18 @@ test.describe('with /api/stats mocked', () => {
     await page.goto('/?dashboard=1');
     await expect(page.getByTestId('open-count')).toHaveText('7');
     await expect(page.getByTestId('desk-rail')).toBeVisible();
-    // The shell's top bar is the title: one h1, no Back, and the live chip (empty) beside it.
+    // The shell's top bar is the title: one h1, no Back, and the live line beside it (live-indicator.html,
+    // Desktop frame): the last stats fetch in minutes and Refresh now. One line on the page; no chip.
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Dashboard');
     await expect(page.getByRole('button', { name: 'Back to requests' })).toHaveCount(0);
-    await expect(page.getByTestId('desk-topbar').getByTestId('dashboard-connection')).toHaveText('');
-    await expect(page.getByTestId('dashboard-connection')).toHaveCount(1);
+    const line = page.getByTestId('desk-topbar').getByTestId('live-indicator');
+    await expect(line).toHaveAttribute('data-state', 'healthy');
+    await expect(line.getByTestId('live-text')).toHaveText('Updated just now');
+    await expect(line).toContainText('Dashboard updated just now.');
+    await expect(line.getByRole('button', { name: 'Refresh now', exact: true })).toBeVisible();
+    await expect(page.getByTestId('live-indicator')).toHaveCount(1);
+    await expect(page.getByTestId('dashboard-connection')).toHaveCount(0);
+    await expect(page.getByTestId('connection-banner')).toHaveCount(0);
     // The tiles start where the top bar's title does.
     const title = (await page.getByRole('heading', { level: 1 }).boundingBox())!;
     expect(Math.abs((await box(page, 'tile-open')).x - Math.round(title.x))).toBeLessThanOrEqual(1);
@@ -524,7 +602,7 @@ test.describe('with /api/stats mocked', () => {
     }
   });
 
-  test('desk: with a request docked beside it the dashboard narrows (3 × 2, sections stacked); the top bar shows Offline', async ({ page, context }) => {
+  test('desk: with a request docked beside it the dashboard narrows (3 × 2, sections stacked); offline, the line beside the title and the banner', async ({ page, context }) => {
     await routeStats(page, mockStats());
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.goto('/?dashboard=1');
@@ -551,19 +629,25 @@ test.describe('with /api/stats mocked', () => {
     for (const id of TILE_ORDER) expect((await box(page, id)).right).toBeLessThanOrEqual(Math.round(pane.x));
     expect(await hScroll(page)).toBe(false);
 
-    // Offline: the chip is beside the title, the numbers stay.
-    const chip = page.getByTestId('desk-topbar').getByTestId('dashboard-connection');
+    // Offline (F1.2): the gray banner at the top of the column, and the line beside the title shows the last
+    // good time with a gray dot; the numbers stay. Back online, the line is healthy again.
+    const line = page.getByTestId('desk-topbar').getByTestId('live-indicator');
     await context.setOffline(true);
     try {
-      await expect(chip).toHaveText('Offline', { timeout: 15_000 });
+      await expect(line).toHaveAttribute('data-state', 'offline', { timeout: 15_000 });
+      await expect(line.getByTestId('live-text')).toHaveText(/^Last updated \d{1,2}:\d{2} (AM|PM)$/);
+      await expect(page.getByTestId('dashboard').getByTestId('connection-banner')).toHaveText(/^Offline · \d+ waiting to send$/);
       const t = (await page.getByTestId('desk-topbar').getByRole('heading', { level: 1 }).boundingBox())!;
-      const c = (await chip.boundingBox())!;
+      const c = (await line.boundingBox())!;
       expect(c.x).toBeGreaterThan(t.x + t.width - 1);
       expect(c.x).toBeLessThan(t.x + t.width + 24);
+      // The line never runs under the search icon or New request.
+      expect(c.x + c.width).toBeLessThanOrEqual((await page.getByTestId('desk-new').boundingBox())!.x);
       await expect(page.getByTestId('open-count')).toBeVisible();
     } finally {
       await context.setOffline(false);
     }
-    await expect(chip).toHaveText('', { timeout: 20_000 });
+    await expect(line).toHaveAttribute('data-state', 'healthy', { timeout: 20_000 });
+    await expect(page.getByTestId('connection-banner')).toHaveCount(0);
   });
 });

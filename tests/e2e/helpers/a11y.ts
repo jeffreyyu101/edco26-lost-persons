@@ -268,11 +268,11 @@ export async function overlappingTargets(page: Page, scope = 'body'): Promise<Ov
 }
 
 /**
- * Text on the brand card (components/list/BrandCard.tsx) lies on a gradient with two glows and faint rings,
- * which axe can only mark "needs review". So this measures it: the card is captured with its text made
- * transparent, and each run of text is compared with every pixel behind its line box. Returns one line per
- * run under 4.5:1 (the bar for small text, applied to the title too). `card` is the phone list's card by
- * default; the desk's is inside its brand slot (data-testid="desk-brand").
+ * Text on the brand row (components/list/BrandCard.tsx) lies on a gradient with two glows, which axe can only
+ * mark "needs review". So this measures it: the row is captured with its text made transparent, and each run
+ * of text is compared with every pixel behind its line box. Returns one line per run under 4.5:1 (the bar for
+ * small text, applied to the title too). `card` is the phone list's row by default; the desk's is inside its
+ * brand slot (data-testid="desk-brand").
  */
 export async function brandContrast(page: Page, card: Locator = page.getByTestId('brand-card')): Promise<string[]> {
   const layout = await card.evaluate((el) => {
@@ -289,7 +289,8 @@ export async function brandContrast(page: Page, card: Locator = page.getByTestId
     }
     return { width: box.width, runs };
   });
-  expect(layout.runs.length).toBeGreaterThanOrEqual(5);
+  // "Is my friend", "in medical?" and the dates (the long dates on a wide screen instead of the short ones).
+  expect(layout.runs.length).toBeGreaterThanOrEqual(3);
   const hide = await page.addStyleTag({ content: '[data-testid="brand-card"] * { color: transparent !important; }' });
   const png = await card.screenshot({ animations: 'disabled' });
   await hide.evaluate((el) => (el as Element).remove());

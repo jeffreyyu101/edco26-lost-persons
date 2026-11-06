@@ -41,12 +41,17 @@
     flex-direction: column;
   }
 
-  /* Jeffrey's brand card on All requests (components/list/brand.module.css sizes it for the desk): above the
-     top bar, scrolling away under it. A container, so the card can size its title to the column. */
+  /* Jeffrey's brand row on All requests (components/list/brand.module.css places it for the desk): above the
+     top bar, scrolling away under it. A container, so the row can fit its words to the column. */
   .brand {
     display: block;
-    container-type: inline-size;
+    container: desk-brand / inline-size;
     padding-top: env(safe-area-inset-top);
+  }
+  /* Hidden with its X on this device: the pre-paint script marks <html> (lib/brand-pref.ts), so the row the
+     server drew never shows, not even before hydration drops it. */
+  :global(html[data-brand-hidden]) .brand {
+    display: none;
   }
 
   .top {

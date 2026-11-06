@@ -1,53 +1,68 @@
-// The brand card at the top of All requests, Pending and My requests (Jeffrey, 2026-11-06 10:31: "add logo,
-// event details, the 'is my friend in medical' bigger and similar design to the previous version"). It is
-// his original header (git show 1f4580b:app/ui.tsx .topbar): the dark gradient banner with faint orbit
-// rings top-right, the EDC Orlando (white) and Ground Control logos with a thin divider, the event kicker,
-// the big title with "in medical?" in cyan, and the credit line. Always dark, in both themes.
+// The brand row over All requests (design/screens/brand-compact.html option A + brand-compact-1.png, approved
+// by Brian 2026-11-06 ~14:30). It replaces the tall brand card of the morning release in one row: Jeffrey's
+// gradient (his original header, git show 1f4580b:app/ui.tsx .topbar), the EDC Orlando (white) and Ground
+// Control logos with a thin divider, "Is my friend in medical?" with the event dates under it ("Nov 6–8"; on
+// a wide screen "November 6–8, 2026" beside the title), and an X that hides it on this device
+// (prefs.brandHidden). The avatar menu's "Show header" brings it back. Always dark, in both themes.
 //
-// It scrolls away with the page; the sticky bar under it (the view menu title, search, the avatar) stays.
-// Nothing in it waits for data, and the logos carry their size, so it never moves what is below it.
+// All requests only: Pending and My requests start at their title. It scrolls away with the page; the sticky
+// bar under it stays. It has a fixed height and the logos carry their size, so it never moves what is below
+// it while they load, and a hidden row is never drawn at all (the list views render only in the browser,
+// where the pref is known from the first frame).
 //
-// From 768 px the desk shell draws the same card above its top bar on All requests (app/app-shell.tsx,
-// components/desk/DeskFrame.tsx); brand.module.css sizes it for the desk. No 'use client': it has no state,
-// so the page (a server component) renders the desk's copy with no JavaScript on the first load, while the
-// list (a client chunk) imports it as client code.
+// From 768 px the desk shell draws the same row above its top bar on All requests (app/app-shell.tsx,
+// components/desk/DeskFrame.tsx; design/screens/live-indicator.html, the Desktop frame). No 'use client': it
+// has no state, so the page (a server component) renders the desk's copy with no JavaScript of its own on the
+// first load, while the phone's list (a client chunk) imports it as client code. The desk's X has no handler
+// here: the frame's brand slot catches its click ([data-brand-hide]), and the pre-paint script keeps a hidden
+// row from showing before hydration (lib/brand-pref.ts).
+import { X } from 'lucide-react';
 import { memo } from 'react';
 import b from './brand.module.css';
 
-/** The kicker, written in sentence case (CSS sets the capitals, so screen readers read words, not letters). */
-export const BRAND_KICKER = 'Event operations · November 6–8, 2026';
-export const BRAND_CREDIT_NAMES = 'Jeffrey & Brian';
-export const BRAND_CREDIT_FOR = 'Ground Control / Headliner Experience';
+/** The dates, written in sentence case (CSS sets the capitals, so screen readers read words, not letters). */
+export const BRAND_DATES_SHORT = 'Nov 6–8';
+export const BRAND_DATES_LONG = 'November 6–8, 2026';
+/** The X's accessible name; the avatar menu item that undoes it is "Show header". */
+export const HIDE_HEADER_LABEL = 'Hide header';
 
 export interface BrandCardProps {
+  /** The X: hide the row on this device. Left out on the desk's server-drawn copy (its slot handles the click). */
+  onHide?: () => void;
   /**
    * 'lazy' for the desk's copy, which the server draws at every width and a phone keeps display: none until
    * it is hydrated: a hidden lazy image is never fetched, so the phone loads the logos exactly as before
-   * (for its own card). Left out, the images load as usual.
+   * (for its own row). Left out, the images load as usual.
    */
   logoLoading?: 'lazy';
 }
 
-export const BrandCard = memo(function BrandCard({ logoLoading }: BrandCardProps) {
+export const BrandCard = memo(function BrandCard({ onHide, logoLoading }: BrandCardProps) {
   return (
     <div className={b.brand} data-testid="brand-card">
-      <div className={b.orbit} aria-hidden="true">
-        <span />
-        <span />
-        <span />
-      </div>
       <div className={b.logos}>
         <img className={b.edc} src="/logos/edc-orlando.png" alt="EDC Orlando" width={194} height={132} decoding="async" loading={logoLoading} />
         <span className={b.div} aria-hidden="true" />
         <img className={b.gc} src="/logos/ground-control.png" alt="Ground Control" width={313} height={120} decoding="async" loading={logoLoading} />
       </div>
-      <p className={b.kicker}>{BRAND_KICKER}</p>
-      <p className={b.title}>
-        Is my friend <span className={b.accent}>in medical?</span>
-      </p>
-      <p className={b.credit}>
-        Built by <b>{BRAND_CREDIT_NAMES}</b> <span className={b.creditFor}>for {BRAND_CREDIT_FOR}</span>
-      </p>
+      <span className={`${b.div} ${b.wideOnly}`} aria-hidden="true" />
+      <div className={b.words}>
+        <p className={b.title}>
+          Is my friend <span className={b.accent}>in medical?</span>
+        </p>
+        <p className={`${b.dates} ${b.datesShort}`}>{BRAND_DATES_SHORT}</p>
+        <p className={`${b.dates} ${b.datesLong}`}>{BRAND_DATES_LONG}</p>
+      </div>
+      <button
+        type="button"
+        className={b.hide}
+        aria-label={HIDE_HEADER_LABEL}
+        onClick={onHide}
+        data-brand-hide=""
+        data-testid="brand-hide"
+      >
+        <X size={15} strokeWidth={2.25} aria-hidden />
+      </button>
     </div>
   );
 });

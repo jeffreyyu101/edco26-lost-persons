@@ -166,12 +166,22 @@ for (const theme of ['light', 'dark'] as const) {
         // ---- Lists, header, menus and sheets
         await visit('/', 'All', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
 
-        // The brand card: every text at 4.5:1 or more against every pixel behind it (axe can't judge
-        // text on its gradient). The card is dark in both themes, so both runs measure the same card.
+        // The brand row: every text at 4.5:1 or more against every pixel behind it (axe can't judge text on
+        // its gradient). The row is dark in both themes, so both runs measure the same row; then the same at
+        // 1280 px, where the long dates sit beside the title.
         await expect
           .poll(() => page.getByTestId('brand-card').evaluate((el) => [...el.querySelectorAll('img')].every((img) => img.complete && img.naturalWidth > 0)))
           .toBe(true);
-        expect.soft(await brandContrast(page), `brand card (${theme})`).toEqual([]);
+        expect.soft(await brandContrast(page), `brand row (${theme})`).toEqual([]);
+        // From 768 px the desk shell draws the row above its top bar (its logos load lazily).
+        await page.setViewportSize({ width: 1280, height: 800 });
+        const deskBrand = page.getByTestId('desk-brand').getByTestId('brand-card');
+        await expect(deskBrand).toBeVisible({ timeout: 10_000 });
+        await expect
+          .poll(() => deskBrand.evaluate((el) => [...el.querySelectorAll('img')].every((img) => img.complete && img.naturalWidth > 0)))
+          .toBe(true);
+        expect.soft(await brandContrast(page, deskBrand), `brand row, 1280 px desk (${theme})`).toEqual([]);
+        await page.setViewportSize({ width: 390, height: 664 });
 
         // Log option B: the closed requests open in place under "Archived N", greyed (contrast, spec §7).
         await page.getByTestId('closed-fold').click();
@@ -241,6 +251,23 @@ for (const theme of ['light', 'dark'] as const) {
         await visit(`/?r=${coming.id}`, 'Profile (in medical)', () => expect(page.getByTestId('audit-item').first()).toBeVisible());
         await visit(`/?r=${waiting.id}&edit=all`, 'Edit', () => expect(page.getByTestId('request-form-submit')).toBeVisible());
         await visit('/?dashboard=1', 'Dashboard', () => expect(page.getByTestId('open-count')).toBeVisible());
+
+        // ---- Reconnecting: syncs aborted while the phone is online (two quick Refresh now taps make the two
+        // failures the store waits for): the amber banner, the badge and the line's clock time
+        await visit('/?view=pending', 'Pending (before reconnecting)', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
+        await page.route('**/api/sync*', (route) => route.abort());
+        try {
+          const refresh = page.getByRole('button', { name: 'Refresh now', exact: true });
+          for (let i = 0; i < 4 && (await page.getByTestId('connection-banner').count()) === 0; i += 1) {
+            await refresh.click();
+            await expect(refresh).not.toHaveAttribute('data-refreshing', { timeout: 15_000 });
+          }
+          await expect(page.getByTestId('connection-banner')).toHaveText('Reconnecting…', { timeout: 30_000 });
+          await expect(page.getByTestId('live-text')).toHaveText(/^Last updated /);
+          results.push(await audit(page, 'Pending reconnecting'));
+        } finally {
+          await page.unroute('**/api/sync*');
+        }
 
         // ---- Offline: the banner, and answers that need a connection
         await visit('/?view=pending', 'Pending (before offline)', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
