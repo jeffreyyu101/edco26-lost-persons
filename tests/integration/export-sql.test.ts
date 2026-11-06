@@ -147,6 +147,28 @@ describe('docs/export.sql', () => {
     expect(col('Updated by')).toBe(staffOf(medical));
   });
 
+  it('Query 1: free-text age and gender are guarded like the other text columns', async () => {
+    const staff = newStaff();
+    const created = await api('/api/requests', {
+      json: createBody({ name: pii(`TEST-core-${uniq()}`), age: '=1+1', gender: '-TEST gender' }),
+      cookie: await cookieFor(staff),
+    });
+    expect(created.status).toBe(201);
+    const plain = await api('/api/requests', {
+      json: createBody({ name: pii(`TEST-core-${uniq()}`), age: 'mid-20s', gender: 'Non-binary' }),
+      cookie: await cookieFor(staff),
+    });
+    expect(plain.status).toBe(201);
+
+    const { header, rows } = runReadOnly(QUERY_1);
+    const one = (n: number) => rows.find((row) => row[0] === lp(n)) as string[];
+    const col = (row: string[], name: string) => row[header.indexOf(name)];
+    expect(col(one(created.body.request.caseNumber), 'Age')).toBe("'=1+1");
+    expect(col(one(created.body.request.caseNumber), 'Gender')).toBe("'-TEST gender");
+    expect(col(one(plain.body.request.caseNumber), 'Age')).toBe('mid-20s');
+    expect(col(one(plain.body.request.caseNumber), 'Gender')).toBe('Non-binary');
+  });
+
   it('Query 2: the audit trail, one row per event, joined to the LP number, oldest first per request', async () => {
     const staff = newStaff();
     const created = await api('/api/requests', { json: createBody({ name: pii(`TEST-core-${uniq()}`) }), cookie: await cookieFor(staff) });

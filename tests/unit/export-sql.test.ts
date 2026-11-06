@@ -155,6 +155,14 @@ describe('docs/export.sql', () => {
     expect(parsed.literals.filter((l) => l === 'America/New_York')).toHaveLength(2);
   });
 
+  it('guards free-text age and gender like the other text columns', () => {
+    // Literals read as '' and labels as "" after lexing. age::text also works while age is still smallint.
+    const [requests] = parsed.statements as [string];
+    expect(requests).toMatch(/regexp_replace\(p\.age::text, s\.guard, ''\) as ""/);
+    expect(requests).toMatch(/regexp_replace\(p\.gender, s\.guard, ''\) as ""/);
+    expect(requests).not.toMatch(/(?<!regexp_replace\()p\.(age|gender)\b(?!::text, s\.guard|, s\.guard)/);
+  });
+
   it('starts with the three steps for the SQL editor', () => {
     const header = parsed.comments.slice(0, 12).join('\n');
     expect(header).toMatch(/1\. Supabase dashboard → SQL Editor/);

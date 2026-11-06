@@ -21,8 +21,8 @@ with settings as (
 select
   'LP-' || lpad(p.case_number::text, greatest(4, length(p.case_number::text)), '0') as "Case number",
   regexp_replace(nullif(concat_ws(' ', nullif(p.first_name, ''), nullif(p.last_name, '')), ''), s.guard, '''') as "Name",
-  p.age as "Age",
-  p.gender as "Gender",
+  regexp_replace(p.age::text, s.guard, '''') as "Age",
+  regexp_replace(p.gender, s.guard, '''') as "Gender",
   regexp_replace(p.height_build, s.guard, '''') as "Height/build",
   regexp_replace(p.hair, s.guard, '''') as "Hair",
   regexp_replace(p.identifying_features, s.guard, '''') as "Identifying features",
