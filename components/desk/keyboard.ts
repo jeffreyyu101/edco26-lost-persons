@@ -104,6 +104,12 @@ export function describeTarget(target: EventTarget | null, doc: { body: unknown 
   return { editable, inOverlay, row, body: false };
 }
 
+/** The request id of the main column's row that `target` is (or is inside), or null. */
+export function mainRowId(target: EventTarget | null): string | null {
+  const row = (target as ElementLike | null)?.closest?.(`${MAIN_SELECTOR} ${ROW_SELECTOR}`) as ElementLike | null | undefined;
+  return row?.getAttribute?.('data-request-id') || null;
+}
+
 /** Request ids in the order the main column shows them (each once). */
 export function readRowIds(root: ParentNode | null): string[] {
   if (!root) return [];

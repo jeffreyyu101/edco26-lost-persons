@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   decideShortcut,
   describeTarget,
+  mainRowId,
   readRowIds,
   type KeyInput,
   type ShortcutContext,
@@ -131,5 +132,28 @@ describe('readRowIds', () => {
   it('lists visible rows once, in document order', () => {
     expect(readRowIds(root([row('a'), row('b'), row('a'), row('c', false), row('d')]))).toEqual(['a', 'b', 'd']);
     expect(readRowIds(null)).toEqual([]);
+  });
+});
+
+describe('mainRowId', () => {
+  /** A target whose closest main-column row (if any) carries `id`. */
+  const target = (id: string | null, selectorSeen: string[] = []) => ({
+    closest: (selector: string) => {
+      selectorSeen.push(selector);
+      return id === null ? null : { getAttribute: (name: string) => (name === 'data-request-id' ? id : null) };
+    },
+  });
+
+  it("is the id of the main column's row the click landed in (the row a pane click opens in place)", () => {
+    const seen: string[] = [];
+    expect(mainRowId(target('00000000-0000-4000-8000-00000000000b', seen) as unknown as EventTarget)).toBe('00000000-0000-4000-8000-00000000000b');
+    expect(seen).toEqual(['[data-desk-main] [data-request-id]']);
+  });
+
+  it('is null off a row, for an empty id, and for no target or a non-element (the window)', () => {
+    expect(mainRowId(target(null) as unknown as EventTarget)).toBeNull();
+    expect(mainRowId(target('') as unknown as EventTarget)).toBeNull();
+    expect(mainRowId(null)).toBeNull();
+    expect(mainRowId({} as EventTarget)).toBeNull();
   });
 });

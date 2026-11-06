@@ -1,19 +1,20 @@
 'use client';
 // The desk keyboard (from 768 px; rules in ./keyboard.ts): "/" search, N new request, J/K or ↓/↑ move
 // through the main column's requests (opening each one when a request is open), Enter opens the selected
-// request, Esc closes the open one and puts focus back on its row. When a form (New request, edit) closes
-// and leaves the focus on nothing, it goes back to where it was before the form opened (New request, the
-// row, the pane's ⋯). Renders nothing.
+// request, Esc closes the open one and puts focus back on its row. A row clicked (or entered) while a
+// request is open replaces it in the pane, so one close always closes. When a form (New request, edit)
+// closes and leaves the focus on nothing, it goes back to where it was before the form opened (New
+// request, the row, the pane's ⋯). Renders nothing.
 import { useEffect, useRef } from 'react';
 import { navigate, parseView, type View } from '@/lib/client/nav';
-import { closePane, openInPane, takeClosedPane } from './DetailPane';
+import { closePane, forgetHistoryEntries, noteHistoryEntry, openInPane, takeClosedPane } from './DetailPane';
 import {
   FORM_LAYER_SELECTOR,
   MAIN_SELECTOR,
   OVERLAY_SELECTOR,
-  ROW_SELECTOR,
   decideShortcut,
   describeTarget,
+  mainRowId,
   overlayOpen,
   readRowIds,
   rowElement,
@@ -29,8 +30,7 @@ export interface DeskKeysProps {
 
 /** The row element (in the main column) that has focus, if any. */
 function focusedRowId(): string | null {
-  const active = document.activeElement as HTMLElement | null;
-  return active?.closest?.(`${MAIN_SELECTOR} ${ROW_SELECTOR}`)?.getAttribute('data-request-id') ?? null;
+  return mainRowId(document.activeElement);
 }
 
 /**
@@ -105,7 +105,9 @@ export function DeskKeys({ view, main }: DeskKeysProps) {
           closePane(latest.current);
           return;
         case 'open':
-          if (cursor.current && cursor.current !== open && rowElement(cursor.current)) navigate({ r: cursor.current });
+          if (!cursor.current || cursor.current === open || !rowElement(cursor.current)) return;
+          if (open) openInPane(cursor.current);
+          else navigate({ r: cursor.current });
           return;
         case 'next':
         case 'prev': {
@@ -132,6 +134,19 @@ export function DeskKeys({ view, main }: DeskKeysProps) {
       e.preventDefault();
       run(action, open);
     };
+    // A row clicked (or Enter on it) while a request is open opens in place, as J / K do: the rows push a
+    // new entry each (the phone's screens), and the pane keeps one, so a single Esc or × closes it.
+    // Capture on window, ahead of React's listeners, so the row's own click never runs.
+    const onClick = (e: MouseEvent) => {
+      const { open, form } = urlState();
+      if (!open || form) return;
+      const id = mainRowId(e.target);
+      if (!id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      cursor.current = id;
+      if (id !== open) openInPane(id);
+    };
     const onFocusIn = (e: FocusEvent) => {
       const id = focusedRowId();
       if (id) cursor.current = id;
@@ -147,14 +162,22 @@ export function DeskKeys({ view, main }: DeskKeysProps) {
       outside.current = null;
     };
     window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('click', onClick, true);
     document.addEventListener('focusin', onFocusIn);
     document.addEventListener('focusout', onFocusOut);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('click', onClick, true);
       document.removeEventListener('focusin', onFocusIn);
       document.removeEventListener('focusout', onFocusOut);
+      forgetHistoryEntries();
     };
   }, []);
+
+  // What each history entry shows, so a close can step back past requests opened over requests.
+  useEffect(() => {
+    noteHistoryEntry();
+  }, [view]);
 
   // When the pane closes (Esc, ×, Back) with the focus left on nothing, the focus returns to its row.
   const lastPane = useRef(paneId);

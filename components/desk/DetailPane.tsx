@@ -15,7 +15,7 @@ import { formatCaseNumber } from '@/lib/format';
 import { MAIN_SELECTOR, readRowIds, rowElement } from './keyboard';
 import { Tip } from './parts';
 import { PANE_FALLBACK_LABEL, neighbours } from './nav-model';
-import { paneRequestId, type MainView } from './views';
+import { isMainView, paneRequestId, type MainView } from './views';
 import d from './desk.module.css';
 
 export interface DeskPaneProps {
@@ -31,14 +31,50 @@ export interface DeskPaneProps {
 let closingFrom: string | null = null;
 /** The request the last close (Esc or ×) closed, until the shell's focus return takes it. */
 let closedId: string | null = null;
+/** Whether each history entry the desk has seen (by depth) shows a list or the dashboard. */
+const mainAtDepth = new Map<number, boolean>();
 
-/** Close the pane: back to the list it was opened from, or the main view on a deep link. */
+/** The current entry's in-app depth (lib/client/nav.ts keeps it in history.state.lpDepth; 0 = opened on). */
+function historyDepth(): number {
+  const depth = (window.history.state as { lpDepth?: unknown } | null)?.lpDepth;
+  return typeof depth === 'number' ? depth : 0;
+}
+
+/** Note what the current history entry shows (DeskKeys calls it whenever the address changes). */
+export function noteHistoryEntry(): void {
+  mainAtDepth.set(historyDepth(), isMainView(parseView(new URLSearchParams(window.location.search))));
+}
+
+/** Forget the entries noted (the desk unmounted: the phone may change them unseen). */
+export function forgetHistoryEntries(): void {
+  mainAtDepth.clear();
+}
+
+/**
+ * Close the pane: back to the list it was opened from, or the main view on a deep link. Back past every
+ * request opened over it with a new entry (a dashboard row; list rows open in place, see DeskKeys), so
+ * one close always closes. An entry the desk has not seen (before a reload) ends the walk: one Back.
+ */
 export function closePane(main: MainView): void {
   // A second close before Back lands (a double click, Esc then ×) must not go back twice.
   if (closingFrom === window.location.href) return;
   closingFrom = window.location.href;
   // From the address bar, not a render: J / K and ↑ / ↓ replace it a moment before React catches up.
   closedId = paneRequestId(parseView(new URLSearchParams(window.location.search)));
+  const depth = historyDepth();
+  for (let k = depth - 1; k >= 0; k -= 1) {
+    const isMain = mainAtDepth.get(k);
+    if (isMain === undefined) break;
+    if (isMain) {
+      window.history.go(k - depth);
+      return;
+    }
+    if (k === 0) {
+      // Requests and forms all the way down to a deep link: show the main view here instead.
+      navigate(viewToParams(main), { replace: true });
+      return;
+    }
+  }
   goBack(viewToParams(main));
 }
 

@@ -162,6 +162,63 @@ test.describe('desktop 1440 × 900', () => {
     await expect.poll(() => activeRowId(page)).toBe(order[1]);
   });
 
+  test('a row clicked or entered while a request is open replaces it: one Esc or × closes, focus on that row', async ({ page }) => {
+    const tag = nextTag();
+    await createRequests(page, 3, tag);
+    await openSearchResults(page, tag);
+    const order = await rowOrder(page);
+    const [a, b, c] = order as [string, string, string];
+    const pane = page.getByTestId('desk-pane');
+    const entries = () => page.evaluate(() => window.history.length);
+    const start = await entries();
+
+    // Pointer: A, then B, then B again (already open: nothing new).
+    await row(page, a).click();
+    await expect.poll(() => paramOf(page, 'r')).toBe(a);
+    await row(page, b).click();
+    await expect.poll(() => paramOf(page, 'r')).toBe(b);
+    await expect(pane).toHaveAttribute('data-request', b);
+    await row(page, b).click();
+    await page.keyboard.press('Escape');
+    await expect(pane).toHaveCount(0);
+    expect(paramOf(page, 'r')).toBeNull();
+    expect(paramOf(page, 'q')).toBe(tag);
+    await expect.poll(() => activeRowId(page)).toBe(b);
+
+    // Keyboard: Enter on A opens it; Tab to C's row and Enter; × closes it in one, focus on C.
+    await row(page, a).focus();
+    await page.keyboard.press('Enter');
+    await expect.poll(() => paramOf(page, 'r')).toBe(a);
+    await row(page, c).focus();
+    await page.keyboard.press('Enter');
+    await expect.poll(() => paramOf(page, 'r')).toBe(c);
+    await page.getByTestId('desk-close').click();
+    await expect(pane).toHaveCount(0);
+    expect(paramOf(page, 'r')).toBeNull();
+    expect(paramOf(page, 'q')).toBe(tag);
+    await expect.poll(() => activeRowId(page)).toBe(c);
+
+    // Each pane session took one history entry, however many rows it showed.
+    expect(await entries()).toBe(start + 1);
+    expect(await page.evaluate(() => (window.history.state as { lpDepth?: number } | null)?.lpDepth ?? 0)).toBe(0);
+  });
+
+  test('the dashboard: a request opened over another still closes in one Esc', async ({ page }) => {
+    await createRequests(page, 2);
+    await page.goto('/?dashboard=1');
+    const recent = page.locator('[data-desk-main] section[aria-labelledby="lp-dash-recent"] button');
+    await expect(recent.nth(1)).toBeVisible({ timeout: 15_000 });
+    await recent.nth(0).click();
+    await expect.poll(() => paramOf(page, 'r')).not.toBeNull();
+    const first = paramOf(page, 'r');
+    await recent.nth(1).click();
+    await expect.poll(() => paramOf(page, 'r')).not.toBe(first);
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('desk-pane')).toHaveCount(0);
+    await expect.poll(() => paramOf(page, 'r')).toBeNull();
+    expect(paramOf(page, 'dashboard')).toBe('1');
+  });
+
   test('"/" searches, N opens New request, keys never fire while typing; the sidebar switches views', async ({ page }) => {
     const tag = nextTag();
     await createRequests(page, 1, tag);
