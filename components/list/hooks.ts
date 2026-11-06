@@ -1,6 +1,6 @@
 'use client';
 // Small client hooks for the list views.
-import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { useActions, useConnection } from '@/lib/client/store-contract';
 import type { SettableStatus, StatusKind } from '@/lib/domain';
 
@@ -47,6 +47,27 @@ export function useScrollMemory(viewKey: string, ready: boolean): void {
       if (frame) cancelAnimationFrame(frame);
     };
   }, [viewKey, ready]);
+}
+
+/**
+ * Keeps `--lp-sticky-h` on the view's root at the height of its sticky header (title, banner, chips), so the
+ * log's column header, which lives inside the log grid to share its columns, sticks right under it.
+ */
+export function useStickyHeight(): { rootRef: RefObject<HTMLDivElement | null>; stickyRef: RefObject<HTMLDivElement | null> } {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const stickyRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const sticky = stickyRef.current;
+    if (!root || !sticky) return;
+    const apply = () => root.style.setProperty('--lp-sticky-h', `${sticky.offsetHeight}px`);
+    apply();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(apply);
+    observer.observe(sticky);
+    return () => observer.disconnect();
+  }, []);
+  return { rootRef, stickyRef };
 }
 
 /**

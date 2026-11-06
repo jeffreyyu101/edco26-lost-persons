@@ -166,12 +166,18 @@ for (const theme of ['light', 'dark'] as const) {
         // ---- Lists, header, menus and sheets
         await visit('/', 'All', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
 
+        // Log option B: the closed requests open in place under "Closed N", greyed (contrast, spec §7).
+        await page.getByTestId('closed-fold').click();
+        await expect(page.getByTestId('closed-rows')).toBeVisible();
+        results.push(await audit(page, 'All, Closed open'));
+        await page.getByTestId('closed-fold').click();
+
         await page.getByTestId('account-trigger').click();
         await expect(page.getByRole('dialog', { name: 'Account' })).toBeVisible();
         results.push(await audit(page, 'account menu'));
-        await page.keyboard.press('Escape');
 
-        await page.getByRole('button', { name: 'New-request alerts' }).click();
+        // The Alerts switch in the avatar menu (it replaced the header bell).
+        await page.getByRole('dialog', { name: 'Account' }).getByRole('switch', { name: 'Alerts' }).click();
         const bell = page.getByRole('dialog', { name: 'Alerts are on' });
         await expect(bell).toBeVisible();
         // Named and described by the visible heading and line, each in the sheet once (no hidden copy that
@@ -223,7 +229,7 @@ for (const theme of ['light', 'dark'] as const) {
         await visit('/?view=pending', 'Pending (before offline)', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
         await context.setOffline(true);
         try {
-          await expect(page.getByTestId('live-dot')).toHaveAttribute('data-state', 'off', { timeout: 15_000 });
+          await expect(page.getByTestId('connection-indicator')).toHaveAttribute('data-state', 'offline', { timeout: 15_000 });
           results.push(await audit(page, 'Pending offline'));
         } finally {
           await context.setOffline(false);

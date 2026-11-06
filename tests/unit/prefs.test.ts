@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_PREFS,
   PREF_STORAGE_KEYS,
+  SESSION_PREF_KEYS,
   clearRememberedIdentity,
   readPrefs,
   setBell,
   setBellIntroSeen,
+  setClosedExpanded,
   setLastPost,
   setThemePref,
   subscribePrefs,
@@ -23,6 +25,12 @@ function fakeBrowser() {
     setItem: (k: string, v: string) => void data.set(k, String(v)),
     removeItem: (k: string) => void data.delete(k),
   };
+  const session = new Map<string, string>();
+  const sessionStorage = {
+    getItem: (k: string) => session.get(k) ?? null,
+    setItem: (k: string, v: string) => void session.set(k, String(v)),
+    removeItem: (k: string) => void session.delete(k),
+  };
   const classes = new Set<string>();
   const documentElement = {
     classList: { add: (c: string) => void classes.add(c), remove: (...cs: string[]) => cs.forEach((c) => classes.delete(c)) },
@@ -31,13 +39,14 @@ function fakeBrowser() {
   const listeners = new Set<(e: { key: string | null }) => void>();
   const window = {
     localStorage,
+    sessionStorage,
     matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
     addEventListener: (type: string, fn: (e: { key: string | null }) => void) => type === 'storage' && listeners.add(fn),
     removeEventListener: (type: string, fn: (e: { key: string | null }) => void) => type === 'storage' && listeners.delete(fn),
   };
   vi.stubGlobal('window', window);
   vi.stubGlobal('document', { documentElement });
-  return { data, classes, documentElement, fire: (key: string | null) => listeners.forEach((l) => l({ key })), listeners };
+  return { data, session, classes, documentElement, fire: (key: string | null) => listeners.forEach((l) => l({ key })), listeners };
 }
 
 describe('prefs (remembered on this phone)', () => {
@@ -136,6 +145,28 @@ describe('prefs (remembered on this phone)', () => {
       expect(browser.data.get(THEME_STORAGE_KEY)).toBe('light');
       expect(browser.classes.has('light')).toBe(true);
       expect(readPrefs()).toEqual({ ...store.getState().prefs });
+    });
+
+    it('the All requests "Closed" fold is remembered for this browser session only', () => {
+      expect(readPrefs().closedExpanded).toBe(false);
+      setClosedExpanded(true);
+      expect(browser.session.get(SESSION_PREF_KEYS.closedExpanded)).toBe('1');
+      expect(browser.data.has(SESSION_PREF_KEYS.closedExpanded)).toBe(false); // never in localStorage
+      expect(readPrefs().closedExpanded).toBe(true);
+      writePref('closedExpanded', false);
+      expect(browser.session.has(SESSION_PREF_KEYS.closedExpanded)).toBe(false);
+      expect(readPrefs().closedExpanded).toBe(false);
+
+      const store = createStubStore({ eventTimezone: 'America/New_York' });
+      store.actions.setPref('closedExpanded', true);
+      expect(store.getState().prefs.closedExpanded).toBe(true);
+      expect(readPrefs()).toEqual({ ...store.getState().prefs });
+    });
+
+    it('a browser without sessionStorage folds Closed and never throws', () => {
+      vi.stubGlobal('window', { localStorage: { getItem: () => null, setItem() {}, removeItem() {} } });
+      expect(() => setClosedExpanded(true)).not.toThrow();
+      expect(readPrefs().closedExpanded).toBe(false);
     });
 
     it('notifies about changes made in another tab', () => {

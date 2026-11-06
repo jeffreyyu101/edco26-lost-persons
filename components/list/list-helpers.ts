@@ -108,8 +108,9 @@ export function stepperModel(status: string): StepperModel {
     case STATUS.waiting:
       return { steps: STEPS, current: 1, mode: 'pend', color: 'var(--blue-9)' };
     case STATUS.notInMedical:
-      // Not in medical is final: the line ends there (DECISIONS: Logged → Checked → Not in medical).
-      return { steps: ['Logged', 'Checked', 'Not in medical'], current: 2, mode: 'cur', color: 'var(--amber-9)' };
+      // Not in medical is final: the line ends there (DECISIONS: Logged → Checked → Not in medical). It is
+      // closed, so it is grey like the other closed statuses (2026-11-06).
+      return { steps: ['Logged', 'Checked', 'Not in medical'], current: 2, mode: 'cur', color: 'var(--gray-9)' };
     case STATUS.inMedical:
     case STATUS.legacyBringFriend:
       return { steps: STEPS, current: 2, mode: 'cur', color: 'var(--green-9)' };
@@ -239,21 +240,78 @@ export function whoPhrase(row: Pick<RequestSummary, 'name' | 'age' | 'gender'>):
   return ag ? `${displayName(row.name)}, ${ag}` : displayName(row.name);
 }
 
-// Row labels say the visible text first, in the order it is shown (WCAG 2.5.3 label in name: what a
-// voice-control user reads off the row is the start of its name), then anything only a screen reader needs.
-
-/** All: "Kayla Martinez, 19 F, 10:58. Waiting for check, FA 3, LP-1012." */
-export function rowLabel(row: RequestSummary, time: string): string {
-  return `${whoPhrase(row)}, ${time}. ${statusMeta(row.status).label}, ${row.postShort}, ${formatCaseNumber(row.caseNumber)}.`;
-}
-
-/** A queued request: "Kayla Martinez, 19 F, 10:58. Waiting to send, FA 3, Not sent." (+ how to fix it). */
+/** A queued request: "Kayla Martinez, 19 F, 10:58 PM. Waiting to send, FA 3, Not sent." (+ how to fix it). */
 export function outboxRowLabel(d: OutboxDisplay, time: string): string {
   const who = d.ageGender ? `${d.name}, ${d.ageGender}` : d.name;
   return `${who}, ${time}. ${d.label}, ${d.post}, ${d.caseText}.${d.needsAttention ? ' Open to fix and resend.' : ''}`;
 }
 
-/** A search result: "Kayla Martinez, 19 F, LP-1012. …pink hair, glitter. Waiting for check." */
-export function searchRowLabel(row: RequestSummary, line: string): string {
-  return `${whoPhrase(row)}, ${formatCaseNumber(row.caseNumber)}.${line ? ` ${line}.` : ''} ${statusMeta(row.status).label}.`;
+// ---------------------------------------------------------------------------------------------------
+// The All requests log (option B, 2026-11-06): one line per request in a shared grid
+//   #  ·  Friend  ·  Status  ·  Created  ·  Updated
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * When the request last changed after it was logged, or null when it has not (the log's "Updated" shows
+ * "—"). The photos its logger attached while logging are part of logging: a new request is saved first and
+ * its photos are uploaded right after, each one a write of its own (rowVersion + 1). So a Waiting request
+ * whose only writes are its creator's photo uploads (1 ≤ rowVersion ≤ photoCount, last written by the
+ * creator) counts as not updated. Any answer, edit or someone else's photo makes it updated. With no write
+ * at all (rowVersion 0, including rows older than row versions) the timestamps decide (format.wasUpdated).
+ */
+export function updatedSince(
+  row: Pick<RequestSummary, 'updatedAt' | 'rowVersion' | 'photoCount' | 'status' | 'createdBy' | 'updatedBy'>,
+): string | null {
+  const onlyOwnPhotos = row.rowVersion >= 1 && row.rowVersion <= row.photoCount && sameStaff(row.updatedBy, row.createdBy);
+  return row.status === STATUS.waiting && onlyOwnPhotos ? null : row.updatedAt;
+}
+
+/**
+ * The status label the log shows on a narrow phone (under 400 px wide), where "Waiting for check" would take
+ * the name's room: "Waiting" (the blue ring says the rest). Null when the label is already short. The row's
+ * sentence always says the full status.
+ */
+export function narrowStatusLabel(status: string): string | null {
+  return status === STATUS.waiting ? 'Waiting' : null;
+}
+
+/** The status as a screen reader says it: "Waiting for check", "In medical, friend coming". */
+export function statusPhrase(status: string): string {
+  return statusMeta(status).label.replace(/\s*·\s*/g, ', ');
+}
+
+/**
+ * A log row's accessible name, as one sentence:
+ * "LP-1013, T.R., Waiting for check, created 11:02 PM, updated 2 minutes ago".
+ * `updated` is format.updatedPhrase(): "updated 2 minutes ago" or "not updated yet".
+ */
+export function logRowLabel(row: Pick<RequestSummary, 'caseNumber' | 'name' | 'status'>, created: string, updated: string): string {
+  return `${formatCaseNumber(row.caseNumber)}, ${displayName(row.name)}, ${statusPhrase(row.status)}, created ${created}, ${updated}`;
+}
+
+/** A search result in the log grid: the row's sentence, then the matched text when it is not the name. */
+export function searchLogLabel(row: Pick<RequestSummary, 'caseNumber' | 'name' | 'status'>, created: string, updated: string, line: string): string {
+  return `${logRowLabel(row, created, updated)}.${line ? ` ${line}` : ''}`;
+}
+
+/** The number column of the log: the LP number without its prefix or padding, "1013", "998". */
+export function logNumber(caseNumber: number): string {
+  return String(caseNumber);
+}
+
+/**
+ * Highlight ranges for the bare number in the log's number column, from a search hit's ranges in
+ * formatCaseNumber() ("LP-0998" → "998").
+ */
+export function logNumberRanges(caseNumber: number, caseRanges: Ranges): Ranges {
+  const shift = formatCaseNumber(caseNumber).length - logNumber(caseNumber).length;
+  const len = logNumber(caseNumber).length;
+  return caseRanges
+    .map(([s, e]) => [Math.max(0, s - shift), Math.min(len, e - shift)] as [number, number])
+    .filter(([s, e]) => e > s);
+}
+
+/** The "Closed N" fold's accessible name ("Closed 6 requests"); aria-expanded carries open / folded. */
+export function closedFoldLabel(count: number): string {
+  return `Closed ${count} ${count === 1 ? 'request' : 'requests'}`;
 }
