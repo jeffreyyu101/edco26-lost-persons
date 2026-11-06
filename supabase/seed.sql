@@ -1,5 +1,7 @@
 -- Local synthetic seed. LOCAL ONLY: every name, phone number and description below is invented.
 -- Loaded by scripts/db-reset.sh after `supabase db reset` (never by hand against another database).
+-- It refuses to run unless the session has lp.allow_seed = 'on', which only db-reset.sh sets, after its
+-- local-host guard. So pasting or `psql -f`-ing this file into any other database (production) aborts.
 --
 -- 21 requests that match the mockups (design/screens/*): 4 Waiting for check, 3 In medical (one with the
 -- legacy status 'Bring friend to medical'), 2 Not in medical, 10 Reunited, 1 Discharged, 1 Cancelled.
@@ -12,6 +14,9 @@ begin;
 
 do $guard$
 begin
+  if coalesce(current_setting('lp.allow_seed', true), '') <> 'on' then
+    raise exception 'seed.sql refuses to run: lp.allow_seed is not on. Only scripts/db-reset.sh loads it, after checking the database is LOCAL.';
+  end if;
   if exists (select 1 from public.patients) then
     raise exception 'seed.sql refuses to run: public.patients is not empty. Run scripts/db-reset.sh on the LOCAL stack.';
   end if;

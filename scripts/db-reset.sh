@@ -62,7 +62,8 @@ echo "db-reset: resetting the local database ($db_url)"
 supabase db reset --local --no-seed
 
 echo "db-reset: loading supabase/seed.sql"
-psql "$db_url" -v ON_ERROR_STOP=1 -q -f supabase/seed.sql >/dev/null
+# seed.sql aborts unless lp.allow_seed is on; only this script sets it, after the local-host checks above.
+psql "$db_url" -v ON_ERROR_STOP=1 -q -c "set lp.allow_seed = 'on'" -f supabase/seed.sql >/dev/null
 
 echo "db-reset: uploading synthetic seed photos"
 full="supabase/seed-photos/photo.jpg"
