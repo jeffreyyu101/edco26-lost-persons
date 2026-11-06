@@ -311,7 +311,7 @@ export function logNumberRanges(caseNumber: number, caseRanges: Ranges): Ranges 
     .filter(([s, e]) => e > s);
 }
 
-/** The "Closed N" fold's accessible name ("Closed 6 requests"); aria-expanded carries open / folded. */
-export function closedFoldLabel(count: number): string {
-  return `Closed ${count} ${count === 1 ? 'request' : 'requests'}`;
+/** The "Archived N" fold's accessible name ("Archived 6 requests"); aria-expanded carries open / folded. */
+export function archivedFoldLabel(count: number): string {
+  return `Archived ${count} ${count === 1 ? 'request' : 'requests'}`;
 }

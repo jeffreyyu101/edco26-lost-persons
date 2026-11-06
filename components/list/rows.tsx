@@ -14,7 +14,7 @@ import type { SearchHit } from '@/lib/client/selectors';
 import { statusMeta } from '@/lib/domain';
 import { NOT_UPDATED } from '@/lib/format';
 import {
-  closedFoldLabel,
+  archivedFoldLabel,
   displayName,
   highlightParts,
   isClosed,
@@ -250,8 +250,11 @@ export function OutboxLogRow({ item, created }: { item: OutboxItem; created: str
   );
 }
 
-/** "Closed  6  ⌄": every closed request folded into one row; tap to show them below (log option B). */
-export function ClosedFold({ count, open, controls, onToggle }: { count: number; open: boolean; controls: string; onToggle: () => void }) {
+/**
+ * "Archived  6  ⌄": every closed request (Not in medical, Reunited, Discharged, Cancelled) folded into one
+ * row under the open ones (log option B; named Archived by Brian, 2026-11-06). Tap to show them below, greyed.
+ */
+export function ArchivedFold({ count, open, controls, onToggle }: { count: number; open: boolean; controls: string; onToggle: () => void }) {
   return (
     <button
       type="button"
@@ -259,11 +262,12 @@ export function ClosedFold({ count, open, controls, onToggle }: { count: number;
       aria-expanded={open}
       // Only while the closed rows are on the page (folded, they are not rendered).
       aria-controls={open ? controls : undefined}
-      aria-label={closedFoldLabel(count)}
+      aria-label={archivedFoldLabel(count)}
       onClick={onToggle}
+      // The test ids keep their log option B names (closed-fold, closed-rows), which other specs use.
       data-testid="closed-fold"
     >
-      <span className={s.foldLabel}>Closed</span>{' '}
+      <span className={s.foldLabel}>Archived</span>{' '}
       <span className={s.cap}>{count}</span>
       <span className={s.sp} />
       <span className={s.foldChev} data-open={open ? '' : undefined}>
@@ -273,10 +277,10 @@ export function ClosedFold({ count, open, controls, onToggle }: { count: number;
   );
 }
 
-/** The closed rows under the fold: a subgrid of the log, so their columns line up with the open rows. */
-export function ClosedRows({ id, children }: { id: string; children: ReactNode }) {
+/** The archived rows under the fold: a subgrid of the log, so their columns line up with the open rows. */
+export function ArchivedRows({ id, children }: { id: string; children: ReactNode }) {
   return (
-    <div id={id} className={s.sub} role="group" aria-label="Closed requests" data-testid="closed-rows">
+    <div id={id} className={s.sub} role="group" aria-label="Archived requests" data-testid="closed-rows">
       {children}
     </div>
   );
