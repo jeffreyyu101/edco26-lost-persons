@@ -89,6 +89,8 @@ export interface RaisedAlert {
   alert: AlertEvent;
   /** The row's status when the alert was raised (null for alerts with no request). */
   status: string | null;
+  /** `${id}:${rowVersion}` of the row that raised it: the same in every tab that raises this alert. */
+  key: string;
 }
 
 /** The alerts of `rows`, each paired with the status of the row that raised it (see diffAlerts). */
@@ -99,7 +101,7 @@ export function diffRaisedAlerts(
 ): RaisedAlert[] {
   const out: RaisedAlert[] = [];
   for (const row of rows) {
-    for (const alert of diffAlerts(previous, [row], ctx)) out.push({ alert, status: row.status });
+    for (const alert of diffAlerts(previous, [row], ctx)) out.push({ alert, status: row.status, key: alertKey(row) });
   }
   return out;
 }

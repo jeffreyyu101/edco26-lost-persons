@@ -98,7 +98,7 @@ npm run start:test                       # http://127.0.0.1:3100
 | `npm run lint` | ESLint, with no warnings allowed |
 | `npm test` | Unit tests (vitest, no network or database) |
 | `npm run test:int` | Integration tests: every route, the SQL functions, concurrency, login limits, the migration and `docs/export.sql` (run read-only), against the local stack through a production build on `PORT` (default 3100). If nothing listens there, the harness starts `next start` itself. Run `npm run build:test` first. |
-| `npm run test:e2e` | Playwright on the production build: sign-in, lists, the two-phone flow (log → Pending → In medical → alert), profile, edit and conflicts, dashboard, offline and lie-fi queueing, the service-worker update, the first-load JS budget, and accessibility (axe-core WCAG 2.1 A/AA in light and dark, plus 44 px tap targets). Run `npm run build:test` first. |
+| `npm run test:e2e` | Playwright on the production build: sign-in, lists, the two-phone flow (log → Pending → In medical → alert), system notifications on a desktop (hidden page notifies, visible page toasts), profile, edit and conflicts, dashboard, offline and lie-fi queueing, the service-worker update, the first-load JS budget, and accessibility (axe-core WCAG 2.1 A/AA in light and dark, plus 44 px tap targets). Run `npm run build:test` first. |
 | `node scripts/smoke-csp.mjs` | The production CSP and nonce in Chromium and WebKit: `/signin` hydrates with no violations, `/` redirects without a session, and with one the list, a profile and Back work. Needs the production build running on `PORT`. `npm run test:e2e` runs it too (`tests/e2e/smoke.spec.ts`). |
 | `npm run db:verify-migration` | Applies the rework migration twice to the local database and to an upgrade fixture built from Jeffrey's original schema, then smoke-tests the functions. |
 | `node scripts/load-test.mjs` | 30 simulated phones polling for 2 minutes against a running local production build (see the file header). |
@@ -126,7 +126,13 @@ Pending.
   is a menu: the other answer, or Back to Waiting for check. Two people giving the same answer is harmless.
   A change made by someone else shows as "Updated by someone else".
 - **Alerts** appear only while the app is open: changes to your requests by someone else, and new requests
-  when alerts are on (the bell, in the avatar menu). There are no lock-screen notifications.
+  when alerts are on (the bell, in the avatar menu). With the app in front, an alert is a toast with a
+  chime. In the background (another tab, a minimised window) it is a system notification instead, where the
+  device allows one and it was allowed (desktop Chrome, Edge, Firefox and Safari, Android Chrome, the iPhone
+  Home Screen app; "Allow notifications" in the avatar menu). It shows the LP number, the status, initials
+  and the post, never contact details, and a click opens the request. One alert is never both a toast and a
+  notification, even with the app in two windows. A Safari tab on iPhone keeps the toast only. There is no
+  push: a closed app gets nothing.
 - **Offline.** A new request (with its photos) is saved on the phone first and sent when the signal is back.
   Answers, edits and adding photos to an existing request need a connection.
 - **Dashboard.** Status count tiles first, then Open by post, Recently updated, and Performance last (longest

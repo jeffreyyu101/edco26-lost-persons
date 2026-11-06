@@ -306,7 +306,11 @@ export interface StoreActions {
 
   showToast(toast: Omit<ToastItem, 'id'>): string;
   dismissToast(id: string): void;
-  /** Alert hosts (chime, vibration) subscribe here. Returns the unsubscribe function. */
+  /**
+   * Alert hosts (chime, vibration) subscribe here. Returns the unsubscribe function. They hear the alerts
+   * shown in the app (a toast); one shown as a system notification while the app is in the background is
+   * not passed on, because the system plays its own sound (v2.5 A52: never both).
+   */
   subscribeAlerts(listener: (alert: AlertEvent) => void): () => void;
 
   /** Activate the waiting service worker and reload (refused while a draft or outbox job exists). */
