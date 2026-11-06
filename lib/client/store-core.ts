@@ -252,6 +252,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const touchedDuringPoll = new Set<string>();
   let rowsTimer: ReturnType<typeof setTimeout> | undefined;
   let rowsDirty = false;
+  /** The first rows of a session are written at once (an offline reload right after load needs them). */
+  let rowsWrittenOnce = false;
 
   // mutations
   const chains = new Map<string, Promise<unknown>>();
@@ -424,10 +426,13 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const markRowsDirty = () => {
     rowsDirty = true;
     if (!running || rowsTimer) return;
-    rowsTimer = setTimeout(() => {
-      rowsTimer = undefined;
-      void flushRows();
-    }, ROWS_WRITE_MS);
+    rowsTimer = setTimeout(
+      () => {
+        rowsTimer = undefined;
+        void flushRows();
+      },
+      rowsWrittenOnce ? ROWS_WRITE_MS : 0,
+    );
   };
 
   const flushRows = async () => {
@@ -435,6 +440,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     rowsTimer = undefined;
     if (!rowsDirty || !cacheStaff) return;
     rowsDirty = false;
+    rowsWrittenOnce = true;
     const staffKey = cacheStaff;
     const rows = [...state.confirmed.values()];
     const gen = ownerGen();
@@ -1686,7 +1692,14 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       try {
         const [last, ids, jobs] = await Promise.all([kv.get<StoredStaff>(K.lastStaff), kv.get<string[]>(K.myIds), readJobs(kv)]);
         if (!isLive(id)) return;
-        if (last && typeof last.staff === 'string' && cacheStaff === null) await loadCache(canonStaff(last.staff) ?? '');
+        if (last && typeof last.staff === 'string' && cacheStaff === null) {
+          await loadCache(canonStaff(last.staff) ?? '');
+          // Offline reload: show who was signed in (avatar, My requests, alerts) until GET /api/session
+          // confirms it. The status stays 'unknown', so nothing is sent on this identity's behalf.
+          if (state.session.status === 'unknown' && !state.session.staff && typeof last.staffName === 'string' && typeof last.team === 'string') {
+            set({ session: { ...state.session, staffName: last.staffName, team: last.team, staff: last.staff } });
+          }
+        }
         const myIds = new Set([...state.myIds, ...(Array.isArray(ids) ? ids.filter((x) => typeof x === 'string') : [])]);
         const known = new Set(state.outbox.map((j) => j.mutationId));
         setJobs([...state.outbox, ...jobs.filter((j) => !known.has(j.mutationId))]);
@@ -1776,7 +1789,13 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       e.on('window', 'focus', triggerSync),
       e.on('window', 'pageshow', triggerSync),
       e.on('document', 'visibilitychange', () => {
-        if (e.visible()) triggerSync();
+        if (e.visible()) {
+          triggerSync();
+        } else {
+          // iOS may kill a hidden page without a pagehide: save now.
+          void draftApi.flush();
+          void flushRows();
+        }
       }),
       e.on('window', 'pagehide', () => {
         void draftApi.flush();

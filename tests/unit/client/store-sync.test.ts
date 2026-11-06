@@ -311,10 +311,34 @@ describe('session', () => {
     // The env reports offline before start in a real reload; emulate by failing the network too.
     server.override = () => 'network';
     await ready();
-    expect(second.s().session.status).toBe('unknown');
+    expect(second.s().session).toMatchObject({ status: 'unknown', staffName: 'Dana Kim', staff: STAFF.dana.staff });
     expect(second.s().hasData).toBe(true);
     expect(second.s().confirmed.size).toBe(2);
     expect(second.fe.redirects).toEqual([]);
+  });
+
+  it('writes the first rows at once, so an offline reload right after load still has the list', async () => {
+    const server = new FakeServer([makeRow(1), makeRow(2), makeRow(3)]);
+    const first = boot(server);
+    await ready();
+    first.stop();
+    server.override = () => 'network';
+    const second = boot(server, { dbName: first.fe.dbName });
+    await ready();
+    expect(second.s().confirmed.size).toBe(3);
+  });
+
+  it('saves the cache when the page is hidden (iOS may kill it without pagehide)', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    const first = boot(server);
+    await ready();
+    server.put(makeRow(2));
+    await advance(6_000); // a change: the next write waits for the 3 s throttle
+    first.fe.setVisible(false);
+    first.fe.fire('document', 'visibilitychange');
+    await settle();
+    const rows = await openKv(first.fe.dbName)?.get<unknown[]>(`cache:edco26:${'dana kim · gc/hx - dispatch'}:rows`);
+    expect(rows).toHaveLength(2);
   });
 
   it('switches to the right staff cache when someone else signs in on this phone', async () => {
