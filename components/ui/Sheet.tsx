@@ -4,13 +4,17 @@
 // above the iOS keyboard (visualViewport) so a field inside it (the post picker's "Where?") stays visible.
 // Scrolls when its content is taller than the screen.
 import { Dialog, VisuallyHidden } from '@radix-ui/themes';
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import styles from './ui.module.css';
 
 interface SheetBase {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   children: ReactNode;
+  /** A tap on the scrim closes the sheet (default). False: only Escape and the sheet's own buttons do. */
+  dismissOnOutside?: boolean;
+  /** Focused when the sheet opens, instead of its first control. */
+  initialFocus?: RefObject<HTMLElement | null>;
 }
 
 export type SheetProps = SheetBase &
@@ -60,14 +64,28 @@ function useKeyboardInset(active: boolean): number {
 }
 
 export function Sheet(props: SheetProps) {
-  const { open, onOpenChange, title, hideTitle, description, titleInContent, children } = props;
+  const { open, onOpenChange, title, hideTitle, description, titleInContent, children, dismissOnOutside = true, initialFocus } = props;
   const keyboard = useKeyboardInset(open);
   const style = { '--lp-kb': `${keyboard}px` } as CSSProperties;
   // Radix points aria-describedby at a Description it finds; without one, say so (no console warning).
   const describedBy = description || titleInContent ? {} : { 'aria-describedby': undefined };
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content className={`lp-sheet ${styles.sheet}`} style={style} {...describedBy}>
+      <Dialog.Content
+        className={`lp-sheet ${styles.sheet}`}
+        style={style}
+        {...describedBy}
+        onPointerDownOutside={dismissOnOutside ? undefined : (e) => e.preventDefault()}
+        onOpenAutoFocus={
+          initialFocus
+            ? (e) => {
+                if (!initialFocus.current) return;
+                e.preventDefault();
+                initialFocus.current.focus();
+              }
+            : undefined
+        }
+      >
         <div className={styles.handle} aria-hidden />
         {titleInContent ? null : hideTitle ? (
           <VisuallyHidden>

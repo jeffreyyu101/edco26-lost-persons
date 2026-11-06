@@ -2053,9 +2053,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 
     addPhotos,
 
-    async preparePhoto(file) {
+    async preparePhoto(file, options) {
       const { compressPhoto } = await import('./image');
-      return compressPhoto(file);
+      return compressPhoto(file, options);
     },
 
     async fetchDetail(id): Promise<RequestDetail> {

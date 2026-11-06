@@ -42,6 +42,17 @@ screenshots.
   last and optional). **Age and gender are free text** ("mid-20s", "Non-binary"; Male / Female / Other are
   quick-fill chips), and search matches the age text. This needs the migration re-run below.
 
+### 2026-11-06 afternoon (v2.2 #10, Jeffrey's photo request)
+
+- **Photos of a phone screen are cleaned up on the phone** before they are saved or sent: an area-averaged
+  downscale, then auto levels and a light unsharp mask, each only when the photo measures as needing it. A
+  sharp, well-exposed camera photo is left as it was. No extra request, no server or Supabase work, and the
+  upload is never bigger than before (`lib/client/image.ts`, `lib/client/image-enhance.ts`).
+- **A quick crop step** follows every photo taken or picked, on New request and on a profile's Add photo.
+  One tap on **Use photo** keeps the whole photo; dragging a corner cuts away the bezel; **Retake** opens the
+  camera again (`components/photo/CropSheet.tsx`).
+- No migration and no environment change: this is client-only.
+
 ## The production migration
 
 [`supabase/migrations/20261106000000_rework.sql`](supabase/migrations/20261106000000_rework.sql) is the only
@@ -106,6 +117,10 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 ## Morning checklist (things tests can't cover)
 
 - [ ] iPhone camera capture from New request, and the page survives coming back from the camera.
+- [ ] On an iPhone, photograph another phone's screen showing a photo: the crop step opens with the whole
+      photo selected, dragging a corner cuts the bezel, Use photo adds it within about a second, and the
+      saved photo looks cleaner, not harsher. Safari's Web Inspector (Timelines) shows `lp-photo-prepare`
+      with its timings.
 - [ ] Keychain fills the password on sign-in step 2.
 - [ ] A Home Screen app signs in on its own and keeps its own saved requests, separate from the Safari tab.
 - [ ] With the mute switch on, an alert still shows its toast (silently).
@@ -135,6 +150,9 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 - **There is no export in the app.** The end-of-event files come from `docs/export.sql`. They hold names and
   phone numbers: don't leave them on shared devices.
 - **Up to three photos per request.** Photos from Jeffrey's app with no timing show "Timing unknown".
+- **Photo cleanup is deliberately light.** It cannot straighten a photo taken at an angle, and moiré bands
+  the camera already recorded stay (only the screen's fine pixel grid is averaged away). If cleanup fails or
+  takes over 1 s on an old phone, the plain photo is used.
 - **Legacy rows.** Rows with an old post (for example `FA 3`) or an old status stay readable and editable,
   and appear as their own bar on the dashboard. On the dashboard, an Other location shows as "Other · Gate 9",
   so it never reads like a fixed post.

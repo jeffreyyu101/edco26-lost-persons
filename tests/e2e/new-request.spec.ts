@@ -1,6 +1,7 @@
 import { deflateSync } from 'node:zlib';
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { testBaseUrl } from '../../scripts/test-env.mjs';
+import { confirmCrop } from './helpers/photo';
 import { signedInAs } from './helpers/session';
 import { syncRows } from './helpers/sync';
 
@@ -201,6 +202,7 @@ test('Send needs a post and a detail; a photo counts; Other asks where', async (
   await personName(page).fill('');
   await expect(submit(page)).toBeDisabled();
   await page.locator('input[type=file]').setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: syntheticPng() });
+  await confirmCrop(page);
   await expect(page.getByRole('button', { name: /^1 photo/ })).toBeVisible();
   await expect(submit(page)).toBeEnabled();
 
@@ -235,6 +237,7 @@ test('creates a request with a photo; it shows in All and My requests', async ({
   await expect(page.getByRole('img', { name: 'Valid number' })).toBeVisible();
   await friend(page).getByLabel('Relation').fill('Best friend');
   await page.locator('input[type=file]').setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: syntheticPng() });
+  await confirmCrop(page);
   await expect(page.getByRole('button', { name: /^1 photo, today/ })).toBeVisible();
 
   await expect(submit(page)).toBeEnabled();
@@ -375,6 +378,7 @@ test('a draft survives a reload, with its photo; Cancel discards it', async ({ p
   await personName(page).fill(name);
   await page.getByLabel('Wearing').fill('TEST-F red hoodie');
   await page.locator('input[type=file]').setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: syntheticPng() });
+  await confirmCrop(page);
   await expect(page.getByRole('button', { name: /^1 photo/ })).toBeVisible();
   await page.waitForTimeout(600); // the store debounces draft saves by 300 ms
 
@@ -499,6 +503,7 @@ test('offline: Save offline queues the request and it sends once back online', a
   await expect(page.getByRole('status').filter({ hasText: /Offline · \d+ waiting to send/ }).first()).toBeVisible();
   await personName(page).fill(name);
   await page.locator('input[type=file]').setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: syntheticPng() });
+  await confirmCrop(page);
   await expect(page.getByRole('button', { name: /^1 photo/ })).toBeVisible();
   await submit(page).click();
   await expect(page.getByText('Saved on this phone', { exact: true })).toBeVisible();

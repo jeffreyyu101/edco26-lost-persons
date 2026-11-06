@@ -1,11 +1,15 @@
 'use client';
 // The portrait photo slot of the ID card (new-request.html .slot): empty, it opens the camera / library
-// (file input, image/*, multiple, max 3). With photos, it shows the first one, a count badge and the
-// Today / Not today tag (tap toggles), and tapping the photo opens a small sheet to add or remove photos.
+// (file input, image/*, multiple, max 3). Each picked photo goes through the quick-crop step (CropSheet,
+// v2.2 #10) and is then prepared on the phone (cropped, cleaned up, compressed). With photos, it shows the
+// first one, a count badge and the Today / Not today tag (tap toggles), and tapping the photo opens a small
+// sheet to add or remove photos.
 // Read-only (needs-attention editor, A33): shows the job's photos, no add / remove / toggle.
 import { Button, IconButton, SegmentedControl, Spinner } from '@radix-ui/themes';
 import { Camera, Plus, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { CropSheet } from '@/components/photo/CropSheet';
+import { useCropQueue, type CropPick } from '@/components/photo/use-crop-queue';
 import { Sheet } from '@/components/ui/Sheet';
 import { useActions, type DraftPhoto } from '@/lib/client/store-contract';
 import { MAX_PHOTOS, PHOTO_TIMING_LABEL, type PhotoTiming } from '@/lib/domain';
@@ -60,30 +64,45 @@ export function PhotoSlot({ photos, onPhotosChange, timing, onTimingChange, read
     if (canAdd) fileRef.current?.click();
   };
 
-  const onFiles = async (list: FileList | null) => {
+  // Files past the limit in the current pick run, reported once its photos are added.
+  const droppedRef = useRef(0);
+
+  const prepare = useCallback(
+    async (picks: CropPick[]) => {
+      const dropped = droppedRef.current;
+      droppedRef.current = 0;
+      setPreparing(true);
+      const added: DraftPhoto[] = [];
+      let failed = 0;
+      // One at a time: decoding several camera photos at once can exhaust memory on older iPhones.
+      for (const { file, crop } of picks) {
+        try {
+          added.push(await actions.preparePhoto(file, { crop }));
+        } catch {
+          failed += 1;
+        }
+      }
+      setPreparing(false);
+      if (added.length > 0) onPhotosChangeRef.current?.([...photosRef.current, ...added].slice(0, MAX_PHOTOS));
+      if (failed > 0) {
+        actions.showToast({ tone: 'red', icon: 'alert', title: failed === 1 ? "Couldn't add that photo" : `Couldn't add ${failed} photos`, durationMs: 5_000 });
+      } else if (dropped > 0) {
+        actions.showToast({ tone: 'neutral', icon: 'info', title: `${MAX_PHOTOS} photos max`, durationMs: 4_000 });
+      }
+    },
+    [actions],
+  );
+  const reopenPicker = useCallback(() => fileRef.current?.click(), []);
+  const crop = useCropQueue((picks) => void prepare(picks), reopenPicker);
+
+  const onFiles = (list: FileList | null) => {
     const files = list ? Array.from(list) : [];
     if (fileRef.current) fileRef.current.value = '';
     if (files.length === 0 || readOnly || !onPhotosChange) return;
-    const { take, dropped } = photoIntake(count, files.length);
+    const { take, dropped } = photoIntake(photosRef.current.length + crop.pending(), files.length);
     if (take === 0) return;
-    setPreparing(true);
-    const added: DraftPhoto[] = [];
-    let failed = 0;
-    // One at a time: decoding several camera photos at once can exhaust memory on older iPhones.
-    for (const file of files.slice(0, take)) {
-      try {
-        added.push(await actions.preparePhoto(file));
-      } catch {
-        failed += 1;
-      }
-    }
-    setPreparing(false);
-    if (added.length > 0) onPhotosChangeRef.current?.([...photosRef.current, ...added].slice(0, MAX_PHOTOS));
-    if (failed > 0) {
-      actions.showToast({ tone: 'red', icon: 'alert', title: failed === 1 ? "Couldn't add that photo" : `Couldn't add ${failed} photos`, durationMs: 5_000 });
-    } else if (dropped > 0) {
-      actions.showToast({ tone: 'neutral', icon: 'info', title: `${MAX_PHOTOS} photos max`, durationMs: 4_000 });
-    }
+    droppedRef.current += dropped;
+    crop.enqueue(files.slice(0, take));
   };
 
   const slotLabel = count === 0
@@ -137,9 +156,10 @@ export function PhotoSlot({ photos, onPhotosChange, timing, onTimingChange, read
           multiple
           tabIndex={-1}
           aria-hidden
-          onChange={(e) => void onFiles(e.currentTarget.files)}
+          onChange={(e) => onFiles(e.currentTarget.files)}
         />
       ) : null}
+      {!readOnly ? <CropSheet item={crop.current} position={crop.position} onUse={crop.use} onRetake={crop.retake} /> : null}
       {!readOnly ? (
         <PhotoManager
           open={managerOpen}

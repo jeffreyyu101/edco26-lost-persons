@@ -27,6 +27,7 @@ import {
   type CreateResult,
   type DraftPhoto,
   type MutationResult,
+  type PreparePhotoOptions,
   type RequestDraft,
   type StoreActions,
   type StoreState,
@@ -251,7 +252,7 @@ export function createStubStore(options: StubOptions): AppStore {
       putRow({ ...row, photoCount: row.photoCount + added, firstPhotoId: row.firstPhotoId ?? photos[0]?.photoId ?? null, rowVersion: row.rowVersion + added });
       return { added, failed: photos.length - added };
     },
-    async preparePhoto(file: File): Promise<DraftPhoto> {
+    async preparePhoto(file: File, _options?: PreparePhotoOptions): Promise<DraftPhoto> {
       return { photoId: crypto.randomUUID(), blob: file, thumbBlob: file, width: 0, height: 0 };
     },
     async fetchDetail(id): Promise<RequestDetail> {

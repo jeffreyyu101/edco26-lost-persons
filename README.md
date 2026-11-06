@@ -75,6 +75,12 @@ Photos live in a **private** Storage bucket named `patient-photos` (JPEG, PNG or
 full image of up to 1600 px and a 320 px thumbnail. Pages load them through `/api/photos/:id`, which checks
 the session and redirects to a signed URL that lasts 120 s. Never make the bucket public.
 
+Every photo is prepared **on the phone** before it is saved or sent (`lib/client/image.ts`): an optional
+quick crop, an area-averaged downscale, and a conservative cleanup for photos of a phone screen (auto levels
+and light sharpening, each only when the photo measures as needing it; `lib/client/image-enhance.ts`).
+Re-encoding strips EXIF and GPS. The cleanup adds no request and no server work, and the upload is never
+bigger than the app made it before the cleanup existed (design/DECISIONS.md v2.2 #10).
+
 ## Run it locally
 
 ```bash
@@ -127,6 +133,9 @@ Pending.
   A change made by someone else shows as "Updated by someone else".
 - **Alerts** appear only while the app is open: changes to your requests by someone else, and new requests
   when alerts are on (the bell, in the avatar menu). There are no lock-screen notifications.
+- **Photos.** After a photo is taken or picked, a crop step shows it with the whole photo selected: **Use
+  photo** keeps it as it is, dragging a corner cuts away a phone's bezel, **Retake** opens the camera again.
+  Photos of a phone screen are cleaned up on the phone (levels, light sharpening) before upload.
 - **Offline.** A new request (with its photos) is saved on the phone first and sent when the signal is back.
   Answers, edits and adding photos to an existing request need a connection.
 - **Dashboard.** Status count tiles first, then Open by post, Recently updated, and Performance last (longest
