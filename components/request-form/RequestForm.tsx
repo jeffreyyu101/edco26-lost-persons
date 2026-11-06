@@ -6,10 +6,13 @@
 // stays above the on-screen keyboard (useKeyboardFit). Every person and contact field is free text.
 // Controlled: RequestFormView owns the values, the draft and the store calls.
 // Tablet and desktop (desktop-new-tablet.html frame 1, `presentation` sheet / modal): the same fields in a
-// dialog. The post is a chip in the header, the groups become boxed fields labelled by their placeholders
-// (screen readers keep the real labels), the modal puts Missing person left and Friend or family + More
-// details right, the place chips stay visible, and the footer is Cancel + Send with its ⌘↵ key cap. The
-// phone page keeps Jeffrey's order and markup exactly (no column wrappers under 768 px).
+// dialog, in Jeffrey's order (10:31) with nothing to expand. The post is a chip in the header; Missing
+// person is boxed fields labelled by their placeholders (screen readers keep the real labels) with the
+// place chips always on screen; More details follows it in the same column as one card of label / value
+// rows (labels stay visible: these values don't name themselves); Friend or family is last. The modal puts
+// Missing person + More details left and Friend or family right; the side sheet stacks the same order in
+// one column. The footer is Cancel + Send with its ⌘↵ key cap. The phone page keeps Jeffrey's order and
+// markup exactly (no column wrappers under 768 px).
 import { Badge, Button, Text } from '@radix-ui/themes';
 import { ArrowUpRight, Check, ChevronDown, CloudOff, MapPin, UserRoundSearch } from 'lucide-react';
 import {
@@ -274,9 +277,9 @@ export function RequestForm(props: RequestFormProps) {
     if (!props.submitDisabled && !busy) props.onSubmit();
   };
 
-  // ---- The groups. The phone renders them in Jeffrey's order (Missing person, More details, Friend or
-  // family) straight in the form; the dialog puts Missing person in one column and Friend or family +
-  // More details in the other (desktop-new-tablet.html frame 1).
+  // ---- The groups, in Jeffrey's order (Missing person, More details, Friend or family). The phone renders
+  // them straight in the form; the dialog wraps Missing person + More details in one column and Friend or
+  // family in the other, so the modal sets them side by side and the sheet stacks them in the same order.
   const personGroup =
     section !== 'friend' ? (
       <>
@@ -644,15 +647,15 @@ export function RequestForm(props: RequestFormProps) {
 
           {desk ? (
             <>
-              {personGroup ? (
+              {personGroup || moreGroup ? (
                 <div className="lp-rf-col" data-col="person">
                   {personGroup}
+                  {moreGroup}
                 </div>
               ) : null}
-              {friendGroup || moreGroup ? (
+              {friendGroup ? (
                 <div className="lp-rf-col" data-col="friend">
                   {friendGroup}
-                  {moreGroup}
                 </div>
               ) : null}
             </>
