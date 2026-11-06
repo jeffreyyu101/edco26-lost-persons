@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { RequestSummary } from '@/lib/api-types';
 import { searchRequests } from '@/lib/client/selectors';
 import { stubRows } from '@/lib/client/stub-data';
+import { mergeRows, normalizeRow, overlayForPatch, replaceAll } from '@/lib/client/sync-merge';
 
 const NOW = Date.parse('2026-11-07T03:10:00Z');
 const base = stubRows(NOW);
@@ -28,5 +29,35 @@ describe('search: free-text age', () => {
     const numeric = rows.map((r) => (r.caseNumber === 1011 ? { ...r, age: '24' } : r));
     expect(searchRequests(numeric, '24').filter((h) => h.field === 'age')).toEqual([]);
     expect(searchRequests(numeric, 'LP-1011').map((h) => h.field)).toEqual(['caseNumber']);
+  });
+});
+
+// Rows cached on a phone before the deploy (and a pending edit from the form) can still hold a number.
+describe('search: a numeric age from before the free-text change', () => {
+  const numeric = (r: RequestSummary, age: number) => ({ ...r, age: age as unknown as string });
+
+  it('a text query over rows with a numeric age never throws (the search guards on its own)', () => {
+    const legacy = base.map((r) => numeric(r, 24));
+    expect(() => searchRequests(legacy, 'zebra')).not.toThrow();
+    expect(searchRequests(legacy, 'zebra')).toEqual([]);
+    expect(() => searchRequests([numeric(at(1013), 0), numeric(at(1012), 19)], 'x')).not.toThrow();
+    // Other fields still match as before.
+    expect(searchRequests(legacy, 'kayla').map((h) => [h.row.caseNumber, h.field])).toEqual([[1012, 'name']]);
+  });
+
+  it('rows entering client state are texted: merge, full fetch, edit overlay', () => {
+    const row = numeric(at(1013), 24);
+    expect(normalizeRow(row).age).toBe('24');
+    expect(normalizeRow(at(1012))).toBe(at(1012)); // already text: same object
+    expect(normalizeRow({ ...at(1012), age: null }).age).toBeNull();
+    expect(normalizeRow(numeric(at(1012), Number.NaN)).age).toBeNull();
+    expect(mergeRows(new Map(), [row])?.get(row.id)?.age).toBe('24');
+    expect(replaceAll(new Map(), [row], new Set()).get(row.id)?.age).toBe('24');
+    // An equal-version re-delivery of the same numeric row keeps the stored (texted) row's identity.
+    const stored = new Map([[row.id, normalizeRow(row)]]);
+    expect(mergeRows(stored, [row])).toBeNull();
+    expect(replaceAll(stored, [row], new Set()).get(row.id)).toBe(stored.get(row.id));
+    expect(overlayForPatch(at(1013), { age: 24 }).age).toBe('24');
+    expect(overlayForPatch(at(1013), { age: ' mid-20s ' }).age).toBe('mid-20s');
   });
 });

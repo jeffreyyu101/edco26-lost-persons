@@ -187,7 +187,8 @@ export function searchRequests(rows: readonly RequestSummary[], query: string): 
       ['identifyingFeatures', row.identifyingFeatures],
       ['hair', row.hair],
       ['post', `${row.postShort} · ${postFull(row.reportingLocation, row.otherLocation)}`],
-      ['age', caseNumber === null ? row.age : null],
+      // String(): a row cached before age became text can still hold a number (24) in memory.
+      ['age', caseNumber === null && row.age !== null && row.age !== undefined ? String(row.age) : null],
     ];
     for (const [field, text] of fields) {
       if (!text) continue;

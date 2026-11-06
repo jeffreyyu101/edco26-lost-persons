@@ -70,7 +70,8 @@ describe('monotonic merge (spec §7 Merge, A11)', () => {
       otherLocation: 'Gate 2',
       postShort: 'Gate 2',
     });
-    expect(overlayForPatch(row, { age: 30 })).toEqual({ age: 30 });
+    // The form still sends a number; the overlay holds the text the server answers (age is free text).
+    expect(overlayForPatch(row, { age: 30 })).toEqual({ age: '30' });
   });
 
   it('strips photos and audit from a detail', () => {
