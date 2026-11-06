@@ -72,7 +72,8 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 - [ ] A Home Screen app signs in on its own and keeps its own saved requests, separate from the Safari tab.
 - [ ] With the mute switch on, an alert still shows its toast (silently).
 - [ ] Export CSV from the Home Screen app opens in a new tab.
-- [ ] Redeploy on Vercel with an old tab open: "Update ready · Reload" appears.
+- [ ] Redeploy on Vercel with an old tab open: "Update ready · Reload" appears. It shows only once the phone
+  has cached the whole new build, which needs `/sw-manifest.json` on the deploy (written by `next build`).
 - [ ] Airplane mode in the middle of a send: it says "Saved on this phone" and sends once the signal is back,
       exactly once.
 - [ ] Lie-fi (one bar): a new request queues after about 10 s and sends later.
