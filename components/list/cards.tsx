@@ -108,12 +108,15 @@ export function WaitBadge({ minutes }: { minutes: number }) {
   );
 }
 
-/** Name + age/sex, then "LP-1010 · FA 4" (requests.html Who). */
-function Who({ name, ag, sub }: { name: string; ag: string; sub: string }) {
+/**
+ * Name + age/sex, then "LP-1010 · FA 4" (requests.html Who). `nameId` / `subId` let the card's action
+ * buttons point at this text (aria-describedby works on hidden text) without repeating it.
+ */
+function Who({ name, ag, sub, nameId, subId }: { name: string; ag: string; sub: string; nameId?: string; subId?: string }) {
   return (
     <div className={s.qn}>
       <div className={s.l1}>
-        <Text size="3" weight="medium">
+        <Text size="3" weight="medium" id={nameId}>
           {name}
         </Text>
         {ag ? (
@@ -122,7 +125,7 @@ function Who({ name, ag, sub }: { name: string; ag: string; sub: string }) {
           </Text>
         ) : null}
       </div>
-      <Text size="1" color="gray" truncate>
+      <Text size="1" color="gray" truncate id={subId}>
         {sub}
       </Text>
     </div>
@@ -190,7 +193,7 @@ export const ComingCard = memo(function ComingCard({ row, now, offline, onTap }:
         <Thumb photoId={row.firstPhotoId} small />
         <div className={s.qn} aria-hidden>
           <div className={s.l1}>
-            <Text size="2" weight="medium">
+            <Text size="2" weight="medium" id={nameId}>
               {displayName(row.name)}
             </Text>
             {ag ? (
@@ -218,7 +221,6 @@ export const ComingCard = memo(function ComingCard({ row, now, offline, onTap }:
           Reunited
         </Button>
       </div>
-      <VisuallyHidden id={nameId}>{`${displayName(row.name)}, ${formatCaseNumber(row.caseNumber)}`}</VisuallyHidden>
       {offline ? <VisuallyHidden id={reasonId}>Needs a connection</VisuallyHidden> : null}
     </Card>
   );
@@ -227,20 +229,21 @@ export const ComingCard = memo(function ComingCard({ row, now, offline, onTap }:
 export const CheckCard = memo(function CheckCard({ row, now, offline, onTap }: ActionCardProps) {
   const reasonId = useId();
   const nameId = useId();
+  const subId = useId();
   const minutes = minutesSince(row.createdAt, now);
   const desc = cardDescription(row);
   const ag = ageGender(row.age, row.gender);
   const sub = `${formatCaseNumber(row.caseNumber)} · ${row.postShort}`;
   const label = `${whoPhrase(row)}. ${sub}. Waiting ${minutesPhrase(minutes)}.${desc ? ` ${desc}` : ''}`;
   const fresh = isFresh(row.createdAt, now);
-  const describedBy = offline ? `${nameId} ${reasonId}` : nameId;
+  const describedBy = offline ? `${nameId} ${subId} ${reasonId}` : `${nameId} ${subId}`;
   return (
     <Card size="2" className={`${s.card} ${fresh ? s.fresh : ''}`} data-testid="check-card">
       <OpenButton id={row.id} label={label} />
       <div aria-hidden>
         <div className={s.qh}>
           <Thumb photoId={row.firstPhotoId} />
-          <Who name={displayName(row.name)} ag={ag} sub={sub} />
+          <Who name={displayName(row.name)} ag={ag} sub={sub} nameId={nameId} subId={subId} />
           <WaitBadge minutes={minutes} />
         </div>
         {desc ? (
@@ -272,7 +275,6 @@ export const CheckCard = memo(function CheckCard({ row, now, offline, onTap }: A
           In medical
         </Button>
       </div>
-      <VisuallyHidden id={nameId}>{`${displayName(row.name)}, ${formatCaseNumber(row.caseNumber)}`}</VisuallyHidden>
       {offline ? <VisuallyHidden id={reasonId}>Needs a connection</VisuallyHidden> : null}
     </Card>
   );
@@ -328,7 +330,13 @@ export function OutboxCard({ item, now }: { item: OutboxItem; now: number }) {
   const sub = `${d.caseText} · ${d.post}`;
   const label = `${d.ageGender ? `${d.name}, ${d.ageGender}` : d.name}. ${d.post}. ${d.label}, saved on this phone ${minutesPhrase(minutes)} ago.${d.needsAttention ? ' Open to fix and resend.' : ''}`;
   return (
-    <Card size="2" className={s.card} data-outbox-id={item.mutationId} data-testid="outbox-card">
+    <Card
+      size="2"
+      className={s.card}
+      data-outbox-id={item.mutationId}
+      data-testid="outbox-card"
+      {...(d.needsAttention ? {} : { role: 'group', 'aria-label': label })}
+    >
       {d.needsAttention ? (
         <button
           type="button"
@@ -336,9 +344,7 @@ export function OutboxCard({ item, now }: { item: OutboxItem; now: number }) {
           aria-label={label}
           onClick={() => navigate({ outbox: item.mutationId })}
         />
-      ) : (
-        <VisuallyHidden>{label}</VisuallyHidden>
-      )}
+      ) : null}
       <div aria-hidden>
         <div className={s.qh}>
           <OutboxThumb item={item} />
