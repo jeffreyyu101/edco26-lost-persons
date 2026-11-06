@@ -346,12 +346,15 @@ export function SearchView({ q }: SearchViewProps) {
   const loading = useIsLoading();
   const inputRef = useRef<HTMLInputElement>(null);
   const hasQuery = query.trim() !== '';
+  // Freshly opened (empty) search takes focus; coming back to results (Back from a profile) does not
+  // pop the keyboard over them.
+  const [focusOnMount] = useState(q === '');
   useScrollMemory('search', !loading);
 
   useEffect(() => {
     // Takes focus from primeKeyboard()'s proxy input, so iOS keeps the keyboard up.
-    inputRef.current?.focus({ preventScroll: true });
-  }, []);
+    if (focusOnMount) inputRef.current?.focus({ preventScroll: true });
+  }, [focusOnMount]);
 
   const change = (value: string) => {
     setText(value);
