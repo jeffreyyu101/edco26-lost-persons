@@ -56,8 +56,11 @@ export function isStatus(value: unknown): value is Status {
   return typeof value === 'string' && (STATUSES as readonly string[]).includes(value);
 }
 
-/** v2.1 A3. Dimming and Reopen apply to `closed` only. */
-export type StatusBucket = 'open' | 'answered' | 'closed';
+/**
+ * v2.1 A3. Dimming and Reopen apply to `closed` only. v2.2 (Jeffrey, 2026-11-06 09:11): Not in medical counts as
+ * closed and is greyed out, so there is no separate `answered` bucket any more.
+ */
+export type StatusBucket = 'open' | 'closed';
 
 /** Radix colour name used for the status label text and the status block background. */
 export type StatusTone = 'blue' | 'amber' | 'green' | 'gray';
@@ -65,7 +68,7 @@ export type StatusTone = 'blue' | 'amber' | 'green' | 'gray';
 /** Which status glyph to draw (components/ui/StatusGlyph ports the mockup SVG for each). */
 export type GlyphKind =
   | 'waiting' // empty ring, blue
-  | 'notInMedical' // filled circle with ×, amber
+  | 'notInMedical' // filled circle with ×, grey (closed, v2.2)
   | 'inMedical' // ring with a ¾ pie, green
   | 'closed' // filled check, grey
   | 'queued' // dashed ring, grey (outbox item, not sent yet)
@@ -83,7 +86,7 @@ export interface StatusMeta {
 
 export const STATUS_META: Readonly<Record<Status, StatusMeta>> = {
   [STATUS.waiting]: { label: 'Waiting for check', shortLabel: 'Waiting for check', tone: 'blue', glyph: 'waiting', bucket: 'open' },
-  [STATUS.notInMedical]: { label: 'Not in medical', shortLabel: 'Not in medical', tone: 'amber', glyph: 'notInMedical', bucket: 'answered' },
+  [STATUS.notInMedical]: { label: 'Not in medical', shortLabel: 'Not in medical', tone: 'gray', glyph: 'notInMedical', bucket: 'closed' },
   [STATUS.inMedical]: { label: 'In medical · friend coming', shortLabel: 'In medical', tone: 'green', glyph: 'inMedical', bucket: 'open' },
   [STATUS.reunited]: { label: 'Reunited', shortLabel: 'Reunited', tone: 'gray', glyph: 'closed', bucket: 'closed' },
   [STATUS.discharged]: { label: 'Discharged', shortLabel: 'Discharged', tone: 'gray', glyph: 'closed', bucket: 'closed' },

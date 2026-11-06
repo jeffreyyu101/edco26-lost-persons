@@ -275,6 +275,8 @@ export function createStubStore(options: StubOptions): AppStore {
           ? { id: oldest.id, caseNumber: oldest.caseNumber, reportingLocation: oldest.reportingLocation, otherLocation: oldest.otherLocation, postShort: oldest.postShort, minutes: minutesSince(oldest.createdAt) }
           : null,
         avgAnswerMinutes: 9,
+        avgReuniteMinutes: 18,
+        loggedLastHour: 6,
         byPost: [
           ...fixed.map((loc) => ({ reportingLocation: loc, otherLocation: null, postShort: postShort(loc), count: open.filter((r) => r.reportingLocation === loc).length })),
           ...otherPosts(open.filter((r) => !fixed.includes(r.reportingLocation))),

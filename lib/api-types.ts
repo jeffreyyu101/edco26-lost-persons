@@ -208,6 +208,13 @@ export interface Stats {
   /** Mean minutes from logged to first answer, over answers in the last 2 hours; null if none. */
   avgAnswerMinutes: number | null;
   /**
+   * v2.2 (dashboard Performance, Jeffrey 2026-11-06). Mean minutes from the In medical answer to Reunited, over
+   * reunions in the last 2 hours; null if none.
+   */
+  avgReuniteMinutes: number | null;
+  /** v2.2. Requests logged in the last 60 minutes (any status). */
+  loggedLastHour: number;
+  /**
    * The 4 fixed posts always (count may be 0), then one entry per other location with open rows: Other
    * grouped by otherLocation (case-insensitive), and a legacy post value (e.g. 'FA 3') as itself. The counts
    * add up to open.waiting + open.inMedical.
