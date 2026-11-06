@@ -36,8 +36,10 @@ function secretKey() {
   return new TextEncoder().encode(secret);
 }
 
-export async function createSession(staffName: string) {
-  const token = await new SignJWT({ staffName })
+export type StaffSession = { staffName: string; department: string };
+
+export async function createSession(staffName: string, department: string) {
+  const token = await new SignJWT({ staffName, department })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('12h')
@@ -54,7 +56,7 @@ export async function createSession(staffName: string) {
   });
 }
 
-export async function currentStaff() {
+export async function currentSession(): Promise<StaffSession | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get('edc_session')?.value;
 
@@ -62,13 +64,16 @@ export async function currentStaff() {
 
   try {
     const { payload } = await jwtVerify(token, secretKey());
-
-    return typeof payload.staffName === 'string'
-      ? payload.staffName
-      : null;
+    if (typeof payload.staffName !== 'string' || typeof payload.department !== 'string') return null;
+    return { staffName: payload.staffName, department: payload.department };
   } catch {
     return null;
   }
+}
+
+export async function currentStaff() {
+  const session = await currentSession();
+  return session ? `${session.staffName} · ${session.department}` : null;
 }
 
 export function jsonError(message: string, status = 400) {

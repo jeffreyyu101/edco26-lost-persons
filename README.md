@@ -32,16 +32,16 @@ node -e "const b=require('bcryptjs'); console.log(Buffer.from(b.hashSync(process
 
 The initial database schema is in [`supabase/schema.sql`](supabase/schema.sql). It includes patients, audit events, and patient photo metadata with RLS enabled and no browser-access policies. Create a **private** Storage bucket named `patient-photos`, restricted to JPEG/PNG/WebP and 5 MB. The server checks the staff session and issues 60-second signed photo URLs.
 
-The existing Supabase project is already configured. Do not rerun the initial schema against it. The `last_seen` migration in [`supabase/migrations/20261105_add_last_seen.sql`](supabase/migrations/20261105_add_last_seen.sql) was applied and verified on 2026-11-05. The app no longer uses requester check-in or search-attempt flows; legacy tables may remain in the project.
+The existing Supabase project is already configured. Do not rerun the initial schema against it. The `last_seen` migration in [`supabase/migrations/20261105_add_last_seen.sql`](supabase/migrations/20261105_add_last_seen.sql) was applied and verified on 2026-11-05. Before deploying the current workflow update, run [`supabase/migrations/20261105_update_locations_and_statuses.sql`](supabase/migrations/20261105_update_locations_and_statuses.sql) in the Supabase SQL Editor; it updates allowed locations and statuses. The app no longer uses requester check-in or search-attempt flows; legacy tables may remain in the project.
 
 ## Current product behavior
 
-- Shared password login, HTTP-only signed 12-hour session cookie, and staff-entered display name (not verified identity).
+- Shared password login, HTTP-only signed 12-hour session cookie, staff-entered display name (not verified identity), and department selection stored in the session: GC/HX Dispatch, GC/HX Special Operations/Med Transpo, GC/HX Base, Prevent, or Other.
 - Shared patient log with search/filter, CSV export, 15-second refresh, manual refresh, and open-profile refresh.
 - Patient profile with intake location/time, current workflow stage, and a dated dot-line timeline backed by `audit_events`.
-- Seven statuses. Status changes save automatically on selection. Unusual transitions are muted but selectable and show a warning.
+- Seven statuses with dot-separated display labels. Status changes stay as a draft and save on profile close; conflicting updates are detected. Unusual transitions are muted but selectable and show a warning.
 - Private photo upload/viewing; maximum three active photos per patient.
-- New inquiries can be queued in browser local storage while offline. Existing edits and status changes are online-only. Reporting location preference is remembered per staff name for the browser session.
+- New inquiries can be queued in browser local storage while offline. Existing edits and status changes are online-only. Reporting location preference is remembered per staff name for the browser session. Command and Base are available as reporting locations.
 
 See [`HANDOFF.md`](HANDOFF.md) for the current PRD, known limitations, and prioritized readiness checklist.
 

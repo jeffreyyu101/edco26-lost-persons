@@ -36,9 +36,9 @@ The profile is a journey timeline, not a collection of medical-search or request
 1. **Added** — first timeline point, with the reporting location and intake time.
 2. **Checked – Not Found** — a completed check with no match; show its timestamp and “repeat later” meaning.
 3. **Found – Awaiting Reunion** — found and waiting for reunification.
-4. **Reunited – Closed**, **Found – Discharged**, **Found – Transported**, and **Cancelled** — closed outcomes.
+4. **Reunited – Closed**, **Found – Discharged**, and **Cancelled** — closed outcomes. **Bring friend to medical** is an open coordination status.
 
-The current stage appears near the top of the profile. The status dropdown includes all statuses and saves automatically on selection. Expected transitions are normal text; unusual transitions are muted but remain selectable and show an inline warning. Saving appends an audit event and refreshes the open profile and log.
+The current stage appears near the top of the profile. The status dropdown uses dot-separated labels (for example, `Added · Awaiting search` and `Closed · Reunited`). A selected status stays as a draft while the profile is open and is saved to the workflow log when staff close the profile. Expected transitions look normal; unusual transitions are muted but remain selectable and show an inline warning. Saving appends an audit event and refreshes the profile and log.
 
 The `audit_events` relationship supplies workflow history. Intake is represented from the patient’s `created_at`; status transitions use `occurred_at`. Existing historic `medical_search` and `medical_search_found` audit entries are still interpreted for timeline continuity where possible. There is no medical-search UI/API now.
 
@@ -88,8 +88,8 @@ Treat “ready” as a verified staging/demo state, not automatic approval to us
 - Confirm `.env.local` is ignored by Git before staging or committing. Never print or copy secret values.
 - Keep the repository private. Review staged files before committing; do not stage `.env.local`, `.next`, or `node_modules`.
 - Run `npm ci`, `npm test`, and `npm run build` from a clean checkout.
-- Use synthetic records to manually verify: login/sign-out/session expiry; create; search/filter; profile intake details; status autosave; found/reunified/closed timeline; cross-refresh state; CSV export; and edits.
-- Test on a real iPhone in Safari: sign-in, create, open profile, select a status, verify autosave and warning for unusual transition, view timeline, rotate/scroll, and refresh.
+- Use synthetic records to manually verify: login/sign-out/session expiry; create; search/filter; profile intake details; status draft and save-on-profile-close; found/reunited/closed timeline; cross-refresh state; CSV export; and edits.
+- Test on a real iPhone in Safari: sign-in, create, open profile, select and change a status repeatedly, close the profile and verify there is only one saved final transition and warning for unusual transition, view timeline, rotate/scroll, and refresh.
 - Test upload/view for valid image types, wrong content type, over 5 MB, fourth photo, unauthenticated access, and private bucket behavior. Do not use real photos.
 
 ### P0 — decide whether this is local demo or multi-device operation

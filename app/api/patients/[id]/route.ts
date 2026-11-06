@@ -26,6 +26,9 @@ export async function PATCH(
     .single();
 
   if (!old) return jsonError('Inquiry not found.', 404);
+  if (body.expected_status !== undefined && body.expected_status !== old.status) {
+    return jsonError('Status changed by another staff member. The latest status is shown; choose again if needed.', 409);
+  }
 
   const allowed = [
     'first_name',
@@ -59,9 +62,9 @@ export async function PATCH(
 
   const now = new Date().toISOString();
   if (body.status && body.status !== old.status) {
-    if (['Found – Awaiting Reunion', 'Found – Discharged', 'Found – Transported'].includes(String(body.status)) && !old.found_at) patch.found_at = now;
+    if (['Found – Awaiting Reunion', 'Found – Discharged', 'Bring friend to medical'].includes(String(body.status)) && !old.found_at) patch.found_at = now;
     if (body.status === 'Found – Awaiting Reunion' && old.status !== 'Found – Awaiting Reunion') patch.reunion_started_at = now;
-    if (['Reunited – Closed', 'Found – Discharged', 'Found – Transported', 'Cancelled'].includes(String(body.status))) patch.closed_at = now;
+    if (['Reunited – Closed', 'Found – Discharged', 'Cancelled'].includes(String(body.status))) patch.closed_at = now;
     else patch.closed_at = null;
   }
 
