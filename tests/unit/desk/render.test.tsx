@@ -51,7 +51,7 @@ describe('DeskFrame', () => {
     expect(html).not.toContain('inert');
   });
 
-  it('on the desk tells the views, docks a pane and holds a form over the rest (inert)', () => {
+  it('on the desk tells the views, docks a pane and holds a form over the rest', () => {
     const html = render(
       <DeskFrame desk nav={<i data-slot="nav" />} top={<i data-slot="top" />} pane={<i data-slot="pane" />}>
         <Probe />
@@ -69,7 +69,9 @@ describe('DeskFrame', () => {
       </DeskFrame>,
     );
     expect(withForm).toContain('data-slot="form"');
-    expect((withForm.match(/inert=""/g) ?? []).length).toBe(2);
+    // Inert is decided once mounted (a form that portals its own dialog leaves the layer empty and
+    // covers nothing): tests/e2e/desk-shell.spec.ts checks it in a browser.
+    expect(withForm).not.toContain('inert');
   });
 });
 

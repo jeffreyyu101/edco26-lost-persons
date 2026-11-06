@@ -21,9 +21,9 @@ export function isFormView(view: View): view is FormView {
   return view.name === 'new' || view.name === 'edit' || view.name === 'outbox';
 }
 
-/** The request open in the detail pane, or null. */
+/** The request open in the detail pane, or null. Its edit form opens over it, so the pane stays behind. */
 export function paneRequestId(view: View): string | null {
-  return view.name === 'profile' ? view.id : null;
+  return view.name === 'profile' || view.name === 'edit' ? view.id : null;
 }
 
 /** The main view to keep showing when `view` is not one (a request or a form is open). */

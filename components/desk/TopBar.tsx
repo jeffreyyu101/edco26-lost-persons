@@ -47,7 +47,8 @@ export function DeskTop({ main }: DeskTopProps) {
       >
         <Search size={17} strokeWidth={1.75} aria-hidden />
       </IconButton>
-      {/* Named by its visible text: "New request", or "New" when the column is narrow. */}
+      {/* Named by its visible text: "New request", or "New" when the column is narrow (an aria-label would
+          not match the visible text, axe label-content-name-mismatch). */}
       <button type="button" className={`${d.newb} lp-hit`} aria-keyshortcuts="N" onClick={() => navigate({ new: true })} data-testid="desk-new">
         <Plus size={15} strokeWidth={2.25} aria-hidden />
         <span className={d.newLong}>New request</span>

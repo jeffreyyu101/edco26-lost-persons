@@ -11,7 +11,7 @@
 // The slot contents (sidebar / rail, top bar, pane header) come from the desk chunk
 // (components/desk/DeskChrome.tsx), loaded only on the desk; this file stays tiny because it is on the
 // first-load path of `/` (spec §7 Performance, the A25 budget).
-import type { ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { DeskContext } from './desk-context';
 import f from './frame.module.css';
 
@@ -24,14 +24,38 @@ export interface DeskFrameProps {
   top?: ReactNode;
   /** The detail pane (a request), or null when none is open. */
   pane?: ReactNode;
-  /** A form (new request, edit, needs attention) over the desk, or null. */
+  /**
+   * A form (new request, edit, needs attention) over the desk, or null. Drawn in place, it covers the main
+   * column and the pane, which go inert. A form that portals its own dialog (the desk side sheet / modal)
+   * leaves the layer empty: the layer then hides itself and the list stays visible behind the dialog,
+   * whose own focus trap does the rest.
+   */
   form?: ReactNode;
   /** The main column: a list or the dashboard on the desk, the whole view on the phone. */
   children: ReactNode;
 }
 
+/** True while `ref`'s element has child elements (a portalled dialog leaves it empty). */
+function useOccupied(ref: RefObject<HTMLElement | null>, active: boolean): boolean {
+  const [occupied, setOccupied] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!active || !el) {
+      setOccupied(false);
+      return;
+    }
+    const update = () => setOccupied(el.childElementCount > 0);
+    update();
+    const observer = new MutationObserver(update);
+    observer.observe(el, { childList: true });
+    return () => observer.disconnect();
+  }, [ref, active]);
+  return occupied;
+}
+
 export function DeskFrame({ desk, nav = null, top = null, pane = null, form = null, children }: DeskFrameProps) {
-  const covered = form !== null;
+  const formRef = useRef<HTMLDivElement>(null);
+  const covered = useOccupied(formRef, form !== null);
   return (
     <DeskContext.Provider value={desk}>
       <div className={f.frame} data-desk={desk ? '' : undefined} data-pane={pane ? '' : undefined}>
@@ -47,7 +71,11 @@ export function DeskFrame({ desk, nav = null, top = null, pane = null, form = nu
             {pane}
           </div>
         ) : null}
-        {form ? <div className={f.form}>{form}</div> : null}
+        {form ? (
+          <div className={f.form} ref={formRef}>
+            {form}
+          </div>
+        ) : null}
       </div>
     </DeskContext.Provider>
   );

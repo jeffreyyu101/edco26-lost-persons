@@ -43,7 +43,9 @@ describe('which view goes where', () => {
     expect(isFormView(view(`outbox=${ID}`))).toBe(true);
     expect(isFormView(view(`r=${ID}`))).toBe(false);
     expect(paneRequestId(view(`r=${ID}`))).toBe(ID);
-    expect(paneRequestId(view(`r=${ID}&edit=person`))).toBeNull();
+    // Editing keeps the request in the pane behind the form.
+    expect(paneRequestId(view(`r=${ID}&edit=person`))).toBe(ID);
+    expect(paneRequestId(view('new=1'))).toBeNull();
     expect(paneRequestId(view('view=pending'))).toBeNull();
   });
 

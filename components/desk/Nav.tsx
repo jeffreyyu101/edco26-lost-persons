@@ -3,7 +3,7 @@
 // desktop-new-tablet.html .rl. Both render; CSS shows one. Views with live counts, a divider, Dashboard;
 // at the bottom the Alerts switch and the signed-in person with the phone's account menu. Rail icons show
 // their label as a tooltip on hover and keyboard focus.
-import { BellOff, BellRing, ChartColumn, ChevronsUpDown, Inbox, List, UserRound, type LucideIcon } from 'lucide-react';
+import { BellOff, BellRing, ChartColumn, ChevronDown, Inbox, List, UserRound, type LucideIcon } from 'lucide-react';
 import { AccountMenu } from '@/components/account/AccountMenu';
 import { usePrefs, useCounts, useIsLoading, useSession } from '@/lib/client/store-contract';
 import { teamShort } from '@/lib/domain';
@@ -94,7 +94,7 @@ function Person() {
         <span className={d.mn}>{name || 'Signed in'}</span>
         {team ? <span className={d.mteam}>{teamShort(team)}</span> : null}
       </span>
-      <ChevronsUpDown size={14} strokeWidth={1.75} className={d.mchev} aria-hidden />
+      <ChevronDown size={14} strokeWidth={1.75} className={d.mchev} aria-hidden />
     </div>
   );
 }

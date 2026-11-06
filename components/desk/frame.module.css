@@ -89,6 +89,10 @@
     background: var(--color-background);
     border-left: 1px solid var(--gray-a4);
   }
+  /* The form portalled its own dialog (side sheet / modal): nothing to cover, the list shows behind it. */
+  .form:empty {
+    display: none;
+  }
 
   /* ---- Phone chrome inside the main column --------------------------------------------------------------
      The list and dashboard views are the phone's (another wave swaps in the desk table). Their own header

@@ -25,18 +25,22 @@ async function api<T>(request: APIRequestContext, method: 'GET' | 'POST', path: 
   return (await res.json()) as T;
 }
 
-async function createRequests(page: Page, n: number): Promise<RequestSummary[]> {
+/** Each test's own tag, so a search never finds another test's rows (cancelled rows stay searchable). */
+let tagSeq = 0;
+const nextTag = () => `${TAG}-t${(tagSeq += 1)}x`;
+
+async function createRequests(page: Page, n: number, tag: string = nextTag()): Promise<RequestSummary[]> {
   const rows: RequestSummary[] = [];
   for (let i = 1; i <= n; i += 1) {
     const { request } = await api<CreateResponse>(page.request, 'POST', '/api/requests', {
       clientMutationId: randomUUID(),
       reportingLocation: 'FA 3 – Kinetic',
-      name: `${TAG} P${i}`,
+      name: `${tag} P${i}`,
       age: 20 + i,
       gender: 'Female',
-      clothing: `Synthetic ${TAG} jacket ${i}`,
+      clothing: `Synthetic ${tag} jacket ${i}`,
       lastSeen: 'kineticFIELD rail',
-      contactName: `${TAG} Friend`,
+      contactName: `${tag} Friend`,
       contactPhone: '(407) 555-0142',
       contactRelationship: 'Friend',
     });
@@ -83,8 +87,8 @@ async function paneColumn(page: Page): Promise<number> {
 
 const activeRowId = (page: Page) => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset?.requestId ?? null);
 
-async function openSearchResults(page: Page) {
-  await page.goto(`/?q=${encodeURIComponent(TAG)}`);
+async function openSearchResults(page: Page, tag: string) {
+  await page.goto(`/?q=${encodeURIComponent(tag)}`);
   await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
 }
 
@@ -92,8 +96,9 @@ test.describe('desktop 1440 × 900', () => {
   test.use({ viewport: { width: 1440, height: 900 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
 
   test('sidebar, top bar and a request docked beside the list; J/K, Esc back to the row', async ({ page }) => {
-    const rows = await createRequests(page, 3);
-    await openSearchResults(page);
+    const tag = nextTag();
+    const rows = await createRequests(page, 3, tag);
+    await openSearchResults(page, tag);
 
     // Sidebar (not the rail), the top bar, and no phone chrome inside the main column.
     const sidebar = page.getByTestId('desk-sidebar');
@@ -106,7 +111,7 @@ test.describe('desktop 1440 × 900', () => {
     }
     await expect(sidebar.getByRole('switch', { name: 'Alerts' })).toBeVisible();
     await expect(page.getByRole('heading', { level: 1, name: 'Search' })).toBeVisible();
-    await expect(page.getByRole('searchbox', { name: 'Search requests' })).toHaveValue(TAG);
+    await expect(page.getByRole('searchbox', { name: 'Search requests' })).toHaveValue(tag);
     await expect(page.getByRole('button', { name: /^New request/ })).toHaveCount(1);
     // The Search view's own field (phone chrome) is hidden: the top bar's field drives it.
     await expect(page.locator('[data-desk-main] [data-view="search"] form[role="search"]')).toBeHidden();
@@ -144,7 +149,7 @@ test.describe('desktop 1440 × 900', () => {
     await page.keyboard.press('Escape');
     await expect(pane).toHaveCount(0);
     expect(paramOf(page, 'r')).toBeNull();
-    expect(paramOf(page, 'q')).toBe(TAG);
+    expect(paramOf(page, 'q')).toBe(tag);
     await expect.poll(() => activeRowId(page)).toBe(first);
 
     // With nothing open, J moves the selection (focus) and Enter opens it.
@@ -158,7 +163,8 @@ test.describe('desktop 1440 × 900', () => {
   });
 
   test('"/" searches, N opens New request, keys never fire while typing; the sidebar switches views', async ({ page }) => {
-    await createRequests(page, 1);
+    const tag = nextTag();
+    await createRequests(page, 1, tag);
     await page.goto('/');
     await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByRole('heading', { level: 1, name: /^All requests \d+$/ })).toBeVisible();
@@ -171,12 +177,12 @@ test.describe('desktop 1440 × 900', () => {
     await page.locator('body').press('/');
     const field = page.getByRole('searchbox', { name: 'Search requests' });
     await expect(field).toBeFocused();
-    await page.keyboard.type(TAG.slice(0, -1));
+    await page.keyboard.type(tag.slice(0, -1));
     await page.keyboard.type('n');
-    await expect(field).toHaveValue(`${TAG.slice(0, -1)}n`);
+    await expect(field).toHaveValue(`${tag.slice(0, -1)}n`);
     expect(paramOf(page, 'new')).toBeNull();
-    await field.fill(TAG);
-    await expect.poll(() => paramOf(page, 'q')).toBe(TAG);
+    await field.fill(tag);
+    await expect.poll(() => paramOf(page, 'q')).toBe(tag);
     await expect(page.getByRole('heading', { level: 1, name: 'Search' })).toBeVisible();
     await expect(main(page).locator('[data-request-id]')).toHaveCount(1);
     // Esc clears, then leaves search.
@@ -192,7 +198,9 @@ test.describe('desktop 1440 × 900', () => {
     await page.locator('body').press('n');
     await expect.poll(() => paramOf(page, 'new')).toBe('1');
     await expect(page.getByTestId('request-form-submit')).toBeVisible();
-    await expect(page.getByTestId('desk-sidebar').locator('xpath=ancestor::*[@inert]')).toHaveCount(1);
+    // Nothing behind the form can be reached: inert while the form covers the desk in place, hidden from
+    // assistive tech (and outside the focus trap) under a form that opens as a dialog.
+    await expect.poll(() => page.getByTestId('desk-sidebar').evaluate((el) => !!el.closest('[inert], [aria-hidden="true"]'))).toBe(true);
     await page.goBack();
     await expect.poll(() => paramOf(page, 'new')).toBeNull();
 
@@ -259,7 +267,8 @@ test.describe('iPad landscape 1180 × 820 (touch)', () => {
     // A narrow main column: the search icon and "New" (desktop-new-tablet.html, iPad landscape).
     await expect(page.getByRole('button', { name: 'Search', exact: true })).toBeVisible();
     await expect(page.getByRole('searchbox', { name: 'Search requests' })).toBeHidden();
-    await expect(page.getByTestId('desk-new')).toHaveText(/^New$/);
+    await expect.poll(async () => (await page.getByTestId('desk-new').innerText()).trim()).toBe('New');
+    await expect(page.getByTestId('desk-new')).toHaveAccessibleName('New');
 
     const coarse = await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
     test.skip(!coarse, 'this browser does not report a coarse pointer for touch emulation');
@@ -274,12 +283,13 @@ test.describe('iPad portrait 820 × 1180 (touch)', () => {
   test.use({ viewport: { width: 820, height: 1180 }, isMobile: false, hasTouch: true, deviceScaleFactor: 1 });
 
   test('the request is a 480 px sheet over the list, which stays visible and usable', async ({ page }) => {
-    const rows = await createRequests(page, 2);
-    await openSearchResults(page);
+    const tag = nextTag();
+    const rows = await createRequests(page, 2, tag);
+    await openSearchResults(page, tag);
     await expect(page.getByTestId('desk-rail')).toBeVisible();
     // Room for the full top bar: the search field with "/" and "New request" (desktop-new-tablet.html).
     await expect(page.getByRole('searchbox', { name: 'Search requests' })).toBeVisible();
-    await expect(page.getByTestId('desk-new')).toHaveText(/New request/);
+    await expect.poll(async () => (await page.getByTestId('desk-new').innerText()).replace(/\s+/g, ' ').trim()).toBe('New request N');
 
     const order = await rowOrder(page);
     const before = await main(page).boundingBox();

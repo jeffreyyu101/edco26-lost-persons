@@ -8,14 +8,14 @@ import { AlertDialog, Button, DropdownMenu, IconButton, Text } from '@radix-ui/t
 import { Check, ChevronDown, ChevronUp, Ellipsis, Pencil, RotateCcw, Trash2, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { RequestSummary } from '@/lib/api-types';
-import { goBack, navigate, viewToParams } from '@/lib/client/nav';
+import { goBack, navigate, parseView, viewToParams } from '@/lib/client/nav';
 import { useActions, useConnection, useRequest, useSession, type MutationResult } from '@/lib/client/store-contract';
 import { canCancel, menuActions, sameStaff, type StatusAction } from '@/lib/domain';
 import { formatCaseNumber } from '@/lib/format';
 import { MAIN_SELECTOR, readRowIds, rowElement } from './keyboard';
 import { Tip } from './parts';
 import { PANE_FALLBACK_LABEL, neighbours } from './nav-model';
-import type { MainView } from './views';
+import { paneRequestId, type MainView } from './views';
 import d from './desk.module.css';
 
 export interface DeskPaneProps {
@@ -27,9 +27,26 @@ export interface DeskPaneProps {
   children: ReactNode;
 }
 
+/** The address the last close left from (history.back() lands a moment later). */
+let closingFrom: string | null = null;
+/** The request the last close (Esc or ×) closed, until the shell's focus return takes it. */
+let closedId: string | null = null;
+
 /** Close the pane: back to the list it was opened from, or the main view on a deep link. */
 export function closePane(main: MainView): void {
+  // A second close before Back lands (a double click, Esc then ×) must not go back twice.
+  if (closingFrom === window.location.href) return;
+  closingFrom = window.location.href;
+  // From the address bar, not a render: J / K and ↑ / ↓ replace it a moment before React catches up.
+  closedId = paneRequestId(parseView(new URLSearchParams(window.location.search)));
   goBack(viewToParams(main));
+}
+
+/** The request closed by closePane since the last call, once (null after Back or a close by other means). */
+export function takeClosedPane(): string | null {
+  const id = closedId;
+  closedId = null;
+  return id;
 }
 
 /** Open another request in the pane (replaces the entry: Back still returns to the list). */
@@ -80,9 +97,12 @@ export function DeskPane({ id, main, children }: DeskPaneProps) {
   const label = row ? formatCaseNumber(row.caseNumber) : PANE_FALLBACK_LABEL;
   const bodyRef = useRef<HTMLDivElement>(null);
 
-  // Each request starts at its top (the pane scrolls on its own; the list keeps its place).
+  // Each request starts at its top (the pane scrolls on its own; the list keeps its place). A request
+  // (re)opened here can be closed again.
   useEffect(() => {
     bodyRef.current?.scrollTo(0, 0);
+    closingFrom = null;
+    closedId = null;
   }, [id]);
 
   return (
