@@ -1,0 +1,113 @@
+/* Avatar + account menu, ported from design/screens/states.html (.menu, .mhead, .mitem, .msep, .mfoot). */
+
+.menu,
+.menu *,
+.trigger {
+  box-sizing: border-box;
+}
+
+/* The 32 px avatar with a 44 px hit area. */
+.trigger {
+  position: relative;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  padding: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  color: inherit;
+}
+.trigger::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+.trigger:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+
+.menu {
+  padding: 6px !important;
+  border-radius: var(--radius-4) !important;
+}
+
+.mhead {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  min-width: 0;
+}
+.mhead > div {
+  min-width: 0;
+}
+.mhead :global(.rt-Text) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msep {
+  height: 1px;
+  background: var(--gray-a4);
+  margin: 6px 4px;
+}
+
+.mitem {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-2);
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--gray-12);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.mitem > svg {
+  color: var(--gray-10);
+  flex: none;
+}
+button.mitem:hover:not(:disabled),
+a.mitem:hover {
+  background: var(--gray-a3);
+}
+.mitem:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -2px;
+}
+.mitem:disabled {
+  cursor: default;
+  color: var(--gray-9);
+}
+.mitem.static {
+  cursor: default;
+}
+.sp {
+  flex: 1;
+}
+
+.mfoot {
+  padding: 6px 10px;
+}
+
+.btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 16px;
+}
+.btns :global(.rt-Button) {
+  white-space: nowrap;
+  padding-left: 12px;
+  padding-right: 12px;
+}
