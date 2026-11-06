@@ -295,7 +295,8 @@ drop function if exists public.lp_cancel(uuid, bigint, text);
 drop function if exists public.lp_add_photo(uuid, uuid, text, text, text, text);
 drop function if exists public.lp_login_begin(text, text);
 drop function if exists public.lp_login_finish(bigint, boolean);
-drop function if exists public.lp_stats();
+-- lp_stats is not dropped: it is `create or replace`d below (same signature and return type since the first
+-- production run), so a re-run never removes it, and its grants carry over.
 drop function if exists public.lp_detail(uuid);
 
 -- lp_canon_staff: canonical form of an attribution string "Name · Team", for creator checks.
@@ -1210,16 +1211,19 @@ begin
 end
 $fn$;
 
--- lp_stats: everything the dashboard needs (spec §8 + A21). camelCase keys, passed through by the server.
+-- lp_stats: everything the dashboard needs (spec §8 + A21 + A49). camelCase keys, passed through by the server.
 --   open {waiting, inMedical (legacy Bring friend counts as In medical)}; notInMedical, reunited,
---   discharged, cancelled and total over all rows; longestWait; avgAnswerMinutes; byPost; recent.
+--   discharged, cancelled and total over all rows; loggedLastHour (rows created in the last 60 minutes,
+--   any status); longestWait; avgAnswerMinutes; avgReuniteMinutes; byPost; recent.
 --   byPost: the 4 fixed posts always (count may be 0), then one entry per other location with open rows
 --   (Other grouped by other_location, legacy post values as themselves); the counts sum to open.
 --   postShort here must match postShort() in lib/domain.ts.
 --   STABLE (read-only): every statement below reads the same snapshot, so open, byPost, longestWait and
 --   recent always agree with each other even while requests change. A VOLATILE function would take a new
 --   snapshot per statement.
-create function public.lp_stats()
+--   create or replace (not drop + create): re-running this file on a database that already has lp_stats()
+--   replaces it in place, inside the one transaction.
+create or replace function public.lp_stats()
 returns jsonb
 language plpgsql
 stable
@@ -1233,6 +1237,7 @@ declare
   v_counts jsonb;
   v_longest jsonb;
   v_avg numeric;
+  v_avg_reunite numeric;
   v_by_post jsonb;
   v_recent jsonb;
 begin
@@ -1245,7 +1250,8 @@ begin
     'reunited', pg_catalog.count(*) filter (where status = 'Reunited – Closed'),
     'discharged', pg_catalog.count(*) filter (where status = 'Found – Discharged'),
     'cancelled', pg_catalog.count(*) filter (where status = 'Cancelled'),
-    'total', pg_catalog.count(*)
+    'total', pg_catalog.count(*),
+    'loggedLastHour', pg_catalog.count(*) filter (where created_at > v_now - interval '60 minutes')
   ) into v_counts
   from public.patients;
 
@@ -1292,6 +1298,40 @@ begin
   from first_answer f
   join public.patients p on p.id = f.patient_id
   where f.occurred_at > v_now - interval '2 hours';
+
+  -- Time to reunite (A49). One reunion per request: a request that is Reunited now, at its latest
+  -- status_changed into Reunited – Closed, when that happened in the last 2 hours. It is measured from the
+  -- latest In medical answer before it: a status_changed out of Added or Checked – Not Found into Found –
+  -- Awaiting Reunion or legacy Bring friend to medical (so Change answer restarts the clock, while an Undo
+  -- of Reunited or a Reopen, which leave a closed status, do not), or a legacy medical_search_found. A
+  -- reunion with no such answer before it is left out. Mean in minutes, 1 decimal; null when there is none.
+  with reunions as (
+    select distinct on (e.patient_id) e.patient_id, e.occurred_at
+    from public.audit_events e
+    join public.patients p on p.id = e.patient_id
+    where e.action_type = 'status_changed'
+      and e.new_value ->> 'status' = 'Reunited – Closed'
+      and p.status = 'Reunited – Closed'
+      and e.occurred_at > v_now - interval '2 hours'
+    order by e.patient_id, e.occurred_at desc
+  )
+  select pg_catalog.round((pg_catalog.avg(extract(epoch from (r.occurred_at - a.occurred_at))) / 60)::numeric, 1)
+    into v_avg_reunite
+  from reunions r
+  cross join lateral (
+    select e.occurred_at
+    from public.audit_events e
+    where e.patient_id = r.patient_id
+      and e.occurred_at <= r.occurred_at
+      and (
+        (e.action_type = 'status_changed'
+         and e.previous_value ->> 'status' in ('Added', 'Checked – Not Found')
+         and e.new_value ->> 'status' in ('Found – Awaiting Reunion', 'Bring friend to medical'))
+        or e.action_type = 'medical_search_found'
+      )
+    order by e.occurred_at desc
+    limit 1
+  ) as a;
 
   select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
            'reportingLocation', x.loc, 'otherLocation', x.other, 'postShort', x.short, 'count', x.n)
@@ -1349,6 +1389,7 @@ begin
   return v_counts || pg_catalog.jsonb_build_object(
     'longestWait', v_longest,
     'avgAnswerMinutes', v_avg,
+    'avgReuniteMinutes', v_avg_reunite,
     'byPost', v_by_post,
     'recent', v_recent,
     'serverTime', v_now
