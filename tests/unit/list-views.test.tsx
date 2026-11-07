@@ -8,13 +8,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BRAND_CREDIT_FOR, BRAND_CREDIT_NAMES, BRAND_KICKER } from '@/components/list/BrandCard';
 import { DeskContext } from '@/components/desk/desk-context';
 import { AllView, MineView, PendingView, SearchView } from '@/components/list/ListViews';
-import { PENDING_TAB_KEY, readPendingTab } from '@/components/list/PendingTabs';
 import { switcherLabel } from '@/components/list/ViewSwitcher';
 import {
   NO_NAME,
   archivedFoldLabel,
   cardDescription,
-  friendComingLine,
   highlightParts,
   isClosed,
   isFresh,
@@ -170,13 +168,6 @@ describe('list helpers', () => {
     expect(searchDisplay(lpHit!)).toMatchObject({ nameRanges: [], caseRanges: [[3, 7]] });
     const hairHit = searchRequests(rows, 'braids').find((h) => h.row.caseNumber === 1012);
     expect(hairHit && searchDisplay(hairHit).lineRanges.length).toBe(1);
-  });
-
-  it('friendComingLine: "<friend> · <relation>, on the way", with fallbacks', () => {
-    expect(friendComingLine({ contactName: ' Chris  P. ', contactRelationship: 'boyfriend' })).toEqual({ friend: 'Chris P.', rest: 'boyfriend, on the way' });
-    expect(friendComingLine({ contactName: 'Ana P.', contactRelationship: '  ' })).toEqual({ friend: 'Ana P.', rest: 'on the way' });
-    expect(friendComingLine({ contactName: null, contactRelationship: 'Sister' })).toEqual({ friend: 'Friend', rest: 'Sister, on the way' });
-    expect(friendComingLine({ contactName: null, contactRelationship: null })).toEqual({ friend: 'Friend', rest: 'on the way' });
   });
 
   it('copy helpers', () => {
@@ -691,28 +682,27 @@ describe('list views render', () => {
     expect(tag).toMatch(/dimCard/);
   });
 
-  it('Pending (phone): the To check | Friend coming control under the title, To check by default, one list at a time', () => {
+  it('Pending (phone, v9.1): one page, Waiting for check then Friend coming under their headers; no tabs', () => {
     const html = render(storeWith((s) => s), <PendingView />);
-    // The segmented control sits in the sticky bar, under the large title, with both counts.
-    const tabs = html.indexOf('data-testid="pending-tabs"');
-    expect(tabs).toBeGreaterThan(html.indexOf('data-testid="view-switcher"'));
-    expect(html).toMatch(/role="tablist" aria-label="Pending"/);
-    expect(html).toMatch(/role="tab"[^>]*aria-selected="true"[^>]*data-tab="check"/);
-    expect(html).toMatch(/role="tab"[^>]*aria-selected="false"[^>]*data-tab="coming"/);
-    const segText = (tab: string) => {
-      const at = html.indexOf(`data-tab="${tab}"`);
-      return html.slice(at, html.indexOf('</button>', at)).replace(/<svg[^]*?<\/svg>/g, '').replace(/<[^>]+>/g, '').replace(/<!-- -->/g, '').trim();
-    };
-    expect(segText('check').replace(/^[^>]*>/, '')).toMatch(/^To check\s*4$/);
-    expect(segText('coming').replace(/^[^>]*>/, '')).toMatch(/^Friend coming\s*3$/);
-    // One list: the 4 To check cards (oldest first), no Friend coming card, no section headers.
+    expect(html).not.toContain('data-testid="pending-tabs"');
+    expect(html).not.toContain('role="tablist"');
+    // The two sections, in this order, each under a 44 px header with its count and a fold button.
+    const check = html.indexOf('data-testid="pending-section-check"');
+    const coming = html.indexOf('data-testid="pending-section-coming"');
+    expect(check).toBeGreaterThan(html.indexOf('data-testid="view-switcher"'));
+    expect(coming).toBeGreaterThan(check);
+    expect(html).toMatch(/data-testid="queue-toggle-check"[^]*?>Waiting for check<\/span> <span[^>]*>4<\/span><span[^>]*> requests<\/span>/);
+    expect(html).toMatch(/data-testid="queue-toggle-coming"[^]*?>Friend coming<\/span> <span[^>]*>3<\/span><span[^>]*> requests<\/span>/);
+    expect(html.match(/aria-expanded="true"[^>]*data-testid="queue-toggle-/g)?.length).toBe(2);
+    // Every card on one page: the 4 Waiting for check cards (longest wait first), then the 3 Friend coming.
     expect(html.match(/data-testid="check-card"/g)?.length).toBe(4);
-    expect(html).not.toContain('data-testid="friend-coming-card"');
-    expect(html).not.toContain('Waiting for check');
+    expect(html.match(/data-testid="friend-coming-card"/g)?.length).toBe(3);
     const order = [1010, 1011, 1012, 1013].map((n) => html.indexOf(`data-request-id="${idOf(n)}"`));
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(html).toMatch(/role="tabpanel"[^>]*aria-labelledby="[^"]*-tab-check"/);
-    expect(html).toContain('Not in medical');
+    expect(order[3]).toBeLessThan(coming);
+    // The left answer of a request never held is the first Not found (the hold).
+    expect(html).toContain('>Not found yet<');
+    expect(html).toContain('aria-label="Not found yet. Keeps this request open and schedules a recheck"');
   });
 
   it('Pending To check card: photo only when there is one, the name, minutes with a clock, wearing, "post · LP-####"', () => {
@@ -724,7 +714,8 @@ describe('list views render', () => {
       return html.slice(start, next > 0 ? next : undefined);
     };
     // LP-1012 has photos, the other three have none: no empty placeholder (Brian, v8).
-    expect(html.match(/data-testid="card-photo"/g)?.length).toBe(1);
+    const checkCards = html.slice(html.indexOf('data-testid="pending-section-check"'), html.indexOf('data-testid="pending-section-coming"'));
+    expect(checkCards.match(/data-testid="card-photo"/g)?.length).toBe(1);
     expect(card(1012)).toContain('data-testid="card-photo"');
     expect(card(1010)).not.toContain('card-photo');
     // "FA 4 · LP-1010": the post first, then the number, one quiet line.
@@ -738,7 +729,7 @@ describe('list views render', () => {
     expect(card(1010)).toMatch(/aria-label="B\.W\., 23 F\. FA 4 · LP-1010\. Waiting 2[34] minutes\. Neon green/);
   });
 
-  it('Pending on the desk: both queues side by side, the Friend coming card with its location chip and who is coming', () => {
+  it('Pending on the desk: both queues side by side, the Friend coming card with its location chip, no friend line', () => {
     const store = storeWith((s) => {
       const confirmed = new Map(s.confirmed);
       const sl = confirmed.get(idOf(1004))!;
@@ -753,45 +744,24 @@ describe('list views render', () => {
     );
     expect(html).toContain('data-testid="pending-board"');
     expect(html).not.toContain('brand-card');
-    // Both columns, To check first, each with its header and count; the board's own control (for a narrow
-    // main column) is there too, and the phone's is not in the sticky bar.
+    // Both columns, Waiting for check first, each with its header, count and chevron; no tabs anywhere.
     expect(html.indexOf('data-testid="pending-column-check"')).toBeLessThan(html.indexOf('data-testid="pending-column-coming"'));
-    expect(html.match(/data-testid="pending-tabs"/g)?.length).toBe(1);
+    expect(html).not.toContain('data-testid="pending-tabs"');
+    expect(html).toContain('data-testid="queue-toggle-check"');
+    expect(html).toContain('data-testid="queue-toggle-coming"');
     expect(html.match(/data-testid="check-card"/g)?.length).toBe(4);
     expect(html.match(/data-testid="friend-coming-card"/g)?.length).toBe(3);
     expect(html.match(/>Reunited</g)?.length).toBe(3);
-    // Friend coming: the location chip (green with a pin) or a quiet "+ Location"; "<friend> · <relation>, on the way".
+    // Friend coming: the location chip (green with a pin) or a quiet "+ Location"; (v9.1) no friend line.
     expect(html).toMatch(/aria-label="Chair 14, edit location"/);
     expect(html.match(/aria-label="Add location"/g)?.length).toBe(2);
-    expect(html).toMatch(/<b>Jess T\.<\/b> · <!-- -->Friend, on the way/);
-    expect(html).toMatch(/<b>Ty B\.<\/b> · <!-- -->Friend, on the way/);
+    expect(html).not.toContain('Jess T.');
+    expect(html).not.toContain('on the way');
     // No coloured arrow line, no "from FA 3" any more.
     expect(html).not.toMatch(/from FA 3/);
     // Minutes since the answer, without the clock: S.L. answered ~3 minutes ago.
     const sl = html.slice(html.lastIndexOf('data-testid="friend-coming-card"', html.indexOf(`data-request-id="${idOf(1004)}"`)));
     expect(sl).toMatch(/data-tone="gray" data-testid="card-minutes">[23]m</);
-  });
-
-  it('the remembered Pending tab: Friend coming once chosen, To check otherwise (storage blocked too)', () => {
-    const saved = new Map<string, string>();
-    vi.stubGlobal('window', {
-      localStorage: {
-        getItem: (k: string) => saved.get(k) ?? null,
-        setItem: (k: string, v: string) => saved.set(k, v),
-        removeItem: (k: string) => saved.delete(k),
-      },
-    });
-    expect(readPendingTab()).toBe('check');
-    saved.set(PENDING_TAB_KEY, 'coming');
-    expect(readPendingTab()).toBe('coming');
-    saved.set(PENDING_TAB_KEY, 'nonsense');
-    expect(readPendingTab()).toBe('check');
-    vi.stubGlobal('window', {
-      get localStorage(): Storage {
-        throw new Error('blocked');
-      },
-    });
-    expect(readPendingTab()).toBe('check');
   });
 
   it('Pending offline: answer buttons look disabled and say why', () => {
@@ -820,7 +790,11 @@ describe('list views render', () => {
     const empty = { ...createServerState('America/New_York'), hydrated: true, hasData: true };
     const store: AppStore = { getState: () => empty, subscribe: () => () => {}, actions: createStubStore({ eventTimezone: 'UTC' }).actions };
     expect(render(store, <AllView status={null} post={null} />)).toContain('No requests yet');
-    expect(render(store, <PendingView />)).toContain('Nothing pending');
+    // (v9.1) Pending keeps both headers with 0: no rows, no text.
+    const pending = render(store, <PendingView />);
+    expect(pending).toContain('Waiting for check, no requests');
+    expect(pending).toContain('Friend coming, no requests');
+    expect(pending).not.toContain('Nothing pending');
     expect(render(store, <SearchView q="zzz" />)).toContain('No matches');
   });
 });

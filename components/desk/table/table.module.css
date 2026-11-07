@@ -77,11 +77,15 @@
   min-width: 0;
 }
 
-/* "#  Friend  Status …": small and quiet, sticky right under the top bar. */
-.th {
+/* "#  Friend  Status …": small and quiet, sticky right under the top bar (with a sort, the header row sits in a
+   one-row table of its own: the sticky part is that wrapper). */
+.thSticky {
   position: sticky;
   top: var(--desk-top, 56px);
   z-index: 2;
+}
+
+.th {
   height: 34px;
   background: var(--color-background);
   border-bottom: 1px solid var(--gray-a4);
@@ -95,6 +99,90 @@
 .th > * {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* (Pending v9.1) A sortable header: the whole label is the button. Only the active one is gray-12 with an arrow;
+   the others show a faint ↕ on hover or focus. 28 px, with a 44 px target. */
+.th > [role='columnheader'] {
+  overflow: visible;
+}
+
+.thb {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  max-width: 100%;
+  margin: 0 -6px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.thb::after {
+  content: '';
+  position: absolute;
+  inset: -8px -2px;
+}
+
+.thbOn {
+  color: var(--gray-12);
+  font-weight: 600;
+}
+
+.thb:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 0;
+}
+
+.thHint {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.thb:focus-visible .thHint {
+  opacity: 0.7;
+}
+
+@media (hover: hover) {
+  .thb:hover {
+    background: var(--gray-a3);
+  }
+  .thb:hover .thHint {
+    opacity: 0.7;
+  }
+}
+
+/* (Pending v9.1) Sorted by status: a group header row over Waiting for check and Friend coming, sticky under the
+   column header (design/screens/pending-v9.html .dgh). */
+.gh {
+  position: sticky;
+  top: calc(var(--desk-top, 56px) + 34px);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  box-sizing: border-box;
+  padding: 0 var(--tbl-pad-r) 0 var(--tbl-pad-l);
+  background: var(--gray-2);
+  border-bottom: 1px solid var(--gray-a3);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gray-12);
+  white-space: nowrap;
+}
+
+.ghn {
+  font-weight: 400;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
 }
 
 .cCreated,
@@ -259,6 +347,15 @@ button.row:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
+}
+
+/* (Pending v9.1) A waiting row's wait after its label, heat-coloured: amber from 10 minutes, red from 20. */
+.stx[data-tone='amber'] {
+  color: var(--amber-11);
+}
+
+.stx[data-tone='red'] {
+  color: var(--red-11);
 }
 
 .glyph {

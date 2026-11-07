@@ -4,7 +4,9 @@
 // 48 px line:  #  ·  Friend  ·  Status  ·  Created  ·  Updated. The name takes the room that is left, with
 // an 80 px floor: on a narrow phone the status label gets shorter ("Waiting"), and only past the floor is it
 // cut. The number and the times never shrink.
-// Queued requests (states.html Offline) and search results (states.html SRow) use the same grid.
+// Queued requests (states.html Offline) and search results (states.html SRow) use the same grid. Sorted by
+// status (Pending v9.1, design/screens/pending-v9.html frame 6), thin pinned dividers name each group: glyph,
+// label, count.
 import { CircleAlert, ChevronDown } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
 import { StageGlyph } from '@/components/ui/StageGlyph';
@@ -12,6 +14,7 @@ import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { navigate } from '@/lib/client/nav';
 import type { SearchHit } from '@/lib/client/selectors';
+import { STATUS_GROUP_META, type StatusGroupName } from '@/lib/client/status-order';
 import { stageLook } from '@/lib/stages';
 import { NOT_UPDATED } from '@/lib/format';
 import {
@@ -138,15 +141,17 @@ export interface LogRowProps {
   updated: string;
   /** "updated 2 minutes ago" / "not updated yet" (format.updatedPhrase). */
   updatedSaid: string;
-  /** (F5) The event timezone, for the stage in the row's sentence ("Not found yet, recheck at 4:40 PM"). */
+  /** (F5) The event timezone, for the stage in the row's sentence. */
   timeZone?: string;
+  /** (Pending v9.1) The views' clock: a hold whose recheck time has passed reads "Recheck due". */
+  now?: number;
 }
 
 /** One request: number, name, status, created, updated. Closed rows are greyed. Tap opens the profile. */
-export const LogRow = memo(function LogRow({ row, created, updated, updatedSaid, timeZone }: LogRowProps) {
+export const LogRow = memo(function LogRow({ row, created, updated, updatedSaid, timeZone, now = 0 }: LogRowProps) {
   const closed = isClosed(row.status);
-  // (F5) The stage: Needs info, Not found yet, Friend en route… over the stored status.
-  const look = stageLook(row);
+  // (F5) The stage: Needs info, Not found yet, Recheck due, Friend en route… over the stored status.
+  const look = stageLook(row, now);
   return (
     <button
       type="button"
@@ -155,7 +160,7 @@ export const LogRow = memo(function LogRow({ row, created, updated, updatedSaid,
       data-closed={closed ? '' : undefined}
       onClick={() => navigate({ r: row.id })}
     >
-      <Vh>{logRowLabel(row, created, updatedSaid, timeZone)}</Vh>
+      <Vh>{logRowLabel(row, created, updatedSaid, timeZone, now)}</Vh>
       <LogCells
         number={logNumber(row.caseNumber)}
         name={displayName(row.name)}
@@ -181,10 +186,10 @@ export interface SearchLogRowProps extends Omit<LogRowProps, 'row'> {
 }
 
 /** A search result: the log row with the match highlighted, and the matched text under the name. */
-export const SearchLogRow = memo(function SearchLogRow({ hit, created, updated, updatedSaid, timeZone, nameRanges, caseRanges, line, lineRanges }: SearchLogRowProps) {
+export const SearchLogRow = memo(function SearchLogRow({ hit, created, updated, updatedSaid, timeZone, now = 0, nameRanges, caseRanges, line, lineRanges }: SearchLogRowProps) {
   const { row } = hit;
   const closed = isClosed(row.status);
-  const look = stageLook(row);
+  const look = stageLook(row, now);
   return (
     <button
       type="button"
@@ -193,7 +198,7 @@ export const SearchLogRow = memo(function SearchLogRow({ hit, created, updated, 
       data-closed={closed ? '' : undefined}
       onClick={() => navigate({ r: row.id })}
     >
-      <Vh>{searchLogLabel(row, created, updatedSaid, line, timeZone)}</Vh>
+      <Vh>{searchLogLabel(row, created, updatedSaid, line, timeZone, now)}</Vh>
       <LogCells
         number={<Highlight text={logNumber(row.caseNumber)} ranges={logNumberRanges(row.caseNumber, caseRanges)} />}
         name={<Highlight text={displayName(row.name)} ranges={row.name ? nameRanges : []} />}
@@ -258,20 +263,35 @@ export function OutboxLogRow({ item, created }: { item: OutboxItem; created: str
  * "Archived  6  ⌄": every closed request (Not in medical, Reunited, Discharged, Cancelled) folded into one
  * row under the open ones (log option B; named Archived by Brian, 2026-11-06). Tap to show them below, greyed.
  */
-export function ArchivedFold({ count, open, controls, onToggle }: { count: number; open: boolean; controls: string; onToggle: () => void }) {
+export function ArchivedFold({
+  count,
+  open,
+  controls,
+  onToggle,
+  label = 'Archived',
+  className,
+}: {
+  count: number;
+  open: boolean;
+  controls: string;
+  onToggle: () => void;
+  /** (Pending v9.1) "Closed" on My requests sorted by status. */
+  label?: string;
+  className?: string;
+}) {
   return (
     <button
       type="button"
-      className={s.fold}
+      className={className ? `${s.fold} ${className}` : s.fold}
       aria-expanded={open}
       // Only while the closed rows are on the page (folded, they are not rendered).
       aria-controls={open ? controls : undefined}
-      aria-label={archivedFoldLabel(count)}
+      aria-label={archivedFoldLabel(count, label)}
       onClick={onToggle}
       // The test ids keep their log option B names (closed-fold, closed-rows), which other specs use.
       data-testid="closed-fold"
     >
-      <span className={s.foldLabel}>Archived</span>{' '}
+      <span className={s.foldLabel}>{label}</span>{' '}
       <span className={s.cap}>{count}</span>
       <span className={s.sp} />
       <span className={s.foldChev} data-open={open ? '' : undefined}>
@@ -282,10 +302,29 @@ export function ArchivedFold({ count, open, controls, onToggle }: { count: numbe
 }
 
 /** The archived rows under the fold: a subgrid of the log, so their columns line up with the open rows. */
-export function ArchivedRows({ id, children }: { id: string; children: ReactNode }) {
+export function ArchivedRows({ id, children, label = 'Archived' }: { id: string; children: ReactNode; label?: string }) {
   return (
-    <div id={id} className={s.sub} role="group" aria-label="Archived requests" data-testid="closed-rows">
+    <div id={id} className={s.sub} role="group" aria-label={`${label} requests`} data-testid="closed-rows">
       {children}
+    </div>
+  );
+}
+
+/**
+ * "○ Waiting for check 7": the thin divider over a status group when a list is sorted by status (pending-v9.html
+ * .gd). It pins under the view's sticky header while its group scrolls. A heading, named in words.
+ */
+export function GroupDivider({ group, count, label, cards = false }: { group: StatusGroupName; count: number; label?: string; cards?: boolean }) {
+  const g = STATUS_GROUP_META[group];
+  const name = label ?? g.label;
+  return (
+    <div className={cards ? `${s.gd} ${s.gdCards}` : s.gd} role="heading" aria-level={2} data-group={group} data-testid={`group-${group}`}>
+      <StatusGlyph kind={g.glyph} size={14} />
+      <span aria-hidden>{name}</span>
+      <span className={s.gdn} aria-hidden>
+        {count}
+      </span>
+      <span className={s.vh}>{`${name} ${count} ${count === 1 ? 'request' : 'requests'}`}</span>
     </div>
   );
 }

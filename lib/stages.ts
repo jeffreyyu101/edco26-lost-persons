@@ -7,6 +7,7 @@ import {
   STATUS_META,
   NOT_FOUND_YET_LABEL,
   canonicalTeam,
+  notFoundHolds,
   isHeld,
   isInMedical,
   parseStaff,
@@ -23,6 +24,7 @@ export { RECHECK_MINUTES, isHeld, isRecheckDue } from './domain';
 // their transitions are unchanged; a stage is derived for display only:
 //   Waiting for check   + needsInfo (F3, medical asked)    → Needs info      amber  ring with "?"
 //   Waiting for check   + recheckAt (the hold, below)     → Not found yet   violet hourglass
+//   … and RECHECK_MINUTES have passed (Pending v9.1)      → Recheck due     violet history (lucide)
 //   In medical          + enroute.state 'enroute' (F3)    → Friend en route teal   walking figure
 //   In medical          + enroute.state 'arrived' (F3)    → Friend arrived  green  check (not filled)
 // Needs info beats Not found yet. Every other status is its own stage, with its label from STATUS_META, so a
@@ -32,11 +34,51 @@ export { RECHECK_MINUTES, isHeld, isRecheckDue } from './domain';
 // The "Not found yet" hold (rework SQL step 1d, lp_set_status): the first Not found on a request Waiting for
 // check keeps it open (status 'Added') with recheckAt = answer + RECHECK_MINUTES and notFoundChecks = 1; it
 // is due once recheckAt has passed, and stays open until someone answers. The next Not found is final.
+// Pending v9.1 (Brian 2026-11-06): a hold is an indicator, not a lane. Every stage of Waiting for check shows the
+// same thing after its label on the desk, the elapsed wait since it was logged ("Not found yet · 47m",
+// "Recheck due · 40m", "Needs info · 9m"); no recheck time is shown on a card or a row.
+
+// ---------------------------------------------------------------------------------------------------
+// Pending v9.1 (Brian 2026-11-06 19:35–20:40, design/screens/pending-v9.html): "Not found yet" is an indicator,
+// not a lane. The left answer on a Waiting for check request has two states, the same style, width and place:
+//   never answered Not found → "⧗ Not found yet", the first Not found (the hold);
+//   on hold, due or not      → "× Not found", the final answer (closed as the Not found status).
+// What the tap does decides the label (domain.notFoundHolds, as lp_set_status decides it).
+// ---------------------------------------------------------------------------------------------------
+
+/** The due stage's label (STAGE_META.recheckDue): a hold whose RECHECK_MINUTES have passed. */
+export const RECHECK_DUE_LABEL = 'Recheck due';
+
+/** The final Not found answer's label on a held request (F2's answer button reads the same). */
+export const NOT_FOUND_FINAL_LABEL = 'Not found';
+
+export interface NotFoundAnswer {
+  /** 'hold': the first Not found (hourglass); 'close': the final one (×). */
+  kind: 'hold' | 'close';
+  /** The button's text: "Not found yet" / "Not found". */
+  label: string;
+  /** The button's accessible name, one sentence that starts with the label (WCAG 2.5.3). */
+  said: string;
+}
+
+/** The left answer for a request Waiting for check: what it says and what a screen reader hears. */
+export function notFoundAnswer(row: { status: string; notFoundChecks?: number }): NotFoundAnswer {
+  if (notFoundHolds(row)) {
+    return { kind: 'hold', label: NOT_FOUND_YET_LABEL, said: `${NOT_FOUND_YET_LABEL}. Keeps this request open and schedules a recheck` };
+  }
+  return {
+    kind: 'close',
+    label: NOT_FOUND_FINAL_LABEL,
+    said: `${NOT_FOUND_FINAL_LABEL}. Closes this request as ${STATUS_META[STATUS.notInMedical].label.toLowerCase()}`,
+  };
+}
 
 export type StageKey =
   | 'waiting'
   | 'needsInfo'
   | 'notFoundYet'
+  /** (Pending v9.1) A "Not found yet" hold whose RECHECK_MINUTES have passed. */
+  | 'recheckDue'
   | 'inMedical'
   | 'enroute'
   | 'arrived'
@@ -51,7 +93,7 @@ export type StageKey =
 export type StageTone = 'blue' | 'amber' | 'violet' | 'green' | 'teal' | 'gray';
 
 /** Which glyph a stage draws (components/ui/StageGlyph.tsx). The status glyphs are StatusGlyph's. */
-export type StageGlyphKind = GlyphKind | 'needsInfo' | 'hourglass' | 'walk' | 'arrived';
+export type StageGlyphKind = GlyphKind | 'needsInfo' | 'hourglass' | 'history' | 'walk' | 'arrived';
 
 export interface StageMeta {
   label: string;
@@ -70,6 +112,7 @@ export const STAGE_META: Readonly<Record<Exclude<StageKey, 'legacy'>, StageMeta>
   waiting: fromStatus(STATUS.waiting),
   needsInfo: { label: 'Needs info', tone: 'amber', glyph: 'needsInfo', bucket: 'open' },
   notFoundYet: { label: NOT_FOUND_YET_LABEL, tone: 'violet', glyph: 'hourglass', bucket: 'open' },
+  recheckDue: { label: RECHECK_DUE_LABEL, tone: 'violet', glyph: 'history', bucket: 'open' },
   inMedical: fromStatus(STATUS.inMedical),
   enroute: { label: 'Friend en route', tone: 'teal', glyph: 'walk', bucket: 'open' },
   arrived: { label: 'Friend arrived', tone: 'green', glyph: 'arrived', bucket: 'open' },
@@ -99,8 +142,11 @@ export interface StageSource {
   lastMessage?: { by?: string | null; mine?: boolean; text?: string | null } | null;
   /** (F3) When the latest message was sent. */
   lastMessageAt?: string | null;
-  /** (F3) Who is walking the friend to medical. */
-  enroute?: { count?: number; earliestEta?: string | null; state?: string | null } | null;
+  /**
+   * (F3) Who is walking the friend to medical. `arrivedAt` (when the first of them arrived) is read when a
+   * server sends it (Pending v9.1 orders Friend arrived by it and the desk shows it after the label).
+   */
+  enroute?: { count?: number; earliestEta?: string | null; state?: string | null; arrivedAt?: string | null } | null;
 }
 
 export interface DisplayStage extends StageMeta {
@@ -109,11 +155,16 @@ export interface DisplayStage extends StageMeta {
   fullLabel: string;
   /** One quiet line under the label: "9m", "Recheck 4:40 PM", "Bed 3", "~4 min", "Rae C. asked · 4:20 PM", "2 checks". */
   sub?: string;
-  /** What follows the label in a desk status cell: "· 9m", "· 4:40 PM", "· Bed 3", "· ~4 min", "· 2 checks". */
+  /**
+   * What follows the label in a desk status cell: the elapsed wait for every stage of Waiting for check ("· 27m",
+   * Pending v9.1), else "· Bed 3", "· ~4 min", "· 4:29 PM", "· 2 checks".
+   */
   extra?: string;
+  /** (Pending v9.1) Minutes since it was logged, for every stage of Waiting for check: the extra's heat colour. */
+  waitMinutes?: number;
   /** The stage as a screen reader says it, in words: "Not found yet, recheck at 4:40 PM". */
   said: string;
-  /** Not found yet only: when the recheck is due, and whether it is due at `now`. */
+  /** Not found yet and Recheck due only: when the recheck is due, and whether it is due at `now`. */
   recheckAt?: string;
   due?: boolean;
 }
@@ -169,21 +220,26 @@ export function displayStage(row: StageSource, opts: StageOptions): DisplayStage
   return { ...stage, said: stage.said.replace(/\s*·\s*/g, ', ') };
 }
 
-/** A request's stage key, label, colour and glyph: what needs no clock (a list's status cell). */
-export function stageLook(row: StageSource): StageMeta & { key: StageKey } {
-  const { key, label, tone, glyph, bucket } = stageOf(row, { now: 0 });
+/**
+ * A request's stage key, label, colour and glyph (a list's status cell). With no clock a hold reads Not found yet;
+ * pass `now` to tell Recheck due from it (Pending v9.1).
+ */
+export function stageLook(row: StageSource, now = 0): StageMeta & { key: StageKey } {
+  const { key, label, tone, glyph, bucket } = stageOf(row, { now });
   return { key, label, tone, glyph, bucket };
 }
 
 /**
- * A row's stage as its screen-reader sentence says it, with no clock: the status's words for a status stage
- * ("In medical, friend coming"), else the stage ("Not found yet, recheck at 4:40 PM", "Friend en route").
+ * A row's stage as its screen-reader sentence says it: the status's words for a status stage ("In medical,
+ * friend coming"), else the stage ("Not found yet", "Recheck due", "Friend en route"). Pass `now` to tell Recheck
+ * due from Not found yet; with no clock a hold reads Not found yet.
  */
-export function stagePhrase(row: StageSource, timeZone: string = DEFAULT_EVENT_TIMEZONE): string {
-  const stage = stageOf(row, { now: 0, timeZone });
+export function stagePhrase(row: StageSource, timeZone: string = DEFAULT_EVENT_TIMEZONE, now = 0): string {
+  const stage = stageOf(row, { now, timeZone });
   const words = (s: string) => s.replace(/\s*·\s*/g, ', ');
   switch (stage.key) {
     case 'notFoundYet':
+    case 'recheckDue':
       return words(stage.said);
     case 'needsInfo':
     case 'enroute':
@@ -203,26 +259,30 @@ function stageOf(row: StageSource, opts: StageOptions): DisplayStage {
   };
 
   if (status === STATUS.waiting) {
+    // (Pending v9.1) Every stage of Waiting for check is followed by its elapsed wait since it was logged.
+    const waitMinutes = minutesSince(row.createdAt, opts.now);
+    const wait = { extra: `· ${formatDuration(waitMinutes)}`, waitMinutes };
     if (row.needsInfo) {
       const by = row.lastMessage ? (row.lastMessage.mine ? 'You' : shortStaffName(row.lastMessage.by)) : '';
       const at = Number.isFinite(epoch(row.lastMessageAt)) ? formatClockAmPm(row.lastMessageAt as string, tz) : '';
       const sub = by ? [`${by} asked`, at].filter(Boolean).join(' · ') : undefined;
       const said = sub ? `${STAGE_META.needsInfo.label}, ${by} asked${at ? ` at ${at}` : ''}` : STAGE_META.needsInfo.label;
-      return of('needsInfo', sub ? { sub, said } : { said });
+      return of('needsInfo', sub ? { sub, said, ...wait } : { said, ...wait });
     }
     if (isHeld(row)) {
       const recheckAt = row.recheckAt as string;
       const at = formatClockAmPm(recheckAt, tz);
-      return of('notFoundYet', {
+      const due = epoch(recheckAt) <= opts.now;
+      return of(due ? 'recheckDue' : 'notFoundYet', {
+        // The request's own status block (not a card) keeps when the recheck is due.
         sub: `Recheck ${at}`,
-        extra: `· ${at}`,
-        said: `${STAGE_META.notFoundYet.label}, recheck at ${at}`,
+        ...wait,
+        said: due ? STAGE_META.recheckDue.label : STAGE_META.notFoundYet.label,
         recheckAt,
-        due: epoch(recheckAt) <= opts.now,
+        due,
       });
     }
-    const waited = formatDuration(minutesSince(row.createdAt, opts.now));
-    return of('waiting', { ...withExtra(waited), said: STATUS_META[STATUS.waiting].label });
+    return of('waiting', { sub: formatDuration(waitMinutes), ...wait, said: STATUS_META[STATUS.waiting].label });
   }
   if (isInMedical(status)) {
     const full = STATUS_META[STATUS.inMedical].label;
@@ -231,7 +291,11 @@ function stageOf(row: StageSource, opts: StageOptions): DisplayStage {
       const said = eta ? `${STAGE_META.enroute.label}, ETA ${eta === 'now' ? 'now' : eta.replace('~', 'about ')}` : STAGE_META.enroute.label;
       return of('enroute', { ...withExtra(eta ?? undefined), said });
     }
-    if (row.enroute?.state === 'arrived') return of('arrived');
+    if (row.enroute?.state === 'arrived') {
+      // When the friend arrived, once a server sends it (F3's summary may not).
+      const at = Number.isFinite(epoch(row.enroute.arrivedAt)) ? formatClockAmPm(row.enroute.arrivedAt as string, tz) : '';
+      return of('arrived', at ? { ...withExtra(at), said: `${STAGE_META.arrived.label}, ${at}` } : {});
+    }
     const location = (row.medicalLocation ?? '').trim();
     return of('inMedical', { fullLabel: full, ...withExtra(location || undefined), said: location ? `${full}, ${location}` : full });
   }

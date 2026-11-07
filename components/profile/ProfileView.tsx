@@ -25,7 +25,7 @@
 //   cancel       red, creator-only (canonical created_by match, A18), while Waiting, confirm Keep / Cancel
 //   conflict     "Updated by someone else" when another person's change arrives while it is open
 import { AlertDialog, Badge, Button, DropdownMenu, Heading, IconButton, Skeleton, Text, VisuallyHidden } from '@radix-ui/themes';
-import { Camera, Check, ChevronDown, Clock, CloudOff, Ellipsis, MapPin, Pencil, Phone, Plus, RefreshCw, RotateCcw, Trash2, Undo2, X } from 'lucide-react';
+import { Camera, Check, ChevronDown, Clock, CloudOff, Ellipsis, Hourglass, MapPin, Pencil, Phone, Plus, RefreshCw, RotateCcw, Trash2, Undo2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { Banner, ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -46,7 +46,7 @@ import {
   type MutationResult,
 } from '@/lib/client/store-contract';
 import { FIELD_LABELS, MAX_PHOTOS, PHOTO_TIMING_LABEL, STATUS, canCancel, isHeld, isInMedical, isStatus, menuActions, parseStaff, postFull, primaryActions, sameStaff, statusMeta, telHref, waitTone, type PhotoTiming, type SettableStatus, type StatusAction, type StatusKind } from '@/lib/domain';
-import { displayStage, holdAnsweredAt, isMedicalTeam } from '@/lib/stages';
+import { displayStage, holdAnsweredAt, isMedicalTeam, notFoundAnswer } from '@/lib/stages';
 import { formatCaseNumber, formatDuration, formatListTime, minutesSince } from '@/lib/format';
 import { AddPhotosSheet, type PhotoPick } from './AddPhotos';
 import { AuditTrail, AuditTrailSkeleton } from './AuditTrail';
@@ -318,7 +318,7 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
             // so a tap never lands on a choice that changed meaning.
             <ChangeAnswerMenu key={`${a.id}:${row.status}`} status={row.status} disabled={offline} side={panel ? 'bottom' : 'top'} onChoose={move} />
           ) : (
-            <ActionButton key={a.id} action={a} disabled={offline} onClick={() => setStatus(a)} />
+            <ActionButton key={a.id} action={a} row={row} disabled={offline} onClick={() => setStatus(a)} />
           ),
         )}
       </div>
@@ -396,7 +396,7 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
           offline={offline}
           panel={panel}
           onNeedsConnection={() => actions.showToast({ tone: 'amber', icon: 'cloud-off', title: NEEDS_CONNECTION, durationMs: 3_000 })}
-          answers={answersInBlock ? <BlockAnswers status={row.status} offline={offline} onAnswer={setStatus} /> : null}
+          answers={answersInBlock ? <BlockAnswers row={row} offline={offline} onAnswer={setStatus} /> : null}
         />
 
         {panel ? actionBar : null}
@@ -630,7 +630,7 @@ function StatusBlock({
   let badge: ReactNode = null;
   if (stage.key === 'needsInfo' && stage.sub) {
     sub = stage.sub;
-  } else if (stage.key === 'notFoundYet') {
+  } else if (stage.key === 'notFoundYet' || stage.key === 'recheckDue') {
     // Who gave the first Not found, and when; before the trail loads, the row's own last change when it is that.
     const o = origin ?? holdFallbackOrigin(row);
     const parts = o ? [o.staffName, formatListTime(o.at, now, timeZone)].filter(Boolean) : [];
@@ -672,7 +672,7 @@ function StatusBlock({
         </div>
         {waiting ? badge : null}
       </div>
-      {stage.key === 'notFoundYet' && stage.sub ? (
+      {(stage.key === 'notFoundYet' || stage.key === 'recheckDue') && stage.sub ? (
         <div className={s.recheckRow} data-due={stage.due ? '' : undefined} data-testid="recheck-row">
           <RefreshCw size={16} strokeWidth={2} aria-hidden className={s.recheckGlyph} />
           <span>{stage.sub}</span>
@@ -694,11 +694,13 @@ function holdFallbackOrigin(row: RequestSummary): StatusOrigin | null {
 }
 
 /**
- * (F5) The medical side's answers inside the status block, [× Not found] [✓ In medical], labelled by their
- * actions (domain primaryActions), so a renamed answer flows through.
+ * (F5) The medical side's answers inside the status block, [Not found yet | Not found] [✓ In medical], labelled by
+ * their actions (domain primaryActions), so a renamed answer flows through. (Pending v9.1) The left answer has
+ * two states, as on the Pending cards: "⧗ Not found yet" (the hold), then "× Not found" (closes it).
  */
-function BlockAnswers({ status, offline, onAnswer }: { status: string; offline: boolean; onAnswer: (a: StatusAction) => void }) {
-  const answers = primaryActions(status).filter((a) => a.kind === 'answer');
+function BlockAnswers({ row, offline, onAnswer }: { row: RequestSummary; offline: boolean; onAnswer: (a: StatusAction) => void }) {
+  const answers = primaryActions(row.status).filter((a) => a.kind === 'answer');
+  const notFound = notFoundAnswer(row);
   if (answers.length === 0) return null;
   return (
     <div className={s.blockActs} data-testid="block-answers">
@@ -715,9 +717,20 @@ function BlockAnswers({ status, offline, onAnswer }: { status: string; offline: 
             {a.label}
           </Button>
         ) : (
-          <Button key={a.id} size="3" variant="soft" color="gray" className={s.blockBtn} disabled={offline} onClick={() => onAnswer(a)}>
-            <X size={16} aria-hidden />
-            {a.label}
+          <Button
+            key={a.id}
+            size="3"
+            variant="soft"
+            color="gray"
+            className={s.blockBtn}
+            disabled={offline}
+            aria-label={notFound.said}
+            data-answer={notFound.kind}
+            data-testid="not-found-answer"
+            onClick={() => onAnswer(a)}
+          >
+            {notFound.kind === 'hold' ? <Hourglass size={16} strokeWidth={1.75} aria-hidden /> : <X size={16} strokeWidth={2.25} aria-hidden />}
+            {notFound.label}
           </Button>
         ),
       )}
@@ -874,7 +887,7 @@ function Details({ row }: { row: RequestSummary }) {
   );
 }
 
-function ActionButton({ action, disabled, onClick }: { action: StatusAction; disabled: boolean; onClick: () => void }) {
+function ActionButton({ action, row, disabled, onClick }: { action: StatusAction; row: RequestSummary; disabled: boolean; onClick: () => void }) {
   // 40 px buttons with a 44 px tap target (.lp-hit); In medical in the accessible green (.lp-solid-accent).
   const common = { size: '3' as const, disabled, onClick, className: 'lp-hit' };
   switch (action.id) {
@@ -892,14 +905,17 @@ function ActionButton({ action, disabled, onClick }: { action: StatusAction; dis
           {action.label}
         </Button>
       );
-    default:
-      // Not in medical. (Change answer is ChangeAnswerMenu.)
+    default: {
+      // Not found: (Pending v9.1) "⧗ Not found yet" (the hold) until the request is held, then "× Not found"
+      // (closes it). (Change answer is ChangeAnswerMenu.)
+      const answer = notFoundAnswer(row);
       return (
-        <Button {...common} variant="soft" color="gray">
-          <X size={16} aria-hidden />
-          {action.label}
+        <Button {...common} variant="soft" color="gray" aria-label={answer.said} data-answer={answer.kind} data-testid="not-found-answer">
+          {answer.kind === 'hold' ? <Hourglass size={16} strokeWidth={1.75} aria-hidden /> : <X size={16} strokeWidth={2.25} aria-hidden />}
+          {answer.label}
         </Button>
       );
+    }
   }
 }
 

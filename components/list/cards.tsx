@@ -1,24 +1,24 @@
 'use client';
 // Pending and My requests cards. Pending is design/screens/pending-v8.html (2026-11-06 afternoon, Brian +
-// Dani): To check (CheckCard) and Friend coming (ComingCard). My requests is requests.html MCard + Stepper.
+// Dani) with Pending v9.1 (Brian 2026-11-06 19:35–20:40, design/screens/pending-v9.html): Waiting for check
+// (CheckCard) and Friend coming (ComingCard). My requests is requests.html MCard + Stepper.
 // Each card opens the profile through a transparent button stretched over it; the action buttons and the
 // location chip sit above that button. A photo shows only when the request has one: no empty placeholders.
 import { Badge, Button, Card, Text, VisuallyHidden } from '@radix-ui/themes';
-import { ArrowRight, Check, CircleAlert, Clock, MapPin, Plus, RefreshCw, UserRound, X } from 'lucide-react';
+import { Check, CircleAlert, Clock, Hourglass, MapPin, Plus, UserRound, X } from 'lucide-react';
 import { memo, useEffect, useId, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { StageGlyph } from '@/components/ui/StageGlyph';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
-import { RecheckChip as RecheckTimeChip, StageChip, hasStageChip } from './StageChips';
+import { HoldChip, StageChip, hasStageChip } from './StageChips';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { photoPath } from '@/lib/client/api-paths';
 import { navigate } from '@/lib/client/nav';
-import { STATUS, actionLabel, ageGender, statusMeta, waitTone } from '@/lib/domain';
-import { displayStage, holdAnsweredAt, type StageTone } from '@/lib/stages';
-import { formatCaseNumber, formatClock, formatClockAmPm, formatDuration, minutesSince } from '@/lib/format';
+import { STATUS, actionLabel, ageGender, isHeld, isRecheckDue, statusMeta, waitTone } from '@/lib/domain';
+import { displayStage, notFoundAnswer, type StageTone } from '@/lib/stages';
+import { formatCaseNumber, formatDuration, minutesSince } from '@/lib/format';
 import {
   cardDescription,
   displayName,
-  friendComingLine,
   isClosed,
   isFresh,
   minutesPhrase,
@@ -139,12 +139,13 @@ export function WaitBadge({ minutes }: { minutes: number }) {
 
 /**
  * Pending's minutes beside the name (pending-v8.html .wait): grey, amber from 10, red from 20, as plain
- * step-11 text on the card's solid panel (4.5:1 in both themes). To check adds the clock glyph (how long it
- * has waited); Friend coming shows the minutes since the In medical answer.
+ * step-11 text on the card's solid panel (4.5:1 in both themes). Waiting for check adds the clock glyph (how
+ * long it has waited); Friend coming shows the minutes since the In medical answer, always grey (Pending v9.1:
+ * red and amber mean "waiting for check too long" and never appear on a found patient).
  */
 function Minutes({ minutes, clock }: { minutes: number; clock?: boolean }) {
   return (
-    <span className={s.pwait} data-tone={waitTone(minutes)} data-testid="card-minutes">
+    <span className={s.pwait} data-tone={clock ? waitTone(minutes) : 'gray'} data-testid="card-minutes">
       {clock ? <Clock size={13} strokeWidth={2} aria-hidden /> : null}
       {formatDuration(minutes)}
     </span>
@@ -213,7 +214,7 @@ function offlineProps(offline: boolean) {
 const cardOf = (e: MouseEvent<HTMLElement>): HTMLElement | null => e.currentTarget.closest<HTMLElement>('[data-pending-card]');
 
 // ---------------------------------------------------------------------------------------------------
-// Pending: To check (CheckCard) and Friend coming (ComingCard), pending-v8.html
+// Pending: Waiting for check (CheckCard) and Friend coming (ComingCard), pending-v8.html + pending-v9.html
 // ---------------------------------------------------------------------------------------------------
 
 export interface CheckCardProps {
@@ -223,40 +224,47 @@ export interface CheckCardProps {
   onNotInMedical: (row: RequestSummary) => void;
   /** `card` is the tapped card (where the desk's location popover first points). */
   onInMedical: (row: RequestSummary, card: HTMLElement | null) => void;
-  /**
-   * (F5) A due recheck (design/screens/recheck-2.png): a blue "Recheck" chip instead of the minutes, and
-   * "FA 4 · not found 4:02" (when the first Not found was given) as its quiet line.
-   */
-  recheck?: boolean;
-  /** (F5) The event timezone, for the recheck card's times. */
-  timeZone?: string;
+  /** (Pending v9.1) A copy of the card animating out of Pending after its final Not found (inert, hidden). */
+  leaving?: boolean;
+}
+
+/** (Pending v9.1) The hold's indicator for a card: none, held ("Not found yet") or due ("Recheck due"). */
+export function holdState(row: Pick<RequestSummary, 'status' | 'recheckAt'>, now: number): 'none' | 'held' | 'due' {
+  if (!isHeld(row)) return 'none';
+  return isRecheckDue(row, now) ? 'due' : 'held';
 }
 
 /**
- * To check: the photo when there is one, the name or initials (18/600) and age/sex, how long it has waited
- * (clock; amber from 10, red from 20), what they're wearing (2 lines), one quiet "FA 4 · LP-0010" line,
- * then Not in medical / In medical (44 px).
+ * Waiting for check: the photo when there is one, the name or initials (18/600) and age/sex, how long it has
+ * waited (clock; amber from 10, red from 20), what they're wearing (2 lines), one quiet "FA 4 · LP-0010" line.
+ * (Pending v9.1) The wait is the only time on the card. While on a "Not found yet" hold a chip row says so
+ * (outlined "⧗ Not found yet", then a filled "↺ Recheck due"); nothing else moves. Then the answers (44 px): the
+ * left one is "⧗ Not found yet" (the first Not found, the hold) or, once held, "× Not found" (the final answer,
+ * which closes it), in the same style, width and place; then ✓ In medical.
  */
-export const CheckCard = memo(function CheckCard({ row, now, offline, onNotInMedical, onInMedical, recheck = false, timeZone }: CheckCardProps) {
+export const CheckCard = memo(function CheckCard({ row, now, offline, onNotInMedical, onInMedical, leaving = false }: CheckCardProps) {
   const reasonId = useId();
   const nameId = useId();
   const metaId = useId();
   const minutes = minutesSince(row.createdAt, now);
   const desc = cardDescription(row);
   const ag = ageGender(row.age, row.gender);
-  // (F5) A due recheck says when the first Not found was given instead of its LP number.
-  const notFoundAt = recheck ? holdAnsweredAt(row) : null;
-  const meta = notFoundAt
-    ? `${row.postShort} · not found ${formatClock(notFoundAt, timeZone)}`
-    : `${row.postShort} · ${formatCaseNumber(row.caseNumber)}`;
-  const label = notFoundAt
-    ? `${whoPhrase(row)}. ${row.postShort} · ${formatCaseNumber(row.caseNumber)}. Recheck due, not found at ${formatClockAmPm(notFoundAt, timeZone)}.${desc ? ` ${desc}` : ''}`
-    : `${whoPhrase(row)}. ${meta}. Waiting ${minutesPhrase(minutes)}.${desc ? ` ${desc}` : ''}`;
+  const hold = holdState(row, now);
+  const answer = notFoundAnswer(row);
+  const meta = `${row.postShort} · ${formatCaseNumber(row.caseNumber)}`;
+  const holdSaid = hold === 'due' ? 'Not found yet, recheck due. ' : hold === 'held' ? 'Not found yet. ' : '';
+  const label = `${whoPhrase(row)}. ${meta}. ${holdSaid}Waiting ${minutesPhrase(minutes)}.${desc ? ` ${desc}` : ''}`;
   const fresh = isFresh(row.createdAt, now);
   const describedBy = offline ? `${nameId} ${metaId} ${reasonId}` : `${nameId} ${metaId}`;
   return (
-    <div className={`${s.pcard} ${fresh ? s.fresh : ''}`} data-testid="check-card" data-pending-card={row.id} data-recheck={notFoundAt ? '' : undefined}>
-      <OpenButton id={row.id} label={label} />
+    <div
+      className={`${s.pcard} ${fresh ? s.fresh : ''} ${leaving ? s.leaving : ''}`}
+      data-testid={leaving ? 'leaving-card' : 'check-card'}
+      data-pending-card={leaving ? undefined : row.id}
+      data-hold={hold === 'none' ? undefined : hold}
+      {...(leaving ? { inert: true, 'aria-hidden': true } : {})}
+    >
+      {leaving ? null : <OpenButton id={row.id} label={label} />}
       <div className={s.pwho} aria-hidden>
         {row.firstPhotoId ? <Portrait photoId={row.firstPhotoId} /> : null}
         <div className={s.pwt}>
@@ -265,7 +273,7 @@ export const CheckCard = memo(function CheckCard({ row, now, offline, onNotInMed
               {displayName(row.name)}
             </span>
             {ag ? <span className={s.pas}>{ag}</span> : null}
-            {notFoundAt ? <RecheckChip /> : <Minutes minutes={minutes} clock />}
+            <Minutes minutes={minutes} clock />
           </div>
           {desc ? <p className={s.pdesc}>{desc}</p> : null}
           <span className={s.pmeta} id={metaId}>
@@ -273,6 +281,11 @@ export const CheckCard = memo(function CheckCard({ row, now, offline, onNotInMed
           </span>
         </div>
       </div>
+      {hold === 'none' ? null : (
+        <div className={s.chipRow}>
+          <HoldChip due={hold === 'due'} />
+        </div>
+      )}
       <div className={`${s.pacts} ${s.actions}`}>
         <Button
           size="3"
@@ -280,11 +293,14 @@ export const CheckCard = memo(function CheckCard({ row, now, offline, onNotInMed
           color="gray"
           className={`${s.pbtn} ${s.pbtnSoft}`}
           {...offlineProps(offline)}
+          aria-label={answer.said}
           aria-describedby={describedBy}
+          data-answer={answer.kind}
+          data-testid="not-found-answer"
           onClick={() => onNotInMedical(row)}
         >
-          <X size={16} strokeWidth={1.75} aria-hidden />
-          {actionLabel('notInMedical')}
+          {answer.kind === 'hold' ? <Hourglass size={16} strokeWidth={1.75} aria-hidden /> : <X size={16} strokeWidth={2.25} aria-hidden />}
+          {answer.label}
         </Button>
         <Button
           size="3"
@@ -303,16 +319,6 @@ export const CheckCard = memo(function CheckCard({ row, now, offline, onNotInMed
   );
 });
 
-/** (F5) A due recheck's chip (recheck-2.png): blue, rotate glyph, "Recheck". */
-function RecheckChip() {
-  return (
-    <span className={s.rc} data-testid="recheck-chip">
-      <RefreshCw size={13} strokeWidth={2.25} aria-hidden />
-      Recheck
-    </span>
-  );
-}
-
 export interface ComingCardProps {
   row: RequestSummary;
   now: number;
@@ -324,8 +330,8 @@ export interface ComingCardProps {
 
 /**
  * Friend coming: the photo when there is one, the name and age/sex, the minutes since the In medical answer,
- * where medical has them (a green chip with a pin, or a quiet "+ Location" chip; either one edits it), who is
- * coming ("Chris P. · boyfriend, on the way"), then a full-width Reunited.
+ * where medical has them (a green chip with a pin, or a quiet "+ Location" chip; either one edits it), then a
+ * full-width Reunited. (Pending v9.1) No "→ friend · relationship" line: the request has it.
  */
 export const ComingCard = memo(function ComingCard({ row, now, offline, onReunited, onLocate }: ComingCardProps) {
   const reasonId = useId();
@@ -333,8 +339,7 @@ export const ComingCard = memo(function ComingCard({ row, now, offline, onReunit
   const minutes = minutesSince(statusSince(row), now);
   const ag = ageGender(row.age, row.gender);
   const location = (row.medicalLocation ?? '').trim();
-  const coming = friendComingLine(row);
-  const label = `${whoPhrase(row)}. In medical${location ? `, ${location}` : ''}, ${minutesPhrase(minutes)} ago. ${coming.friend} · ${coming.rest}. ${row.postShort} · ${formatCaseNumber(row.caseNumber)}.`;
+  const label = `${whoPhrase(row)}. In medical${location ? `, ${location}` : ''}, ${minutesPhrase(minutes)} ago. ${row.postShort} · ${formatCaseNumber(row.caseNumber)}.`;
   const describedBy = offline ? `${nameId} ${reasonId}` : nameId;
   return (
     <div className={s.pcard} data-testid="friend-coming-card" data-pending-card={row.id}>
@@ -363,12 +368,6 @@ export const ComingCard = memo(function ComingCard({ row, now, offline, onReunit
               {location ? <MapPin size={14} strokeWidth={2} aria-hidden /> : <Plus size={14} strokeWidth={2} aria-hidden />}
               <span className={s.locText}>{location || 'Location'}</span>
             </button>
-          </div>
-          <div className={s.pcoming} aria-hidden>
-            <ArrowRight size={14} strokeWidth={2} aria-hidden />
-            <span>
-              <b>{coming.friend}</b> · {coming.rest}
-            </span>
           </div>
         </div>
       </div>
@@ -401,17 +400,21 @@ export const MineCard = memo(function MineCard({
   row: RequestSummary;
   now: number;
   freshTone: string | null;
-  /** (F5) The event timezone, for "Recheck 4:40 PM". */
+  /** (F5) The event timezone, for the stage's words. */
   timeZone?: string;
 }) {
   const closed = isClosed(row.status);
   const waiting = row.status === STATUS.waiting;
   const minutes = minutesSince(waiting ? row.createdAt : statusSince(row), now);
   const sub = `${formatCaseNumber(row.caseNumber)} · ${row.postShort}`;
-  // (F5) The stage: a chip in the corner for Needs info and Not found yet, the stage's glyph and label otherwise.
+  // (F5) The stage: a chip in the corner for Needs info, the stage's glyph and label otherwise. (Pending v9.1) A
+  // hold keeps the wait in the corner and says "Not found yet" / "Recheck due" in a chip row: no recheck time.
   const stage = displayStage(row, { now, ...(timeZone ? { timeZone } : {}) });
   const chip = hasStageChip(stage);
-  const said = stage.key === 'notFoundYet' || stage.key === 'needsInfo' ? stage.said : statusMeta(row.status).label;
+  const hold = holdState(row, now);
+  const holdSaid = hold === 'due' ? 'not found yet, recheck due' : hold === 'held' ? 'not found yet' : '';
+  const stageSaid = stage.key === 'needsInfo' ? stage.said : hold !== 'none' ? '' : statusMeta(row.status).label;
+  const said = [stageSaid, holdSaid].filter(Boolean).join(', ').replace(/^n/, 'N');
   const label = `${whoPhrase(row)}. ${sub}. ${said}${waiting ? `, waiting ${minutesPhrase(minutes)}` : `, ${minutesPhrase(minutes)} ago`}.`;
   return (
     <Card
@@ -435,13 +438,11 @@ export const MineCard = memo(function MineCard({
             </Text>
           )}
         </div>
-        {chip ? (
-          stage.key === 'notFoundYet' ? (
-            <div className={s.stageRow}>
-              <RecheckTimeChip stage={stage} />
-            </div>
-          ) : null
-        ) : (
+        {hold !== 'none' ? (
+          <div className={s.stageRow}>
+            <HoldChip due={hold === 'due'} />
+          </div>
+        ) : chip ? null : (
           <div className={s.stat}>
             <StageGlyph glyph={stage.glyph} size={15} />
             <Text size="2" weight="medium" color={stageTextColor(stage.tone)}>

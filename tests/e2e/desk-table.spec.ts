@@ -231,10 +231,11 @@ test.describe('desktop 1440 × 900', () => {
     const statusChip = main(page).getByTestId('status-chip');
     await expect(statusChip).toHaveAccessibleName(/^Waiting for check \d+ shown\. Clear this filter$/);
     await expect(fold(page)).toHaveCount(0);
-    // (F5) The label, before what follows it ("· 9m").
-    expect(new Set((await main(page).locator('[data-request-id] [data-col="status"]').allTextContents()).map((t) => t.replace(/·.*$/, '')))).toEqual(
-      new Set(['Waiting for check']),
-    );
+    // (F5) The label, before what follows it ("· 9m"): every stage of Waiting for check (a request other runs left
+    // on a "Not found yet" hold reads Not found yet or Recheck due, Pending v9.1).
+    const labels = new Set((await main(page).locator('[data-request-id] [data-col="status"]').allTextContents()).map((t) => t.replace(/·.*$/, '')));
+    expect(labels.has('Waiting for check')).toBe(true);
+    for (const label of labels) expect(['Waiting for check', 'Needs info', 'Not found yet', 'Recheck due']).toContain(label);
     const shown = await main(page).locator('[data-request-id]').count();
     await expect(statusChip).toHaveAccessibleName(`Waiting for check ${shown} shown. Clear this filter`);
     await statusChip.click();

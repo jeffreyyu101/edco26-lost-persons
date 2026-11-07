@@ -2,7 +2,7 @@
 // store-contract.ts. No React, no I/O.
 // FROZEN after Phase 1a: later phases may ADD exports, never change existing ones.
 import type { OutboxItem, RequestSummary } from '../api-types';
-import { STATUS, isHeld, isInMedical, isRecheckDue, matchesPostFilter, postFull, sameStaff, statusBucket } from '../domain';
+import { STATUS, isInMedical, matchesPostFilter, postFull, sameStaff, statusBucket } from '../domain';
 import { formatCaseNumber, parseCaseNumberQuery } from '../format';
 import type { Overlay } from './store-contract';
 
@@ -117,14 +117,12 @@ export function viewCounts(
   outboxShown: readonly OutboxItem[],
   myIds: ReadonlySet<string>,
   sessionStaff: string | null,
-  /** (F5) With `now`, held requests not due yet (Pending's "Later") are not counted as pending. */
-  now?: number,
 ): ViewCounts {
   const groups = pendingGroups(rows);
-  const later = now === undefined ? 0 : groups.waiting.filter((r) => isHeld(r) && !isRecheckDue(r, now)).length;
   return {
     all: rows.length + outboxShown.length,
-    pending: groups.friendComing.length + groups.waiting.length - later,
+    // Pending v9.1: Waiting for check (held requests included) + Friend coming.
+    pending: groups.friendComing.length + groups.waiting.length,
     mine: rows.filter((r) => isMine(r, myIds, sessionStaff)).length + outboxShown.length,
   };
 }
