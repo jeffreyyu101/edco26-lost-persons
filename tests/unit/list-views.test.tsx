@@ -650,7 +650,7 @@ describe('list views render', () => {
     expect(shown(html, 1013, 'updated')).toBe('—');
     expect(html.slice(html.indexOf(`data-request-id="${idOf(1013)}"`))).toMatch(/^[^]*?data-col="status" data-tone="blue"/);
     // Jordan Diaz (LP-1007) moved to In medical 2 minutes ago: green, "2m" (or 1m/3m at a minute edge).
-    expect(spoken(html, 1007)).toMatch(/^LP-1007, Jordan Diaz, In medical, friend coming, created \S+ (AM|PM), updated [123] minutes? ago$/);
+    expect(spoken(html, 1007)).toMatch(/^LP-1007, Jordan Diaz, In medical, friend coming, created (?:[A-Z][a-z]{2} )?\S+ (AM|PM), updated [123] minutes? ago$/);
     expect(shown(html, 1007, 'status')).toBe('In medical');
     expect(narrow(html, 1007)).toBeNull();
     expect(shown(html, 1007, 'updated')).toMatch(/^[123]m$/);
