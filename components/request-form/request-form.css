@@ -15,16 +15,17 @@
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
 }
-/* On-screen keyboard up (use-keyboard-fit.ts): the form follows the visual viewport, so the pinned Send bar
-   sits just above the keyboard and the scroller can bring the focused row into view. The home-indicator
-   gap under Send is covered by the keyboard, so it goes. */
+/* On-screen keyboard up (use-keyboard-fit.ts, lib/client/visual-viewport.ts): the form follows the visual
+   viewport, so the pinned Send bar sits just above the keyboard and the scroller can bring the focused row into
+   view. The home-indicator gap under Send is covered by the keyboard, so it goes; Safari's floating tab bar may
+   sit over the foot (--lp-vv-under, iOS 26). */
 .lp-rf[data-kb] {
-  top: var(--lp-rf-vv-top, 0px);
+  top: var(--lp-vv-top, 0px);
   bottom: auto;
-  height: var(--lp-rf-vv-h, 100%);
+  height: var(--lp-vv-h, 100%);
 }
 .lp-rf[data-kb] .lp-rf-foot-in {
-  padding-bottom: 12px;
+  padding-bottom: calc(12px + var(--lp-vv-under, 0px));
 }
 
 .lp-rf-nav {

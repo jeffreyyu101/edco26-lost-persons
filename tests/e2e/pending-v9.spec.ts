@@ -601,6 +601,70 @@ test.describe('fixture', () => {
     });
   }
 
+  // (Hotfix F5.1, Brian 2026-11-07, pending-v9.html frames 6, 7, 9) The phone header's rhythm: the title row, then the
+  // live line 12 px under the search and avatar on every list view (the same place on Pending, which has no toggle),
+  // and on All and My requests the "⇅" toggle at the line's right end: a 32 px chip centred on the line's words, its
+  // right edge on the avatar's, its 44 px tap area inside the row. At 360 px it drops to its own row, 12 px under.
+  for (const theme of ['light', 'dark'] as const) {
+    test(`header (${theme}): the toggle centred on the live line, 12 px clear of the avatar, nothing cut, 360–430 px`, async ({ browser }) => {
+      test.setTimeout(120_000);
+      for (const width of [360, 375, 390, 414, 430] as const) {
+        await withPage(browser, DANA, { ...PHONE, viewport: { width, height: 780 } }, async (page) => {
+          await serve(page, { rows: [...ALL_FIX] }, theme);
+          const lineUnderTitle: Record<string, number> = {};
+          for (const path of ['/?view=mine', '/', '/?view=pending']) {
+            const at = `${path} at ${width} (${theme})`;
+            await page.goto(path);
+            await expect(page.getByTestId('live-text')).toHaveText('Updated just now', { timeout: 20_000 });
+            const box = async (l: Locator) => (await l.boundingBox())!;
+            const title = await box(page.getByTestId('view-switcher'));
+            const avatar = await box(page.getByTestId('account-trigger'));
+            const words = await box(page.getByTestId('live-text'));
+            const refresh = await box(page.getByTestId('refresh-now'));
+            // The line's 32 px row starts 12 px under the avatar, the same distance under the title on every view.
+            expect(refresh.y - (avatar.y + avatar.height), at).toBeGreaterThanOrEqual(11.5);
+            lineUnderTitle[path] = refresh.y - title.y;
+            // Nothing cut: the words are whole (no ellipsis), every control on screen.
+            expect(await page.getByTestId('live-text').evaluate((el) => el.scrollWidth <= el.clientWidth + 1), at).toBe(true);
+            expect(await overlappingTargets(page), at).toEqual([]);
+            if (path.includes('pending')) {
+              await expect(page.getByTestId('sort-toggle'), at).toHaveCount(0);
+              continue;
+            }
+            const toggle = page.getByTestId('sort-toggle');
+            const chip = await box(toggle);
+            expect(chip.height, at).toBe(32);
+            expect(chip.x, at).toBeGreaterThanOrEqual(0);
+            expect(chip.x + chip.width, at).toBeLessThanOrEqual(width);
+            // Its glyph and word inside the chip (its tap area overhangs it, so not scrollWidth).
+            const textInside = await toggle.evaluate((el) => {
+              const range = document.createRange();
+              range.selectNodeContents(el);
+              const t = range.getBoundingClientRect();
+              const b = el.getBoundingClientRect();
+              return t.left >= b.left - 0.5 && t.right <= b.right + 0.5 && t.top >= b.top - 0.5 && t.bottom <= b.bottom + 0.5;
+            });
+            expect(textInside, at).toBe(true);
+            if (width > 360) {
+              // At the line's right end: centred on its words, 12 px clear of the avatar, on the avatar's right edge.
+              expect(Math.abs(chip.y + chip.height / 2 - (words.y + words.height / 2)), at).toBeLessThanOrEqual(1);
+              expect(chip.y - (avatar.y + avatar.height), at).toBeGreaterThanOrEqual(11.5);
+              expect(Math.abs(chip.x + chip.width - (avatar.x + avatar.width)), at).toBeLessThanOrEqual(1);
+              // Its row is the line's own height (the chip's tap area adds none).
+              expect((await box(page.getByTestId('live-row'))).height, at).toBeLessThanOrEqual(38.5);
+            } else {
+              // Its own row, left-aligned with the line, 12 px under it.
+              expect(chip.y - (refresh.y + refresh.height), at).toBeGreaterThanOrEqual(11.5);
+              expect(Math.abs(chip.x - title.x), at).toBeLessThanOrEqual(1);
+            }
+          }
+          // The same rhythm on All, My requests and Pending.
+          expect(Math.max(...Object.values(lineUnderTitle)) - Math.min(...Object.values(lineUnderTitle)), `${width} (${theme})`).toBeLessThanOrEqual(0.5);
+        });
+      }
+    });
+  }
+
   test('desk table: the header sorts — Created ↓ by default, Status ↓ with group rows and the wait after every waiting label, Created goes back', async ({ browser }) => {
     await withPage(browser, DANA, viewportFor(1440), async (page) => {
       await serve(page, { rows: [...ALL_FIX] });
