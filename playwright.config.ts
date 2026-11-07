@@ -26,7 +26,8 @@ export default defineConfig({
     serviceWorkers: 'allow',
   },
   projects: [
-    { name: 'chromium-iphone14', use: { ...devices['iPhone 14'], browserName: 'chromium' } },
+    // --mute-audio: the alert chimes never play through the machine's speakers during a run.
+    { name: 'chromium-iphone14', use: { ...devices['iPhone 14'], browserName: 'chromium', launchOptions: { args: ['--mute-audio'] } } },
     { name: 'webkit-iphone14', use: { ...devices['iPhone 14'] } },
   ],
   webServer: {

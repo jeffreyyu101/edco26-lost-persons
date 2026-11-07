@@ -12,3 +12,8 @@ export declare const TEST_INVITE_ENV: Readonly<{ INVITE_CODE_SHA256: string; INV
 export declare function localDbUrl(): string;
 export declare const PAUSE_INACTIVE_JOB_SQL: string;
 export declare function pauseInactiveJob(url?: string): void;
+export declare const DEFAULT_E2E_LOCK_DIR: string;
+export declare const SHARED_STACK_API_PORT: string;
+export declare const E2E_LOCK_WAIT_MS: number;
+export declare function e2eLockDir(env?: Record<string, string | undefined>, supabaseUrl?: string): string;
+export declare function e2eLockHolder(dir: string): string;

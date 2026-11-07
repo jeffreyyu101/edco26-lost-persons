@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Runs a command while holding the shared local-stack lock (/tmp/lp-e2e.lock, or LP_E2E_LOCK_DIR), the one Playwright's global
-// setup takes. Several agents on several branches share ONE local Supabase stack and each re-applies its own
+// Runs a command while holding the local-stack lock Playwright's global setup takes (LP_E2E_LOCK_DIR, else one per
+// stack: /tmp/lp-e2e.lock-<port of .env.test's Supabase URL>, /tmp/lp-e2e.lock on the shared stack; test-env.mjs
+// e2eLockDir). It waits up to 2 minutes for a live holder, then fails naming its pid and cwd. Several agents on several branches share ONE local Supabase stack and each re-applies its own
 // version of the rework migration, so integration and end-to-end runs must hold the lock, and re-apply THIS
 // branch's migration right after taking it (--migrate applies it twice, which also proves it is idempotent).
 // Playwright started inside sees LP_E2E_LOCK_OWNER and does not wait for the lock it is already under.
@@ -12,11 +13,11 @@ import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { ROOT, assertLocalUrl, pauseInactiveJob } from './test-env.mjs';
+import { E2E_LOCK_WAIT_MS, ROOT, assertLocalUrl, e2eLockDir, e2eLockHolder, pauseInactiveJob } from './test-env.mjs';
 
-// LP_E2E_LOCK_DIR: a run on its own isolated stack takes a lock of its own (tests/e2e/global-setup.ts lockDirFrom).
-const LOCK_DIR = process.env.LP_E2E_LOCK_DIR?.trim() || '/tmp/lp-e2e.lock';
-const WAIT_MS = 30 * 60_000;
+// The same directory as tests/e2e/global-setup.ts lockDirFrom (both call e2eLockDir).
+const LOCK_DIR = e2eLockDir();
+const WAIT_MS = E2E_LOCK_WAIT_MS;
 const NO_PID_GRACE_MS = 10_000;
 const MIGRATION = join(ROOT, 'supabase/migrations/20261106000000_rework.sql');
 
@@ -71,15 +72,18 @@ async function acquire() {
   for (;;) {
     try {
       mkdirSync(LOCK_DIR);
+      writeFileSync(`${LOCK_DIR}/cwd`, process.cwd());
       writeFileSync(`${LOCK_DIR}/pid`, String(process.pid));
       return;
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
     }
     if (removeStale()) continue;
-    if (Date.now() - started > WAIT_MS) throw new Error(`timed out waiting for ${LOCK_DIR} (held by pid ${ownerPid(LOCK_DIR) ?? 'unknown'})`);
+    if (Date.now() - started > WAIT_MS) {
+      throw new Error(`timed out after ${Math.round(WAIT_MS / 1000)} s waiting for ${LOCK_DIR} (held by ${e2eLockHolder(LOCK_DIR)})`);
+    }
     if (!told) {
-      console.error(`with-e2e-lock: waiting for ${LOCK_DIR} (held by pid ${ownerPid(LOCK_DIR) ?? 'unknown'})…`);
+      console.error(`with-e2e-lock: waiting for ${LOCK_DIR} (held by ${e2eLockHolder(LOCK_DIR)})…`);
       told = true;
     }
     await new Promise((r) => setTimeout(r, 2_000));

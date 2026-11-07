@@ -112,7 +112,9 @@ const msg = (text: string): QuickLine => ({ text, kind: 'message' });
 /** The medical side's quick lines by stage. */
 export const MEDICAL_LINES: Readonly<Record<QuickStage, readonly QuickLine[]>> = {
   waiting: [msg('Any tattoos or marks?'), msg('What are they wearing?'), msg('Do you have a photo?')],
-  in_medical: [msg('Bring 1 person only'), msg('Being worked up — wait'), msg('Ready for them'), msg('Hold — not ready yet')],
+  // (HIPAA, Brian 2026-11-07 14:18) "Not ready yet — wait" (was "Being worked up — wait": it described care), and
+  // "Hold — not ready yet" went with it (the same words twice).
+  in_medical: [msg('Bring 1 person only'), msg('Not ready yet — wait'), msg('Ready for them')],
   closed: [],
 };
 

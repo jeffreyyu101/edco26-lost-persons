@@ -116,7 +116,9 @@ npm run start:test                       # http://127.0.0.1:3100
 | `npm run db:verify-migration` | Applies the rework migration twice to the local database (`SUPABASE_DB_URL` when set, else the stack `supabase status` reports) and to an upgrade fixture built from Jeffrey's original schema, then smoke-tests the functions. |
 | `node scripts/load-test.mjs` | 30 simulated phones polling for 2 minutes against a running local production build (see the file header). |
 
-End-to-end runs take a lock (`/tmp/lp-e2e.lock`), so two suites never share the local stack at once. Every
+End-to-end runs take a lock per stack (`LP_E2E_LOCK_DIR`, else `/tmp/lp-e2e.lock-<port of .env.test's Supabase URL>`;
+`/tmp/lp-e2e.lock` on the shared stack), so two suites never share a local stack at once; a run that waits 2 minutes
+fails naming the holder's pid and cwd. Every
 spec signs in through `POST /api/session` once per identity and reuses that session (`storageState`).
 Integration tests close the requests they create when each file ends, so nothing they leave shows in
 Pending.

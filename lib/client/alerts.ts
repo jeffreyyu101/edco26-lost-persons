@@ -43,12 +43,19 @@ function subject(row: RequestSummary): string {
   return who ? `${lp} · ${who}` : lp;
 }
 
+/**
+ * (HIPAA, Brian 2026-11-07 14:18) The line under "<initials> located" in the in-app alert and the page's own system
+ * notification. It never names Main Med (or any medical place): "Bring the friend to Main Med" said where the
+ * named person is.
+ */
+export const LOCATED_SUBTITLE = 'Friend can head over';
+
 export function statusAlert(row: RequestSummary, timeZone?: string): AlertEvent {
   // (F5) An Undo of the final Not found, or of In medical, can put the hold back: it reads "Not located yet".
   if (isHeld(row)) return holdAlert(row, timeZone);
   const s = subject(row);
   if (isInMedical(row.status)) {
-    return { kind: 'in_medical', requestId: row.id, title: `${s} ${statusMeta(STATUS.inMedical).shortLabel.toLowerCase()}`, subtitle: 'Bring the friend to Main Med', count: 1 };
+    return { kind: 'in_medical', requestId: row.id, title: `${s} ${statusMeta(STATUS.inMedical).shortLabel.toLowerCase()}`, subtitle: LOCATED_SUBTITLE, count: 1 };
   }
   if (row.status === STATUS.notInMedical) {
     return { kind: 'not_in_medical', requestId: row.id, title: `${s} — ${statusMeta(STATUS.notInMedical).shortLabel.toLowerCase()}`, count: 1 };
@@ -188,7 +195,7 @@ export function alertToast(alert: AlertEvent, view: (id: string) => void): Omit<
   const base = { title: alert.title, ...(alert.subtitle ? { subtitle: alert.subtitle } : {}), ...(action ? { action } : {}) };
   switch (alert.kind) {
     case 'in_medical':
-      // Front of house has to act on this one (walk the friend to Main Med): it stays until dismissed.
+      // Front of house has to act on this one (walk the friend over): it stays until dismissed.
       return { ...base, tone: 'green', icon: 'check', durationMs: null };
     case 'not_in_medical':
       return { ...base, tone: 'amber', icon: 'x', durationMs: ALERT_TOAST_MS };

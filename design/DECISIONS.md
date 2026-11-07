@@ -389,7 +389,7 @@ Staff were still relaying "this pt is being worked up, only bring one" and "ok o
   | | Medical | Front of house |
   |---|---|---|
   | Waiting for check (and Not found yet) | Any tattoos or marks? · What are they wearing? · Do you have a photo? | Friend is still here · Friend left the area |
-  | In medical | Bring 1 person only · Being worked up — wait · Ready for them · Hold — not ready yet | En route (before) or Arrived (while en route) · Friend left the area ("Can't find them" removed 2026-11-07) |
+  | In medical | Bring 1 person only · Not ready yet — wait · Ready for them (was "Being worked up — wait" and "Hold — not ready yet" until 2026-11-07 14:18) | En route (before) or Arrived (while en route) · Friend left the area ("Can't find them" removed 2026-11-07) |
   | Closed | none (free text) | none (free text) |
 
   Every quick line is just a message, except En route (opens the en route sheet) and Arrived.
@@ -533,3 +533,8 @@ Approved 2026-11-07 morning. Identifying the person comes first and the conversa
 |---|---|---|
 | 1 | **A bell copied from the server is never an "old bell".** Once the server has answered with a staff member's switches, the phone's bell is only a copy of that switch (`lp-bell-server`), and the push client sends `bell` only while it is one this phone set itself (before F4). Sign-out forgets the bell and its intro, and so does a sign-in by anyone but the staff member remembered on the phone (or after "Change"). On a shared phone or iPad the next staff member starts from their own switch: a new Medical staff member stays on by the team default (push only), front of house that never set it stays off. A phone's own pre-F4 bell still turns New requests on for its staff member (F4's rule). | Release review; F4 row "no phone loses the new-request alerts it had" kept for the phone's own staff member only |
 | 2 | **A second Not found tapped while the first is still saving:** within 0.5 s of the hold showing it is the other half of a double tap and is dropped (F5's rule); later, the medic tapped the "× Not located" on screen, so it is queued and sent as the final answer once the hold is saved, and nothing is sent if the hold never lands (the first failed or the request moved on). | Release review ("a deliberate second tap should not be silently dropped"); F5 double-tap rule kept for real double taps |
+
+## Located alert and medical quick lines, HIPAA (Brian 2026-11-07 14:18)
+
+- **"<initials> located" reads "Friend can head over"** under it (was "Bring the friend to Main Med"), in the in-app alert and the page's own system notification: no alert names where the person is.
+- **Medical's In medical quick lines: Bring 1 person only · Not ready yet — wait · Ready for them.** "Being worked up — wait" became "Not ready yet — wait" (it described care); "Hold — not ready yet", now the same words, is gone. Old messages stay as written.

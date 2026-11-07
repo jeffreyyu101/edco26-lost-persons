@@ -141,6 +141,68 @@ export function childTestEnv(extra = {}, { keys = true } = {}) {
   return env;
 }
 
+// --- The e2e lock (tests/e2e/global-setup.ts, scripts/with-e2e-lock.mjs) --------------------------------------
+
+/** The lock on the shared local stack (supabase/config.toml), the one every older checkout takes too. */
+export const DEFAULT_E2E_LOCK_DIR = '/tmp/lp-e2e.lock';
+/** supabase/config.toml [api] port: the shared stack, which keeps DEFAULT_E2E_LOCK_DIR. */
+export const SHARED_STACK_API_PORT = '54421';
+/** How long a run waits on a lock a live process holds before it fails, naming that process. */
+export const E2E_LOCK_WAIT_MS = 2 * 60_000;
+
+/** .env.test's NEXT_PUBLIC_SUPABASE_URL (the stack this checkout's tests use), or undefined. */
+function envTestSupabaseUrl() {
+  try {
+    return parseEnv(readFileSync(join(ROOT, '.env.test'), 'utf8')).NEXT_PUBLIC_SUPABASE_URL;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The e2e lock directory: LP_E2E_LOCK_DIR when set; else one per stack, from the port of `supabaseUrl` (.env.test's
+ * NEXT_PUBLIC_SUPABASE_URL): /tmp/lp-e2e.lock-<port> for an isolated stack (~/.config/lp-stacks/use.sh rewrites
+ * .env.test), so runs on different stacks never wait on each other; DEFAULT_E2E_LOCK_DIR for the shared stack, or
+ * when there is no URL or port.
+ */
+export function e2eLockDir(env = process.env, supabaseUrl = envTestSupabaseUrl()) {
+  const set = env.LP_E2E_LOCK_DIR?.trim();
+  if (set) return set;
+  let port = '';
+  try {
+    port = new URL(supabaseUrl ?? '').port;
+  } catch {
+    // No URL: the shared lock.
+  }
+  return port && port !== SHARED_STACK_API_PORT ? `${DEFAULT_E2E_LOCK_DIR}-${port}` : DEFAULT_E2E_LOCK_DIR;
+}
+
+/** Who holds the lock at `dir`: "pid 4242, cwd /path/to/checkout" (the cwd its owner wrote, else lsof's, else unknown). */
+export function e2eLockHolder(dir) {
+  let pid = null;
+  try {
+    const n = Number(readFileSync(join(dir, 'pid'), 'utf8'));
+    if (Number.isInteger(n) && n > 0) pid = n;
+  } catch {
+    // No pid yet.
+  }
+  let cwd = '';
+  try {
+    cwd = readFileSync(join(dir, 'cwd'), 'utf8').trim();
+  } catch {
+    // An owner on an older build writes no cwd.
+  }
+  if (!cwd && pid !== null) {
+    try {
+      const out = execFileSync('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2_000 });
+      cwd = /^n(.+)$/m.exec(out)?.[1] ?? '';
+    } catch {
+      // No lsof, or the process is gone.
+    }
+  }
+  return `pid ${pid ?? 'unknown'}, cwd ${cwd || 'unknown'}`;
+}
+
 /** Base URL of the local test server (PORT from the environment, else .env.test, else 3100). */
 export function testBaseUrl() {
   const port = process.env.PORT || loadTestEnv().PORT || '3100';

@@ -34,7 +34,7 @@ import {
   statusChangeEvent,
 } from '@/lib/activity';
 import { notFoundDetail } from '@/lib/server/stage-notify';
-import { holdAlert, statusAlert } from '@/lib/client/alerts';
+import { LOCATED_SUBTITLE, holdAlert, statusAlert } from '@/lib/client/alerts';
 import { systemNotice } from '@/lib/client/system-notify';
 import { notFoundSnack } from '@/lib/client/hold';
 import { changeAnswerChoices } from '@/components/profile/change-answer';
@@ -179,6 +179,28 @@ describe('Located / Not located: no status wording says "medical"', () => {
     // The staff attribution ("· Medical") is the team's name, not a status: only the status words are checked.
     expect(saysMedical(items.map((i) => [i.title ?? '', i.note ?? '', i.status?.fromLabel ?? '', i.status?.toLabel ?? '']))).toEqual([]);
     expect(items.map((i) => i.status?.toLabel)).toContain('Not located (rechecked)');
+  });
+});
+
+describe('"<initials> located" says "Friend can head over", never Main Med (HIPAA, Brian 2026-11-07 14:18)', () => {
+  const MED = /\bmed\b|medical/i;
+
+  it('the in-app alert and the system notification', () => {
+    expect(LOCATED_SUBTITLE).toBe('Friend can head over');
+    const row = makeRow(33, { status: STATUS.inMedical, medicalLocation: 'Chair 9' });
+    const alert = statusAlert(row, TZ);
+    expect(alert).toMatchObject({ kind: 'in_medical', title: 'LP-1033 · T.R. located', subtitle: 'Friend can head over' });
+    const notice = systemNotice(alert, (id) => (id === row.id ? row : undefined));
+    expect(notice.title).toBe('T.R. · Located');
+    expect(notice.body.split('\n').at(-1)).toBe('Friend can head over');
+  });
+
+  it('no alert or system notification, in any status or stage, names Main Med', () => {
+    for (const row of everyRow()) {
+      const alert = statusAlert(row, TZ);
+      const notice = systemNotice(alert, (id) => (id === row.id ? row : undefined));
+      expect([alert.title, alert.subtitle ?? '', notice.title, notice.body].join('\n'), row.status).not.toMatch(MED);
+    }
   });
 });
 

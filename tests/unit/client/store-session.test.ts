@@ -458,7 +458,7 @@ describe('alerts through the store', () => {
     await advance(6_000);
     expect(heard.map((e) => e.title)).toEqual(['LP-1004 · S.L. located']);
     const toast = s().toasts.find((t) => t.title === 'LP-1004 · S.L. located');
-    expect(toast).toMatchObject({ subtitle: 'Bring the friend to Main Med', tone: 'green', durationMs: null, action: { label: 'View' } });
+    expect(toast).toMatchObject({ subtitle: 'Friend can head over', tone: 'green', durationMs: null, action: { label: 'View' } });
     await advance(6_000); // the overlap re-delivers the row: no second alert
     expect(heard).toHaveLength(1);
   });

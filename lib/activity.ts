@@ -160,7 +160,7 @@ export interface PushPayload {
    * notification did (system-notify noticeOptions).
    */
   renotify: boolean;
-  /** Stays on screen until dismissed (In medical: front of house walks the friend to Main Med), like its toast. */
+  /** Stays on screen until dismissed (Located: front of house walks the friend over), like its toast. */
   requireInteraction?: boolean;
   /** The recipient's unread Activity count (the app icon badge), when known. */
   badge: number | null;

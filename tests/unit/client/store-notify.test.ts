@@ -121,7 +121,7 @@ describe('alerts in the background are system notifications', () => {
     expect(n.shown).toEqual([
       {
         title: 'S.L. · Located',
-        body: 'FA 3\nBring the friend to Main Med',
+        body: 'FA 3\nFriend can head over',
         tag: `lp-${mine.id}`,
         url: `/?r=${mine.id}`,
         key: `${mine.id}:2`,

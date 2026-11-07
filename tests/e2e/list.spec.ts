@@ -997,11 +997,11 @@ test('front of house logs a request with a photo; the liaison sees it in Pending
     const toast = a.locator('.lp-toast').filter({ hasText: new RegExp(`${lpText} · [^—]+ located`) });
     await expect(toast).toBeVisible({ timeout: 15_000 });
     await expect(toast).toContainText(/LP-\d+ · .+ located/);
-    await expect(toast).toContainText('Bring the friend to Main Med');
+    await expect(toast).toContainText('Friend can head over');
     await expect.poll(async () => ((await (await a.request.get(`/api/requests/${id}`)).json()) as RequestDetail).photos.length).toBe(1);
 
     // Regression: B changes the answer (past the Undo window). A's sticky "is in medical" must not outlive
-    // it: on A's next poll the new answer replaces it, so nobody walks the friend to Main Med for nothing.
+    // it: on A's next poll the new answer replaces it, so nobody walks the friend over for nothing.
     await page.waitForTimeout(6_500);
     const inMedical = (await (await page.request.get(`/api/requests/${id}`)).json()) as RequestDetail;
     const changed = await page.request.post(`/api/requests/${id}/status`, {
@@ -1012,7 +1012,7 @@ test('front of house logs a request with a photo; the liaison sees it in Pending
     const notInMedical = a.locator('.lp-toast').filter({ hasText: new RegExp(`${lpText} · .+ — not located`) });
     await expect(notInMedical).toBeVisible({ timeout: 15_000 });
     await expect(toast).toHaveCount(0);
-    await expect(a.locator('.lp-toast').filter({ hasText: 'Bring the friend to Main Med' })).toHaveCount(0);
+    await expect(a.locator('.lp-toast').filter({ hasText: 'Friend can head over' })).toHaveCount(0);
   } finally {
     if (id) {
       // Leave nothing open for the other specs.

@@ -96,12 +96,9 @@ describe('quick lines (status × side)', () => {
       quickLines(stage, side, mine, arrived).map((l) => `${l.kind}:${l.text}`);
     expect(texts('waiting', 'medical')).toEqual(['message:Any tattoos or marks?', 'message:What are they wearing?', 'message:Do you have a photo?']);
     expect(texts('waiting', 'foh')).toEqual(['message:Friend is still here', 'message:Friend left the area']);
-    expect(texts('in_medical', 'medical')).toEqual([
-      'message:Bring 1 person only',
-      'message:Being worked up — wait',
-      'message:Ready for them',
-      'message:Hold — not ready yet',
-    ]);
+    // (HIPAA, Brian 2026-11-07 14:18) "Not ready yet — wait" (was "Being worked up — wait"); "Hold — not ready yet",
+    // now the same words, is gone.
+    expect(texts('in_medical', 'medical')).toEqual(['message:Bring 1 person only', 'message:Not ready yet — wait', 'message:Ready for them']);
     // (2026-11-07 13:52) "Can't find them" is gone; En route / Arrived and "Friend left the area" stay.
     expect(texts('in_medical', 'foh')).toEqual(['enroute:En route', 'message:Friend left the area']);
     expect(texts('in_medical', 'foh', true)).toEqual(['arrived:Arrived', 'message:Friend left the area']);
@@ -111,7 +108,11 @@ describe('quick lines (status × side)', () => {
     for (const stage of ['waiting', 'in_medical', 'closed'] as const) {
       for (const side of ['medical', 'foh'] as const) {
         for (const mine of [false, true]) {
-          for (const arrived of [false, true]) expect(texts(stage, side, mine, arrived).join('|')).not.toContain("Can't find them");
+          for (const arrived of [false, true]) {
+            const all = texts(stage, side, mine, arrived).join('|');
+            expect(all).not.toContain("Can't find them");
+            expect(all).not.toMatch(/worked up|Hold —/);
+          }
         }
       }
     }

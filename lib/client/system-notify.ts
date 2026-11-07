@@ -34,7 +34,7 @@
 import { useSyncExternalStore } from 'react';
 import type { RequestSummary } from '../api-types';
 import { initials, isHeld, statusMeta } from '../domain';
-import { alertKey } from './alerts';
+import { LOCATED_SUBTITLE, alertKey } from './alerts';
 import { hrefFor, navigate, parseView, viewToParams } from './nav';
 import type { AlertEvent } from './store-contract';
 import { requestThreadJump } from './thread-jump';
@@ -146,7 +146,7 @@ export interface SystemNotice {
   url: string;
   /** `${id}:${rowVersion}` of the row that alerted (null when combined): the cross-tab dedupe. */
   key: string | null;
-  /** In medical stays on screen until dismissed (front of house walks the friend to Main Med). */
+  /** Located stays on screen until dismissed (front of house walks the friend over). */
   requireInteraction: boolean;
 }
 
@@ -196,7 +196,7 @@ export function systemNotice(
   const name = initials(row.name) || NO_NAME;
   const title = alert.kind === 'new_request' ? 'New request' : `${name} · ${statusMeta(row.status).shortLabel}`;
   const where = alert.kind === 'new_request' ? who(row) : row.postShort;
-  const body = alert.kind === 'in_medical' ? [where, 'Bring the friend to Main Med'].filter(Boolean).join('\n') : where;
+  const body = alert.kind === 'in_medical' ? [where, LOCATED_SUBTITLE].filter(Boolean).join('\n') : where;
   return { title, body, tag, url, key: alertKey(row), requireInteraction };
 }
 
