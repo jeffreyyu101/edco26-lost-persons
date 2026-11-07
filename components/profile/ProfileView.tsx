@@ -27,6 +27,8 @@
 import { AlertDialog, Badge, Button, DropdownMenu, Heading, IconButton, Skeleton, Text, VisuallyHidden } from '@radix-ui/themes';
 import { Camera, Check, ChevronDown, Clock, CloudOff, Ellipsis, MapPin, Pencil, Phone, Plus, RotateCcw, Trash2, Undo2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { StatusEnroute } from '@/components/messages/Enroute';
+import { MessagesSection } from '@/components/messages/MessagesSection';
 import { Banner, ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ProfileSkeleton } from '@/components/ui/Skeleton';
@@ -410,6 +412,9 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
 
         {panel ? actionBar : null}
 
+        {/* F3: the request's thread, at every status (updates.html v7). */}
+        <MessagesSection row={row} panel={panel} />
+
         <Details row={row} />
 
         <SectionLabel>Photos</SectionLabel>
@@ -665,6 +670,8 @@ function StatusBlock({
         {badge}
       </div>
       {inMedical ? <LocationRow row={row} offline={offline} panel={panel} onNeedsConnection={onNeedsConnection} /> : null}
+      {/* F3: one en route row under the location (teal; tappable when it is mine). */}
+      {inMedical ? <StatusEnroute row={row} /> : null}
     </div>
   );
 }

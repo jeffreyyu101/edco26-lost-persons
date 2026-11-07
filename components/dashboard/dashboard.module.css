@@ -214,6 +214,26 @@ button.tile:active {
   visibility: hidden;
 }
 
+/* (F3) Friends en route: one slim tile across the grid, label left, count right. */
+.tile.tileWide {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: 10px 14px 10px 12px;
+}
+.tileWide .lb {
+  align-items: center;
+}
+.tileWide .lb > svg {
+  margin-top: 0;
+}
+.enrGlyph {
+  flex: none;
+  color: var(--teal-11);
+}
+
 /* ---- section headers ------------------------------------------------------------------------------------ */
 
 .sh {
@@ -537,6 +557,20 @@ button.pr:active {
   }
   .ghost {
     display: none;
+  }
+  /* (F3) After the closed tiles, across every column, its own single row. */
+  .tile.tileWide {
+    display: flex;
+    grid-row: auto;
+    order: 3;
+    margin-top: 8px;
+  }
+  .tileWide .lb {
+    margin-bottom: 0;
+    align-self: center;
+  }
+  .tileWide .v {
+    align-self: center;
   }
 
   .loading .tiles {

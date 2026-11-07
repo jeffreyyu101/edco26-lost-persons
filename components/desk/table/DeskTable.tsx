@@ -12,6 +12,7 @@
 import { Skeleton } from '@radix-ui/themes';
 import { ChevronDown, CircleAlert } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
+import { UnreadBadge, unreadSentence } from '@/components/messages/CardActivity';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { navigate } from '@/lib/client/nav';
@@ -96,6 +97,8 @@ export function Highlight({ text, ranges }: { text: string; ranges: Ranges }) {
 interface CellsProps {
   number: ReactNode;
   name: ReactNode;
+  /** (F3) The unread count after the name. */
+  badge?: ReactNode;
   ageGender: string;
   /** The matched text of a search result, on a second line under the name. */
   line?: ReactNode;
@@ -121,6 +124,7 @@ function Cells(p: CellsProps) {
       <span className={cx(t.cFriend, t.friend)} data-col="friend" aria-hidden>
         <span className={t.who}>
           <span className={t.nm}>{p.name}</span>
+          {p.badge}
           {p.ageGender ? <span className={t.ag}>{p.ageGender}</span> : null}
         </span>
         {p.line ? <span className={t.match}>{p.line}</span> : null}
@@ -173,10 +177,14 @@ export const TableRow = memo(function TableRow({ row, times, selected }: TableRo
       aria-current={selected ? 'true' : undefined}
       onClick={() => navigate({ r: row.id })}
     >
-      <Vh>{tableRowLabel(row, times)}</Vh>
+      <Vh>
+        {tableRowLabel(row, times)}
+        {unreadSentence(row)}
+      </Vh>
       <Cells
         number={logNumber(row.caseNumber)}
         name={friend.name}
+        badge={<UnreadBadge row={row} />}
         ageGender={friend.ageGender}
         glyph={<StatusGlyph status={row.status} className={t.glyph} />}
         tone={meta.tone}
@@ -218,10 +226,14 @@ export const SearchRow = memo(function SearchRow({ hit, times, selected, nameRan
       aria-current={selected ? 'true' : undefined}
       onClick={() => navigate({ r: row.id })}
     >
-      <Vh>{searchRowLabel(row, times, line)}</Vh>
+      <Vh>
+        {searchRowLabel(row, times, line)}
+        {unreadSentence(row)}
+      </Vh>
       <Cells
         number={<Highlight text={logNumber(row.caseNumber)} ranges={logNumberRanges(row.caseNumber, caseRanges)} />}
         name={<Highlight text={friend.name} ranges={row.name ? nameRanges : []} />}
+        badge={<UnreadBadge row={row} />}
         ageGender={friend.ageGender}
         line={line ? <Highlight text={line} ranges={lineRanges} /> : null}
         glyph={<StatusGlyph status={row.status} className={t.glyph} />}

@@ -4,6 +4,7 @@
 // localStorage, best effort, so it also works with storage blocked). The phone puts it under the large
 // title; the desk board uses it when its two columns don't fit side by side.
 import { useCallback, useState, type KeyboardEvent } from 'react';
+import { FriendComingDot } from '@/components/messages/CardActivity';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import s from './list.module.css';
 
@@ -95,6 +96,8 @@ export function PendingTabs({ tab, onChange, counts, idBase, className }: Pendin
                 <span className={s.segn}>{count}</span>
               </>
             )}
+            {/* F3: a dot while a Friend coming request has unread messages. */}
+            {id === 'coming' ? <FriendComingDot /> : null}
           </button>
         );
       })}

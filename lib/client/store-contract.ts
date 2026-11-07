@@ -19,6 +19,7 @@ import type {
   Stats,
 } from '../api-types';
 import type { PhotoTiming, SettableStatus, StatusKind } from '../domain';
+import type { MessagingApi } from './messages-core';
 import { DEFAULT_PREFS, type Prefs } from './prefs';
 import type { RequestFormValues } from './form-values';
 import {
@@ -77,7 +78,7 @@ export interface Overlay {
 }
 
 export type ToastTone = 'neutral' | 'green' | 'amber' | 'red' | 'blue';
-export type ToastIcon = 'bell' | 'check' | 'x' | 'alert' | 'refresh' | 'cloud-off' | 'info' | 'walk';
+export type ToastIcon = 'bell' | 'check' | 'x' | 'alert' | 'refresh' | 'cloud-off' | 'info' | 'walk' | 'message';
 
 export interface ToastItem {
   id: string;
@@ -214,7 +215,7 @@ export interface AlertEvent {
    * 'status_changed' (added in Phase 1b): any other status change of one of my requests by someone else
    * (back to Waiting after an Undo, Discharged, Cancelled), since spec §7 alerts on ANY status change.
    */
-  kind: 'in_medical' | 'not_in_medical' | 'reunited' | 'new_request' | 'combined' | 'status_changed';
+  kind: 'in_medical' | 'not_in_medical' | 'reunited' | 'new_request' | 'combined' | 'status_changed' | 'message';
   /** Absent for 'combined'. */
   requestId?: string;
   title: string;
@@ -295,7 +296,10 @@ export interface StoreActions {
    * timeouts, 5xx); nothing was cleared, the session goes on, and the caller shows `message`.
    */
   signOut(opts?: { discardOutbox?: boolean }): Promise<
-    { ok: true } | { ok: false; reason: 'outbox'; count: number } | { ok: false; reason: 'failed'; message: string }
+    | { ok: true }
+    /** `count`: unsent requests; `messages` (F3): unsent messages and en route taps, also discarded with them. */
+    | { ok: false; reason: 'outbox'; count: number; messages?: number }
+    | { ok: false; reason: 'failed'; message: string }
   >;
 
   /**
@@ -322,6 +326,13 @@ export interface StoreActions {
    * every view chunk. Resolves false without a service worker (development, unsupported browsers).
    */
   prepareOffline?(): Promise<boolean>;
+
+  /**
+   * (Added 2026-11-06 evening, F3.) Messages and en route: threads, the message / en route outbox, read
+   * cursors. Absent in stores without it (the test stub): screens then show no Messages. Use the hooks in
+   * lib/client/messages-hooks.ts.
+   */
+  messages?: MessagingApi;
 }
 
 /**

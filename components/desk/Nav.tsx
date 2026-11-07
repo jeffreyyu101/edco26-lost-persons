@@ -6,6 +6,7 @@
 // their label as a tooltip on hover and keyboard focus.
 import { BellOff, BellRing, ChartColumn, ChevronDown, Inbox, List, UserRound, type LucideIcon } from 'lucide-react';
 import { AccountMenu } from '@/components/account/AccountMenu';
+import { PendingDot } from '@/components/messages/CardActivity';
 import { usePrefs, useCounts, useIsLoading, useSession } from '@/lib/client/store-contract';
 import { teamShort } from '@/lib/domain';
 import { LiveMark, Tip, ViewLink, useBell } from './parts';
@@ -53,6 +54,8 @@ function Sidebar({ main }: DeskNavProps) {
               <Icon size={16} strokeWidth={1.75} aria-hidden />
               <span className={d.nl}>{NAV_LABEL[k]}</span>{' '}
               {loading ? null : <span className={d.nc}>{counts[k]}</span>}
+              {/* F3: a dot while a Pending request has unread messages (after the count: "Pending 4", then the dot). */}
+              {k === 'pending' ? <PendingDot /> : null}
             </ViewLink>
           );
         })}
@@ -111,6 +114,7 @@ function Rail({ main }: DeskNavProps) {
     return (
       <ViewLink key={k} params={NAV_PARAMS[k]} current={active === k} className={`${d.ri} lp-hit`} label={badge === null ? NAV_LABEL[k] : `${NAV_LABEL[k]} ${badge}`}>
         <Icon size={19} strokeWidth={1.75} aria-hidden />
+        {k === 'pending' ? <PendingDot rail /> : null}
         {badge === null ? null : (
           <span className={d.bd} aria-hidden>
             {badge > 99 ? '99+' : badge}

@@ -6,6 +6,8 @@
 import { Badge, Button, Card, Text, VisuallyHidden } from '@radix-ui/themes';
 import { ArrowRight, Check, CircleAlert, Clock, MapPin, Plus, UserRound, X } from 'lucide-react';
 import { memo, useEffect, useId, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
+import { CheckPreview, ComingEnroute, MessageButton, MessageIconButton, MineActivity, useHasMessages } from '@/components/messages/CardActivity';
+import m from '@/components/messages/messages.module.css';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { photoPath } from '@/lib/client/api-paths';
@@ -234,6 +236,7 @@ export const CheckCard = memo(function CheckCard({ row, now, offline, onNotInMed
   const label = `${whoPhrase(row)}. ${meta}. Waiting ${minutesPhrase(minutes)}.${desc ? ` ${desc}` : ''}`;
   const fresh = isFresh(row.createdAt, now);
   const describedBy = offline ? `${nameId} ${metaId} ${reasonId}` : `${nameId} ${metaId}`;
+  const messages = useHasMessages();
   return (
     <div className={`${s.pcard} ${fresh ? s.fresh : ''}`} data-testid="check-card" data-pending-card={row.id}>
       <OpenButton id={row.id} label={label} />
@@ -253,7 +256,10 @@ export const CheckCard = memo(function CheckCard({ row, now, offline, onNotInMed
           </span>
         </div>
       </div>
-      <div className={`${s.pacts} ${s.actions}`}>
+      {/* F3: the last message, then Message left of the answers (updates.html #clarify 3). */}
+      <CheckPreview row={row} />
+      <div className={`${messages ? m.checkActs : s.pacts} ${s.actions}`}>
+        {messages ? <MessageIconButton row={row} /> : null}
         <Button
           size="3"
           variant="soft"
@@ -306,6 +312,20 @@ export const ComingCard = memo(function ComingCard({ row, now, offline, onReunit
   const coming = friendComingLine(row);
   const label = `${whoPhrase(row)}. In medical${location ? `, ${location}` : ''}, ${minutesPhrase(minutes)} ago. ${coming.friend} · ${coming.rest}. ${row.postShort} · ${formatCaseNumber(row.caseNumber)}.`;
   const describedBy = offline ? `${nameId} ${reasonId}` : nameId;
+  const messages = useHasMessages();
+  const reunited = (
+    <Button
+      size="3"
+      highContrast
+      className={`${s.pbtn} ${s.actions}`}
+      {...offlineProps(offline)}
+      aria-describedby={describedBy}
+      onClick={() => onReunited(row)}
+    >
+      <Check size={16} strokeWidth={2.25} aria-hidden />
+      Reunited
+    </Button>
+  );
   return (
     <div className={s.pcard} data-testid="friend-coming-card" data-pending-card={row.id}>
       <OpenButton id={row.id} label={label} />
@@ -342,17 +362,18 @@ export const ComingCard = memo(function ComingCard({ row, now, offline, onReunit
           </div>
         </div>
       </div>
-      <Button
-        size="3"
-        highContrast
-        className={`${s.pbtn} ${s.actions}`}
-        {...offlineProps(offline)}
-        aria-describedby={describedBy}
-        onClick={() => onReunited(row)}
-      >
-        <Check size={16} strokeWidth={2.25} aria-hidden />
-        Reunited
-      </Button>
+      {/* F3: who is bringing the friend, then Message | Reunited (updates.html v7 "4 · Pending"). */}
+      {messages ? (
+        <>
+          <ComingEnroute row={row} />
+          <div className={`${m.cardBtns} ${s.actions}`}>
+            <MessageButton row={row} />
+            {reunited}
+          </div>
+        </>
+      ) : (
+        reunited
+      )}
       {offline ? <VisuallyHidden id={reasonId}>Needs a connection</VisuallyHidden> : null}
     </div>
   );
@@ -397,6 +418,8 @@ export const MineCard = memo(function MineCard({ row, now, freshTone }: { row: R
         </div>
         <Stepper model={stepperModel(row.status)} />
       </div>
+      {/* F3: en route, the last message, En route / Arrived and Message (updates.html v7 "2 · My requests"). */}
+      <MineActivity row={row} />
     </Card>
   );
 });

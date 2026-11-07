@@ -1,13 +1,25 @@
 // Pure merge rules for the store (spec §7 Sync / Mutations, v2.1 A11). No I/O.
 import type { RequestPatch, RequestSummary } from '../api-types';
 import { postShort, splitName } from '../domain';
+import { carryActivity } from './messages-logic';
 
-/** Same content (shallow, every key). Equal-version rows from the 30 s overlap keep their identity. */
+/** Equal plain JSON values (the F3 activity objects lastMessage / enroute arrive as new objects every poll). */
+function sameJson(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+/** Same content (every key; object values compared as JSON). Equal-version rows from the 30 s overlap keep their identity. */
 export function sameRow(a: RequestSummary, b: RequestSummary): boolean {
   if (a === b) return true;
   const ka = Object.keys(a) as Array<keyof RequestSummary>;
   if (ka.length !== Object.keys(b).length) return false;
-  return ka.every((k) => Object.is(a[k], b[k]));
+  return ka.every((k) => sameJson(a[k], b[k]));
 }
 
 /**
@@ -33,8 +45,9 @@ export function mergeRows(
 ): Map<string, RequestSummary> | null {
   let next: Map<string, RequestSummary> | null = null;
   for (const raw of rows) {
-    const row = normalizeRow(raw);
-    const current = (next ?? confirmed).get(row.id);
+    const current = (next ?? confirmed).get(raw.id);
+    // A row without the F3 activity fields (a mutation answer) keeps the ones the client had.
+    const row = carryActivity(current, normalizeRow(raw));
     if (current) {
       if (row.rowVersion < current.rowVersion) continue;
       if (row.rowVersion === current.rowVersion && sameRow(current, row)) continue;
@@ -57,8 +70,8 @@ export function replaceAll(
 ): Map<string, RequestSummary> {
   const next = new Map<string, RequestSummary>();
   for (const raw of rows) {
-    const row = normalizeRow(raw);
-    const current = confirmed.get(row.id);
+    const current = confirmed.get(raw.id);
+    const row = carryActivity(current, normalizeRow(raw));
     if (current && current.rowVersion > row.rowVersion) next.set(row.id, current);
     else if (current && current.rowVersion === row.rowVersion && sameRow(current, row)) next.set(row.id, current);
     else next.set(row.id, row);
@@ -124,7 +137,7 @@ export function overlayForPatch(row: RequestSummary, patch: RequestPatch): Parti
 
 /** A RequestDetail's summary part (the detail endpoint returns the row too). */
 export function summaryOf<T extends RequestSummary>(detail: T): RequestSummary {
-  const { photos: _p, audit: _a, ...rest } = detail as T & { photos?: unknown; audit?: unknown };
+  const { photos: _p, audit: _a, thread: _t, ...rest } = detail as T & { photos?: unknown; audit?: unknown; thread?: unknown };
   return rest as RequestSummary;
 }
 

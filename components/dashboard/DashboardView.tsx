@@ -18,6 +18,7 @@
 //            has room, stacked when a request is docked. Sized by the main column (container queries).
 import { Skeleton, VisuallyHidden } from '@radix-ui/themes';
 import { ChevronLeft, ChevronRight, Clock, Inbox, Timer, Users, type LucideIcon } from 'lucide-react';
+import { WalkIcon } from '@/components/messages/WalkIcon';
 import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { useInDesk } from '@/components/desk/desk-context';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -182,7 +183,33 @@ function Tiles({ stats }: { stats: Stats }) {
         }
         onClick={() => show({ status: STATUS.reunited })}
       />
+      <EnrouteTile stats={stats} />
     </section>
+  );
+}
+
+/**
+ * (F3) Friends en route now: one slim full-width tile under the six, teal walk glyph, "—" when the server
+ * did not send it. Opens Pending (Friend coming lists them).
+ */
+function EnrouteTile({ stats }: { stats: Stats }) {
+  const n = typeof stats.friendsEnRoute === 'number' && Number.isFinite(stats.friendsEnRoute) ? stats.friendsEnRoute : null;
+  return (
+    <button
+      type="button"
+      className={`${s.tap} ${s.tile} ${s.tileWide}`}
+      onClick={() => show({ view: 'pending' })}
+      data-testid="tile-enroute"
+      aria-label={n === null ? 'Friends en route: not available. Opens Pending.' : `Friends en route now: ${n}. Opens Pending.`}
+    >
+      <span className={s.lb} aria-hidden>
+        <WalkIcon size={14} strokeWidth={2} className={s.enrGlyph} />
+        <span>Friends en route</span>
+      </span>
+      <span className={s.v} data-testid="tile-enroute-value" aria-hidden>
+        {n === null ? NO_VALUE : n}
+      </span>
+    </button>
   );
 }
 
@@ -350,6 +377,7 @@ function Performance({ stats }: { stats: Stats }) {
   const longestContext = longest ? [String(longest.caseNumber), longest.postShort].filter(Boolean).join(' · ') : null;
   const answer = durationPhrase(stats.avgAnswerMinutes);
   const reunite = durationPhrase(stats.avgReuniteMinutes);
+  const arrive = durationPhrase(stats.avgArriveMinutes);
   const logged = countParts(stats.loggedLastHour);
   return (
     <section aria-labelledby="lp-dash-perf" className={s.perf}>
@@ -387,6 +415,14 @@ function Performance({ stats }: { stats: Stats }) {
           phrase={`Average time to reunite: ${reunite ?? 'not available'}.`}
         />
         <PerfRow
+          testId="perf-arrive"
+          icon={WalkIcon}
+          label="Time to arrive"
+          context="avg, 2 h"
+          parts={durationParts(stats.avgArriveMinutes)}
+          phrase={`Average time from en route to arrived over the last 2 hours: ${arrive ?? 'not available'}.`}
+        />
+        <PerfRow
           testId="perf-logged"
           icon={Inbox}
           label="Logged"
@@ -403,7 +439,7 @@ function Performance({ stats }: { stats: Stats }) {
 
 interface PerfRowProps {
   testId: string;
-  icon: LucideIcon;
+  icon: LucideIcon | typeof WalkIcon;
   label: string;
   context: string | null;
   parts: ValuePart[] | null;

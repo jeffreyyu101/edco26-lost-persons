@@ -42,6 +42,8 @@ import {
 import { DRAFT_DEBOUNCE_MS, LEGACY_QUEUE_KEY, MUTATION_TIMEOUT_MS, SYNC, UNDO_MS } from './constants';
 import { createBodyFromLegacyQueueItem, hasAnyDetail, toCreateBody } from './form-values';
 import { apiRequest, isDefinitive, isUncertain, type FetchLike, type HttpFailure, type HttpResult, type RequestOptions } from './http';
+import { createMessaging, type MessagingEngine } from './messages-core';
+import { diffMessageAlerts } from './messages-logic';
 import { navigate } from './nav';
 import {
   CREATE_DEFINITIVE,
@@ -87,7 +89,7 @@ import {
   type StoreState,
   type ToastItem,
 } from './store-contract';
-import { chunk, isRow, mergeRows, overlayForPatch, replaceAll, staleIds, summaryOf } from './sync-merge';
+import { chunk, isRow, mergeRows, overlayForPatch, replaceAll, sameRow, staleIds, summaryOf } from './sync-merge';
 import { uuid } from './uuid';
 
 // ---------------------------------------------------------------------------------------------------
@@ -467,7 +469,22 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     if (snackTimer) clearTimeout(snackTimer);
     snackTimer = undefined;
     undoRecords.clear();
+    customUndos.clear();
     if (state.snackbar) set({ snackbar: null });
+  };
+
+  /** (F3) The Undo bar for something that is not a status (en route cancelled · Undo). */
+  const customUndos = new Map<string, () => void>();
+  const showCustomUndo = (message: string, ms: number, onUndo: () => void) => {
+    clearSnackbar();
+    const snackId = uuid();
+    customUndos.set(snackId, onUndo);
+    set({ snackbar: { id: snackId, message, expiresAt: now() + ms } });
+    snackTimer = setTimeout(() => {
+      snackTimer = undefined;
+      customUndos.delete(snackId);
+      if (state.snackbar?.id === snackId) set({ snackbar: null });
+    }, ms);
   };
 
   /**
@@ -653,6 +670,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     const valid = rows.filter(isRow);
     if (valid.length === 0) return;
     const alerts = armed ? diffRaisedAlerts(state.confirmed, valid, alertCtx()) : [];
+    const messageAlerts = armed ? diffMessageAlerts(state.confirmed, valid, seen, (id) => messaging.isOpen(id)) : [];
     if (defer) alertBacklog.push(...alerts);
     const merged = mergeRows(state.confirmed, valid);
     if (merged) {
@@ -661,6 +679,22 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     }
     if (!defer && alerts.length) emitAlerts(alerts);
     else if (merged) pruneAlertToasts();
+    emitMessageAlerts(messageAlerts);
+  };
+
+  /**
+   * F3: a new message from someone else on a request I'm involved in. Toast + chime while the app is in
+   * front, through the same delivery plan as the other alerts (one tab of this browser shows it); in the
+   * background nothing here (F4's Web Push carries it). Never for a thread on screen.
+   */
+  const emitMessageAlerts = (raised: ReturnType<typeof diffMessageAlerts>) => {
+    if (raised.length === 0 || !env?.visible()) return;
+    const plan = notifier?.plan(raised.map((r) => r.key)) ?? TOAST_PLAN;
+    if (plan.route !== 'toast') return;
+    for (const r of raised) {
+      if (plan.skip.has(r.key)) continue;
+      showAlertToast(r.alert, null);
+    }
   };
 
   /** Shows the alerts of every row a sync applied (also after a later request of that sync failed). */
@@ -801,6 +835,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     clearSnackbar();
     approved.clear();
     touchedDuringPoll.clear();
+    // Threads were the previous staff's (their read state, "You"); queued jobs stay (sent only as their owner).
+    void messaging.clear(false);
   };
 
   /** False when a sign-out overtook it (nothing applied then). */
@@ -821,6 +857,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     void enqueue((store) => store.set(K.lastStaff, last));
     refreshPrompt();
     kickOutbox();
+    messaging.kick();
     // Polling stopped at a 401; a session confirmed again (signed in in another tab) restarts it.
     if (running && !pollInFlight && !pollTimer) schedulePoll(0);
     return true;
@@ -1103,6 +1140,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     // The first sync after load is the baseline: it alerts nothing (runSync shows what later ones raise).
     setArmed(true);
     if (state.outbox.length) kickOutbox();
+    messaging.kick();
     return 'ok';
   };
 
@@ -1588,7 +1626,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       | { type: 'signout-failed' }
       | { type: 'outbox' }
       | { type: 'myids' }
-      | { type: 'outbox-idle' },
+      | { type: 'outbox-idle' }
+      | { type: 'mjobs' },
   ) => {
     try {
       channel?.postMessage(message);
@@ -1922,6 +1961,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     draftTimer = undefined;
     draftPending = null;
     draftHas = false;
+    // Threads (memory; their cached copies are `cache:` keys, deleted below) and, with the outbox, queued
+    // messages and en route taps (`mjob:` keys).
+    void messaging.clear(discardOutbox);
     if (!store) return;
     // Queued behind every pending write, so nothing older can land after the clear.
     const done = enqueue(async (s) => {
@@ -2080,8 +2122,51 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       case 'outbox-idle':
         kickOutbox();
         return;
+      case 'mjobs':
+        // Another tab queued, sent or retried a message / en route tap.
+        void messaging.reload().then(() => messaging.kick());
+        return;
     }
   };
+
+  // ---- messages and en route (F3, lib/client/messages-core.ts) ----
+  /** A request's activity (unread, last message, en route) as the engine learned it: same rowVersion, no alert. */
+  const patchActivity = (id: string, activity: Partial<RequestSummary>) => {
+    const row = state.confirmed.get(id);
+    if (!row) return;
+    const next = { ...row, ...activity };
+    if (sameRow(row, next)) return;
+    const confirmed = new Map(state.confirmed);
+    confirmed.set(id, next);
+    set({ confirmed });
+    markRowsDirty();
+  };
+
+  const messaging: MessagingEngine = createMessaging({
+    call,
+    online: () => !!env && env.online() && state.connection !== 'offline',
+    visible: () => !!env && env.visible(),
+    canSend: () => canFlush(),
+    async ensureSession() {
+      if (!running || networkHeld() || state.session.status === 'signed_out') return false;
+      if (!sessionCheckDue && state.session.status === 'active') return true;
+      return (await confirmSession()) === 'ok';
+    },
+    sessionExpired,
+    staff: () => state.session.staff,
+    cacheStaff: () => cacheStaff,
+    generation: () => state.generation,
+    kv: () => kv,
+    enqueue,
+    durable: () => state.durableStorage,
+    row: (id) => state.confirmed.get(id),
+    patchActivity,
+    markLive,
+    showToast,
+    showUndo: showCustomUndo,
+    broadcast: () => broadcast({ type: 'mjobs' }),
+    locks: () => env?.locks ?? null,
+  });
 
   // ---- actions ----
   const actions: StoreActions = {
@@ -2096,6 +2181,12 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     },
 
     async undo(snackbarId) {
+      const custom = customUndos.get(snackbarId);
+      if (custom) {
+        clearSnackbar();
+        custom();
+        return null;
+      }
       const record = undoRecords.get(snackbarId);
       if (!record) return null;
       clearSnackbar();
@@ -2268,7 +2359,10 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 
     async signOut(opts) {
       const unsent = state.outbox.length;
-      if (unsent > 0 && !opts?.discardOutbox) return { ok: false, reason: 'outbox', count: unsent };
+      const messages = messaging.unsentCount();
+      if ((unsent > 0 || messages > 0) && !opts?.discardOutbox) {
+        return { ok: false, reason: 'outbox', count: unsent, ...(messages > 0 ? { messages } : {}) };
+      }
       if (state.session.status === 'signed_out') return { ok: true };
       return signOutOnce(!!opts?.discardOutbox);
     },
@@ -2300,6 +2394,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     async prepareOffline() {
       return (await sw?.precache()) ?? false;
     },
+
+    messages: messaging,
   };
 
   const showUpdateToast = () => {
@@ -2345,6 +2441,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     }
     if (!isLive(id)) return;
     set({ hydrated: true, durableStorage: durable });
+    if (durable) await messaging.hydrate();
+    if (!isLive(id)) return;
     if (durable) await importLegacyQueue();
     if (!isLive(id)) return;
     const pendingSignOut = resumeSignOut;
@@ -2359,6 +2457,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     }
     schedulePoll(0);
     kickOutbox();
+    messaging.kick();
   };
 
   const importLegacyQueue = async () => {
@@ -2436,6 +2535,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         netFailures = 0;
         triggerSync();
         kickOutbox();
+        messaging.kick();
       }),
       e.on('window', 'offline', () => setConnection('offline')),
       e.on('window', 'focus', triggerSync),
@@ -2475,6 +2575,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         if (!state.offlineReady) set({ offlineReady: true });
       },
     });
+    messaging.start();
     void boot(id);
     return stop;
   };
@@ -2493,6 +2594,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     sw = null;
     notifier?.setActive(false);
     notifier = null;
+    messaging.stop();
     pollInFlight = false;
     if (state.syncing) set({ syncing: false });
     void draftApi.flush();
