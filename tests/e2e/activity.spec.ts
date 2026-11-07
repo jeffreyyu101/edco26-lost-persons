@@ -251,6 +251,8 @@ test.describe('desk keyboard', () => {
       await page.keyboard.press('Enter');
       await expect(pop).toBeVisible();
       await expect.poll(inPopover).toBe(true);
+      // The rows load when it opens: Tab through them once they are there.
+      await expect(pop.getByTestId('activity-row').first()).toBeVisible();
       await page.keyboard.press('Tab');
       expect(await focusedName()).toBe('Mark all read');
       await page.keyboard.press('Tab');
@@ -266,6 +268,7 @@ test.describe('desk keyboard', () => {
       await page.keyboard.press('Enter');
       await expect(pop).toBeVisible();
       await expect.poll(inPopover).toBe(true);
+      await expect(pop.getByTestId('activity-row').first()).toBeVisible();
       await page.keyboard.press('Tab');
       await page.keyboard.press('Tab');
       expect(await page.evaluate(() => document.activeElement?.getAttribute('data-testid'))).toBe('activity-row');
