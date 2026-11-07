@@ -95,13 +95,13 @@ export function rowTimes(row: RequestSummary, now: number, timeZone: string): Ro
  * Park, GCHX Base". It starts like the phone log's sentence (number, name, status), then says the columns a
  * desk adds.
  */
-export function tableRowLabel(row: RequestSummary, times: Pick<RowTimes, 'created' | 'updatedSaid'>, timeZone?: string): string {
+export function tableRowLabel(row: RequestSummary, times: Pick<RowTimes, 'created' | 'updatedSaid'>, timeZone?: string, now = 0): string {
   const by = loggedByPhrase(row.createdBy);
   return [
     formatCaseNumber(row.caseNumber),
     whoPhrase(row),
-    // (F5) The stage, not just the status ("Not found yet, recheck at 4:40 PM").
-    stagePhrase(row, timeZone),
+    // (F5) The stage, not just the status ("Not found yet", "Recheck due" with the views' clock).
+    stagePhrase(row, timeZone, now),
     `created ${times.created}`,
     times.updatedSaid,
     postCell(row),
@@ -112,8 +112,8 @@ export function tableRowLabel(row: RequestSummary, times: Pick<RowTimes, 'create
 }
 
 /** A search result's sentence: the row's, then the matched text when the match is not the name or number. */
-export function searchRowLabel(row: RequestSummary, times: Pick<RowTimes, 'created' | 'updatedSaid'>, line: string, timeZone?: string): string {
-  return `${tableRowLabel(row, times, timeZone)}.${line ? ` ${line}` : ''}`;
+export function searchRowLabel(row: RequestSummary, times: Pick<RowTimes, 'created' | 'updatedSaid'>, line: string, timeZone?: string, now = 0): string {
+  return `${tableRowLabel(row, times, timeZone, now)}.${line ? ` ${line}` : ''}`;
 }
 
 export interface OutboxRowModel {

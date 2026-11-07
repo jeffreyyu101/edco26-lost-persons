@@ -58,7 +58,7 @@ const SWIPE_CLOSE_PX = 64;
 /**
  * A stand-in element for the desk popover: the first visible element matching `selector` each time the
  * popover measures it, else where that element (or `fallback`, the tapped card) last was. A card answered
- * In medical leaves To check for the end of Friend coming, often off screen: the popover stays where the
+ * In medical leaves Waiting for check for Friend coming, often off screen: the popover stays where the
  * tap was, and moves with the page when it scrolls (the document is the scroller on the desk too).
  */
 export function anchorFor(selector: string, fallback: DOMRect | null): RefObject<Measurable | null> {

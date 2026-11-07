@@ -9,14 +9,23 @@
 // from screen readers, as on the phone log. Rows carry data-request-id: the desk keyboard (J / K, Enter,
 // Esc) and the pane's previous / next walk them in the order shown, and the open request is the selected
 // row (data-selected, aria-current).
+//
+// (Pending v9.1, Brian 2026-11-06, design/screens/pending-v9.html frame 8) On All requests and My requests the
+// column header is the sort control: "Created ↓" (All) or "Updated ↓" (My requests) by default, "Status ↓" when
+// sorted by status (aria-sort; the arrow only on the active header; Status again goes back). Sorted by status,
+// group header rows (glyph, label, count) sit over Waiting for check and Friend coming, and the closed ones fold
+// last. The header is then a one-row table of its own, so its column headers can carry aria-sort.
 import { Skeleton } from '@radix-ui/themes';
-import { ChevronDown, CircleAlert, RefreshCw } from 'lucide-react';
+import { ArrowDown, ArrowUpDown, ChevronDown, CircleAlert } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
 import { StageGlyph } from '@/components/ui/StageGlyph';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { navigate } from '@/lib/client/nav';
 import type { SearchHit } from '@/lib/client/selectors';
+import { STATUS_GROUP_META, type StatusGroupName } from '@/lib/client/status-order';
+import type { SortOrder } from '@/lib/client/view-prefs';
+import { waitTone } from '@/lib/domain';
 import { stageLook, type DisplayStage } from '@/lib/stages';
 import { NOT_UPDATED } from '@/lib/format';
 import { archivedFoldLabel, highlightParts, isClosed, logNumber, logNumberRanges, type Ranges } from '@/components/list/list-helpers';
@@ -46,28 +55,104 @@ const COLUMN_CLASS: Readonly<Record<TableColumnKey, string | undefined>> = {
 
 const cx = (...names: Array<string | false | null | undefined>) => names.filter(Boolean).join(' ');
 
+/** (Pending v9.1) The table's order and how its header changes it. */
+export interface TableSort {
+  order: SortOrder;
+  /** The default order's column: Created (All requests, newest first) or Updated (My requests, latest first). */
+  defaultColumn: 'created' | 'updated';
+  onChange: (order: SortOrder) => void;
+}
+
 /** The table: its column header, then the rows. data-testid="request-list" as on the phone. */
-export function DeskTable({ children, testId = 'request-list' }: { children: ReactNode; testId?: string }) {
+export function DeskTable({ children, testId = 'request-list', sort }: { children: ReactNode; testId?: string; sort?: TableSort }) {
   return (
-    <div className={t.table} data-testid={testId} data-desk-table="">
-      <ColumnHeader />
+    <div className={t.table} data-testid={testId} data-desk-table="" data-order={sort?.order}>
+      <ColumnHeader sort={sort} />
       {children}
     </div>
   );
 }
 
+const DEFAULT_SAID: Readonly<Record<TableSort['defaultColumn'], { order: string; sortBy: string }>> = {
+  created: { order: 'newest first', sortBy: 'Sort by newest' },
+  updated: { order: 'latest update first', sortBy: 'Sort by latest update' },
+};
+
+/** A sortable column header's accessible name: its label, its state, and what a click does. */
+export function sortHeaderLabel(column: 'status' | TableSort['defaultColumn'], label: string, sort: Pick<TableSort, 'order' | 'defaultColumn'>): string {
+  const d = DEFAULT_SAID[sort.defaultColumn];
+  if (column === 'status') return sort.order === 'status' ? `${label}, sorted waiting for check first. ${d.sortBy}` : `${label}. Sort by status, waiting for check first`;
+  return sort.order === 'status' ? `${label}. ${d.sortBy}` : `${label}, ${d.order}`;
+}
+
 /**
  * "#  Friend  Status  Post  Created  Updated  Logged by", sticky under the top bar. Every row's sentence says
- * what each value is, so the header is hidden from screen readers.
+ * what each value is, so without a sort the header is hidden from screen readers. With one (All and My
+ * requests), Status and Created / Updated are buttons that set the order, the active one gray-12 with ↓.
  */
-export function ColumnHeader() {
+export function ColumnHeader({ sort }: { sort?: TableSort }) {
+  if (!sort) {
+    return (
+      <div className={cx(t.grid, t.th, t.thSticky)} aria-hidden data-testid="desk-table-columns">
+        {TABLE_COLUMNS.map((c) => (
+          <span key={c.key} className={COLUMN_CLASS[c.key]} data-col={c.key}>
+            {c.label}
+          </span>
+        ))}
+      </div>
+    );
+  }
+  const active = sort.order === 'status' ? 'status' : sort.defaultColumn;
   return (
-    <div className={cx(t.grid, t.th)} aria-hidden data-testid="desk-table-columns">
-      {TABLE_COLUMNS.map((c) => (
-        <span key={c.key} className={COLUMN_CLASS[c.key]} data-col={c.key}>
-          {c.label}
-        </span>
-      ))}
+    <div className={t.thSticky} role="table" aria-label="Sort requests" data-testid="desk-table-columns">
+      <div className={cx(t.grid, t.th)} role="row">
+        {TABLE_COLUMNS.map((c) => {
+          const sortable = c.key === 'status' || c.key === sort.defaultColumn;
+          const on = sortable && c.key === active;
+          return (
+            <span
+              key={c.key}
+              role="columnheader"
+              className={COLUMN_CLASS[c.key]}
+              data-col={c.key}
+              aria-sort={on ? (c.key === 'status' ? 'other' : 'descending') : undefined}
+            >
+              {sortable ? (
+                <button
+                  type="button"
+                  className={cx(t.thb, on && t.thbOn)}
+                  aria-label={sortHeaderLabel(c.key as 'status' | TableSort['defaultColumn'], c.label, sort)}
+                  data-testid={`sort-${c.key}`}
+                  onClick={() => {
+                    if (c.key === 'status') sort.onChange(sort.order === 'status' ? 'default' : 'status');
+                    else if (sort.order === 'status') sort.onChange('default');
+                  }}
+                >
+                  {c.label}
+                  {on ? <ArrowDown size={13} strokeWidth={2.25} aria-hidden /> : <ArrowUpDown size={12} strokeWidth={2} className={t.thHint} aria-hidden />}
+                </button>
+              ) : (
+                c.label
+              )}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** (Pending v9.1) "○ Waiting for check  7": a group header row over a status group, sticky under the column header. */
+export function GroupRow({ group, count }: { group: StatusGroupName; count: number }) {
+  const g = STATUS_GROUP_META[group];
+  return (
+    <div className={t.gh} role="heading" aria-level={2} data-group={group} data-testid={`group-${group}`}>
+      <StatusGlyph kind={g.glyph} size={14} />
+      <span aria-hidden>{g.label}</span>
+      <span className={t.ghn} aria-hidden>
+        {count}
+      </span>
+      <span className={t.vh}>{`${g.label} ${count} ${count === 1 ? 'request' : 'requests'}`}</span>
     </div>
   );
 }
@@ -103,12 +188,12 @@ interface CellsProps {
   glyph: ReactNode;
   tone: string;
   statusLabel: string;
-  /** (F5) What follows the label: "· 4:40 PM", "· Bed 3", "· ~4 min", "· 2 checks". */
+  /** (F5) What follows the label: "· 27m" (every stage of Waiting for check), "· Bed 3", "· ~4 min", "· 2 checks". */
   statusExtra?: string;
-  /** (F5) Its short form for a narrow status column ("· 4:40"; '' for none). Absent: always `statusExtra`. */
+  /** (F5) Its short form for a narrow status column ('' for none: a closed row's "· 2 checks"). Absent: always `statusExtra`. */
   statusExtraShort?: string;
-  /** (F5) A glyph before it: ⟳ for a recheck time. */
-  statusExtraGlyph?: 'recheck';
+  /** (Pending v9.1) The wait's heat (amber from 10 minutes, red from 20) when the extra is a wait. */
+  statusExtraTone?: string;
   post: string;
   created: string;
   createdTitle?: string;
@@ -135,7 +220,7 @@ function Cells(p: CellsProps) {
       <span className={cx(t.cStatus, t.st)} data-col="status" data-tone={p.tone} aria-hidden>
         {p.glyph}
         <span className={t.stl}>{p.statusLabel}</span>
-        <StatusExtra extra={p.statusExtra} short={p.statusExtraShort} glyph={p.statusExtraGlyph} />
+        <StatusExtra extra={p.statusExtra} short={p.statusExtraShort} tone={p.statusExtraTone} />
       </span>
       <span className={cx(t.cPost, t.mut)} data-col="post" aria-hidden>
         {p.post}
@@ -160,22 +245,26 @@ function Cells(p: CellsProps) {
 }
 
 /** (F5) What follows the status label: whole while the column has room, else its short form. */
-function StatusExtra({ extra, short, glyph }: { extra?: string; short?: string; glyph?: 'recheck' }) {
+function StatusExtra({ extra, short, tone }: { extra?: string; short?: string; tone?: string }) {
   if (!extra) return null;
-  const mark = glyph === 'recheck' ? <RefreshCw size={12} strokeWidth={2} className={t.stxGlyph} aria-hidden /> : null;
+  // (F5) A size container picks the whole or the short form (table.module.css .stxWide / .stxNarrow).
   if (short === undefined) {
     return (
-      <>
-        {mark}
-        <span className={t.stx}>{extra}</span>
-      </>
+      <span className={t.stx} data-tone={tone}>
+        {extra}
+      </span>
     );
   }
   return (
     <>
-      {mark}
-      <span className={cx(t.stx, t.stxWide)}>{extra}</span>
-      {short ? <span className={cx(t.stx, t.stxNarrow)}>{short}</span> : null}
+      <span className={cx(t.stx, t.stxWide)} data-tone={tone}>
+        {extra}
+      </span>
+      {short ? (
+        <span className={cx(t.stx, t.stxNarrow)} data-tone={tone}>
+          {short}
+        </span>
+      ) : null}
     </>
   );
 }
@@ -192,12 +281,14 @@ export interface TableRowProps {
   stage?: DisplayStage;
   /** (F5) For the stage in the row's sentence. */
   timeZone?: string;
+  /** (Pending v9.1) The views' clock, for the row's sentence ("Recheck due"). */
+  now?: number;
 }
 
 /** One request. Closed rows are greyed in place. A click opens it (beside the list on the desk). */
-export const TableRow = memo(function TableRow({ row, times, selected, stage, timeZone }: TableRowProps) {
+export const TableRow = memo(function TableRow({ row, times, selected, stage, timeZone, now = 0 }: TableRowProps) {
   const closed = isClosed(row.status);
-  const look = stage ?? stageLook(row);
+  const look = stage ?? stageLook(row, now);
   const friend = friendCell(row);
   return (
     <button
@@ -209,7 +300,7 @@ export const TableRow = memo(function TableRow({ row, times, selected, stage, ti
       aria-current={selected ? 'true' : undefined}
       onClick={() => navigate({ r: row.id })}
     >
-      <Vh>{tableRowLabel(row, times, timeZone)}</Vh>
+      <Vh>{tableRowLabel(row, times, timeZone, now)}</Vh>
       <Cells
         number={logNumber(row.caseNumber)}
         name={friend.name}
@@ -219,7 +310,7 @@ export const TableRow = memo(function TableRow({ row, times, selected, stage, ti
         statusLabel={look.label}
         statusExtra={stage?.extra}
         statusExtraShort={stage?.extraShort}
-        statusExtraGlyph={stage?.extraGlyph}
+        statusExtraTone={extraTone(stage)}
         post={postCell(row)}
         created={times.created}
         createdTitle={times.createdTitle}
@@ -232,6 +323,11 @@ export const TableRow = memo(function TableRow({ row, times, selected, stage, ti
   );
 });
 
+/** The heat of a waiting row's extra: its wait's tone (gray under 10 minutes). */
+function extraTone(stage: DisplayStage | undefined): string | undefined {
+  return stage?.waitMinutes === undefined ? undefined : waitTone(stage.waitMinutes);
+}
+
 export interface SearchRowProps extends Omit<TableRowProps, 'row'> {
   hit: SearchHit;
   nameRanges: Ranges;
@@ -242,10 +338,10 @@ export interface SearchRowProps extends Omit<TableRowProps, 'row'> {
 }
 
 /** A search result: the row with the match highlighted, and the matched text under the name. */
-export const SearchRow = memo(function SearchRow({ hit, times, selected, stage, timeZone, nameRanges, caseRanges, line, lineRanges }: SearchRowProps) {
+export const SearchRow = memo(function SearchRow({ hit, times, selected, stage, timeZone, now = 0, nameRanges, caseRanges, line, lineRanges }: SearchRowProps) {
   const { row } = hit;
   const closed = isClosed(row.status);
-  const look = stage ?? stageLook(row);
+  const look = stage ?? stageLook(row, now);
   const friend = friendCell(row);
   return (
     <button
@@ -257,7 +353,7 @@ export const SearchRow = memo(function SearchRow({ hit, times, selected, stage, 
       aria-current={selected ? 'true' : undefined}
       onClick={() => navigate({ r: row.id })}
     >
-      <Vh>{searchRowLabel(row, times, line, timeZone)}</Vh>
+      <Vh>{searchRowLabel(row, times, line, timeZone, now)}</Vh>
       <Cells
         number={<Highlight text={logNumber(row.caseNumber)} ranges={logNumberRanges(row.caseNumber, caseRanges)} />}
         name={<Highlight text={friend.name} ranges={row.name ? nameRanges : []} />}
@@ -268,7 +364,7 @@ export const SearchRow = memo(function SearchRow({ hit, times, selected, stage, 
         statusLabel={look.label}
         statusExtra={stage?.extra}
         statusExtraShort={stage?.extraShort}
-        statusExtraGlyph={stage?.extraGlyph}
+        statusExtraTone={extraTone(stage)}
         post={postCell(row)}
         created={times.created}
         createdTitle={times.createdTitle}
@@ -326,7 +422,20 @@ export function OutboxRow({ item, created }: { item: OutboxItem; created: string
  * "Archived  6  ⌄": every closed request folded into one row under the open ones, exactly as F1's phone
  * log (the same test ids, name and remembered open state, prefs.closedExpanded).
  */
-export function ArchivedFold({ count, open, controls, onToggle }: { count: number; open: boolean; controls: string; onToggle: () => void }) {
+export function ArchivedFold({
+  count,
+  open,
+  controls,
+  onToggle,
+  label = 'Archived',
+}: {
+  count: number;
+  open: boolean;
+  controls: string;
+  onToggle: () => void;
+  /** (Pending v9.1) "Closed" on My requests sorted by status. */
+  label?: string;
+}) {
   return (
     <button
       type="button"
@@ -334,11 +443,11 @@ export function ArchivedFold({ count, open, controls, onToggle }: { count: numbe
       aria-expanded={open}
       // Only while the closed rows are on the page (folded, they are not rendered).
       aria-controls={open ? controls : undefined}
-      aria-label={archivedFoldLabel(count)}
+      aria-label={archivedFoldLabel(count, label)}
       onClick={onToggle}
       data-testid="closed-fold"
     >
-      <span className={t.foldLabel}>Archived</span> <span className={t.cap}>{count}</span>
+      <span className={t.foldLabel}>{label}</span> <span className={t.cap}>{count}</span>
       <span className={t.sp} />
       <span className={t.chev} data-open={open ? '' : undefined}>
         <ChevronDown size={16} strokeWidth={2.25} aria-hidden />
@@ -348,9 +457,9 @@ export function ArchivedFold({ count, open, controls, onToggle }: { count: numbe
 }
 
 /** The archived rows under the fold. */
-export function ArchivedRows({ id, children }: { id: string; children: ReactNode }) {
+export function ArchivedRows({ id, children, label = 'Archived' }: { id: string; children: ReactNode; label?: string }) {
   return (
-    <div id={id} role="group" aria-label="Archived requests" data-testid="closed-rows">
+    <div id={id} role="group" aria-label={`${label} requests`} data-testid="closed-rows">
       {children}
     </div>
   );

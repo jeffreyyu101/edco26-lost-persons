@@ -3,7 +3,7 @@
 // deliberate second Not found is final, and A12's 409 resend never turns someone else's hold into a final answer.
 // The fake server answers a first Not found as lp_set_status does (status stays Added). Synthetic data only.
 import { describe, expect, it } from 'vitest';
-import { RECHECK_MINUTES, STATUS, actionLabel } from '@/lib/domain';
+import { RECHECK_MINUTES, STATUS } from '@/lib/domain';
 import { applyOverlay } from '@/lib/client/selectors';
 import { advance } from './helpers/env';
 import { boot, finish, gate, installStoreHooks, ready } from './helpers/boot';
@@ -30,7 +30,7 @@ function holdingServer(server: FakeServer, wait?: () => Promise<undefined>) {
 }
 
 describe('the hold in the store', () => {
-  it('the first Not found keeps Waiting for check and goes on hold at once; the Undo bar reads "Not found · recheck 4:40"', async () => {
+  it('the first Not found keeps Waiting for check and goes on hold at once; the Undo bar reads "Not found yet · recheck in 20 min"', async () => {
     const server = new FakeServer([R1]);
     const { a, s } = boot(server);
     await ready();
@@ -45,7 +45,8 @@ describe('the hold in the store', () => {
     g.open();
     expect(await finish(p)).toMatchObject({ ok: true, changed: true });
     expect(s().confirmed.get(R1.id)).toMatchObject({ status: STATUS.waiting, notFoundChecks: 1 });
-    expect(s().snackbar?.message).toMatch(new RegExp(`^${actionLabel('notInMedical')} · recheck \\d{1,2}:\\d\\d$`));
+    expect(s().snackbar?.message).toBe(`Not found yet · recheck in ${RECHECK_MINUTES} min`);
+    expect(s().snackbar?.said).toBe(`Not found yet, recheck in ${RECHECK_MINUTES} minutes.`);
     // Undo: back to Waiting for check, kind undo, as before.
     await finish(a.undo(s().snackbar!.id));
     expect(statusPosts(server).at(-1)?.body).toEqual({ status: STATUS.waiting, expectedVersion: 2, kind: 'undo' });

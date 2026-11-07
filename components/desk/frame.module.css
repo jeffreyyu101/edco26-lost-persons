@@ -139,6 +139,10 @@
   .content > [data-view] > main {
     padding-bottom: 24px;
   }
+  /* Pending's board fills the window under the top bar and scrolls in its columns (pending-board.module.css). */
+  .content > [data-view='pending'] > main {
+    padding-bottom: 0;
+  }
   .content [data-request-id] {
     scroll-margin-top: calc(var(--desk-top) + 72px);
     scroll-margin-bottom: 16px;

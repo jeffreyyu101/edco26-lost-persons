@@ -1,80 +1,90 @@
-/* Pending on the desk (design/screens/pending-v8.html .cols / .colh). The board is a size container: two
-   card columns from 700 px of main column, else the phone's segmented control and one queue at a time. */
+/* Pending on the desk (Pending v9.1, design/screens/pending-v9.html .cols / .colsec, frames 4 and 5). The board
+   is a size container: two card columns from 720 px of main column, each scrolling on its own under the desk's
+   top bar; narrower (a request docked beside it), the two sections stack in one scrolling column. The column
+   headers are components/list/PendingQueues.tsx QueueHeader, pinned to the top of their column. */
 
 .board {
   container-type: inline-size;
   box-sizing: border-box;
-  padding: 18px 24px 8px;
-}
-
-/* Doubled: over the phone's .seg (components/list/list.module.css), whatever the stylesheet order. */
-.tabs.tabs {
-  display: none;
-  margin: 0 0 12px;
 }
 
 .cols {
+  --qh-top: 0px;
+  /* The window under the desk's top bar: the columns scroll, the page does not. */
+  height: calc(100vh - var(--desk-top, 56px));
+  height: calc(100dvh - var(--desk-top, 56px));
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 20px;
+  align-content: start;
+  gap: 0;
+  padding: 0 16px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
 .col {
   min-width: 0;
-}
-
-/* "To check 4": the glyph, the label, the count in grey. */
-.colh {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 10px;
-  font-size: 14px;
-  line-height: 20px;
-  font-weight: 600;
-  color: var(--gray-12);
+  flex-direction: column;
 }
 
-.n {
-  font-weight: 400;
-  color: var(--gray-11);
-  font-variant-numeric: tabular-nums;
+.col > * {
+  flex-shrink: 0;
+}
+
+/* The column header (components/list/PendingQueues.tsx QueueHeader) lines up with the cards under it. */
+.col > h2 {
+  margin: 0;
+}
+
+.col > h2 > :first-child {
+  padding: 0 6px 0 4px;
 }
 
 .cards {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  padding: 2px 0 16px;
 }
 
 .cards > * {
   flex-shrink: 0;
 }
 
-.empty {
-  margin: 0;
-  padding: 28px 16px;
-  border-radius: 14px;
-  box-shadow: inset 0 0 0 1px var(--gray-a4);
-  font-size: 14px;
-  color: var(--gray-11);
-  text-align: center;
+/* A card J / K moved to stays clear of its column's pinned header. */
+.cards [data-request-id] {
+  scroll-margin-top: 52px;
+  scroll-margin-bottom: 12px;
 }
 
-@container (min-width: 700px) {
+@container (min-width: 720px) {
   .cols {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 20px;
+    padding: 0 24px;
+    overflow: hidden;
+  }
+
+  .col {
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    padding-top: 6px;
+  }
+
+  .cards {
+    padding-bottom: 24px;
   }
 }
 
-@container (max-width: 699.98px) {
-  .tabs.tabs {
-    display: grid;
-  }
-  .colh {
-    display: none;
-  }
-  .col:not([data-active]) {
-    display: none;
+@container (min-width: 720px) and (max-width: 899.98px) {
+  .cols {
+    gap: 16px;
+    padding: 0 16px;
   }
 }

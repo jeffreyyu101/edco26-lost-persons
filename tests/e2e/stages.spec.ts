@@ -11,10 +11,11 @@ import { newSignedInContext, signedInAs, type TestStaff } from './helpers/sessio
 
 // F5: status stages and the "Not found yet" hold (design/screens/updates.html #clarify / #recheck / #colors),
 // end to end:
-//   * the real flow on the real store, API and database: medical answers Not found → the card moves to Later
-//     (Undo puts it back) → the page clock passes the recheck time → the card is back on top as a Recheck →
-//     the second Not found closes it; front of house's My requests card shows Not found yet + Recheck, then
-//     the final grey Not in medical; the desk status cell's strings;
+//   * the real flow on the real store, API and database: medical answers Not found yet → the card stays where it
+//     is with a "Not found yet" chip (Undo takes it away) → the page clock passes the recheck time → the chip
+//     reads "Recheck due", nothing moves (Pending v9.1) → the final Not found closes it; front of house's My
+//     requests card shows the chip and no recheck time, then the final grey Not in medical; the desk status
+//     cell's strings (the wait after every Waiting for check stage);
 //   * a fixture (page.route on /api/sync and the request) for every stage at once: overflow at 375, 390, 820,
 //     1180 and 1440 px (nothing wider than its container, nothing outside the viewport, one-line status tags),
 //     the post-rename long label "Not found in medical · 2 checks", axe in light and dark, and the screenshots
@@ -26,8 +27,9 @@ const TZ = 'America/New_York';
 const MEDIC: TestStaff = { staffName: 'TEST-F5 Medic', team: 'Medical' };
 const FOH: TestStaff = { staffName: 'TEST-F5 Front', team: 'GC/HX - Dispatch' };
 const TAG = `TEST-F5-${Date.now().toString(36)}`;
-const NOT_FOUND = actionLabel('notInMedical');
+const IN_MEDICAL = actionLabel('inMedical');
 const NOT_IN_MEDICAL = STATUS_META[STATUS.notInMedical].shortLabel;
+const NOT_FOUND = actionLabel('notInMedical');
 let seq = 0;
 
 test.use({ serviceWorkers: 'block' });
@@ -91,7 +93,6 @@ test.afterEach(async () => {
 });
 
 const checkCard = (page: Page, id: string) => page.locator(`[data-testid="check-card"]:has([data-request-id="${id}"])`);
-const laterRow = (page: Page, id: string) => page.locator(`[data-testid="later-row"][data-request-id="${id}"]`);
 const mineCard = (page: Page, id: string) => page.locator(`[data-testid="mine-card"]:has([data-request-id="${id}"])`);
 
 async function phoneContext(browser: Browser, staff: TestStaff): Promise<BrowserContext> {
@@ -107,7 +108,7 @@ async function phoneContext(browser: Browser, staff: TestStaff): Promise<Browser
 // The real flow
 // ---------------------------------------------------------------------------------------------------
 
-test('medical: Not found → Later (Undo puts it back) → due on top → the second Not found closes it; front of house sees each step', async ({
+test('medical: Not found yet → the chip, in place (Undo takes it away) → Recheck due, nothing moves → the final Not found closes it; front of house sees each step', async ({
   page,
   browser,
 }) => {
@@ -118,64 +119,53 @@ test('medical: Not found → Later (Undo puts it back) → due on top → the se
   try {
     const r = await createRequest(foh.request);
     await page.goto('/?view=pending');
-    await expect(checkCard(page, r.id)).toBeVisible({ timeout: 20_000 });
-    await expect(
-      checkCard(page, r.id).getByRole('button', {
-        name: NOT_FOUND,
-        exact: true,
-      }),
-    ).toBeVisible();
+    const card = checkCard(page, r.id);
+    await expect(card).toBeVisible({ timeout: 20_000 });
+    const answer = card.getByTestId('not-found-answer');
+    await expect(answer).toHaveText('Not found yet');
+    const position = () => page.locator('[data-testid="check-card"]').evaluateAll((els, id) => els.findIndex((el) => el.getAttribute('data-pending-card') === id), r.id);
+    const before = await position();
 
-    // First Not found: the card leaves the queue for Later, with "Not found · recheck 4:40" and Undo.
-    await checkCard(page, r.id).getByRole('button', { name: NOT_FOUND, exact: true }).click();
-    await expect(checkCard(page, r.id)).toHaveCount(0);
-    await expect(laterRow(page, r.id)).toBeVisible();
-    await expect(
-      page.getByRole('status').filter({
-        hasText: new RegExp(`^${NOT_FOUND} · recheck \\d{1,2}:\\d\\d`),
-      }),
-    ).toBeVisible();
+    // First Not found: the card stays where it is, with the chip and "Not found yet · recheck in 20 min" + Undo.
+    await answer.click();
+    await expect(card.getByTestId('hold-chip')).toHaveText('Not found yet');
+    await expect(page.getByRole('status').filter({ hasText: /^Not found yet · recheck in 20 min/ })).toBeVisible();
+    expect(await position()).toBe(before);
 
-    // Undo: back in the queue, the hold gone.
+    // Undo: no hold, no chip.
     await page.getByRole('button', { name: 'Undo', exact: true }).click();
-    await expect(checkCard(page, r.id)).toBeVisible();
-    await expect(laterRow(page, r.id)).toHaveCount(0);
+    await expect(card.getByTestId('hold-chip')).toHaveCount(0);
+    await expect(answer).toHaveText('Not found yet');
     await expect.poll(async () => (await call<RequestDetail>(page.request, 'GET', `/api/requests/${r.id}`)).notFoundChecks).toBe(0);
 
     // Again, for real this time.
-    await checkCard(page, r.id).getByRole('button', { name: NOT_FOUND, exact: true }).click();
-    await expect(laterRow(page, r.id)).toBeVisible();
+    await answer.click();
+    await expect(card.getByTestId('hold-chip')).toHaveText('Not found yet');
+    await expect(answer).toHaveText('Not found');
+    await expect.poll(async () => (await call<RequestDetail>(page.request, 'GET', `/api/requests/${r.id}`)).notFoundChecks).toBe(1);
     const held = await call<RequestDetail>(page.request, 'GET', `/api/requests/${r.id}`);
     expect(held).toMatchObject({ status: STATUS.waiting, notFoundChecks: 1 });
     const recheck = formatClockAmPm(held.recheckAt as string, TZ);
-    await expect(laterRow(page, r.id)).toContainText(recheck);
 
-    // Front of house: still open, the violet chip and the recheck time.
+    // Front of house: still open, the violet chip, and no recheck time on the card.
     await foh.goto('/?view=mine');
-    const card = mineCard(foh, r.id);
-    await expect(card.getByTestId('stage-chip')).toHaveText('Not found yet', {
-      timeout: 20_000,
-    });
-    await expect(card.getByTestId('recheck-time-chip')).toHaveText(`Recheck ${recheck}`);
+    const mine = mineCard(foh, r.id);
+    await expect(mine.getByTestId('hold-chip')).toHaveText('Not found yet', { timeout: 20_000 });
+    await expect(mine).not.toContainText(recheck);
 
-    // 21 minutes later on medical's phone: due, and back on top as a Recheck.
+    // 21 minutes later on medical's phone: Recheck due, in place. Never closed by itself.
     await page.clock.fastForward('21:00');
-    await expect(laterRow(page, r.id)).toHaveCount(0);
-    const due = checkCard(page, r.id);
-    await expect(due).toHaveAttribute('data-recheck', '');
-    await expect(due.getByTestId('recheck-chip')).toHaveText('Recheck');
-    await expect(page.locator('[data-testid="check-card"]').first()).toHaveAttribute('data-pending-card', r.id);
-    // Never closed by itself.
+    await expect(card.getByTestId('hold-chip')).toHaveText('Recheck due');
+    expect(await position()).toBe(before);
     expect((await call<RequestDetail>(page.request, 'GET', `/api/requests/${r.id}`)).status).toBe(STATUS.waiting);
 
     // The second Not found is final.
-    await due.getByRole('button', { name: NOT_FOUND, exact: true }).click();
-    await expect(checkCard(page, r.id)).toHaveCount(0);
-    await expect(laterRow(page, r.id)).toHaveCount(0);
+    await answer.click();
+    await expect(card).toHaveCount(0);
     await expect.poll(async () => (await call<RequestDetail>(page.request, 'GET', `/api/requests/${r.id}`)).status).toBe(STATUS.notInMedical);
 
     // Front of house: the final grey answer, with no chip.
-    await expect(mineCard(foh, r.id).getByTestId('stage-chip')).toHaveCount(0, {
+    await expect(mineCard(foh, r.id).getByTestId('hold-chip')).toHaveCount(0, {
       timeout: 20_000,
     });
     await expect(mineCard(foh, r.id)).toContainText(NOT_IN_MEDICAL);
@@ -197,10 +187,11 @@ test('the request (medical): Not found yet in violet, who answered, Recheck, and
   await expect(block).toContainText(MEDIC.staffName);
   await expect(block.getByTestId('recheck-row')).toHaveText(`Recheck ${formatClockAmPm(held.recheckAt as string, TZ)}`);
   const answers = block.getByTestId('block-answers');
-  await expect(answers.getByRole('button', { name: NOT_FOUND, exact: true })).toBeVisible();
+  // (Pending v9.1) Held: the left answer is the final "Not found".
+  await expect(answers.getByTestId('not-found-answer')).toHaveText('Not found');
   await expect(
     answers.getByRole('button', {
-      name: actionLabel('inMedical'),
+      name: IN_MEDICAL,
       exact: true,
     }),
   ).toBeVisible();
@@ -209,7 +200,7 @@ test('the request (medical): Not found yet in violet, who answered, Recheck, and
   await expect(page.getByTestId('audit-item').first()).toContainText('Not found yet');
   await expect(page.getByTestId('audit-item').first()).toContainText(`Recheck ${formatClockAmPm(held.recheckAt as string, TZ)}`);
   // In medical from the block clears the hold.
-  await answers.getByRole('button', { name: actionLabel('inMedical'), exact: true }).click();
+  await answers.getByRole('button', { name: IN_MEDICAL, exact: true }).click();
   await expect(block).toHaveAttribute('data-tone', 'green');
   await expect(block.getByTestId('recheck-row')).toHaveCount(0);
 });
@@ -221,7 +212,7 @@ test.describe('desk', () => {
     hasTouch: false,
   });
 
-  test('the status cell: "Waiting for check · 9m", "Not found yet · 4:40 PM", "In medical · Bed 3", "Not found in medical · 2 checks"; no en route column', async ({
+  test('the status cell: "Waiting for check · 9m", "Not found yet · 9m", "In medical · Bed 3", "Not found in medical · 2 checks"; no en route column', async ({
     page,
   }) => {
     const waiting = await createRequest(page.request);
@@ -252,7 +243,8 @@ test.describe('desk', () => {
       );
     await expect(cell(waiting.id)).toBeVisible({ timeout: 20_000 });
     await expect.poll(() => shown(waiting.id)).toMatch(/^Waiting for check · (now|\d+m)$/);
-    await expect.poll(() => shown(held.id)).toBe(`Not found yet · ${formatClockAmPm(held.recheckAt as string, TZ)}`);
+    // (Pending v9.1) The wait after the label, never the recheck time.
+    await expect.poll(() => shown(held.id)).toMatch(/^Not found yet · (now|\d+m)$/);
     await expect.poll(() => shown(located.id)).toBe(`${STATUS_META[STATUS.inMedical].shortLabel} · Bed 3`);
     await page.getByTestId('closed-fold').first().click();
     await expect.poll(() => shown(final.id)).toBe(`${NOT_IN_MEDICAL} · 2 checks`);
@@ -592,7 +584,7 @@ async function layoutProblems(page: Page): Promise<string[]> {
     }
     // Status tags are one line.
     for (const el of document.querySelectorAll<HTMLElement>(
-      '[data-col="status"], [data-testid="stage-chip"], [data-testid="recheck-chip"], [data-testid="recheck-time-chip"]',
+      '[data-col="status"], [data-testid="stage-chip"], [data-testid="hold-chip"]',
     )) {
       if (!visible(el)) continue;
       const lh = parseFloat(getComputedStyle(el).lineHeight) || parseFloat(getComputedStyle(el).fontSize) * 1.4;
@@ -624,7 +616,7 @@ async function applyLongLabel(page: Page) {
 }
 
 /**
- * Status cells whose words are cut: a label or what follows it ("· 11:40 PM", "· 2 checks") narrower than its own
+ * Status cells whose words are cut: a label or what follows it ("· 47m", "· 2 checks") narrower than its own
  * text (an ellipsis counts as cut: layoutProblems accepts one, a status label must never need it), or text
  * running into the next column. The text's width is its Range's, which an ellipsis does not shorten.
  */
@@ -665,13 +657,13 @@ const VIEWS = [
   {
     name: 'pending',
     path: '/?view=pending',
-    ready: (page: Page) => page.getByTestId('later-group').first(),
+    ready: (page: Page) => page.locator('[data-testid="hold-chip"]').first(),
   },
   {
     name: 'mine',
     path: '/?view=mine',
     // The phone's cards carry the chip; the desk shows My requests as its table.
-    ready: (page: Page) => page.locator(`[data-testid="stage-chip"], [data-desk-table] [data-request-id="${ROW(13).id}"]`).first(),
+    ready: (page: Page) => page.locator(`[data-testid="hold-chip"], [data-desk-table] [data-request-id="${ROW(13).id}"]`).first(),
   },
   {
     name: 'request',
@@ -747,8 +739,8 @@ test.describe('fixture', () => {
     });
   }
 
-  // A request open beside the list is the desk's usual state. Tonight's values are the widest: rechecks with two-
-  // digit hours ("· 11:40 PM"), a long wait ("· 59m") and, after the rename, "Not found in medical · 2 checks".
+  // A request open beside the list is the desk's usual state. Tonight's values are the widest: a long wait
+  // ("· 59m") and, after the rename, "Not found in medical · 2 checks" (Pending v9.1: no recheck times in a cell).
   // Every one fits whole in its status cell, clear of the next column, at both pane breakpoints' narrowest and at
   // the usual widths.
   for (const width of [1024, 1180, 1280, 1440] as const) {
@@ -788,17 +780,18 @@ test.describe('fixture', () => {
             ),
           ),
         );
-        // Whole from 1080 px (1024–1279) and from 1304 px (1280+); short just above each breakpoint.
+        // Whole from 1080 px (1024–1279) and from 1304 px (1280+); short just above each breakpoint. (Pending v9.1)
+        // Every stage of Waiting for check shows its wait, never a recheck time, so only "· 2 checks" has a short form.
         const whole = width === 1180 || width === 1440;
         expect(cells).toEqual({
           15: `${STATUS_META[STATUS.waiting].shortLabel} · 59m`,
-          14: whole ? 'Needs info 11:35 PM' : 'Needs info 11:35',
-          13: whole ? 'Not found yet · 11:40 PM' : 'Not found yet · 11:40',
-          17: whole ? 'Not found yet · 11:51 PM' : 'Not found yet · 11:51',
+          14: 'Needs info · 16m',
+          13: 'Not found yet · 24m',
+          17: 'Not found yet · 12m',
           7: whole ? 'Not found in medical · 2 checks' : 'Not found in medical',
         });
-        // Needs info on hold draws the recheck glyph before its time.
-        await expect(table.locator(`[data-request-id="${ROW(14).id}"] [data-col="status"] svg`)).toHaveCount(2);
+        // Needs info on hold: its own glyph only (no recheck glyph, no time).
+        await expect(table.locator(`[data-request-id="${ROW(14).id}"] [data-col="status"] svg`)).toHaveCount(1);
         expect(await statusCuts(page), `pane open at ${width}`).toEqual([]);
         expect(await layoutProblems(page), `pane open at ${width}`).toEqual([]);
       } finally {
@@ -839,7 +832,7 @@ test.describe('fixture', () => {
     });
   }
 
-  test('screenshots (LP_F5_SHOTS=1): list, Pending (due + Later), held request, front of house card, desktop', async ({ browser }, info) => {
+  test('screenshots (LP_F5_SHOTS=1): list, Pending (held + due), held request, front of house card, desktop', async ({ browser }, info) => {
     test.skip(process.env.LP_F5_SHOTS !== '1' || info.project.name !== 'chromium-iphone14', 'set LP_F5_SHOTS=1 (Chromium) to write design/screens/f5-*.png');
     test.setTimeout(180_000);
     const dir = join(ROOT, 'design/screens');
@@ -860,7 +853,7 @@ test.describe('fixture', () => {
       {
         name: 'pending',
         path: '/?view=pending',
-        ready: (p) => p.getByTestId('later-group').first(),
+        ready: (p) => p.locator('[data-testid="hold-chip"]').first(),
         staff: { staffName: 'Rae Chen', team: 'Medical' },
       },
       {
@@ -872,7 +865,7 @@ test.describe('fixture', () => {
       {
         name: 'foh-card',
         path: '/?view=mine',
-        ready: (p) => p.locator(`[data-testid="stage-chip"], [data-desk-table] [data-request-id="${ROW(13).id}"]`).first(),
+        ready: (p) => p.locator(`[data-testid="hold-chip"], [data-desk-table] [data-request-id="${ROW(13).id}"]`).first(),
         staff: {
           staffName: 'Dana Kim',
           team: 'GC/HX - Special Operations/Med Transpo',

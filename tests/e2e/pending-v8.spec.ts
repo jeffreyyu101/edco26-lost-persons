@@ -4,13 +4,14 @@ import type { RequestDetail, RequestSummary } from '../../lib/api-types';
 import { testBaseUrl } from '../../scripts/test-env.mjs';
 import { signedInAs } from './helpers/session';
 
-// Pending v8 (design/screens/pending-v8.html, Brian + Dani 2026-11-06 afternoon), end to end on the real
-// store, API and database:
-//   phone  To check | Friend coming, one list at a time, To check by default, the last tab remembered; the
-//          v8 cards; In medical saves at once and then asks where they are (bottom sheet: Save, Skip, Esc or a
-//          swipe down); the Friend coming chip edits the location; the request's status block shows it.
-//   desk   both queues side by side (stacking into the tabs when the main column is narrow); the location
-//          popover at the card; J / K walk To check, then Friend coming.
+// Pending v8 (design/screens/pending-v8.html, Brian + Dani 2026-11-06 afternoon) with Pending v9.1 (Brian
+// 2026-11-06 evening, design/screens/pending-v9.html; tests/e2e/pending-v9.spec.ts has the rest), end to end on
+// the real store, API and database:
+//   phone  one page, Waiting for check then Friend coming (no tabs); the v8 cards (no friend line since v9.1);
+//          In medical saves at once and then asks where they are (bottom sheet: Save, Skip, Esc or a swipe
+//          down); the Friend coming chip edits the location; the request's status block shows it.
+//   desk   both queues side by side (stacking into one column when the main column is narrow); the location
+//          popover at the card; J / K walk Waiting for check, then Friend coming.
 // Synthetic rows only (TEST-P8-…), closed again afterwards.
 
 const BASE = testBaseUrl();
@@ -69,7 +70,6 @@ test.afterEach(async () => {
 
 const checkCard = (page: Page, id: string) => page.locator(`[data-testid="check-card"]:has([data-request-id="${id}"])`);
 const comingCard = (page: Page, id: string) => page.locator(`[data-testid="friend-coming-card"]:has([data-request-id="${id}"])`);
-const tab = (page: Page, name: 'To check' | 'Friend coming') => page.getByRole('tab', { name: new RegExp(`^${name}`) });
 const nameOf = (r: RequestSummary) => r.name;
 
 /** A swipe down on `el` (touch events React reads, the same in Chromium and WebKit). */
@@ -92,48 +92,36 @@ async function swipeDown(el: Locator, distance: number) {
 }
 
 test.describe('phone', () => {
-  test('To check by default, one list at a time; Friend coming shows where and who; the tab is remembered', async ({ page }) => {
+  test('one page: Waiting for check, then Friend coming with where medical has them (no tabs, no friend line)', async ({ page }) => {
     const waiting = await createRequest(page);
     const located = await inMedical(page, await createRequest(page), 'Chair 3');
     const unlocated = await inMedical(page, await createRequest(page, { contactRelationship: null }));
     await page.goto('/?view=pending');
     await expect(checkCard(page, waiting.id)).toBeVisible({ timeout: 15_000 });
 
-    // No brand card; the large title, then the control.
+    // No brand card; the large title, then the Waiting for check section, then Friend coming. No tabs.
     await expect(page.getByTestId('brand-card')).toHaveCount(0);
-    await expect(tab(page, 'To check')).toHaveAttribute('aria-selected', 'true');
-    await expect(tab(page, 'Friend coming')).toHaveAttribute('aria-selected', 'false');
+    await expect(page.getByRole('tab')).toHaveCount(0);
     const title = (await page.getByTestId('view-switcher').boundingBox())!;
-    const tabs = (await page.getByTestId('pending-tabs').boundingBox())!;
-    expect(tabs.y).toBeGreaterThan(title.y + title.height - 1);
-    await expect(comingCard(page, located.id)).toHaveCount(0);
+    const check = (await page.getByTestId('queue-header-check').boundingBox())!;
+    const coming = (await page.getByTestId('queue-header-coming').boundingBox())!;
+    expect(check.y).toBeGreaterThan(title.y + title.height - 1);
+    expect(coming.y).toBeGreaterThan(check.y);
+    await expect(comingCard(page, located.id)).toBeVisible();
 
-    // The To check card: no photo placeholder, "FA 3 · LP-…", both answers at 44 px.
+    // The Waiting for check card: no photo placeholder, "FA 3 · LP-…", both answers at 44 px.
     const card = checkCard(page, waiting.id);
     await expect(card.getByTestId('card-photo')).toHaveCount(0);
     await expect(card).toContainText(`FA 3 · LP-${String(waiting.caseNumber).padStart(4, '0')}`);
-    for (const name of ['Not found', 'In medical']) {
-      expect((await card.getByRole('button', { name, exact: true }).boundingBox())!.height).toBeCloseTo(44, 0);
+    for (const answer of [card.getByTestId('not-found-answer'), card.getByRole('button', { name: 'In medical', exact: true })]) {
+      expect((await answer.boundingBox())!.height).toBeCloseTo(44, 0);
     }
 
-    await tab(page, 'Friend coming').click();
-    await expect(checkCard(page, waiting.id)).toHaveCount(0);
     await expect(comingCard(page, located.id).getByTestId('location-chip')).toHaveAccessibleName('Chair 3, edit location');
-    await expect(comingCard(page, located.id)).toContainText(`${TAG} Friend ${seq - 1} · boyfriend, on the way`);
+    await expect(comingCard(page, located.id)).not.toContainText(`${TAG} Friend`);
+    await expect(comingCard(page, located.id)).not.toContainText('boyfriend');
     await expect(comingCard(page, unlocated.id).getByTestId('location-chip')).toHaveAccessibleName('Add location');
-    await expect(comingCard(page, unlocated.id)).toContainText(`${TAG} Friend ${seq} · on the way`);
     await expect(comingCard(page, unlocated.id).getByRole('button', { name: 'Reunited' })).toBeVisible();
-
-    // Remembered on this device.
-    await page.reload();
-    await expect(tab(page, 'Friend coming')).toHaveAttribute('aria-selected', 'true');
-    await expect(comingCard(page, located.id)).toBeVisible({ timeout: 15_000 });
-    // Arrow keys move between the two tabs.
-    await tab(page, 'Friend coming').focus();
-    await page.keyboard.press('ArrowLeft');
-    await expect(tab(page, 'To check')).toBeFocused();
-    await expect(tab(page, 'To check')).toHaveAttribute('aria-selected', 'true');
-    await expect(checkCard(page, waiting.id)).toBeVisible();
   });
 
   test('In medical saves at once, then the sheet: Save shows the chip, and the In medical Undo still works', async ({ page }) => {
@@ -155,7 +143,6 @@ test.describe('phone', () => {
     await sheet.getByRole('button', { name: 'Save' }).click();
     await expect(sheet).toHaveCount(0);
     await expect.poll(async () => (await detail(page, r.id)).medicalLocation).toBe('Chair 12');
-    await tab(page, 'Friend coming').click();
     await expect(comingCard(page, r.id).getByTestId('location-chip')).toHaveAccessibleName('Chair 12, edit location');
 
     // The Undo from the answer is still there and still works; the location stays on the request.
@@ -226,7 +213,6 @@ test.describe('phone', () => {
   test('the Friend coming chip edits the location: change it, then clear it', async ({ page }) => {
     const r = await inMedical(page, await createRequest(page), 'Chair 3');
     await page.goto('/?view=pending');
-    await tab(page, 'Friend coming').click();
     const chip = comingCard(page, r.id).getByTestId('location-chip');
     await expect(chip).toHaveAccessibleName('Chair 3, edit location', { timeout: 15_000 });
 
@@ -250,7 +236,6 @@ test.describe('phone', () => {
   test('offline: the chip needs a connection (no sheet)', async ({ page, context }) => {
     const r = await inMedical(page, await createRequest(page));
     await page.goto('/?view=pending');
-    await tab(page, 'Friend coming').click();
     const chip = comingCard(page, r.id).getByTestId('location-chip');
     await expect(chip).toBeVisible({ timeout: 15_000 });
     await context.setOffline(true);
@@ -289,7 +274,7 @@ test.describe('phone', () => {
 test.describe('desk 1440 × 900', () => {
   test.use({ viewport: { width: 1440, height: 900 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
 
-  test('both queues side by side; In medical opens the popover at the card; J / K walk To check, then Friend coming', async ({ page }) => {
+  test('both queues side by side; In medical opens the popover at the card; J / K walk Waiting for check, then Friend coming', async ({ page }) => {
     const waiting = await createRequest(page);
     const coming = await inMedical(page, await createRequest(page), 'Chair 5');
     await page.goto('/?view=pending');
@@ -298,16 +283,16 @@ test.describe('desk 1440 × 900', () => {
     await expect(checkCard(page, waiting.id)).toBeVisible({ timeout: 15_000 });
     await expect(comingCard(page, coming.id)).toBeVisible();
 
-    // Two columns, To check on the left, no segmented control.
-    await expect(page.getByTestId('pending-tabs')).toBeHidden();
+    // Two columns, Waiting for check on the left, no segmented control.
+    await expect(page.getByTestId('pending-tabs')).toHaveCount(0);
     const left = (await page.getByTestId('pending-column-check').boundingBox())!;
     const right = (await page.getByTestId('pending-column-coming').boundingBox())!;
     expect(right.x).toBeGreaterThan(left.x + left.width);
     expect(Math.abs(right.y - left.y)).toBeLessThan(2);
-    await expect(page.getByRole('heading', { level: 2, name: /^To check \d+$/ })).toBeVisible();
-    await expect(page.getByRole('heading', { level: 2, name: /^Friend coming \d+$/ })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: /^Waiting for check \d+ requests?$/ })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: /^Friend coming \d+ requests?$/ })).toBeVisible();
 
-    // J walks every card on screen: all of To check before Friend coming.
+    // J walks every card on screen: all of Waiting for check before Friend coming.
     const order = await page.evaluate(() =>
       Array.from(document.querySelectorAll<HTMLElement>('[data-desk-main] [data-request-id]'))
         .filter((el) => el.getClientRects().length > 0)
@@ -319,7 +304,7 @@ test.describe('desk 1440 × 900', () => {
     await expect(page.locator('[data-desk-main] [data-request-id]').first()).toBeFocused();
 
     // In medical: saved at once; the popover opens where the tapped card was (the card itself moves on to
-    // the end of Friend coming), under it, in the To check column.
+    // the end of Friend coming), under it, in the Waiting for check column.
     await checkCard(page, waiting.id).evaluate((el) => el.scrollIntoView({ block: 'center' }));
     const tapped = (await checkCard(page, waiting.id).boundingBox())!;
     await checkCard(page, waiting.id).getByRole('button', { name: 'In medical', exact: true }).click();
@@ -358,7 +343,7 @@ test.describe('desk 1440 × 900', () => {
       return pop;
     };
 
-    // To check is oldest first: a, b, c are its last three. Esc: the focus is on b, which took a's place.
+    // Waiting for check is longest wait first: a, b, c are its last three. Esc: the focus is on b, which took a's place.
     let pop = await answer(a);
     await page.keyboard.press('Escape');
     await expect(pop).toHaveCount(0);
@@ -387,24 +372,28 @@ test.describe('desk 1440 × 900', () => {
       .not.toBeNull();
   });
 
-  test('a docked request narrows the board into the tabs; the pane edits the location in a popover', async ({ page }) => {
+  test('a docked request stacks the board into one column (no tabs); the pane edits the location in a popover', async ({ page }) => {
     await page.setViewportSize({ width: 1180, height: 820 });
     const waiting = await createRequest(page);
     const coming = await inMedical(page, await createRequest(page));
     await page.goto('/?view=pending');
     await expect(checkCard(page, waiting.id)).toBeVisible({ timeout: 15_000 });
-    // 1180 with nothing open: still two columns.
-    await expect(page.getByTestId('pending-tabs')).toBeHidden();
+    // 1180 with nothing open: two columns.
+    const side = (await page.getByTestId('pending-column-coming').boundingBox())!;
+    expect(side.x).toBeGreaterThan((await page.getByTestId('pending-column-check').boundingBox())!.x + 100);
     await expect(comingCard(page, coming.id)).toBeVisible();
 
     await comingCard(page, coming.id).locator('[data-request-id]').click();
     const pane = page.getByTestId('profile');
     await expect(pane.getByTestId('location-row')).toBeVisible();
-    // Docked beside a 700 px main column: one queue at a time, under the control: the one that holds the
-    // open request, so its card stays on screen.
-    await expect(page.getByTestId('pending-tabs')).toBeVisible();
-    await expect(tab(page, 'Friend coming')).toHaveAttribute('aria-selected', 'true');
-    await expect(page.getByTestId('pending-column-check')).toBeHidden();
+    // Docked beside a 700 px main column (under the board's 720 px): both sections in one column, Waiting for
+    // check on top; no tabs.
+    await expect(page.getByTestId('pending-tabs')).toHaveCount(0);
+    const top = (await page.getByTestId('pending-column-check').boundingBox())!;
+    const below = (await page.getByTestId('pending-column-coming').boundingBox())!;
+    expect(Math.abs(below.x - top.x)).toBeLessThan(2);
+    expect(below.y).toBeGreaterThanOrEqual(top.y + top.height - 1);
+    // The open request's card is scrolled into view when it opens (PendingView follows the pane).
     await expect(comingCard(page, coming.id)).toBeInViewport();
 
     await pane.getByTestId('location-row').click();
@@ -427,36 +416,27 @@ test.describe('desk 1440 × 900', () => {
 test.describe('iPad landscape 1180 × 820', () => {
   test.use({ viewport: { width: 1180, height: 820 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
 
-  test('a Friend coming card opened beside the board: its queue shows, it stays selected on screen, J / K walk Friend coming', async ({ page }) => {
+  test('a Friend coming card opened beside the board: the stacked board keeps it on screen, J / K walk Friend coming', async ({ page }) => {
     await createRequest(page);
     const first = await inMedical(page, await createRequest(page));
     const second = await inMedical(page, await createRequest(page));
     await page.goto('/?view=pending');
     await expect(comingCard(page, second.id)).toBeVisible({ timeout: 15_000 });
-    // Two columns while nothing is open; the remembered tab is To check.
-    await expect(page.getByTestId('pending-tabs')).toBeHidden();
+    await expect(page.getByTestId('pending-tabs')).toHaveCount(0);
     await comingCard(page, first.id).locator('[data-request-id]').click();
     await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(first.id);
     await expect(page.getByTestId('desk-pane')).toBeVisible();
-    // Docked: the board stacks into the tabs, on the open request's queue.
-    await expect(page.getByTestId('pending-tabs')).toBeVisible();
-    await expect(tab(page, 'Friend coming')).toHaveAttribute('aria-selected', 'true');
-    await expect(page.getByTestId('pending-column-check')).toBeHidden();
+    // (Pending v9.1) Docked: the board stacks into one column (no tabs) and the open request's card stays on screen.
+    await expect(page.getByTestId('pending-tabs')).toHaveCount(0);
     await expect(comingCard(page, first.id)).toBeInViewport();
-    // Following the open request is not a choice the person made: the device keeps remembering To check.
-    expect(await page.evaluate(() => window.localStorage.getItem('lp-pending-tab'))).toBeNull();
-    // J opens the next Friend coming card (the answers are oldest first: `second` is after `first`); K back.
+    // J opens the next Friend coming card (nobody coming yet: longest since found first, so `second` is after
+    // `first`); K back.
     await page.keyboard.press('j');
     await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(second.id);
     await expect(comingCard(page, second.id)).toBeInViewport();
     await expect(page.getByTestId('desk-prev')).toBeEnabled();
     await page.keyboard.press('k');
     await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(first.id);
-    // A tab picked by hand stays picked while the same request is open.
-    await tab(page, 'To check').click();
-    await expect(page.getByTestId('pending-column-coming')).toBeHidden();
-    await page.waitForTimeout(500);
-    await expect(tab(page, 'To check')).toHaveAttribute('aria-selected', 'true');
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('desk-pane')).toHaveCount(0);
   });
@@ -472,7 +452,7 @@ test.describe('iPad portrait 820 × 1180', () => {
     await expect(page.getByTestId('desk-rail')).toBeVisible();
     await expect(checkCard(page, waiting.id)).toBeVisible({ timeout: 15_000 });
     await expect(comingCard(page, coming.id)).toBeVisible();
-    await expect(page.getByTestId('pending-tabs')).toBeHidden();
+    await expect(page.getByTestId('pending-tabs')).toHaveCount(0);
     const left = (await page.getByTestId('pending-column-check').boundingBox())!;
     const right = (await page.getByTestId('pending-column-coming').boundingBox())!;
     expect(right.x).toBeGreaterThan(left.x + left.width);

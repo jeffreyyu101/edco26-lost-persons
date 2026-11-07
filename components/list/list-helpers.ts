@@ -48,16 +48,6 @@ export function cardDescription(row: Pick<RequestSummary, 'clothing' | 'physical
   return parts.join(' · ');
 }
 
-/**
- * Who is on the way to Main Med, for a Friend coming card (pending-v8.html .coming): the friend's name in
- * bold, then "boyfriend, on the way". Without a name it reads "Friend", without a relation "on the way".
- */
-export function friendComingLine(row: Pick<RequestSummary, 'contactName' | 'contactRelationship'>): { friend: string; rest: string } {
-  const friend = clean(row.contactName).replace(/\s+/g, ' ') || 'Friend';
-  const relation = clean(row.contactRelationship).replace(/\s+/g, ' ');
-  return { friend, rest: relation ? `${relation}, on the way` : 'on the way' };
-}
-
 /** When the request entered its current status (Friend coming time, My requests "3m"). */
 export function statusSince(row: Pick<RequestSummary, 'status' | 'createdAt' | 'updatedAt' | 'foundAt' | 'reunionStartedAt' | 'closedAt'>): string {
   if (row.status === STATUS.waiting) return row.createdAt;
@@ -293,9 +283,11 @@ export function logRowLabel(
   created: string,
   updated: string,
   timeZone?: string,
+  /** (Pending v9.1) The views' clock: a hold whose recheck time has passed says "Recheck due". */
+  now = 0,
 ): string {
-  // (F5) The stage, not just the status: "Not found yet, recheck at 4:40 PM".
-  return `${formatCaseNumber(row.caseNumber)}, ${displayName(row.name)}, ${stagePhrase(row, timeZone)}, created ${created}, ${updated}`;
+  // (F5) The stage, not just the status: "Not found yet", "Recheck due", "Friend en route".
+  return `${formatCaseNumber(row.caseNumber)}, ${displayName(row.name)}, ${stagePhrase(row, timeZone, now)}, created ${created}, ${updated}`;
 }
 
 /** A search result in the log grid: the row's sentence, then the matched text when it is not the name. */
@@ -305,8 +297,9 @@ export function searchLogLabel(
   updated: string,
   line: string,
   timeZone?: string,
+  now = 0,
 ): string {
-  return `${logRowLabel(row, created, updated, timeZone)}.${line ? ` ${line}` : ''}`;
+  return `${logRowLabel(row, created, updated, timeZone, now)}.${line ? ` ${line}` : ''}`;
 }
 
 /** The number column of the log: the LP number without its prefix or padding, "1013", "998". */
@@ -327,6 +320,6 @@ export function logNumberRanges(caseNumber: number, caseRanges: Ranges): Ranges 
 }
 
 /** The "Archived N" fold's accessible name ("Archived 6 requests"); aria-expanded carries open / folded. */
-export function archivedFoldLabel(count: number): string {
-  return `Archived ${count} ${count === 1 ? 'request' : 'requests'}`;
+export function archivedFoldLabel(count: number, label = 'Archived'): string {
+  return `${label} ${count} ${count === 1 ? 'request' : 'requests'}`;
 }

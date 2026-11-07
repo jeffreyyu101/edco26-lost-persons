@@ -15,8 +15,9 @@ import { syncRows } from './helpers/sync';
 // into "Archived N" (Brian, 2026-11-06), Alerts in the avatar menu, and no badge on the avatar unless the
 // connection is down; Jeffrey's brand row (2026-11-06 10:31, made compact with an X that hides it on this
 // device, 2026-11-06 afternoon) over All requests only (Pending v8, Brian 2026-11-06 afternoon: Pending and
-// My requests open with their large title; Pending is To check | Friend coming, tests/e2e/pending-v8.spec.ts
-// has the rest); and the live indicator under the title. Runs against
+// My requests open with their large title; Pending v9.1 is one page, Waiting for check then Friend coming,
+// tests/e2e/pending-v8.spec.ts and pending-v9.spec.ts have the rest); and the live indicator under the title.
+// Runs against
 // the real store and API on the local stack. Every row is synthetic and unique to this run (TEST-L-<tag>);
 // nothing is truncated or reset, and the requests a test opened are closed after it.
 
@@ -790,7 +791,6 @@ test('Pending: In medical → Friend coming, Undo, then Reunited closes it (grey
   const r = await createRequest(page);
   await page.goto('/?view=pending');
   await expect(checkCard(page, r.id)).toBeVisible({ timeout: 10_000 });
-  const tab = (name: RegExp) => page.getByRole('tab', { name });
 
   // In medical saves at once, then asks where they are (Skip saves nothing more).
   await checkCard(page, r.id).getByRole('button', { name: 'In medical', exact: true }).click();
@@ -799,20 +799,18 @@ test('Pending: In medical → Friend coming, Undo, then Reunited closes it (grey
   await expect(sheet).toBeVisible();
   await sheet.getByRole('button', { name: 'Skip' }).click();
   await expect(sheet).toHaveCount(0);
-  await tab(/^Friend coming/).click();
+  // (v9.1) Friend coming is on the same page, under Waiting for check; its cards carry no friend line.
   await expect(comingCard(page, r.id)).toBeVisible();
-  await expect(comingCard(page, r.id)).toContainText(`${TAG} Friend · on the way`);
+  await expect(comingCard(page, r.id)).not.toContainText(`${TAG} Friend`);
   await expect(comingCard(page, r.id)).not.toContainText('from FA 3');
 
   await expect(page.getByText(`${lp(r)} · In medical`)).toBeVisible();
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect(comingCard(page, r.id)).toHaveCount(0);
-  await tab(/^To check/).click();
   await expect(checkCard(page, r.id)).toBeVisible();
 
   await checkCard(page, r.id).getByRole('button', { name: 'In medical', exact: true }).click();
   await sheet.getByRole('button', { name: 'Skip' }).click();
-  await tab(/^Friend coming/).click();
   await expect(comingCard(page, r.id)).toBeVisible();
   await comingCard(page, r.id).getByRole('button', { name: 'Reunited' }).click();
   await expect(comingCard(page, r.id)).toHaveCount(0);
@@ -832,13 +830,12 @@ test('Not found leaves Pending; ?status= shows a filter chip that clears to All'
   const r = await createRequest(page);
   await page.goto('/?view=pending');
   await expect(checkCard(page, r.id)).toBeVisible({ timeout: 10_000 });
-  await checkCard(page, r.id).getByRole('button', { name: 'Not found', exact: true }).click();
+  // (v9.1) The first Not found holds it, in place with a "Not found yet" chip; the second closes it.
+  await checkCard(page, r.id).getByTestId('not-found-answer').click();
+  await expect(checkCard(page, r.id).getByTestId('hold-chip')).toHaveText('Not found yet');
+  await checkCard(page, r.id).getByTestId('not-found-answer').click();
   await expect(checkCard(page, r.id)).toHaveCount(0);
-  // (F5) The first Not found holds it under Later; the second (from the request, here through the API) closes it.
-  await expect(page.locator(`[data-testid="later-row"][data-request-id="${r.id}"]`)).toBeVisible();
-  const held = (await (await page.request.get(`/api/requests/${r.id}`)).json()) as RequestSummary;
-  await setStatus(page, held, 'Checked – Not Found', 'answer');
-  await expect(page.locator(`[data-testid="later-row"][data-request-id="${r.id}"]`)).toHaveCount(0, { timeout: 15_000 });
+  await expect.poll(async () => ((await (await page.request.get(`/api/requests/${r.id}`)).json()) as RequestSummary).status).toBe('Checked – Not Found');
 
   await page.goto(`/?status=${encodeURIComponent('Checked – Not Found')}`);
   const chip = page.getByTestId('status-chip');
@@ -938,7 +935,6 @@ test('front of house logs a request with a photo; the liaison sees it in Pending
     await expect(locationForm).toBeVisible();
     await page.getByRole('textbox', { name: 'Location' }).fill('Chair 7');
     await locationForm.getByRole('button', { name: 'Save' }).click();
-    await page.getByRole('tab', { name: /^Friend coming/ }).click();
     await expect(comingCard(page, id!)).toBeVisible();
     await expect(comingCard(page, id!).getByTestId('location-chip')).toHaveAccessibleName('Chair 7, edit location');
 

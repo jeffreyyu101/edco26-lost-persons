@@ -88,7 +88,7 @@ import {
   type ToastItem,
 } from './store-contract';
 import { chunk, isRow, mergeRows, overlayForPatch, replaceAll, staleIds, summaryOf } from './sync-merge';
-import { holdChanged, holdSnackMessage, statusOverlayFields } from './hold';
+import { holdChanged, notFoundSnack, statusOverlayFields } from './hold';
 import { uuid } from './uuid';
 
 // ---------------------------------------------------------------------------------------------------
@@ -1208,9 +1208,11 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     clearSnackbar();
     const snackId = uuid();
     undoRecords.set(snackId, { id: row.id, to: back, version: row.rowVersion });
-    // (F5) The first Not found puts the request on hold: "Not found · recheck 4:40".
-    const message = holdSnackMessage(row, to, state.eventTimezone) ?? `${formatCaseNumber(row.caseNumber)} · ${statusMeta(to).shortLabel}`;
-    set({ snackbar: { id: snackId, message, expiresAt: now() + UNDO_MS } });
+    // (Pending v9.1) A Not found says what it did: "Not found yet · recheck in 20 min" (the hold) or "B.W. closed ·
+    // not found in medical" (the final answer).
+    const words = notFoundSnack(row, to);
+    const message = words?.message ?? `${formatCaseNumber(row.caseNumber)} · ${statusMeta(to).shortLabel}`;
+    set({ snackbar: { id: snackId, message, ...(words ? { said: words.said } : {}), expiresAt: now() + UNDO_MS } });
     // Held (the location sheet covers the bar): the countdown starts when the hold is released.
     if (undoHolds === 0) armUndo(snackId);
   };

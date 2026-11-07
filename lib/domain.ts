@@ -784,3 +784,15 @@ export function holdDetail(recheckAt: string | null | undefined, timeZone?: stri
 export function isRecheckDue(row: { status: string; recheckAt?: string | null }, now: number): boolean {
   return isHeld(row) && holdEpoch(row.recheckAt) <= now;
 }
+
+// ---------------------------------------------------------------------------------------------------
+// Pending v9.1 (Brian 2026-11-06 19:35–20:40, design/screens/pending-v9.html): what a Not found tap does, as
+// lp_set_status decides it: a request Waiting for check with no Not found in this round (notFoundChecks 0) goes on
+// hold; any other Not found is final. The two-state answer button that shows it (notFoundAnswer) and the "Recheck
+// due" label are lib/stages.ts's (the views' chunks), so the first load (A25) only carries this.
+// ---------------------------------------------------------------------------------------------------
+
+/** True when a Not found on this request puts it on hold (the first Not found) rather than closing it. */
+export function notFoundHolds(row: { status: string; notFoundChecks?: number }): boolean {
+  return row.status === STATUS.waiting && (row.notFoundChecks ?? 0) === 0;
+}

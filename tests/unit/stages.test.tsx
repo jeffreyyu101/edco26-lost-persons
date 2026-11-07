@@ -1,8 +1,10 @@
 // F5: the stage system (lib/stages displayStage + STAGE_META) and the "Not found yet" hold on the client: every
 // status × Needs info × hold (none / held / due) × en route, the colours' contrast in light and dark, the one
-// 20-minute constant shared with SQL, Pending's To check lanes and Later group, the labels (read from
-// STATUS_META and the action definitions, so the "Not found in medical" rename flows through), the optimistic
-// overlay and Undo words, the alert, the mapper and the audit trail. Synthetic data only.
+// 20-minute constant shared with SQL, the labels (read from STATUS_META and the action definitions, so the "Not
+// found in medical" rename flows through), the optimistic overlay and Undo words, the alert, the mapper and the
+// audit trail. Pending v9.1 (2026-11-06 evening) replaced F5's lanes: a due hold is the "Recheck due" stage, every
+// stage of Waiting for check is followed by its wait, and Pending is tests/unit/pending-v9.test.tsx's. Synthetic
+// data only.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Theme } from '@radix-ui/themes';
@@ -19,15 +21,14 @@ import { buildAuditTrail, holdOrigin } from '@/components/profile/audit-trail';
 import type { AuditEvent, RequestSummary } from '@/lib/api-types';
 import { HOLD_ALERT_UNNAMED, alertStillCurrent, diffAlerts, diffRaisedAlerts, holdAlert, statusAlert, type AlertContext } from '@/lib/client/alerts';
 import { systemNotice } from '@/lib/client/system-notify';
-import { holdChanged, holdSnackMessage, holdsOnNotFound, statusOverlayFields } from '@/lib/client/hold';
-import { nextRecheckAt, toCheckLanes } from '@/lib/client/lanes';
-import { pendingGroups, viewCounts } from '@/lib/client/selectors';
+import { holdChanged, holdSnackMessage, holdsOnNotFound, notFoundSnack, statusOverlayFields } from '@/lib/client/hold';
+import { pendingGroups } from '@/lib/client/selectors';
 import { StoreContext, type AppStore, type StoreState } from '@/lib/client/store-contract';
 import { createStubStore } from '@/lib/client/store-stub';
 import { STUB_SESSION, stubRows } from '@/lib/client/stub-data';
 import { RECHECK_MINUTES, STATUS, STATUS_META, actionLabel, holdDetail, initials, isHeld, isRecheckDue, primaryActions } from '@/lib/domain';
-import { STAGE_META, displayStage, etaText, holdAnsweredAt, isMedicalTeam, shortStaffName, stageLook, stagePhrase, type StageKey, type StageSource } from '@/lib/stages';
-import { formatClock, formatClockAmPm } from '@/lib/format';
+import { STAGE_META, displayStage, notFoundAnswer, etaText, holdAnsweredAt, isMedicalTeam, shortStaffName, stageLook, stagePhrase, type StageKey, type StageSource } from '@/lib/stages';
+import { formatClockAmPm } from '@/lib/format';
 import { mapAudit, mapRow } from '@/lib/server/mappers';
 import { notFoundDetail } from '@/lib/server/stage-notify';
 
@@ -68,7 +69,7 @@ function expectedKey(status: string, needsInfo: boolean, hold: keyof typeof HOLD
   switch (status) {
     case STATUS.waiting:
       if (needsInfo) return 'needsInfo';
-      return hold === 'none' ? 'waiting' : 'notFoundYet';
+      return hold === 'none' ? 'waiting' : hold === 'due' ? 'recheckDue' : 'notFoundYet';
     case STATUS.inMedical:
     case STATUS.legacyBringFriend:
       return enroute === 'none' ? 'inMedical' : enroute;
@@ -114,8 +115,9 @@ describe('displayStage', () => {
     } else {
       expect(stage).toMatchObject({ label: 'Found – Transported', tone: 'gray', bucket: 'closed' });
     }
-    // The look needs no clock, and says the same.
-    expect(stageLook(source)).toMatchObject({ key, label: stage.label, tone: stage.tone, glyph: stage.glyph });
+    // The look says the same at the same clock; with no clock a due hold reads Not found yet.
+    expect(stageLook(source, NOW)).toMatchObject({ key, label: stage.label, tone: stage.tone, glyph: stage.glyph });
+    expect(stageLook(source).key).toBe(key === 'recheckDue' ? 'notFoundYet' : key);
     // One line under the label, and what a desk cell puts after it.
     switch (key) {
       case 'waiting':
@@ -123,36 +125,29 @@ describe('displayStage', () => {
         break;
       case 'needsInfo':
         expect(stage.sub).toBe('Rae C. asked · 4:20 PM');
+        // (Pending v9.1) Every stage of Waiting for check is followed by its wait on the desk, never a time.
+        expect([stage.extra, stage.waitMinutes, stage.extraShort]).toEqual(['· 9m', 9, undefined]);
+        expect(stage.said).toBe('Needs info, Rae C. asked at 4:20 PM');
         if (hold === 'none') {
-          expect(stage.extra).toBeUndefined();
-          expect(stage.said).toBe('Needs info, Rae C. asked at 4:20 PM');
+          expect(stage.recheck).toBeUndefined();
         } else {
-          // Needs info wins the label, and the hold goes on: its time stays on every surface.
+          // (F5) Needs info wins the label, and the hold goes on: the request's own block keeps its recheck time.
           const time = formatClockAmPm(HOLDS[hold] as string, TZ);
-          expect({
-            extra: stage.extra,
-            extraShort: stage.extraShort,
-            extraGlyph: stage.extraGlyph,
-            recheck: stage.recheck,
-            recheckAt: stage.recheckAt,
-            due: stage.due,
-          }).toEqual({
-            extra: time,
-            extraShort: formatClock(HOLDS[hold] as string, TZ),
-            extraGlyph: 'recheck',
+          expect({ recheck: stage.recheck, recheckAt: stage.recheckAt, due: stage.due }).toEqual({
             recheck: `Recheck ${time}`,
             recheckAt: HOLDS[hold],
             due: hold === 'due',
           });
-          expect(stage.said).toBe(`Needs info, Rae C. asked at 4:20 PM, recheck at ${time}`);
         }
         break;
-      case 'notFoundYet': {
+      case 'notFoundYet':
+      case 'recheckDue': {
         const time = formatClockAmPm(HOLDS[hold] as string, TZ);
-        expect([stage.sub, stage.extra, stage.extraShort]).toEqual([`Recheck ${time}`, `· ${time}`, `· ${formatClock(HOLDS[hold] as string, TZ)}`]);
+        // The request's block keeps the recheck time; the desk shows the wait, never the time.
+        expect([stage.sub, stage.extra, stage.waitMinutes]).toEqual([`Recheck ${time}`, '· 9m', 9]);
         expect(stage.recheck).toBe(`Recheck ${time}`);
         expect(stage.due).toBe(hold === 'due');
-        expect(stage.said).toBe(`Not found yet, recheck at ${time}`);
+        expect(stage.said).toBe(hold === 'due' ? 'Recheck due' : 'Not found yet');
         break;
       }
       case 'inMedical':
@@ -207,12 +202,14 @@ describe('displayStage', () => {
     expect(isMedicalTeam(null)).toBe(false);
   });
 
-  it('the row sentence names the stage, with the status words for status stages', () => {
+  it('the row sentence names the stage, with the status words for status stages (no recheck time)', () => {
     expect(stagePhrase({ status: STATUS.inMedical, createdAt: at(-5) })).toBe('In medical, friend coming');
-    expect(stagePhrase({ status: STATUS.waiting, createdAt: at(-5), recheckAt: at(10) }, TZ)).toBe(`Not found yet, recheck at ${formatClockAmPm(at(10), TZ)}`);
-    expect(logRowLabel(row({ recheckAt: at(10), notFoundChecks: 1 }), '4:11 PM', 'updated now', TZ)).toContain('Not found yet, recheck at');
-    // Needs info on hold says both.
-    expect(stagePhrase({ status: STATUS.waiting, createdAt: at(-5), recheckAt: at(10), needsInfo: true }, TZ)).toBe(`Needs info, recheck at ${formatClockAmPm(at(10), TZ)}`);
+    expect(stagePhrase({ status: STATUS.waiting, createdAt: at(-5), recheckAt: at(10) }, TZ)).toBe('Not found yet');
+    expect(stagePhrase({ status: STATUS.waiting, createdAt: at(-5), recheckAt: at(-1) }, TZ, NOW)).toBe('Recheck due');
+    expect(logRowLabel(row({ recheckAt: at(10), notFoundChecks: 1 }), '4:11 PM', 'updated now', TZ)).toContain(', Not found yet, created 4:11 PM');
+    expect(logRowLabel(row({ recheckAt: at(-1), notFoundChecks: 1 }), '4:11 PM', 'updated now', TZ, NOW)).toContain(', Recheck due, created 4:11 PM');
+    // Needs info on hold: Needs info (the hold's time is the request's own block's).
+    expect(stagePhrase({ status: STATUS.waiting, createdAt: at(-5), recheckAt: at(10), needsInfo: true }, TZ)).toBe('Needs info');
   });
 });
 
@@ -229,6 +226,8 @@ describe('labels', () => {
     }
     expect(STAGE_META.needsInfo.label).toBe('Needs info');
     expect(STAGE_META.notFoundYet.label).toBe('Not found yet');
+    expect(STAGE_META.recheckDue.label).toBe('Recheck due');
+    expect(STAGE_META.recheckDue.glyph).toBe('history');
     expect(STAGE_META.enroute.label).toBe('Friend en route');
     expect(STAGE_META.arrived.label).toBe('Friend arrived');
   });
@@ -238,6 +237,7 @@ describe('labels', () => {
       waiting: 'blue',
       needsInfo: 'amber',
       notFoundYet: 'violet',
+      recheckDue: 'violet',
       inMedical: 'green',
       enroute: 'teal',
       arrived: 'green',
@@ -246,17 +246,22 @@ describe('labels', () => {
       discharged: 'gray',
       cancelled: 'gray',
     });
-    for (const key of ['needsInfo', 'notFoundYet', 'enroute', 'arrived'] as const) expect(STAGE_META[key].bucket).toBe('open');
+    for (const key of ['needsInfo', 'notFoundYet', 'recheckDue', 'enroute', 'arrived'] as const) expect(STAGE_META[key].bucket).toBe('open');
   });
 
-  it('the answer buttons and the Undo bar read the action labels', () => {
+  it('the answer buttons and the Undo bar (Pending v9.1): "Not found yet · recheck in 20 min", then "<initials> closed · …"', () => {
     const [notFound, inMedical] = primaryActions(STATUS.waiting);
     expect(notFound?.label).toBe(actionLabel('notInMedical'));
     expect(inMedical?.label).toBe(actionLabel('inMedical'));
+    expect(notFoundAnswer(row()).label).toBe('Not found yet');
     const held = row({ recheckAt: '2026-11-06T21:40:00Z', notFoundChecks: 1 });
-    expect(holdSnackMessage(held, STATUS.notInMedical, TZ)).toBe(`${actionLabel('notInMedical')} · recheck 4:40`);
-    expect(holdSnackMessage(held, STATUS.inMedical, TZ)).toBeNull();
-    expect(holdSnackMessage(row(), STATUS.notInMedical, TZ)).toBeNull();
+    expect(notFoundAnswer(held).label).toBe('Not found');
+    expect(holdSnackMessage(held, STATUS.notInMedical)).toBe(`Not found yet · recheck in ${RECHECK_MINUTES} min`);
+    expect(holdSnackMessage(held, STATUS.inMedical)).toBeNull();
+    expect(holdSnackMessage(row(), STATUS.notInMedical)).toBeNull();
+    const closed = row({ name: 'Bea Walsh', status: STATUS.notInMedical, notFoundChecks: 2 });
+    const words = STATUS_META[STATUS.notInMedical].label.toLowerCase();
+    expect(notFoundSnack(closed, STATUS.notInMedical)).toEqual({ message: `B.W. closed · ${words}`, said: `B.W. closed, ${words}.` });
   });
 
   it('the notification detail: "Not found yet · recheck 4:40 PM", or the final status label from STATUS_META', () => {
@@ -348,41 +353,6 @@ describe('STAGE_META contrast', () => {
       expect(contrast(s[`${tone}-11`]!, page)).toBeGreaterThanOrEqual(3);
     });
   }
-});
-
-// ---------------------------------------------------------------------------------------------------
-// Pending > To check: due first, then the queue, then Later; counts
-// ---------------------------------------------------------------------------------------------------
-
-describe('To check lanes', () => {
-  const a = row({ id: 'a', caseNumber: 1, createdAt: at(-30) });
-  const b = row({ id: 'b', caseNumber: 2, createdAt: at(-5) });
-  const dueLate = row({ id: 'c', caseNumber: 3, createdAt: at(-50), recheckAt: at(-10), notFoundChecks: 1 });
-  const dueSoon = row({ id: 'd', caseNumber: 4, createdAt: at(-40), recheckAt: at(-1), notFoundChecks: 1 });
-  const laterFar = row({ id: 'e', caseNumber: 5, createdAt: at(-20), recheckAt: at(15), notFoundChecks: 1 });
-  const laterNear = row({ id: 'f', caseNumber: 6, createdAt: at(-10), recheckAt: at(3), notFoundChecks: 1 });
-  const waiting = pendingGroups([b, laterFar, dueSoon, a, laterNear, dueLate]).waiting;
-
-  it('due rechecks first (most overdue first), then the queue (oldest first), then Later (earliest recheck first)', () => {
-    const lanes = toCheckLanes(waiting, NOW);
-    expect(lanes.due.map((r) => r.id)).toEqual(['c', 'd']);
-    expect(lanes.queue.map((r) => r.id)).toEqual(['a', 'b']);
-    expect(lanes.later.map((r) => r.id)).toEqual(['f', 'e']);
-  });
-
-  it('a held request moves from Later to the top when its time comes, never anywhere else', () => {
-    expect(nextRecheckAt(waiting, NOW)).toBe(Date.parse(at(3)));
-    const later = toCheckLanes(waiting, Date.parse(at(3)));
-    expect(later.due.map((r) => r.id)).toEqual(['c', 'd', 'f']);
-    expect(later.later.map((r) => r.id)).toEqual(['e']);
-    expect(nextRecheckAt(waiting, Date.parse(at(20)))).toBeNull();
-  });
-
-  it('Pending counts To check (due + queue) and Friend coming, not Later', () => {
-    const all = [a, b, dueLate, dueSoon, laterFar, laterNear];
-    expect(viewCounts(all, [], new Set(), null).pending).toBe(6);
-    expect(viewCounts(all, [], new Set(), null, NOW).pending).toBe(4);
-  });
 });
 
 // ---------------------------------------------------------------------------------------------------
@@ -564,77 +534,69 @@ function heldStore(session: Partial<StoreState['session']> = {}) {
 }
 
 describe('renders', () => {
-  it('All (phone): a held request reads "Not found yet" with the violet hourglass, never "Waiting"', () => {
+  it('All (phone): a held request reads "Not found yet" (violet hourglass), a due one "Recheck due" (violet history), never "Waiting"', () => {
     const store = heldStore();
     const held = [...store.getState().confirmed.values()].filter((r) => isHeld(r));
     expect(held).toHaveLength(2);
     const html = render(store, <AllView status={null} post={null} />);
     for (const r of held) {
+      const due = isRecheckDue(r, RECHECK_NOW);
       const i = html.indexOf(`data-request-id="${r.id}"`);
       const rowHtml = html.slice(i, html.indexOf('</button>', i));
       expect(rowHtml).toContain('data-tone="violet"');
-      expect(rowHtml).toContain('data-glyph="hourglass"');
-      expect(rowHtml).toContain('>Not found yet<');
+      expect(rowHtml).toContain(due ? 'data-glyph="history"' : 'data-glyph="hourglass"');
+      expect(rowHtml).toContain(due ? '>Recheck due<' : '>Not found yet<');
       expect(rowHtml).not.toContain('Waiting');
-      expect(rowHtml).toMatch(/Not found yet, recheck at \d{1,2}:\d\d (AM|PM)/);
+      expect(rowHtml).not.toMatch(/recheck at/);
     }
   });
 
-  it('desk table: "Not found yet · 4:40 PM" in the status cell', () => {
+  it('desk table: "Not found yet · 12m" / "Recheck due · 40m": the wait after the label, never the recheck time', () => {
     const store = heldStore();
     const held = [...store.getState().confirmed.values()].filter((r) => isHeld(r));
     const html = render(store, <DeskAllTable status={null} post={null} />, true);
     for (const r of held) {
       const i = html.indexOf(`data-request-id="${r.id}"`);
       const cell = html.slice(html.indexOf('data-col="status"', i), html.indexOf('data-col="post"', i)).replace(/<[^>]+>/g, '');
-      expect(cell).toContain(`Not found yet· ${formatClockAmPm(r.recheckAt as string, TZ)}`);
+      const label = isRecheckDue(r, RECHECK_NOW) ? 'Recheck due' : 'Not found yet';
+      expect(cell).toMatch(new RegExp(`${label}· (now|\\d+m)<`));
+      expect(cell).not.toContain(formatClockAmPm(r.recheckAt as string, TZ));
     }
   });
 
-  it('Pending (phone): the due recheck on top with its chip, the queue, then "Later 1"; To check counts 1 + queue', () => {
+  it('Pending (phone): held and due requests stay in Waiting for check in wait order, with their chips; no Later', () => {
     const store = heldStore({ team: 'Medical', staff: 'Rae Chen · Medical', staffName: 'Rae Chen' });
     const html = render(store, <PendingView />);
-    const [due, later] = [...store.getState().confirmed.values()].filter((r) => isHeld(r)).sort((x, y) => Date.parse(x.recheckAt!) - Date.parse(y.recheckAt!));
-    const firstCard = html.indexOf('data-testid="check-card"');
-    expect(html.slice(firstCard, firstCard + 200)).toContain(`data-pending-card="${due!.id}"`);
-    expect(html).toContain('data-testid="recheck-chip"');
-    expect(html).toContain(`not found ${formatClock(holdAnsweredAt(due!)!, TZ)}`);
-    const group = html.indexOf('data-testid="later-group"');
-    expect(group).toBeGreaterThan(html.lastIndexOf('data-testid="check-card"'));
-    expect(html.slice(group)).toContain(`data-request-id="${later!.id}"`);
-    expect(html).toMatch(/aria-label="Later, 1 on hold" data-testid="later-group"/);
-    // The answers are the action labels.
-    expect(html).toContain(`>${actionLabel('notInMedical')}<`);
-    // The tab counts To check without Later.
-    const queue = pendingGroups([...store.getState().confirmed.values()]).waiting.filter((r) => !isHeld(r)).length;
-    expect(html).toMatch(new RegExp(`data-tab="check"[\\s\\S]*?To check</span> <span[^>]*>${queue + 1}<`));
+    const waiting = pendingGroups([...store.getState().confirmed.values()]).waiting;
+    const order = [...html.matchAll(/data-testid="check-card" data-pending-card="([^"]+)"/g)].map((m) => m[1]);
+    expect(order).toEqual(waiting.map((r) => r.id));
+    expect(html).not.toContain('data-testid="later-group"');
+    expect(html).not.toContain('data-testid="recheck-chip"');
+    expect(html).toContain('>Recheck due<');
+    expect(html).toContain('>Not found yet<');
   });
 
-  it('desk board: the same lanes in the To check column', () => {
+  it('desk board: the same cards in the Waiting for check column', () => {
     const store = heldStore();
     const waiting = pendingGroups([...store.getState().confirmed.values()]).waiting;
-    const lanes = toCheckLanes(waiting, RECHECK_NOW);
     const html = render(
       store,
       <PendingBoard
         waiting={waiting}
-        lanes={lanes}
-        timeZone={TZ}
-        friendComing={[]}
+        coming={[]}
         now={RECHECK_NOW}
         offline={false}
-        tab="check"
-        onTab={() => {}}
-        idBase="t"
-        onNotInMedical={() => {}}
+        leaving={{ items: waiting.map((r) => ({ row: r, leaving: false })), mark: () => {}, unmark: () => {} }}
+        onNotFound={() => {}}
         onInMedical={() => {}}
         onReunited={() => {}}
         onLocate={() => {}}
       />,
       true,
     );
-    expect(html).toContain('data-testid="recheck-chip"');
-    expect(html).toContain('data-testid="later-group"');
+    expect(html).toContain('data-testid="pending-column-check"');
+    expect(html).toContain('data-testid="hold-chip"');
+    expect(html).not.toContain('data-testid="later-group"');
   });
 
   it('the request (medical): violet block, who answered, "Recheck 4:40 PM", and the answers inside the block', () => {
@@ -647,7 +609,8 @@ describe('renders', () => {
     expect(block).toContain('>Not found yet<');
     expect(block).toContain(`Recheck ${formatClockAmPm(held.recheckAt!, TZ)}`);
     expect(block).toContain('data-testid="block-answers"');
-    expect(block).toContain(`>${actionLabel('notInMedical')}<`);
+    // (Pending v9.1) Held: the left answer is the final "Not found".
+    expect(block).toContain('>Not found<');
     expect(block).toContain(`>${actionLabel('inMedical')}<`);
     // No second set of answers at the foot.
     expect(html).not.toContain('data-testid="profile-actions"');
@@ -662,7 +625,7 @@ describe('renders', () => {
     expect(html).toContain('data-testid="profile-actions"');
   });
 
-  it('Needs info on hold keeps the recheck time: the request\'s recheck row, the My requests chip, the desk cell', () => {
+  it('Needs info on hold: the request\'s recheck row keeps the time; the My requests card and the desk cell show none (v9.1)', () => {
     const store = storeWith((all) => {
       const mineId = all.find((r) => r.createdBy === STUB_SESSION.staff && r.status !== STATUS.cancelled)!.id;
       return all.map((r) =>
@@ -681,27 +644,28 @@ describe('renders', () => {
       );
     });
     const held = [...store.getState().confirmed.values()].find((r) => isHeld(r))!;
-    const recheck = `Recheck ${formatClockAmPm(held.recheckAt!, TZ)}`;
+    const time = formatClockAmPm(held.recheckAt!, TZ);
     const profile = render(store, <ProfileView id={held.id} />);
     expect(profile).toContain('data-stage="needsInfo"');
-    expect(profile).toMatch(new RegExp(`data-testid="recheck-row"[\\s\\S]*?${recheck}`));
+    expect(profile).toMatch(new RegExp(`data-testid="recheck-row"[\\s\\S]*?Recheck ${time}`));
     const mine = render(store, <MineView />);
     const i = mine.indexOf(`data-request-id="${held.id}"`);
-    const card = mine.slice(mine.lastIndexOf('data-testid="mine-card"', i));
+    const next = mine.indexOf('data-testid="mine-card"', i + 1);
+    const card = mine.slice(mine.lastIndexOf('data-testid="mine-card"', i), next > 0 ? next : undefined);
     expect(card).toMatch(/data-testid="stage-chip"[^>]*>.*Needs info/);
-    expect(card).toContain('data-testid="recheck-time-chip"');
-    expect(card).toContain(recheck);
-    expect(card).toMatch(/aria-label="[^"]*Needs info, Rae C\. asked at [^"]*, recheck at /);
+    expect(card).toMatch(/data-testid="hold-chip"[^>]*>.*Not found yet/);
+    expect(card).not.toContain(time);
+    expect(card).toMatch(/aria-label="[^"]*Needs info, Rae C\. asked at [^"]*, not found yet, waiting /);
     const desk = render(store, <DeskAllTable status={null} post={null} />, true);
     const j = desk.indexOf(`data-request-id="${held.id}"`);
     const cell = desk.slice(desk.indexOf('data-col="status"', j), desk.indexOf('data-col="post"', j));
-    expect(cell).toContain('lucide-refresh-cw');
-    expect(cell).toContain(`>Needs info<`);
-    expect(cell).toMatch(new RegExp(`stxWide[^>]*>${formatClockAmPm(held.recheckAt!, TZ)}<`));
-    expect(cell).toMatch(new RegExp(`stxNarrow[^>]*>${formatClock(held.recheckAt!, TZ)}<`));
+    expect(cell).not.toContain('lucide-refresh-cw');
+    expect(cell).toContain('>Needs info<');
+    expect(cell).toMatch(/class="[^"]*stx[^"]*"[^>]*>· \d+m</);
+    expect(cell).not.toContain(time);
   });
 
-  it('My requests: the violet "Not found yet" chip in the corner and the outline "Recheck 4:40 PM"', () => {
+  it('My requests: the wait in the corner and the violet "Not found yet" chip under the name; no recheck time', () => {
     // One of this phone's own requests, put on hold.
     const store = storeWith((all) => {
       const mineId = all.find((r) => r.createdBy === STUB_SESSION.staff && r.status !== STATUS.cancelled)!.id;
@@ -711,9 +675,9 @@ describe('renders', () => {
     const html = render(store, <MineView />);
     const i = html.indexOf(`data-request-id="${held.id}"`);
     const card = html.slice(html.lastIndexOf('data-testid="mine-card"', i), html.indexOf('data-testid="mine-card"', i + 1) > 0 ? html.indexOf('data-testid="mine-card"', i + 1) : undefined);
-    expect(card).toMatch(/data-testid="stage-chip"[^>]*>.*Not found yet/);
-    expect(card).toContain('data-tone="violet"');
-    expect(card).toContain(`Recheck ${formatClockAmPm(held.recheckAt!, TZ)}`);
-    expect(card).toMatch(/aria-label="[^"]*Not found yet, recheck at /);
+    expect(card).toMatch(/data-testid="hold-chip"[^>]*>.*Not found yet/);
+    expect(card).not.toContain('data-testid="stage-chip"');
+    expect(card).not.toContain(`Recheck ${formatClockAmPm(held.recheckAt!, TZ)}`);
+    expect(card).toMatch(/aria-label="[^"]*\. Not found yet, waiting /);
   });
 });

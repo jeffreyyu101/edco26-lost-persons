@@ -98,6 +98,8 @@ export interface SnackbarItem {
   id: string;
   /** e.g. "LP-1012 · In medical" */
   message: string;
+  /** (Pending v9.1) What a screen reader hears instead of `message`, when the words differ ("B.W. closed, not found in medical."). */
+  said?: string;
   expiresAt: number;
 }
 
@@ -501,6 +503,8 @@ const pendingEqual = (a: PendingGroups, b: PendingGroups) =>
 const selectPending = (s: StoreState) => pendingGroups(selectMerged(s));
 const selectMine = (s: StoreState) => mineRows(selectMerged(s), s.myIds, s.session.staff);
 const selectOutbox = (s: StoreState) => visibleOutbox(s.outbox, s.confirmed);
+const selectCounts = (s: StoreState) =>
+  viewCounts(selectMerged(s), visibleOutbox(s.outbox, s.confirmed), s.myIds, s.session.staff);
 const selectConnection = (s: StoreState) => ({ connection: s.connection, syncing: s.syncing, lastSyncAt: s.lastSyncAt });
 const selectLiveSync = (s: StoreState) => ({ connection: s.connection, syncedAt: s.lastSyncLocalAt });
 const selectSession = (s: StoreState) => s.session;
@@ -554,13 +558,9 @@ export function useOutbox(): OutboxItem[] {
 }
 
 export function useCounts(): ViewCounts {
-  // (F5) Pending leaves out held requests that are not due yet ("Later"), so the count follows the clock.
-  const now = useNow();
-  const selector = useCallback(
-    (s: StoreState) => viewCounts(selectMerged(s), visibleOutbox(s.outbox, s.confirmed), s.myIds, s.session.staff, now),
-    [now],
-  );
-  return useStoreSelector(selector, shallowEqual);
+  // Pending v9.1: Pending counts every request Waiting for check (held ones included: "Not found yet" is an
+  // indicator, not a lane) and every one In medical.
+  return useStoreSelector(selectCounts, shallowEqual);
 }
 
 export function useSearch(query: string): SearchHit[] {

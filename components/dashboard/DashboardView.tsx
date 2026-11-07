@@ -325,7 +325,7 @@ function Recent({ stats, now }: { stats: Stats; now: number }) {
         {stats.recent.map((r) => {
           const meta = statusMeta(r.status);
           const live = byId.get(r.id);
-          const look = live && live.status === r.status ? stageLook(live) : { ...meta, label: meta.shortLabel, glyph: meta.glyph };
+          const look = live && live.status === r.status ? stageLook(live, now) : { ...meta, label: meta.shortLabel, glyph: meta.glyph };
           const closed = meta.bucket === 'closed';
           const name = r.name?.trim() || '';
           const ago = formatAgo(r.updatedAt, now);
@@ -338,7 +338,7 @@ function Recent({ stats, now }: { stats: Stats; now: number }) {
               data-closed={closed ? '' : undefined}
               data-request-id={r.id}
               onClick={() => show({ r: r.id })}
-              aria-label={`${shown}. ${look.label !== meta.shortLabel && live ? stagePhrase(live) : meta.label}, ${r.postShort}, updated ${agoPhrase(r.updatedAt, now)}.`}
+              aria-label={`${shown}. ${look.label !== meta.shortLabel && live ? stagePhrase(live, undefined, now) : meta.label}, ${r.postShort}, updated ${agoPhrase(r.updatedAt, now)}.`}
             >
               <span className={s.num}>{r.caseNumber}</span>{' '}
               <span className={s.nm} data-empty={name ? undefined : ''}>

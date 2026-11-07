@@ -89,6 +89,17 @@ screenshots.
   double tap or a held key in the crop step answers one photo, never the next.
 - **System notifications** (above) ship in this release too.
 
+### 2026-11-06 night (F5 release, `release/f5`)
+
+- **Stages and the "Not found yet" hold** (F5): a request shows its stage (Needs info, Not found yet, Recheck
+  due, Friend en route, Friend arrived) over its stored status. The first Not found ("⧗ Not found yet") keeps
+  it open for a recheck in 20 minutes; on a held request the button reads "× Not found" and closes it. **This
+  needs the migration below re-applied, before the deploy.**
+- **Pending v9.1**: one page on a phone (Waiting for check, then Friend coming, each header folds its
+  section), two columns that scroll on their own from 768 px; no To check | Friend coming tabs, no Later lane.
+- **Sort by status** on All requests and My requests ("⇅ Newest" / "⇅ Updated" ↔ "⇅ Status" at the right end
+  of the line under the title; the column header on the desk table).
+
 ## The production migration
 
 [`supabase/migrations/20261106000000_rework.sql`](supabase/migrations/20261106000000_rework.sql) is the only
@@ -208,9 +219,13 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 - [ ] The re-run of the migration on production **before** this build deploys (lp_stats + age → text): dry
       run, then commit (see above).
 - [ ] Several staff sign in at once behind the venue Wi-Fi (one shared IP).
-- [ ] The "Not found yet" hold on real phones: medical taps Not found → the card moves under Later with
-      "Not found · recheck" and Undo; 20 minutes later (phone clock) it is back on top as Recheck; the second
-      Not found closes it. Front of house's My requests shows the violet chip and the recheck time meanwhile.
+- [ ] The "Not found yet" hold on real phones (Pending v9.1): medical taps "Not found yet" → the card stays in
+      place with the violet chip, "Not found yet · recheck in 20 min" and Undo, and its button reads "× Not
+      found"; 20 minutes later (phone clock) the chip reads "Recheck due" and nothing has moved; "× Not found"
+      closes it ("B.W. closed · not found in medical", Undo). Front of house's My requests shows the chip (no
+      recheck time) meanwhile.
+- [ ] Pending v9.1 on a phone and an iPad: one page (Waiting for check, then Friend coming), each header folds
+      its section; the board's columns scroll on their own; "⇅ Status" on All and My requests is remembered.
 
 ## Known limits
 

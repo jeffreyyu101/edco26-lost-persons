@@ -120,7 +120,7 @@ Pending.
 - **Sign-in.** Step 1 is your name and team, and step 2 is the event password. The phone remembers step 1.
   Sessions last 12 hours from the last use, and 36 hours at most. Too many wrong passwords from one place
   pauses sign-in for a while.
-- **One page, several views.** All requests, Pending (Friend coming, then Waiting for check), My requests
+- **One page, several views.** All requests, Pending (Waiting for check, then Friend coming), My requests
   (with a progress line), Search, New request, the profile, Edit and the dashboard. Views are URL parameters
   on `/`, so Back and shared links work. The view menu is the large page title ("All requests 13 ⌄").
 - **All requests.** Open requests (Waiting for check, In medical) come first, newest first; every closed one
@@ -136,13 +136,19 @@ Pending.
 - **Desk and tablet (from 768 px).** A sidebar (or an icon rail under 1280 px), a top bar with the view's
   title, its live line and Refresh now, search and New request, and the list as a table; a request opens
   beside it (docked from 1024 px) and New request as a side sheet or a centred dialog. Pending is two
-  columns, To check and Friend coming. All requests opens with the same compact brand row, its X and Show
-  header.
-- **Not found yet.** The first Not found on a waiting request holds it for a recheck in 20 minutes (still open,
-  Waiting for check in the database, violet "Not found yet" on screen, under Pending's "Later"); when the time
-  comes it is back on top of To check as a Recheck, and it never closes by itself. The second Not found is the
-  final, closed Not found in medical. Lists show each request's stage: Needs info, Not found yet, Friend en route
-  and Friend arrived refine the stored status (`design/DECISIONS.md`, spec §19).
+  columns, Waiting for check and Friend coming, each scrolling on its own. All requests opens with the same
+  compact brand row, its X and Show header.
+- **Pending** (Pending v9.1) is one page on a phone: Waiting for check (longest wait first), then Friend coming
+  (friend arrived, then en route, then nobody yet), each under a header that folds it; side by side from 768 px.
+- **Not found yet.** The first Not found ("⧗ Not found yet") on a waiting request holds it for a recheck in 20
+  minutes: still open, Waiting for check in the database, in its place in Pending with a violet "Not found yet"
+  chip, which turns into "Recheck due" after 20 minutes. Nothing moves and it never closes by itself. On a held
+  request the button reads "× Not found": the final answer, which closes it as Not found in medical. Lists show
+  each request's stage: Needs info, Not found yet, Recheck due, Friend en route and Friend arrived refine the
+  stored status (`design/DECISIONS.md`, spec §19).
+- **Sort by status.** All requests and My requests have a one-tap "⇅ Newest" / "⇅ Updated" ↔ "⇅ Status" toggle
+  at the right end of the line under the title (the column header on the desk table), remembered on the
+  device: Waiting for check, Friend coming, then the closed ones folded.
 - **Answers.** Not found, In medical, Reunited and Change answer each offer Undo for 10 s. Change answer
   is a menu: the other answer, or Back to Waiting for check. Two people giving the same answer is harmless.
   A change made by someone else shows as "Updated by someone else".
