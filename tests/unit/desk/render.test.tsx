@@ -133,12 +133,13 @@ describe('DeskNav', () => {
     expect(sidebar).toContain(`Pending ${counts.pending}`);
     expect(sidebar).toContain('My requests');
     expect(sidebar).toContain('Dashboard');
-    expect(sidebar).toContain('Alerts');
     expect(sidebar).toContain('Dana Kim');
     expect(sidebar).toContain('Dispatch');
     expect(html).toContain('href="/?view=pending"');
     expect(html).toContain('href="/?dashboard=1"');
-    expect(html).toMatch(/role="switch"[^>]*aria-checked="false"/);
+    // F4: Alerts and Activity are client-only slots (components/activity/slots.tsx, their own chunk), drawn
+    // after hydration: the e2e specs check them (alerts.spec.ts, activity.spec.ts, desk-shell.spec.ts).
+    expect(html).not.toMatch(/role="switch"/);
     // The current view is marked in the sidebar and in the rail.
     expect((html.match(/aria-current="page"/g) ?? []).length).toBe(2);
     expect(html).toMatch(/href="\/"[^>]*aria-current="page"/);
@@ -159,7 +160,6 @@ describe('DeskNav', () => {
     expect(rail).toContain(`aria-label="Pending ${counts.pending}"`);
     expect(rail).toContain('aria-label="My requests"');
     expect(rail).toContain('aria-label="Dashboard"');
-    expect(rail).toMatch(/aria-label="Alerts" aria-pressed="false"/);
   });
 
   it('shows no counts until data has loaded', () => {

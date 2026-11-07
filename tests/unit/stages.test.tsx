@@ -425,7 +425,7 @@ describe('alerts', () => {
     expect({ title: notice.title, body: notice.body, tag: notice.tag, url: notice.url }).toEqual({
       title: initials(held.name),
       body: 'Not found yet · recheck 4:50 PM',
-      tag: held.id,
+      tag: `lp-${held.id}`,
       url: `/?r=${held.id}`,
     });
     for (const text of [alert.title, alert.subtitle, notice.title, notice.body]) expect(text).not.toMatch(/LP-?\d/);

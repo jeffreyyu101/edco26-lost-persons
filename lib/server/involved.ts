@@ -1,52 +1,56 @@
-// replaced by F4 (contract C: F4 owns lib/server/involved.ts; F5 ships this stub with the same API).
-// Who a request's notifications go to: public.lp_involved_staff(p_request) (F3's function: the logger, who
-// answered, who set the location, everyone who messaged, everyone en route), as canonical staff strings
-// (domain.canonStaff). Where the function does not exist yet (PGRST202 / 42883), the logger and whoever
-// answered it. Never throws: on any other failure it returns []. Server only.
+// Who is involved in a request (contract C). Server only.
+//
+// public.lp_involved_staff(p_request uuid) returns setof text is owned by the Messages release (F3): the
+// logger, whoever answered In medical / Not found, whoever set the location, everyone who messaged and
+// everyone en route. Until it is there (PGRST202 "function not found" / 42883), or if it fails for any other
+// reason, the fallback is lp_activity_fallback_staff: whoever logged the request and whoever answered it.
+// A notification is never lost because the richer list could not be read.
 import 'server-only';
-import { canonStaff } from '../domain';
 import { db, rpc } from './supabase';
-import { ApiFailure } from './errors';
 
-const MISSING_FUNCTION = new Set(['PGRST202', '42883']);
-
-function canonList(values: readonly unknown[]): string[] {
-  const out = new Set<string>();
-  for (const v of values) {
-    const c = typeof v === 'string' ? canonStaff(v) : null;
-    if (c) out.add(c);
+/** Attribution or canonical staff strings out of a PostgREST answer (setof text, or rows of one column). */
+export function staffList(data: unknown): string[] {
+  if (!Array.isArray(data)) return [];
+  const out: string[] = [];
+  for (const item of data) {
+    if (typeof item === 'string') out.push(item);
+    else if (item && typeof item === 'object') {
+      const values = Object.values(item as Record<string, unknown>);
+      if (values.length === 1 && typeof values[0] === 'string') out.push(values[0]);
+    }
   }
-  return [...out];
+  return out.filter((s) => s.trim() !== '');
 }
 
-/** The logger and every staff member who changed the request's status (the fallback). */
-async function loggerAndAnswerers(requestId: string): Promise<string[]> {
-  const client = db();
-  const [patient, events] = await Promise.all([
-    client.from('patients').select('created_by').eq('id', requestId).maybeSingle(),
-    client.from('audit_events').select('staff_name').eq('patient_id', requestId).eq('action_type', 'status_changed'),
-  ]);
-  const values: unknown[] = [];
-  const createdBy = (patient.data as { created_by?: unknown } | null)?.created_by;
-  if (createdBy) values.push(createdBy);
-  for (const e of (events.data as Array<{ staff_name?: unknown }> | null) ?? []) values.push(e.staff_name);
-  return canonList(values);
+/** Logger + answerers (lp_activity_fallback_staff). Never throws. */
+export async function fallbackStaff(requestId: string): Promise<string[]> {
+  try {
+    return staffList(await rpc<unknown>('lp_activity_fallback_staff', { p_request: requestId }));
+  } catch {
+    return [];
+  }
 }
 
+/** Everyone involved in the request (attribution strings). Never throws. */
 export async function involvedStaff(requestId: string): Promise<string[]> {
   try {
-    const data = await rpc<unknown>('lp_involved_staff', { p_request: requestId });
-    const rows = Array.isArray(data) ? data : [];
-    // setof text arrives as a list of strings (or of {lp_involved_staff: text} rows on some PostgREST setups).
-    return canonList(rows.map((r) => (r && typeof r === 'object' ? Object.values(r as Record<string, unknown>)[0] : r)));
-  } catch (error) {
-    if (error instanceof ApiFailure && error.dbCode && MISSING_FUNCTION.has(error.dbCode)) {
-      try {
-        return await loggerAndAnswerers(requestId);
-      } catch {
-        return [];
-      }
+    const { data, error } = await db().rpc('lp_involved_staff', { p_request: requestId });
+    if (!error) {
+      const list = staffList(data);
+      // The richer list always includes the logger; an empty answer means something is off: fall back.
+      if (list.length > 0) return list;
     }
+  } catch {
+    // network or timeout: the fallback below tries again
+  }
+  return fallbackStaff(requestId);
+}
+
+/** Everyone whose "New requests" switch is on (canonical staff strings). Never throws. */
+export async function newRequestStaff(): Promise<string[]> {
+  try {
+    return staffList(await rpc<unknown>('lp_push_new_request_staff', {}));
+  } catch {
     return [];
   }
 }

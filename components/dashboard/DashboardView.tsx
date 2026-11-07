@@ -22,6 +22,7 @@
 //            has room, stacked when a request is docked. Sized by the main column (container queries).
 import { Skeleton, VisuallyHidden } from '@radix-ui/themes';
 import { ChevronLeft, ChevronRight, Clock, Inbox, Timer, Users, type LucideIcon } from 'lucide-react';
+import { WalkIcon } from '@/components/messages/WalkIcon';
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useInDesk } from '@/components/desk/desk-context';
 import { ConnectionBanner } from '@/components/ui/Banner';
@@ -197,7 +198,40 @@ function Tiles({ stats }: { stats: Stats }) {
         }
         onClick={() => show({ status: STATUS.reunited })}
       />
+      <EnrouteTile stats={stats} />
     </section>
+  );
+}
+
+/**
+ * (F3) Friends en route now: one slim full-width tile under the six, teal walk glyph, "—" when the server
+ * did not send it. Opens Pending (Friend coming lists them).
+ */
+function EnrouteTile({ stats }: { stats: Stats }) {
+  const n = typeof stats.friendsEnRoute === 'number' && Number.isFinite(stats.friendsEnRoute) ? stats.friendsEnRoute : null;
+  return (
+    <button
+      type="button"
+      className={`${s.tap} ${s.tile} ${s.tileWide}`}
+      onClick={() => show({ view: 'pending' })}
+      data-testid="tile-enroute"
+    >
+      {/* Named by its own text, like the tiles above (WCAG 2.5.3): "Friends en route 3". */}
+      <span className={s.lb}>
+        <WalkIcon size={14} strokeWidth={2} className={s.enrGlyph} />
+        <span>Friends en route</span>
+      </span>{' '}
+      {n === null ? (
+        <span className={s.v} data-testid="tile-enroute-value">
+          <span aria-hidden>{NO_VALUE}</span>
+          <VisuallyHidden>not available</VisuallyHidden>
+        </span>
+      ) : (
+        <span className={s.v} data-testid="tile-enroute-value">
+          {n}
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -366,7 +400,7 @@ function Recent({ stats, now }: { stats: Stats; now: number }) {
 // ---------------------------------------------------------------------------------------------------
 
 /** The Performance rows' windows (lp_stats): answers and reunions over the last 2 hours, logged over the last hour. */
-export const PERF_CONTEXT = { answer: 'last 2 hours', reunite: 'last 2 hours', logged: 'last hour' } as const;
+export const PERF_CONTEXT = { answer: 'last 2 hours', reunite: 'last 2 hours', arrive: 'last 2 hours', logged: 'last hour' } as const;
 
 /** A Performance value with nothing to show (Brian 2026-11-06 21:55); "—" (NO_VALUE) only when the stats request failed. */
 export const PERF_NONE = 'None';
@@ -376,6 +410,7 @@ function Performance({ stats, failed }: { stats: Stats; failed: boolean }) {
   const longestContext = longest ? [String(longest.caseNumber), longest.postShort].filter(Boolean).join(' · ') : null;
   const answer = durationPhrase(stats.avgAnswerMinutes);
   const reunite = durationPhrase(stats.avgReuniteMinutes);
+  const arrive = durationPhrase(stats.avgArriveMinutes);
   const logged = countParts(stats.loggedLastHour);
   const empty = failed ? NO_VALUE : PERF_NONE;
   // An empty value's sentence: what it means, or, while the request fails, that it is not known.
@@ -433,6 +468,21 @@ function Performance({ stats, failed }: { stats: Stats; failed: boolean }) {
           }
         />
         <PerfRow
+          testId="perf-arrive"
+          icon={WalkIcon}
+          label="Time to arrive"
+          context={PERF_CONTEXT.arrive}
+          parts={durationParts(stats.avgArriveMinutes)}
+          empty={empty}
+          phrase={
+            arrive
+              ? `Average time from en route to arrived over the last 2 hours: ${arrive}.`
+              : failed
+                ? unknown('Average time from en route to arrived over the last 2 hours')
+                : 'No friends arrived in the last 2 hours.'
+          }
+        />
+        <PerfRow
           testId="perf-logged"
           icon={Inbox}
           label="Logged"
@@ -454,7 +504,7 @@ function Performance({ stats, failed }: { stats: Stats; failed: boolean }) {
 
 interface PerfRowProps {
   testId: string;
-  icon: LucideIcon;
+  icon: LucideIcon | typeof WalkIcon;
   label: string;
   context: string | null;
   parts: ValuePart[] | null;

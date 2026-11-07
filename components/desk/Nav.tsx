@@ -2,14 +2,17 @@
 // Sidebar (from 1280 px) and icon rail (768–1279), design/screens/desktop-log.html .side and
 // desktop-new-tablet.html .rl. Both render; CSS shows one. At the top, the compact logo lockup (EDC Orlando |
 // Ground Control, the brand card's colours) with the live dot; then views with live counts, a divider, Dashboard;
-// at the bottom the Alerts switch and the signed-in person with the phone's account menu (with "Show header"
-// on All requests while its brand row is hidden, as on the phone). Rail icons show their label as a tooltip
-// on hover and keyboard focus.
-import { BellOff, BellRing, ChartColumn, ChevronDown, Inbox, List, UserRound, type LucideIcon } from 'lucide-react';
+// at the bottom the Alerts row (it opens the Alerts sheet, F4) and the signed-in person with the phone's
+// account menu (with "Show header" on All requests while its brand row is hidden, as on the phone). F4 adds
+// Activity under the views, with the bell's unread count; it opens the top bar's Activity popover. Rail icons
+// show their label as a tooltip on hover and keyboard focus.
+import { ChartColumn, ChevronDown, Inbox, List, UserRound, type LucideIcon } from 'lucide-react';
 import { AccountMenu } from '@/components/account/AccountMenu';
+import { ActivityNavItemSlot, DeskAlertsRowSlot, DeskRailActivitySlot, DeskRailAlertsSlot } from '@/components/activity/slots';
+import { PendingDot } from '@/components/messages/CardActivity';
 import { useActions, usePrefs, useCounts, useIsLoading, useSession } from '@/lib/client/store-contract';
 import { teamShort } from '@/lib/domain';
-import { LiveMark, Tip, ViewLink, useBell } from './parts';
+import { LiveMark, Tip, ViewLink } from './parts';
 import { NAV_LABEL, NAV_PARAMS, navKeyOf, type NavKey } from './nav-model';
 import type { MainView } from './views';
 import d from './desk.module.css';
@@ -69,9 +72,12 @@ function Sidebar({ main }: DeskNavProps) {
               <Icon size={16} strokeWidth={1.75} aria-hidden />
               <span className={d.nl}>{NAV_LABEL[k]}</span>{' '}
               {loading ? null : <span className={d.nc}>{counts[k]}</span>}
+              {/* F3: a dot while a Pending request has unread messages (after the count: "Pending 4", then the dot). */}
+              {k === 'pending' ? <PendingDot /> : null}
             </ViewLink>
           );
         })}
+        <ActivityNavItemSlot />
         <span className={d.sep} aria-hidden />
         <ViewLink params={NAV_PARAMS.dashboard} current={active === 'dashboard'} className={d.ni}>
           <ChartColumn size={16} strokeWidth={1.75} aria-hidden />
@@ -79,21 +85,9 @@ function Sidebar({ main }: DeskNavProps) {
         </ViewLink>
       </nav>
       <span className={d.sp} />
-      <AlertsSwitch />
+      <DeskAlertsRowSlot />
       <Person onShowHeader={showHeader} />
     </div>
-  );
-}
-
-/** The mockup's switch row. The whole row is the switch (one big target). */
-function AlertsSwitch() {
-  const bell = useBell();
-  return (
-    <button type="button" role="switch" aria-checked={bell.on} className={d.bell} onClick={bell.toggle} data-testid="desk-alerts">
-      {bell.on ? <BellRing size={16} strokeWidth={1.75} aria-hidden /> : <BellOff size={16} strokeWidth={1.75} aria-hidden />}
-      <span className={d.nl}>Alerts</span>
-      <span className={d.sw} data-on={bell.on ? '' : undefined} aria-hidden />
-    </button>
   );
 }
 
@@ -119,7 +113,6 @@ function Rail({ main }: DeskNavProps) {
   const active = navKeyOf(main);
   const counts = useCounts();
   const loading = useIsLoading();
-  const bell = useBell();
   const showHeader = useShowHeader(main);
   const pending = loading ? 0 : counts.pending;
   const item = (k: NavKey) => {
@@ -128,6 +121,7 @@ function Rail({ main }: DeskNavProps) {
     return (
       <ViewLink key={k} params={NAV_PARAMS[k]} current={active === k} className={`${d.ri} lp-hit`} label={badge === null ? NAV_LABEL[k] : `${NAV_LABEL[k]} ${badge}`}>
         <Icon size={19} strokeWidth={1.75} aria-hidden />
+        {k === 'pending' ? <PendingDot rail /> : null}
         {badge === null ? null : (
           <span className={d.bd} aria-hidden>
             {badge > 99 ? '99+' : badge}
@@ -142,22 +136,12 @@ function Rail({ main }: DeskNavProps) {
       <LiveMark variant="rail" className={d.railMark} />
       <nav className={d.railViews} aria-label="Views">
         {VIEW_KEYS.map(item)}
+        <DeskRailActivitySlot />
         <span className={d.railSep} aria-hidden />
         {item('dashboard')}
       </nav>
       <span className={d.sp} />
-      <button
-        type="button"
-        className={`${d.ri} lp-hit`}
-        // A toggle, as on the phone: the name stays and aria-pressed carries the state.
-        aria-label="Alerts"
-        aria-pressed={bell.on}
-        data-on={bell.on ? '' : undefined}
-        onClick={bell.toggle}
-      >
-        {bell.on ? <BellRing size={19} strokeWidth={1.75} aria-hidden /> : <BellOff size={19} strokeWidth={1.75} aria-hidden />}
-        <Tip>Alerts</Tip>
-      </button>
+      <DeskRailAlertsSlot />
       <div className={d.railMe}>
         <AccountMenu size="2" onShowHeader={showHeader} />
       </div>

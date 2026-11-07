@@ -1,7 +1,8 @@
 'use client';
 // The `/` page shell (spec §7 One route, v2.1 A22/A23): the store provider, the client view router and
 // the hosts for banners, toasts, the Undo snackbar, alerts (chime / vibration), the outbox operator prompt,
-// the "Alerts are on" sheet, and the offline precache. Views are separate chunks loaded with next/dynamic
+// Web Push and Activity (F4, with the Alerts sheet that replaced the "Alerts are on" sheet), and the offline
+// precache. Views are separate chunks loaded with next/dynamic
 // (client-only: the server HTML never contains request data); all of them are prefetched after the first
 // idle and then handed to the service worker (A15) so they work offline later.
 //
@@ -21,7 +22,7 @@
 // hidden before hydration too).
 // Under 768 px the view router renders exactly what it always did.
 import dynamic from 'next/dynamic';
-import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, type ReactNode } from 'react';
 import { isDeskNow, useHydrated, useIsDesk } from '@/components/desk/breakpoints';
 import { DeskFrame, useBrandInHtml } from '@/components/desk/DeskFrame';
 import { useMainView } from '@/components/desk/use-main-view';
@@ -57,11 +58,12 @@ const RequestFormView = dynamic(() => loadForm().then((m) => m.RequestFormView),
 const ProfileView = dynamic(() => loadProfile().then((m) => m.ProfileView), { ssr: false, loading: () => <ProfileSkeleton /> });
 const DashboardView = dynamic(() => loadDashboard().then((m) => m.DashboardView), { ssr: false });
 const OutboxPromptDialog = dynamic(() => loadDialogs().then((m) => m.OutboxPromptDialog), { ssr: false });
-const BellIntroSheet = dynamic(() => loadDialogs().then((m) => m.BellIntroSheet), { ssr: false });
 // The shell's fallback banner (ShellBanners: a phone's request page until its chunk is in) loads like the views
 // that draw their own, so the banner and the live status it derives stay off the first load (A25 budget). It is
 // the same module the views import: the shell's copy still steps aside while a view's is mounted.
 const ConnectionBanner = dynamic(() => import('@/components/ui/Banner').then((m) => m.ConnectionBanner), { ssr: false });
+// Web Push and Activity (F4): starts after hydration, through the dialogs chunk (no new first-load entry, A25).
+const ActivityHost = dynamic(() => loadDialogs().then((m) => m.ActivityHost), { ssr: false });
 // Desk only. The pane's profile skeleton has no chrome of its own: the pane draws the header.
 const PaneProfileView = dynamic(() => loadProfile().then((m) => m.ProfileView), { ssr: false, loading: () => <ProfileSkeleton chrome={false} /> });
 const DeskNav = dynamic(() => loadDesk().then((m) => m.DeskNav), { ssr: false });
@@ -208,10 +210,7 @@ function ShellHosts() {
   const toasts = useToasts();
   const snackbar = useSnackbar();
   const prompt = useStoreSelector(selectPrompt);
-  const prefs = usePrefs();
   const offlineReady = useStoreSelector(selectOfflineReady);
-  const [bellIntro, setBellIntro] = useState(false);
-  const bellWasOn = useRef<boolean | null>(null);
 
   // Prefetch every view chunk after the first idle, then let the service worker cache them all (A15). If the
   // signal dropped before every chunk arrived, try again when the phone is back online.
@@ -282,21 +281,6 @@ function ShellHosts() {
     [actions],
   );
 
-  // "Alerts are on": only the first time the bell is switched on (not when it was already on at load: the
-  // first run reads the store itself, because the hydration render still carries the server's prefs).
-  useEffect(() => {
-    const was = bellWasOn.current;
-    bellWasOn.current = prefs.bell;
-    if (was === null) {
-      bellWasOn.current = store.getState().prefs.bell;
-      return;
-    }
-    if (!was && prefs.bell && !prefs.bellIntroSeen) {
-      setBellIntro(true);
-      actions.setPref('bellIntroSeen', true);
-    }
-  }, [actions, store, prefs.bell, prefs.bellIntroSeen]);
-
   const answerPrompt = useCallback((send: boolean) => void actions.outbox.answerPrompt(send), [actions]);
 
   return (
@@ -304,7 +288,7 @@ function ShellHosts() {
       <Toaster toasts={toasts} onDismiss={actions.dismissToast} />
       <Snackbar snackbar={snackbar} onUndo={(id) => void actions.undo(id)} onDismiss={actions.dismissSnackbar} />
       {prompt ? <OutboxPromptDialog prompt={prompt} onAnswer={answerPrompt} /> : null}
-      {bellIntro ? <BellIntroSheet open={bellIntro} onOpenChange={setBellIntro} /> : null}
+      <ActivityHost />
     </>
   );
 }

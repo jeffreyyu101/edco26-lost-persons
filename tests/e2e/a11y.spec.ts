@@ -4,7 +4,7 @@ import type { ChangeResponse, CreateResponse, RequestDetail, RequestSummary } fr
 import { testBaseUrl } from '../../scripts/test-env.mjs';
 import { axeContrastUnder, axeViolations, brandContrast, overlappingTargets, smallTargets, type AxeFinding } from './helpers/a11y';
 import { syntheticPng } from './helpers/png';
-import { signedInAs } from './helpers/session';
+import { newSignedInContext, signedInAs } from './helpers/session';
 
 // Accessibility gates (spec §7 Accessibility: "tap targets of 44 px or more", "contrast passes in both
 // themes"; WCAG 2.5.3 label in name). Every view and its main states, in light and in dark:
@@ -134,7 +134,7 @@ for (const theme of ['light', 'dark'] as const) {
       // Signed in once through POST /api/session (A17); the sign-in test above stays signed out.
       signedInAs(STAFF);
 
-      test(`signed-in views pass axe and have 44 px targets (${theme})`, async ({ context, page }) => {
+      test(`signed-in views pass axe and have 44 px targets (${theme})`, async ({ browser, context, page }) => {
         test.slow();
         const waiting = await createRequest(page);
         const answerMe = await createRequest(page);
@@ -144,6 +144,9 @@ for (const theme of ['light', 'dark'] as const) {
         await setStatus(page, await setStatus(page, await createRequest(page), 'Checked – Not Found', 'answer'), 'Checked – Not Found', 'answer');
         await setStatus(page, await setStatus(page, await createRequest(page), 'Found – Awaiting Reunion', 'answer'), 'Reunited – Closed', 'reunite');
         const other = await createRequest(page, { reportingLocation: 'Other', otherLocation: 'Base' });
+        // (F3) In medical with me en route: my en route row is a button named by what it shows (WCAG 2.5.3).
+        const walking = await setStatus(page, await createRequest(page), 'Found – Awaiting Reunion', 'answer');
+        await api(page.request, 'POST', `/api/requests/${walking.id}/enroute`, { action: 'set', etaMinutes: 5 });
         // A photo, so the profile's portrait is a button (its name must start with the count it shows).
         const png = syntheticPng(64, 64);
         const upload = await page.request.post(`/api/requests/${waiting.id}/photos`, {
@@ -156,6 +159,16 @@ for (const theme of ['light', 'dark'] as const) {
           },
         });
         expect(upload.ok(), `photo upload → ${upload.status()}`).toBe(true);
+        // (F3) Medical asks on two of them: unread counts and previews on the cards (Message buttons with a
+        // badge), and someone else's bubble in the thread.
+        const medic = await newSignedInContext(browser, { staffName: 'TEST-A Medic', team: 'Medical' });
+        try {
+          for (const id of [waiting.id, coming.id]) {
+            await api(medic.request, 'POST', `/api/requests/${id}/messages`, { clientMutationId: randomUUID(), body: 'Any tattoos or marks?' });
+          }
+        } finally {
+          await medic.close();
+        }
 
         const results: Audit[] = [];
         const visit = async (url: string, view: string, ready: () => Promise<void>) => {
@@ -195,26 +208,35 @@ for (const theme of ['light', 'dark'] as const) {
         await expect(page.getByRole('dialog', { name: 'Account' })).toBeVisible();
         results.push(await audit(page, 'account menu'));
 
-        // The Alerts switch in the avatar menu (it replaced the header bell).
-        await page.getByRole('dialog', { name: 'Account' }).getByRole('switch', { name: 'Alerts' }).click();
-        const bell = page.getByRole('dialog', { name: 'Alerts are on' });
-        await expect(bell).toBeVisible();
-        // Named and described by the visible heading and line, each in the sheet once (no hidden copy that
-        // a screen reader would read twice).
-        await expect(bell).toHaveAccessibleDescription('New requests alert you while this app is open.');
-        await expect(bell.getByText('Alerts are on', { exact: true })).toHaveCount(1);
-        await expect(bell.getByText('New requests alert you while this app is open.', { exact: true })).toHaveCount(1);
-        await expect(bell.getByRole('heading', { name: 'Alerts are on' })).toBeVisible();
-        results.push(await audit(page, 'bell sheet'));
-        await page.getByRole('button', { name: 'Got it' }).click();
+        // Alerts in the avatar menu opens the Alerts sheet (F4): named by its visible heading.
+        await page.getByRole('dialog', { name: 'Account' }).getByTestId('alerts-menu').click();
+        const alertsSheet = page.getByRole('dialog', { name: 'Alerts' });
+        await expect(alertsSheet).toBeVisible();
+        await expect(alertsSheet.getByRole('heading', { name: 'Alerts' })).toBeVisible();
+        await expect(alertsSheet.getByRole('switch', { name: /New requests/ })).toBeVisible();
+        results.push(await audit(page, 'Alerts sheet'));
+        await page.keyboard.press('Escape');
+        await expect(alertsSheet).toHaveCount(0);
+        // The Activity sheet from the bell (F4).
+        await page.getByTestId('activity-bell').click();
+        const activity = page.getByRole('dialog', { name: 'Activity' });
+        await expect(activity).toBeVisible();
+        await expect(activity.getByTestId('activity-panel')).toBeVisible();
+        results.push(await audit(page, 'Activity sheet'));
+        await page.keyboard.press('Escape');
+        await expect(activity).toHaveCount(0);
 
-        await visit('/?view=pending', 'Pending', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
+        await visit('/?view=pending', 'Pending', async () => {
+          await expect(row(waiting.id)).toBeVisible({ timeout: 15_000 });
+          await expect(page.locator(`[data-testid="check-card"]:has([data-request-id="${waiting.id}"])`).getByTestId('message-preview')).toBeVisible();
+        });
         await page.locator(`[data-testid="check-card"]:has([data-request-id="${answerMe.id}"])`).getByTestId('not-found-answer').click();
         await expect(page.getByRole('button', { name: 'Undo' })).toBeVisible();
         results.push(await audit(page, 'Pending + Undo snackbar'));
         // Pending v9.1: Friend coming (location chips) on the same page, its header folding it; the location sheet.
         await expect(row(coming.id)).toBeVisible();
         await page.getByTestId('queue-toggle-check').click();
+        await expect(page.locator(`[data-testid="friend-coming-card"]:has([data-request-id="${coming.id}"])`).getByTestId('unread-badge')).toBeVisible();
         results.push(await audit(page, 'Pending, Friend coming'));
         await page.locator(`[data-testid="friend-coming-card"]:has([data-request-id="${coming.id}"])`).getByTestId('location-chip').click();
         await expect(page.getByTestId('location-form')).toBeVisible();
@@ -223,7 +245,10 @@ for (const theme of ['light', 'dark'] as const) {
         await expect(page.getByTestId('location-form')).toHaveCount(0);
         await page.getByTestId('queue-toggle-check').click();
 
-        await visit('/?view=mine', 'My requests', () => expect(row(coming.id)).toBeVisible({ timeout: 15_000 }));
+        await visit('/?view=mine', 'My requests', async () => {
+          await expect(row(coming.id)).toBeVisible({ timeout: 15_000 });
+          await expect(page.locator(`[data-testid="mine-card"]:has([data-request-id="${coming.id}"])`).getByTestId('unread-badge')).toBeVisible();
+        });
         await visit(`/?q=${encodeURIComponent(TAG)}`, 'Search', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
         await visit(`/?status=${encodeURIComponent('Checked – Not Found')}`, 'All, status filter', () => expect(page.getByTestId('status-chip')).toBeVisible());
         await visit(`/?post=${encodeURIComponent('Other:Base')}`, 'All, post filter', () => expect(row(other.id)).toBeVisible({ timeout: 15_000 }));
@@ -250,8 +275,16 @@ for (const theme of ['light', 'dark'] as const) {
         await expect(page.getByRole('alertdialog')).toBeVisible();
         results.push(await audit(page, 'cancel confirm'));
         await page.getByRole('button', { name: 'Keep' }).click();
-        await visit(`/?r=${coming.id}`, 'Profile (in medical)', () => expect(page.getByTestId('audit-item').first()).toBeVisible());
+        await visit(`/?r=${coming.id}`, 'Profile (in medical)', async () => {
+          await expect(page.getByTestId('audit-item').first()).toBeVisible();
+          await expect(page.getByTestId('messages').getByTestId('bubble-them')).toBeVisible({ timeout: 15_000 });
+        });
         await visit(`/?r=${held.id}`, 'Profile (not found yet)', () => expect(page.getByTestId('recheck-row')).toBeVisible());
+        await visit(`/?r=${walking.id}`, 'Profile (my en route)', async () => {
+          const mine = page.getByTestId('status-block').getByRole('button', { name: /^Friend en route ~\d+ min$/ });
+          await expect(mine).toBeVisible({ timeout: 15_000 });
+          await expect(mine).toHaveAccessibleDescription(/^Friend en route, about \d+ min away\. Change or cancel yours\.$/);
+        });
         await visit(`/?r=${waiting.id}&edit=all`, 'Edit', () => expect(page.getByTestId('request-form-submit')).toBeVisible());
         await visit('/?dashboard=1', 'Dashboard', () => expect(page.getByTestId('open-count')).toBeVisible());
 

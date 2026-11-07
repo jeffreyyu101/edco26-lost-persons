@@ -15,6 +15,10 @@ import { newSignedInContext, signedInAs } from './helpers/session';
 // hidden tab polls once a minute, so the test asks for a sync with an `online` event. Two pages of one
 // context are two windows of one browser: never a toast in one and a notification in the other. The other
 // phone logs synthetic requests (TEST-N-<tag>), closed again after each test.
+//
+// F4: these desktop contexts have no Web Push (PushManager is removed), which is the "no subscription →
+// today's system notifications" case; the push cases are in alerts.spec.ts. "New requests" is the server-side
+// switch (POST /api/push/prefs), opened from Alerts in the avatar menu.
 
 const BASE = testBaseUrl();
 const LIAISON = { staffName: 'TEST-N Notify', team: 'Medical' };
@@ -50,6 +54,8 @@ async function installSpy(context: BrowserContext, mode: Mode): Promise<void> {
     w.__lpShown = [];
     w.__lpAsked = 0;
     w.__lpAnswer = 'granted';
+    // No Web Push here (F4): the page's own system notifications are what these tests check.
+    delete (window as unknown as { PushManager?: unknown }).PushManager;
     if (typeof ServiceWorkerRegistration !== 'undefined') {
       ServiceWorkerRegistration.prototype.showNotification = function (title: string, options?: NotificationOptions) {
         w.__lpShown.push(JSON.parse(JSON.stringify({ title, ...(options ?? {}) })) as Shown);
@@ -103,6 +109,9 @@ async function desktop(browser: Browser, mode: Mode, opts: { bell?: boolean } = 
   });
   if (mode === 'granted') await context.grantPermissions(['notifications'], { origin: BASE });
   await installSpy(context, mode);
+  // "New requests" is server-side (F4): set it for this identity, on or off, before the app opens.
+  const res = await context.request.post('/api/push/prefs', { headers: { origin: BASE }, data: { newRequests: !!opts.bell } });
+  expect(res.status(), await res.text()).toBe(200);
   if (opts.bell) {
     await context.addInitScript(() => {
       localStorage.setItem('lp-bell', '1');
@@ -117,7 +126,7 @@ const lp = (r: RequestSummary) => `LP-${String(r.caseNumber).padStart(4, '0')}`;
 const synced = (page: Page, r: RequestSummary) => expect(page.locator(`[data-request-id="${r.id}"]`).first()).toBeAttached({ timeout: 15_000 });
 /** The front claim across the browser's app tabs (lib/client/system-notify.ts FRONT_KEY). */
 const frontClaim = (page: Page) => page.evaluate(() => localStorage.getItem('lp-alerts-front'));
-const shownFor = (page: Page, id: string) => page.evaluate((tag) => window.__lpShown.filter((n) => n.tag === tag), id);
+const shownFor = (page: Page, id: string) => page.evaluate((tag) => window.__lpShown.filter((n) => n.tag === tag), `lp-${id}`);
 const toastFor = (page: Page, r: RequestSummary) => page.locator('.lp-toast').filter({ hasText: `New request · ${lp(r)}` });
 /** A hidden tab polls once a minute: sync now. */
 const syncNow = (page: Page) => page.evaluate(() => window.dispatchEvent(new Event('online')));
@@ -208,13 +217,14 @@ test.describe('desktop (Chromium)', () => {
       await expect.poll(() => shownFor(page, hidden.id), { timeout: 15_000 }).toHaveLength(1);
       const [n] = await shownFor(page, hidden.id);
       expect(n).toMatchObject({
-        title: `New request · ${lp(hidden)}`,
+        title: 'New request',
         body: 'T.N. · FA 3',
-        tag: hidden.id,
+        tag: `lp-${hidden.id}`,
         renotify: true,
         data: { url: `/?r=${hidden.id}`, key: `${hidden.id}:${hidden.rowVersion}` },
       });
-      // Lock screen / notification centre: never the phone number, the contact or the name.
+      // Lock screen / notification centre: never the request id (F4), the phone number, the contact or the name.
+      expect(JSON.stringify(n)).not.toContain(lp(hidden));
       expect(JSON.stringify(n)).not.toContain('555');
       expect(JSON.stringify(n)).not.toContain(`${TAG} Friend`);
       expect(JSON.stringify(n)).not.toContain(`${TAG} N`);
@@ -316,14 +326,18 @@ test.describe('desktop (Chromium)', () => {
       await expect(state).toContainText('Blocked in browser');
       await expect(menu.getByTestId('notify-allow')).toHaveCount(0);
 
-      // Turning Alerts on never prompts again; the sheet shows the same quiet state, no Home Screen tip.
-      await menu.getByRole('switch', { name: 'Alerts' }).click();
-      const sheet = page.getByRole('dialog', { name: 'Alerts are on' });
+      // New requests on (the Alerts sheet) never prompts again; the sheet shows the same quiet state, no
+      // Home Screen tip.
+      await menu.getByTestId('alerts-menu').click();
+      const sheet = page.getByRole('dialog', { name: 'Alerts' });
       await expect(sheet).toBeVisible();
       await expect(sheet.getByTestId('notify-state')).toHaveAttribute('data-state', 'denied');
-      await expect(sheet.getByText('Add to Home Screen')).toHaveCount(0);
+      await expect(sheet.getByText('Add to Home Screen', { exact: true })).toHaveCount(0);
+      await sheet.getByRole('switch', { name: /New requests/ }).click();
+      await expect(sheet.getByRole('switch', { name: /New requests/ })).toHaveAttribute('aria-checked', 'true');
       expect(await page.evaluate(() => window.__lpAsked)).toBe(0);
-      await sheet.getByRole('button', { name: 'Got it' }).click();
+      await page.keyboard.press('Escape');
+      await expect(sheet).toHaveCount(0);
 
       await page.evaluate(() => window.__lpBackground(true, false));
       const r = await logRequest(front, created);
@@ -337,7 +351,7 @@ test.describe('desktop (Chromium)', () => {
     }
   });
 
-  test('not asked yet: nothing on load; turning Alerts on asks once; "Allow notifications" asks from one tap', async ({ browser }) => {
+  test('not asked yet: nothing on load; New requests never asks; "Allow notifications" asks from one tap', async ({ browser }) => {
     const desk = await desktop(browser, 'default');
     try {
       const page = await desk.newPage();
@@ -350,36 +364,31 @@ test.describe('desktop (Chromium)', () => {
       await expect(allow).toHaveText('Allow notifications');
       expect(await page.evaluate(() => window.__lpAsked)).toBe(0);
 
-      // Alerts on asks; the person dismisses the prompt, so the sheet offers the one-tap row.
-      await page.evaluate(() => {
-        window.__lpAnswer = 'default';
-      });
-      await menu.getByRole('switch', { name: 'Alerts' }).click();
-      const sheet = page.getByRole('dialog', { name: 'Alerts are on' });
+      // The Alerts sheet: New requests on and off never asks; its one-tap row asks once.
+      await menu.getByTestId('alerts-menu').click();
+      const sheet = page.getByRole('dialog', { name: 'Alerts' });
       await expect(sheet).toBeVisible();
-      expect(await page.evaluate(() => window.__lpAsked)).toBe(1);
-      await page.evaluate(() => {
-        window.__lpAnswer = 'granted';
-      });
+      const newRequests = sheet.getByRole('switch', { name: /New requests/ });
+      await newRequests.click();
+      await newRequests.click();
+      expect(await page.evaluate(() => window.__lpAsked)).toBe(0);
       await sheet.getByTestId('notify-allow').click();
       await expect(sheet.getByTestId('notify-state')).toHaveText('System notifications on');
-      expect(await page.evaluate(() => window.__lpAsked)).toBe(2);
-      await sheet.getByRole('button', { name: 'Got it' }).click();
+      expect(await page.evaluate(() => window.__lpAsked)).toBe(1);
+      await page.keyboard.press('Escape');
+      await expect(sheet).toHaveCount(0);
 
       await accountTrigger(page).click();
       await expect(menu.getByTestId('notify-state')).toHaveAttribute('data-state', 'granted');
       await expect(menu.getByTestId('notify-allow')).toHaveCount(0);
-      // Off and on again: already answered, so no prompt.
-      await menu.getByRole('switch', { name: 'Alerts' }).click();
-      await menu.getByRole('switch', { name: 'Alerts' }).click();
-      expect(await page.evaluate(() => window.__lpAsked)).toBe(2);
+      expect(await page.evaluate(() => window.__lpAsked)).toBe(1);
     } finally {
       await desk.close();
     }
   });
 });
 
-test('iPhone: the avatar menu and the "Alerts are on" sheet are unchanged, and nothing prompts', async ({ page, context }) => {
+test('iPhone (a Safari tab): the avatar menu and the Alerts sheet show the Home Screen taps, and nothing prompts', async ({ page, context }) => {
   await installSpy(context, 'default');
   watch(page);
   await openApp(page);
@@ -389,14 +398,13 @@ test('iPhone: the avatar menu and the "Alerts are on" sheet are unchanged, and n
   );
   await accountTrigger(page).click();
   const menu = page.getByRole('dialog', { name: 'Account' });
-  await expect(menu.getByRole('switch', { name: 'Alerts' })).toBeVisible();
+  await expect(menu.getByRole('button', { name: 'Alerts Off' })).toBeVisible({ timeout: 15_000 });
   await expect(menu.getByTestId('notify-allow')).toHaveCount(0);
   await expect(menu.getByTestId('notify-state')).toHaveCount(0);
-  await menu.getByRole('switch', { name: 'Alerts' }).click();
-  const sheet = page.getByRole('dialog', { name: 'Alerts are on' });
+  await menu.getByTestId('alerts-menu').click();
+  const sheet = page.getByRole('dialog', { name: 'Alerts' });
   await expect(sheet).toBeVisible();
-  await expect(sheet).toHaveAccessibleDescription('New requests alert you while this app is open.');
-  await expect(sheet.getByText('Add to Home Screen')).toBeVisible();
+  await expect(sheet.getByText('Add to Home Screen', { exact: true })).toBeVisible();
   await expect(sheet.getByTestId('notify-allow')).toHaveCount(0);
   await expect(sheet.getByTestId('notify-state')).toHaveCount(0);
   expect(await page.evaluate(() => window.__lpAsked)).toBe(0);

@@ -616,6 +616,9 @@ test.describe('fixture', () => {
             const at = `${path} at ${width} (${theme})`;
             await page.goto(path);
             await expect(page.getByTestId('live-text')).toHaveText('Updated just now', { timeout: 20_000 });
+            // (F3 + F4 release) F4's alerts reminder (an iPhone Safari tab here) loads after start and pushes the
+            // header down when it comes: measure once it is there, so every box is from the same layout.
+            await expect(page.getByTestId('alerts-banner').filter({ visible: true }), at).toHaveCount(1, { timeout: 20_000 });
             const box = async (l: Locator) => (await l.boundingBox())!;
             const title = await box(page.getByTestId('view-switcher'));
             const avatar = await box(page.getByTestId('account-trigger'));

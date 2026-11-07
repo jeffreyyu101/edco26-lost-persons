@@ -27,6 +27,8 @@ import {
   waitingOrder,
 } from '@/lib/client/status-order';
 import { SORT_STORAGE_KEYS, readSortOrder, waitingShowsFolded, writeSortOrder } from '@/lib/client/view-prefs';
+import { StoreContext } from '@/lib/client/store-contract';
+import { createStubStore } from '@/lib/client/store-stub';
 import { stubRows } from '@/lib/client/stub-data';
 import { NOT_FOUND_YET_LABEL, RECHECK_MINUTES, STATUS, STATUS_META, notFoundHolds } from '@/lib/domain';
 import { NOT_FOUND_FINAL_LABEL, displayStage, notFoundAnswer, stageLook } from '@/lib/stages';
@@ -139,7 +141,14 @@ describe('the left answer, by hold state', () => {
     expect(displayStage(MR, { now: NOW }).label).toBe('Recheck due');
   });
 
-  const render = (node: ReactNode) => renderToString(<Theme>{node}</Theme>);
+  // (F3 + F4 release) The cards read the store since F3 (the Message button, the preview row): a stub store.
+  const store = createStubStore({ eventTimezone: 'America/New_York' });
+  const render = (node: ReactNode) =>
+    renderToString(
+      <StoreContext.Provider value={store}>
+        <Theme>{node}</Theme>
+      </StoreContext.Provider>,
+    );
   const noop = () => {};
 
   it('the card: the same button in both states, the chip only when held or due, the wait the only time', () => {

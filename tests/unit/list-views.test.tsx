@@ -403,7 +403,7 @@ describe('list views render', () => {
     if (cell === null) return null;
     return text(cell.replace(/<span class="[^"]*vh[^"]*">[^<]*<\/span>/g, '').replace(/<span class="[^"]*stNarrow[^"]*"[^>]*>[^<]*<\/span>/g, ''));
   };
-  /** The status label LP-n's row shows under 400 px instead ("Waiting"), or null when it keeps its label. */
+  /** The status label LP-n's row shows under 430 px instead ("Waiting"), or null when it keeps its label. */
   const narrow = (html: string, n: number) => {
     const cell = cellHtml(html, n, 'status') ?? '';
     const m = /<span class="[^"]*stNarrow[^"]*"[^>]*>([^<]*)<\/span>/.exec(cell);
@@ -644,7 +644,7 @@ describe('list views render', () => {
     expect(shown(html, 1013, 'number')).toBe('1013');
     expect(shown(html, 1013, 'name')).toBe('T.R.');
     expect(shown(html, 1013, 'status')).toBe('Waiting for check');
-    // Under 400 px it reads "Waiting" (the name keeps its room); the sentence above still says it in full.
+    // Under 430 px it reads "Waiting" (the name keeps its room); the sentence above still says it in full.
     expect(narrow(html, 1013)).toBe('Waiting');
     expect(shown(html, 1013, 'created')).toBe(created);
     expect(shown(html, 1013, 'updated')).toBe('—');
@@ -708,7 +708,7 @@ describe('list views render', () => {
     expect(html).toContain('data-testid="status-chip"');
     expect(html).toContain('Not found in medical 2 shown. Clear this filter');
     expect(html).not.toContain('Waiting to send');
-    // Under 400 px the final status reads "Not found" (F2), also now that rows show stages (F5).
+    // Under 430 px the final status reads "Not found" (F2), also now that rows show stages (F5).
     expect(narrow(html, 1009)).toBe('Not found');
   });
 

@@ -38,6 +38,8 @@ message.
 | `EVENT_TIMEZONE` | no | Defaults to `America/New_York`. Every displayed time uses it. |
 | `INVITE_CODE_SHA256` | no | The team join link: hex SHA-256 of the code (`node scripts/make-invite.mjs`). Unset: password only. |
 | `INVITE_EXPIRES_AT` | with the one above | ISO time the team join link stops working, e.g. `2026-11-09T12:00:00Z`. Unset: the link is off. |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | for lock-screen alerts | Web Push (already set in production). All three switch it on; `VAPID_SUBJECT` is `mailto:` or `https:`. Missing or invalid: push is off, silently (no alerts banner, no pushes; Activity and in-app alerts still work). A new pair makes every device subscribe again on its next open. |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | no | The same public key at build time. The app reads the key from the server anyway (`POST /api/push/prefs`). |
 
 To make a password hash without writing the password into a file:
 
@@ -67,8 +69,9 @@ and starts with a dry-run note.
 
 ### End-of-event export
 
-The app has no export. [`docs/export.sql`](docs/export.sql) holds two read-only queries for the Supabase SQL
-editor: every request (one row each, by case number, times in New York) and the whole audit trail. Run each
+The app has no export. [`docs/export.sql`](docs/export.sql) holds three read-only queries for the Supabase SQL
+editor: every request (one row each, by case number, times in New York), the whole audit trail, and every
+message and en route event (unsent messages marked). Run each
 one and use "Download CSV" on the results; the steps are at the top of the file. The files hold names and
 phone numbers, so treat them as sensitive.
 
@@ -107,6 +110,7 @@ npm run start:test                       # http://127.0.0.1:3100
 | `npm run lint` | ESLint, with no warnings allowed |
 | `npm test` | Unit tests (vitest, no network or database) |
 | `npm run test:int` | Integration tests: every route, the SQL functions, concurrency, login limits, the migration and `docs/export.sql` (run read-only), against the local stack through a production build on `PORT` (default 3100). If nothing listens there, the harness starts `next start` itself. Run `npm run build:test` first. |
+| `node scripts/with-e2e-lock.mjs --migrate -- <command>` | Runs integration or e2e tests while holding the shared local-stack lock, after re-applying this branch's rework migration twice (several branches share one local stack). |
 | `npm run test:e2e` | Playwright on the production build: sign-in, lists, the two-phone flow (log → Pending → In medical → alert), system notifications on a desktop (hidden page notifies, visible page toasts), profile, edit and conflicts, dashboard, offline and lie-fi queueing, the service-worker update, the first-load JS budget, and accessibility (axe-core WCAG 2.1 A/AA in light and dark, plus 44 px tap targets). Run `npm run build:test` first. |
 | `node scripts/smoke-csp.mjs` | The production CSP and nonce in Chromium and WebKit: `/signin` hydrates with no violations, `/` redirects without a session, and with one the list, a profile and Back work. Needs the production build running on `PORT`. `npm run test:e2e` runs it too (`tests/e2e/smoke.spec.ts`). |
 | `npm run db:verify-migration` | Applies the rework migration twice to the local database (`SUPABASE_DB_URL` when set, else the stack `supabase status` reports) and to an upgrade fixture built from Jeffrey's original schema, then smoke-tests the functions. |
@@ -155,14 +159,28 @@ Pending.
 - **Answers.** Not found, In medical, Reunited and Change answer each offer Undo for 10 s. Change answer
   is a menu: the other answer, or Back to Waiting for check. Two people giving the same answer is harmless.
   A change made by someone else shows as "Updated by someone else".
-- **Alerts** appear only while the app is open: changes to your requests by someone else, and new requests
-  when alerts are on (the bell, in the avatar menu). With the app in front, an alert is a toast with a
-  chime. In the background (another tab, a minimised window) it is a system notification instead, where the
-  device allows one and it was allowed (desktop Chrome, Edge, Firefox and Safari, Android Chrome, the iPhone
-  Home Screen app; "Allow notifications" in the avatar menu). It shows the LP number, the status, initials
-  and the post, never contact details, and a click opens the request. One alert is never both a toast and a
-  notification, even with the app in two windows. A Safari tab on iPhone keeps the toast only. There is no
-  push: a closed app gets nothing.
+- **Messages** (2026-11-06 evening). Every request has its own thread, at every status: iMessage-style
+  bubbles, "Delivered" / "Read 4:14 PM" under your latest message, quick lines for the status and your side
+  (medical or front of house), Copy and Unsend (15 minutes). My requests and Pending cards show the last
+  message and an unread count. A message written offline is saved on the phone and sent once the signal is
+  back. Front of house can say **Friend en route** (optional ETA) and **Arrived**; one teal row shows it, with
+  no names. Any status change out of In medical clears it (an Undo within 30 s puts it back). An En route
+  tap that could not be sent shows "Not delivered · Retry" under the row.
+- **Alerts.** With the app in front, an alert is a toast with a chime: changes to your requests by someone
+  else, and new requests when "New requests" is on. **Lock-screen alerts (Web Push, F4)** reach a locked
+  phone or a closed laptop app once "Turn on" was tapped on that device (desktop browsers, Android Chrome,
+  the iPhone / iPad Home Screen app): answers, location changes and other updates on requests you logged or
+  answered, and new requests with "New requests" on. A notification shows the request's initials and one
+  line ("In medical · Chair 9"), never a name, LP number or contact details, and opens the request. A banner
+  on All, Pending and My requests shows what this device still needs (Turn on, the Home Screen taps, or the
+  settings path when blocked). Avatar menu → Alerts opens the Alerts sheet: this device's state, "Send a test
+  alert", and the "New requests" and "Updates on my requests" switches (saved on the server for every device
+  of yours). One alert is never both a toast and a notification. Without push on a device, a page in the
+  background still shows a system notification where allowed ("Allow notifications"), as before, now
+  without the LP number ("S.L. · In medical" / "FA 3").
+- **Activity.** The bell next to search (and in the desk top bar and sidebar) counts requests with something
+  new for you. One row per request, newest first; opening the request (from anywhere) marks it read; Mark all
+  read has Undo. The app icon badge shows the same count.
 - **Photos.** After a photo is taken or picked, a crop step shows it with the whole photo selected: **Use
   photo** keeps it as it is, dragging a corner cuts away a phone's bezel, **Retake** opens the camera again.
   Photos of a phone screen are cleaned up on the phone (levels, light sharpening) before upload.

@@ -3,7 +3,7 @@
 // bottom (.snack). Both are announced politely. A toast closes on tap (or its hidden Dismiss button for
 // screen readers and keyboards); sticky ones (durationMs null) stay until then.
 import { Button, Text } from '@radix-ui/themes';
-import { Bell, Check, CircleAlert, CloudOff, Footprints, Info, RefreshCw, X } from 'lucide-react';
+import { Bell, Check, CircleAlert, CloudOff, Footprints, Info, MessageCircle, RefreshCw, X } from 'lucide-react';
 import type { MouseEvent } from 'react';
 import type { SnackbarItem, ToastIcon, ToastItem, ToastTone } from '@/lib/client/store-contract';
 import styles from './ui.module.css';
@@ -17,6 +17,7 @@ const ICONS: Readonly<Record<ToastIcon, typeof Bell>> = {
   'cloud-off': CloudOff,
   info: Info,
   walk: Footprints,
+  message: MessageCircle,
 };
 
 /** Icon circle colours (mockup: bell = gray-a4 / gray-12, "is in medical" = green-a4 / green-11). */

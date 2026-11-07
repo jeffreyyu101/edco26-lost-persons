@@ -1,7 +1,7 @@
 # Handoff: "Is my friend in medical?" rebuild
 
-Updated: 2026-11-06 (morning, v2.5). **Production is live at https://edco26-lost-persons.vercel.app**, deployed
-on 2026-11-06 from `main`.
+Updated: 2026-11-07 (the F3 + F4 release, `feat/f34`). **Production is live at
+https://edco26-lost-persons.vercel.app**, deployed from `main`.
 
 [`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md) is the engineering contract (§17 holds the 2026-11-06 morning
 amendments), and [`design/DECISIONS.md`](design/DECISIONS.md) holds the product decisions. Setup and checks are
@@ -111,7 +111,136 @@ screenshots.
   password, and the password keeps working. No database change. See [Team join link](#team-join-link) for
   the variables, and how to make, rotate and switch off a code.
 
+### 2026-11-07 (F3 + F4 release, `feat/f34`, ships after the join link)
+
+- **Messages and en route (F3)** and **lock-screen alerts, the Alerts sheet and Activity (F4)** on top of
+  production (F2, F5, Pending v9.1, the join link, Hotfix F5.1). Both are described below. **This needs the migration below
+  re-applied, before the deploy** ([F3 + F4 in production](#f3--f4-in-production)).
+- **Pending v9.1 stays as it is**, with F3's pieces added: the Friend coming section header gets the unread
+  dot; Waiting for check cards get the last-message line and a Message button left of the answers (where the
+  three don't fit on a narrow phone or a narrow board column, In medical moves to its own row; nothing is
+  cut); Friend coming cards get the en route row and Message | Reunited.
+- **Every event notifies once.** Both Not found answers ("Not found yet · recheck 4:40 PM", then "Not found in
+  medical") reach everyone involved as Activity rows and pushes; an Undo of either reads "Back to Waiting for
+  check". Whoever gave the first Not found is now involved in the request.
+- **On phones under 430 px wide** the log's status reads "Waiting" / "Not found" (was under 400 px), so an
+  earlier day's time never cuts the full label at 400–429 px.
+- **Cross-feature review fixes:** a locked iPhone with push never also toasts what the lock screen showed; every
+  lock-screen alert sounds when it replaces the request's earlier one, and In medical stays until dismissed on a
+  computer; the first message on a request a phone saved before the update alerts; Mark all read holds on a slow
+  network; the open request's Activity row turns read only while the app is on screen; Not found yet ends Needs info
+  at once. Client only, no migration.
+- **Hotfix F5.1 is in** (`main` 332c90a merged): the release ships on top of exactly what production runs.
+- Decisions: `design/DECISIONS.md` "The F3 + F4 release" (and its review fixes); spec: `docs/BUILD_SPEC.md` §23 (A90–A95).
+
+### 2026-11-06 evening (F4: lock-screen alerts, the Alerts sheet and Activity)
+
+- **Lock-screen alerts (Web Push).** Answers, location changes, Back to Waiting, Reunited, Discharged,
+  Cancelled and edits reach everyone involved in the request; new requests reach staff with "New requests"
+  on. The notification shows the request's initials and one line ("In medical · Chair 9"), never a name, LP
+  number or phone number. One per request on the lock screen. With the app in front there is no
+  notification (the toast shows); a phone with push never also gets the page's own notification. The page's
+  own notification (devices without push) no longer shows the LP number either: "S.L. · In medical" / "FA 3".
+- **Alerts sheet** (avatar menu → Alerts; the desk sidebar and rail): this device On / Off / Blocked, "Send a
+  test alert", and the two switches "New requests" and "Updates on my requests", saved on the server for every
+  device of the staff member. "New requests" is the old in-app Alerts bell.
+- **Alerts banner** on All, Pending and My requests until alerts work on the device, with the exact taps for
+  that phone or browser (Turn on; Home Screen steps on an iPhone or iPad Safari tab; the settings path when
+  blocked).
+- **Activity**: a bell next to search (and in the desk top bar and sidebar) with an unread count; one row per
+  request, newest first; opening the request marks it read; Mark all read with Undo; the app icon badge.
+- Not in this release: messages, en route and the Not in medical / Not found yet notifications (the
+  Messages and Not found yet releases send those through the same inbox and pushes).
+- **Review fixes (2026-11-07, DECISIONS F4 rows 15–23, BUILD_SPEC A60):** a sign-out that fails (offline)
+  keeps the device's lock-screen alerts; "Send a test alert" shows with the app open; the open app decides
+  whether it is in front (iPad split view, Android multi-window) and toasts pushed events it would not toast
+  itself; a desk with the old bell off can't switch a phone's "New requests" off; the iPhone Home Screen
+  chips end with "Add" (Open as Web App is already on); the blocked path names the app "In medical?" as
+  Settings lists it; the desk Activity popover works with the keyboard; a poll no longer carries the unread
+  ids; nobody can remove another person's device.
+
+#### F4 integrator notes
+
+- **Done in the F3 + F4 release:** `'not_in_medical'` is in `PUSHED_ALERT_KINDS` (`lib/client/push-client.ts`
+  and its test), now that F5's stage-notify pushes both Not found answers.
+- **Test keys:** the local VAPID pair and `LP_PUSH_ALLOW_LOCAL=1` are in the tracked `.env.test.push` (loaded
+  by `scripts/test-env.mjs` under `.env.test`). `.env.test` itself is unchanged from the base, so the stack
+  scripts (`use.sh`) need nothing new.
+
+#### F4 in production
+
+1. **Migration first.** The F4 section of `20261106000000_rework.sql` adds three tables (`lp_push_prefs`,
+   `lp_push_subscriptions`, `lp_activity`) and the `lp_push_*` / `lp_activity_*` functions. It is additive:
+   nothing the live build uses changes, and a second run keeps every row. Dry run (ending in `rollback;`),
+   then commit, as below. Check:
+   `select count(*) from pg_proc where proname like 'lp\_push\_%' or proname like 'lp\_activity\_%';`
+   returns `12`, `select to_regclass('public.lp_activity') is not null;` returns `true`, and
+   `select count(*) from information_schema.columns where table_name = 'lp_push_prefs' and column_name = 'new_requests_set';`
+   returns `1`.
+2. **Environment.** `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` are already set in production
+   (keep them; `VAPID_SUBJECT` must be `mailto:` or `https:`). `NEXT_PUBLIC_VAPID_PUBLIC_KEY` is optional
+   (the app reads the key from the server). If the keys are missing or invalid, push is simply off: no banner,
+   no pushes; Activity and in-app alerts still work. Do not change the pair during the event: every device
+   would subscribe again on its next open.
+3. **Then deploy.** A build deployed before the migration answers 503 on `/api/push/*` and `/api/activity*`
+   (the bell stays empty, no banner); sync and everything else keep working.
+4. Old phones keep working: their cached app ignores the new sync fields, their queued requests send as
+   before (a new request then notifies staff with "New requests" on).
+
+#### Verified vs researched (alerts banner chips and push behaviour)
+
+| What | How it was checked |
+|---|---|
+| iPhone Safari, iOS 27: Menu → Share → Add to Home Screen → Add (Open as Web App is on already, so it is not a chip; VoiceOver hears "keep Open as Web App on") | Researched: Apple, "Turn a website into an app in Safari on iPhone" (steps: "Tap Add to Home Screen", "Turn on Open as Web App", "Tap Add"); WebKit, "WebKit Features in Safari 26.0" ("By default, every website added to the Home Screen opens as a web app"); re-checked 2026-11-07. Apple's iOS 27 page: the button is "the Page Menu button". Re-read 2026-11-06 20:30 (iOS 27 page: "the Page Menu button"; iOS 26 page: "the More button"). Not seen on a device: this Mac has Xcode but no iOS Simulator runtime (`xcrun simctl list runtimes` is empty; the T3 device tools list no devices; checked again 2026-11-07 01:10, unchanged). |
+| iPhone Safari, iOS 26: More (⋯) → Share → … | Researched: the same Apple article, iOS 26 version ("the More button"). |
+| iPhone Safari, iOS 17 / 18: Share → Add to Home Screen → Add | Researched: Apple, "Bookmark a website in Safari on iPhone", iOS 17 and 18 (the Add button of the sheet that opens). |
+| iPad Safari 27 / 26 / 18 | Researched: Apple, "Turn a website into an app in Safari on iPad" (27: View More; 26: the More button). |
+| iOS 26+ Safari's frozen user agent (iPhone OS 18_6 + Version/26.x) | Researched: WebKit, "WebKit Features in Safari 26.0". Unit-tested with those strings. |
+| Home Screen app blocked: Settings → Notifications → In medical? (the Home Screen name, `apple-mobile-web-app-title` / manifest `short_name`) → Allow Notifications; Android installed app likewise "In medical?" | Researched: Apple, "Change notification settings on iPhone", iOS 17, 18, 26 and 27 pages (all give "Settings → Notifications, then tap an app below Notification Style … Allow Notifications"; re-read 2026-11-06 20:30 for 26 and 27, and 2026-11-07 for 26: "Go to the Settings app … Tap Notifications, then tap an app below Notification Style"). The brief's "Settings → Apps → the app → Notifications" (18+) is not on Apple's page; WebKit, "Web Push for Web Apps on iOS and iPadOS": a web app's permission is managed "in Notifications Settings — just like any other app". |
+| Android Chrome: More → Site controls → Permissions → Notifications → Allow | Researched: Google, "Use notifications to get alerts" (Android; re-read 2026-11-06 20:30: "Tap More → Site controls → Permissions"). No Android emulator on this machine (no Android SDK). |
+| Android installed app: Settings → Notifications → App notifications → the app | Researched: Google, "Control notifications on Android". |
+| Desktop Chrome: View site information → Notifications | Researched: Google, "Use notifications to get alerts" (computer; re-read 2026-11-06 20:30: "Click View site information. To allow notifications, turn on Notifications"). Verified in Playwright Chromium (headless): the banner states, Turn on, revoke → blocked, re-check, overflow at 820 / 1180 / 1440 px. |
+| Edge, Firefox, Safari on a Mac | Researched: Microsoft, "Manage website notifications in Microsoft Edge" (View site information → Permissions for this site → Notifications); Mozilla, "Web Push notifications in Firefox" (the Permissions icon in the address bar opens the site's permissions; a block is cleared with ×, then the page asks again); Apple, "Customize website notifications in Safari on Mac". Not run. |
+| WebKit revokes push after silent pushes | Researched: Apple docs / WebKit blog quoted in WebKit and Firebase issues (3 silent pushes). The worker never leaves a push silent on WebKit (unit-tested). |
+| A push while the app is in front shows nothing; the page syncs | Verified in Playwright Chromium: a push event dispatched inside this build's real service worker (`worker.evaluate`; the DevTools protocol's push delivery, and `setAppBadge` in a worker, crash the headless Chromium shell). The background path (shown, tag, badge, silent-and-closed on WebKit) is unit-tested against `public/sw.js`. |
+| "Send a test alert" shows with the app in front; a page that says it is in front (iPad split view) gets no notification | Verified in Playwright Chromium (the worker's own `showNotification` calls, recorded) and unit-tested against `public/sw.js` with Chromium and WebKit user agents. Not seen on a real iPad. |
+| The desk Activity popover by keyboard (Enter on the bell or the sidebar item, Tab to Mark all read and the rows, Escape back) | Verified in Playwright Chromium (`tests/e2e/activity.spec.ts`). |
+| Encryption and delivery to a push service | Verified in the integration tests: `web-push` 3.6.7 sends to a fake HTTPS push service on 127.0.0.1 that decrypts every payload (aes128gcm) and answers 201, 410, 500 or never (deletion, failure counting and the timeout). |
+| The banner and the sheet on an iPhone layout | Verified in Playwright WebKit (iPhone 14 profile) with a faked PushManager, permission and Home Screen mode: install, off, blocked, on. Not a real iPhone. |
+| Real delivery to a phone's lock screen | Not verified here (needs a real device and the production keys): morning checklist below. |
+
 ## The production migration
+
+### F3 + F4 in production
+
+Production has `main`'s file (99e2db6: F2, F5, the join link; Hotfix F5.1, 332c90a, did not change it). This release's file is that file with two
+sections appended (7: messages and en route; 8: Web Push and Activity) and four header comment lines; no line
+of `main`'s file changes. **Order: migration first, then deploy.**
+
+1. **Before:** `select public.lp_stages_recheck_minutes();` returns `20` (F5 is applied). If not, stop.
+2. **Dry run** (Supabase dashboard → SQL Editor, as `postgres`): paste the whole file, change the last line
+   `commit;` to `rollback;`, run. It must finish without an error. It takes locks for a moment only: the
+   new trigger on `patients`, the new index on `audit_events`. `lock_timeout` is 5 s, so behind a long live
+   write it stops with a lock timeout and changes nothing; run it again.
+3. **Commit:** paste the file again unchanged (ending in `commit;`) and run it.
+4. **Check:**
+   - `select count(*) from pg_proc where proname in ('lp_post_message','lp_mark_read','lp_set_enroute','lp_unsend_message','lp_involved_staff','lp_messages_thread','lp_messages_sync','lp_enroute_stats');` returns `8`;
+   - `select count(*) from pg_proc where proname like 'lp\_push\_%' or proname like 'lp\_activity\_%';` returns `12`;
+   - `select to_regclass('public.lp_messages') is not null, to_regclass('public.lp_enroute') is not null, to_regclass('public.lp_activity') is not null;` returns `true | true | true`;
+   - `select count(*) from pg_trigger where tgname = 'lp_enroute_clear';` returns `1`;
+   - `select count(*) from information_schema.columns where table_name = 'lp_push_prefs' and column_name = 'new_requests_set';` returns `1`.
+5. **Environment (Vercel):** `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` set and unchanged (see "F4
+   in production"). Missing keys only switch push off.
+6. **Deploy.** Then ask staff to tap "Update ready · Reload".
+
+The build that is live now keeps working on the migrated database: it never calls the new functions, and the
+trigger only deletes en route rows, which only this build writes. Phones with old cached rows ignore the new
+optional fields; their queued requests send as before (a queued new request then also notifies staff with
+"New requests" on). A second paste keeps every message, read cursor, en route row, subscription, switch and
+Activity row. To go back, redeploy the previous build; the SQL can stay. Proven locally: `main`'s file on a
+fresh stack with the seed, then this file twice, then the full integration and end-to-end suites.
+
+### Earlier runs
 
 [`supabase/migrations/20261106000000_rework.sql`](supabase/migrations/20261106000000_rework.sql) is the only
 file production needs. The other files in that folder are the local chain: the baseline and both
@@ -150,6 +279,20 @@ file production needs. The other files in that folder are the local chain: the b
   `select lp_stages_recheck_minutes();` returns `20`, and
   `select column_name from information_schema.columns where table_name = 'patients' and column_name in ('recheck_at', 'not_found_checks');`
   returns both. A second paste keeps every hold.
+- **Messages and en route (section 7, 2026-11-06 evening)** need it again before that build deploys. It is
+  additive: three new tables (`lp_messages`, `lp_message_reads`, `lp_enroute`, RLS on, `service_role`
+  only), a partial index on `audit_events`, the trigger `lp_enroute_clear` on `patients` (a status change out
+  of In medical deletes that request's en route rows in the same transaction, keeping them in its audit row so
+  that going back to In medical within 30 s, e.g. an Undo of Reunited, restores them), and new functions
+  (`lp_post_message`, `lp_mark_read`, `lp_set_enroute`, `lp_unsend_message`, `lp_involved_staff`,
+  `lp_messages_thread`, `lp_messages_sync`, `lp_enroute_stats` and three helpers). No existing column,
+  constraint or function changes. The build that is live now keeps working on it: it never calls the new
+  functions, and the trigger only deletes rows only the new build writes. Migration first, then deploy (the
+  new build's sync, detail and message routes call the new functions; if they are missing, sync and the
+  detail still answer, without messages). A second paste keeps every message, read cursor and en route.
+  Check: `select count(*) from pg_proc where proname in ('lp_post_message', 'lp_mark_read', 'lp_set_enroute',
+  'lp_unsend_message', 'lp_involved_staff', 'lp_messages_thread', 'lp_messages_sync', 'lp_enroute_stats');`
+  returns `8`.
 
 By hand, in the Supabase dashboard:
 
@@ -174,7 +317,8 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 
 ## Deploying on Vercel
 
-- **Environment variables.** Keep the names Jeffrey's project already has. `NEXT_PUBLIC_SUPABASE_URL` and
+- **Environment variables.** `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` switch lock-screen
+  alerts on (F4; already set). Keep the names Jeffrey's project already has. `NEXT_PUBLIC_SUPABASE_URL` and
   `SUPABASE_SECRET_KEY` (or `SUPABASE_SERVICE_ROLE_KEY`) stay the same. Set `SESSION_SECRET` (32 characters
   or more) and keep `APP_SHARED_PASSWORD_HASH_B64`. `EVENT_TIMEZONE` defaults to `America/New_York`. All
   of them are listed in `.env.example`. `INVITE_CODE_SHA256` and `INVITE_EXPIRES_AT` are optional (the team
@@ -229,6 +373,32 @@ expires, so share it like the password (the staff group chat, never a public pos
 
 ## Morning checklist (things tests can't cover)
 
+- [ ] **F3 + F4, before the deploy:** the migration is applied on production ([F3 + F4 in
+      production](#f3--f4-in-production): dry run, commit, checks).
+- [ ] **F3 + F4, Not found on real phones:** front of house with alerts on locks the phone; medical taps "Not
+      found yet": the lock screen shows the initials and "Not found yet · recheck 4:40 PM" once; "× Not found"
+      replaces it with "Not found in medical"; Undo shows "Back to Waiting for check". With the app open, only
+      the toast shows.
+- [ ] **F3 + F4, messages:** a message from medical reaches a locked front-of-house phone as "J.D." / "Rae C.:
+      …"; with that request open on screen, no toast and no notification.
+
+- [ ] **F4, before the deploy:** the F4 migration section is applied on production (dry run, then commit;
+      the checks under "F4 in production").
+- [ ] **F4, iPhone Home Screen app:** the banner says "Alerts are off"; Turn on asks, then the Alerts sheet
+      opens with "On for this phone"; "Send a test alert" shows a notification on the lock screen within a few
+      seconds with "Is my friend in medical?" / "Test alert"; tapping it opens the app.
+- [ ] **F4, iPhone Safari tab:** the banner shows this phone's Home Screen taps and they match the screen
+      (on iOS 26+, the Compact tab layout; with Bottom / Top, Share is on the toolbar), and "Open as Web App"
+      is already on when the Add sheet opens. With alerts blocked, Settings → Notifications lists the app as
+      "In medical?".
+- [ ] **F4, sign-out offline:** on a phone with alerts on, airplane mode → sign out (it fails) → back online:
+      the Alerts sheet still says "On for this phone" and "Send a test alert" arrives.
+- [ ] **F4, Android Chrome and a desktop browser:** Turn on, then "Send a test alert"; then with the screen
+      locked (or the browser closed), an In medical answer on one of your requests arrives as "J.D." /
+      "In medical" and opens that request. With the app in front, only the toast shows.
+- [ ] **F4, Activity:** someone else answers your request: the bell shows 1; the row opens the request and the
+      count drops; Mark all read → Undo.
+
 - [ ] iPhone camera capture from New request, and the page survives coming back from the camera.
 - [ ] On an iPhone, photograph another phone's screen showing a photo: the crop step opens with the whole
       photo selected, dragging a corner cuts the bezel, Use photo adds it within about a second, and the
@@ -252,6 +422,10 @@ expires, so share it like the password (the staff group chat, never a public pos
       the focused window and nothing in the other; with both minimised it is one notification.
 - [ ] iPhone Home Screen app: turning Alerts on asks to allow notifications, and the app then appears in
       Settings → Notifications. In a Safari tab on iPhone nothing is asked and alerts stay toasts.
+- [ ] Messages on two phones (one Medical, one front of house): medical asks from a To check card, the other
+      phone shows the badge and the preview within a few seconds, the reply shows "Read" on the asker's phone.
+      En route ~5 min, change it, cancel and Undo, Arrived; Reunited clears the row, and its Undo brings the
+      row back. A message typed in airplane mode shows "Sending…" and goes out once the signal is back.
 - [ ] At the end, run `docs/export.sql` in the SQL editor and download the results (Query 1, then Query 2;
       the steps are at the top of the file).
 - [ ] Redeploy on Vercel with an old tab open: "Update ready · Reload" appears. It shows only once the phone
@@ -281,7 +455,11 @@ expires, so share it like the password (the staff group chat, never a public pos
 
 - **Answers, edits and adding photos to an existing request need a connection.** Only new requests (with
   their photos) queue offline. Those buttons show "Needs a connection" offline.
-- **Alerts need the app open.** There is no push. With the app in the background, desktop browsers,
+- **Lock-screen alerts need Web Push on the device** (F4): desktop browsers, Android Chrome and the iPhone /
+  iPad Home Screen app (iOS 16.4+), once Turn on was tapped. A Safari tab on iPhone gets the banner with the
+  Home Screen taps instead. Push goes through Apple's, Google's, Mozilla's or Microsoft's push service, so a
+  phone with no signal gets it when it is back (within an hour for answers, 15 minutes for the rest).
+  Without push, the earlier behaviour holds: with the app in the background, desktop browsers,
   Android and the iPhone Home Screen app show a system notification (once allowed); a Safari tab on iPhone
   shows only the toast. A background tab checks once a minute, so a notification can be up to a minute late.
   Phones pause background pages (an iPhone almost at once, Android Chrome after a few minutes), so phone

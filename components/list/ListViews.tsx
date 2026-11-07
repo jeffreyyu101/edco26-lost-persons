@@ -24,6 +24,7 @@ import { Button, Text } from '@radix-ui/themes';
 import { MapPin, Plus, Search as SearchIcon, X } from 'lucide-react';
 import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { AccountMenu } from '@/components/account/AccountMenu';
+import { AlertsBannerSlot as AlertsBanner } from '@/components/activity/slots';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LiveIndicator } from '@/components/ui/LiveIndicator';
@@ -65,7 +66,7 @@ import { MineCard, OutboxCard } from './cards';
 import { displayName } from './list-helpers';
 import { PendingQueues, useLeaving } from './PendingQueues';
 import { SortToggle } from './SortToggle';
-import { primeKeyboard, useScrollMemory, useStatusTap, useStickyHeight } from './hooks';
+import { primeKeyboard, useHeightVar, useScrollMemory, useStatusTap, useStickyHeight } from './hooks';
 import { mineFreshTone, resultCount, searchDisplay, stageClock, updatedSince } from './list-helpers';
 import { AllSkeleton, MineSkeleton, PendingSkeleton } from './ListSkeletons';
 import { ArchivedFold, ArchivedRows, ColumnHeader, GroupDivider, LogGrid, LogRow, OutboxLogRow, SearchLogRow } from './rows';
@@ -112,6 +113,7 @@ function Chrome({ view, sort = null, chips, filtered = false, skeleton, children
   const snackbar = useSnackbar();
   const prefs = usePrefs();
   const { rootRef, stickyRef } = useStickyHeight();
+  const alertsRef = useHeightVar(rootRef, '--lp-alerts-h');
   // From 768 px the desk shell draws the brand row (above its top bar) and this view's chrome, the line under
   // the title included (in its top bar): the list's own brand row and line are phone only.
   const inDesk = useInDesk();
@@ -158,6 +160,8 @@ function Chrome({ view, sort = null, chips, filtered = false, skeleton, children
   return (
     <div className={s.root} data-view={view} ref={rootRef}>
       {brand ? <BrandCard onHide={hideBrand} /> : null}
+      {/* F4: until lock-screen alerts work on this phone (on the desk it sits in the main column). */}
+      {inDesk ? null : <AlertsBanner />}
       <div className={s.sticky} ref={stickyRef}>
         <AppHeader
           view={view}
@@ -184,7 +188,14 @@ function Chrome({ view, sort = null, chips, filtered = false, skeleton, children
         {loading ? null : <ConnectionBanner status={live} />}
         {chips}
       </div>
-      <main className={s.body}>{body}</main>
+      <main className={s.body}>
+        {inDesk ? (
+          <div className={s.alertsWrap} ref={alertsRef}>
+            <AlertsBanner />
+          </div>
+        ) : null}
+        {body}
+      </main>
       {snackbar ? null : <NewRequestButton />}
     </div>
   );

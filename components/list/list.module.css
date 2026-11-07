@@ -144,6 +144,17 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* F4: the header also holds the Activity bell now. On a phone 400 px wide or less the title and its count step
+   down to 24 px, so "All requests 758 ⌄" still fits beside search, the bell and the avatar (28 px would cut
+   it to "All requ…"). */
+@media (max-width: 400px) {
+  .ttx,
+  .tcount {
+    font-size: 24px;
+    line-height: 30px;
+  }
+}
+
 .tchev {
   flex: none;
   align-self: center;
@@ -202,6 +213,12 @@
    each side, none down. (Its own -6 px all round stays in the desk's sidebar.) */
 .icons [data-testid='account-trigger']::after {
   inset: -12px -6px 0;
+}
+
+/* (F3 + F4 release) F4's Activity bell, between search and the avatar, grows its 44 px hit area the same way:
+   8 px up, 4 px to each side, none down, so it never reaches the "⇅" toggle's under it. */
+.icons [data-testid='activity-bell']::before {
+  inset: -8px -4px 0;
 }
 
 .ib:active {
@@ -588,14 +605,22 @@ button.lr:focus-visible {
   text-overflow: ellipsis;
 }
 
-/* Under 400 px "Waiting for check" reads "Waiting" (list-helpers.narrowStatusLabel): with a created time
+/* (F3 + F4 release) The desk's alerts banner (F4) sits in the main column above the view; its height is mirrored
+   into --lp-alerts-h on the view's root (hooks.ts useHeightVar) so the Pending board still fits the window. */
+.alertsWrap {
+  display: flow-root;
+}
+
+/* Under 430 px "Waiting for check" reads "Waiting" (list-helpers.narrowStatusLabel): with a created time
    from an earlier day ("Fri 11:02 PM") the full label would leave the name two letters. (F5) Not in medical
-   reads its answer's label there: the same today, "Not found" for "Not found in medical" after the rename. */
+   reads its answer's label there: "Not found" for "Not found in medical". (F3 + F4 release, the deferred F2
+   fix) 430, not 400: at 400–429 px (Pixel 7a, Galaxy S24, iPhone Pro / Plus at 402 / 414 / 428) "Not found in
+   medical" beside an earlier day's time was cut. */
 .stNarrow {
   display: none;
 }
 
-@media (max-width: 399.98px) {
+@media (max-width: 429.98px) {
   .stWide {
     display: none;
   }

@@ -122,6 +122,8 @@ export interface RaisedAlert {
   held?: boolean;
   /** `${id}:${rowVersion}` of the row that raised it: the same in every tab that raises this alert. */
   key: string;
+  /** The row's updatedAt (server time): when the change happened. */
+  at?: string;
 }
 
 /** The alerts of `rows`, each paired with the status of the row that raised it (see diffAlerts). */
@@ -132,7 +134,7 @@ export function diffRaisedAlerts(
 ): RaisedAlert[] {
   const out: RaisedAlert[] = [];
   for (const row of rows) {
-    for (const alert of diffAlerts(previous, [row], ctx)) out.push({ alert, status: row.status, held: isHeld(row), key: alertKey(row) });
+    for (const alert of diffAlerts(previous, [row], ctx)) out.push({ alert, status: row.status, held: isHeld(row), key: alertKey(row), at: row.updatedAt });
   }
   return out;
 }
@@ -195,5 +197,8 @@ export function alertToast(alert: AlertEvent, view: (id: string) => void): Omit<
       return { ...base, tone: 'neutral', icon: 'info', durationMs: ALERT_TOAST_MS };
     case 'combined':
       return { ...base, tone: 'neutral', icon: 'bell', durationMs: ALERT_TOAST_MS };
+    case 'message':
+      // F3: a new message from someone else on a request I'm involved in ("J.D." / "Rae C.: Any tattoos?").
+      return { ...base, tone: 'blue', icon: 'message', durationMs: ALERT_TOAST_MS };
   }
 }

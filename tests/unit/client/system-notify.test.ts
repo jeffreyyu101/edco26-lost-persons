@@ -25,7 +25,7 @@ import {
   type NotifyState,
   type WindowInfo,
 } from '@/lib/client/system-notify';
-import { STATUS } from '@/lib/domain';
+import { STATUS, STATUS_META } from '@/lib/domain';
 import { MemoryStorage } from './helpers/env';
 import { makeRow } from './helpers/fake-server';
 import { UA, fakeNotifyHost, fakeRegistration, flush } from './helpers/notify-host';
@@ -124,37 +124,35 @@ describe('what a notification shows', () => {
   const rows = new Map<string, RequestSummary>([[sofia.id, sofia]]);
   const rowOf = (id: string) => rows.get(id);
 
-  it('In medical: the LP number and status, initials and post, the next step; sticky until dismissed', () => {
+  it('In medical: initials and status (no LP number, F4), the post, the next step; sticky until dismissed', () => {
     const n = systemNotice(statusAlert(sofia), rowOf);
     expect(n).toEqual({
-      title: 'LP-1004 · In medical',
-      body: 'S.L. · FA 3\nBring the friend to Main Med',
-      tag: sofia.id,
+      title: 'S.L. · In medical',
+      body: 'FA 3\nBring the friend to Main Med',
+      tag: `lp-${sofia.id}`,
       url: `/?r=${sofia.id}`,
       key: `${sofia.id}:3`,
       requireInteraction: true,
     });
   });
 
-  it('the other answers and changes read "LP-#### · <status>"', () => {
-    for (const [status, title] of [
-      [STATUS.notInMedical, 'LP-1004 · Not found in medical'],
-      [STATUS.reunited, 'LP-1004 · Reunited'],
-      [STATUS.waiting, 'LP-1004 · Waiting for check'],
-      [STATUS.cancelled, 'LP-1004 · Cancelled'],
-    ] as const) {
+  it('the other answers and changes read "<initials> · <status>" (the label from STATUS_META), never an LP number', () => {
+    for (const status of [STATUS.notInMedical, STATUS.reunited, STATUS.waiting, STATUS.cancelled] as const) {
       const row = { ...sofia, status };
       const n = systemNotice(statusAlert(row), () => row);
-      expect(n.title).toBe(title);
-      expect(n.body).toBe('S.L. · FA 3');
+      expect(n.title).toBe(`S.L. · ${STATUS_META[status].shortLabel}`);
+      expect(n.title).not.toMatch(/LP-?\d/);
+      expect(n.body).toBe('FA 3');
       expect(n.requireInteraction).toBe(false);
     }
   });
 
-  it('a new request: "New request · LP-####", initials and post (no age or gender either)', () => {
+  it('a new request: "New request" (no LP number, F4), initials and post (no age or gender either)', () => {
     const row = makeRow(13, { firstName: 'Tara', lastName: 'Reyes', age: '24', gender: 'Female', caseNumber: 1013, contactPhone: '4075550123' });
     const n = systemNotice(newRequestAlert(row), () => row);
-    expect(n).toMatchObject({ title: 'New request · LP-1013', body: 'T.R. · FA 4', tag: row.id, url: `/?r=${row.id}` });
+    expect(n).toMatchObject({ title: 'New request', body: 'T.R. · FA 4', tag: `lp-${row.id}`, url: `/?r=${row.id}` });
+    // Not synced yet: the alert's own title would carry the LP number; the notification never does.
+    expect(systemNotice(newRequestAlert(row), () => undefined).title).toBe('New request');
   });
 
   it('never carries a phone number, a contact or a full name, in the text or the data', () => {
@@ -162,14 +160,17 @@ describe('what a notification shows', () => {
     for (const secret of ['555', '0100', '0199', 'Maya', 'Sister', 'Call', 'Sofia', 'Lopez', 'Red hoodie']) expect(shown).not.toContain(secret);
   });
 
-  it('3 or more at once: one notification, "3 new requests" (or "3 updates" when mixed), opening the log', () => {
-    const fresh = [20, 21, 22].map((n) => makeRow(n, { caseNumber: 1000 + n }));
+  // Ann R20, Ben R21, … → "A.R.", "B.R.", …
+  const named = (n: number) => makeRow(n, { caseNumber: 1000 + n, firstName: `${String.fromCharCode(45 + n)}nn`, lastName: `R${n}` });
+
+  it('3 or more at once: one notification, "3 new requests" (or "3 updates" when mixed), opening the log; initials, no LP numbers', () => {
+    const fresh = [20, 21, 22].map(named);
     const lookup = (id: string) => [...fresh, sofia].find((r) => r.id === id);
     const news = fresh.map(newRequestAlert);
     const [combined] = coalesceAlerts(news);
     expect(systemNotice(combined!, lookup, news)).toEqual({
       title: '3 new requests',
-      body: 'LP-1020, LP-1021, LP-1022',
+      body: 'A.R., B.R., C.R.',
       tag: COMBINED_TAG,
       url: '/',
       key: null,
@@ -177,17 +178,17 @@ describe('what a notification shows', () => {
     });
     const mixed = [...news, statusAlert(sofia)];
     expect(systemNotice(coalesceAlerts(mixed)[0]!, lookup, mixed).title).toBe('4 updates');
-    const many = [20, 21, 22, 23, 24, 25].map((n) => makeRow(n, { caseNumber: 1000 + n }));
+    const many = [20, 21, 22, 23, 24, 25].map(named);
     const manyAlerts = many.map(newRequestAlert);
     expect(systemNotice(coalesceAlerts(manyAlerts)[0]!, (id) => many.find((r) => r.id === id), manyAlerts).body).toBe(
-      'LP-1020, LP-1021, LP-1022, LP-1023, +2',
+      'A.R., B.R., C.R., D.R., +2',
     );
   });
 
   it('options: tag per request so a later alert replaces it, renotify so it sounds, the click target in data', () => {
     const options = noticeOptions(systemNotice(statusAlert(sofia), rowOf));
     expect(options).toMatchObject({
-      tag: sofia.id,
+      tag: `lp-${sofia.id}`,
       renotify: true,
       requireInteraction: true,
       icon: '/icons/icon-192.png',
@@ -326,14 +327,14 @@ describe('the notifier', () => {
     const notice = sample();
     expect(await system.showNotice(notice)).toBe(true);
     expect(f.shows).toHaveLength(1);
-    expect(f.shows[0]).toMatchObject({ title: 'LP-1004 · In medical', options: { tag: notice.tag, renotify: true } });
+    expect(f.shows[0]).toMatchObject({ title: notice.title, options: { tag: notice.tag, renotify: true } });
     // Another tab of this browser raises the same alert: already showing.
     expect(await system.showNotice(notice)).toBe(true);
     expect(f.shows).toHaveLength(1);
     // A newer change of the request replaces it (same tag).
-    expect(await system.showNotice({ ...notice, title: 'LP-1004 · Not found in medical', key: `${notice.tag}:3` })).toBe(true);
+    expect(await system.showNotice({ ...notice, title: 'T.R. · Not found in medical', key: `${notice.tag}:3` })).toBe(true);
     expect(f.shows).toHaveLength(2);
-    expect(f.open.map((n) => n.title)).toEqual(['LP-1004 · Not found in medical']);
+    expect(f.open.map((n) => n.title)).toEqual(['T.R. · Not found in medical']);
   });
 
   it('show(alert) builds the notification from the rows at call time (the store’s entry point)', async () => {
@@ -346,7 +347,7 @@ describe('the notifier', () => {
     const shown = system.show(alert, () => row, [alert]);
     row = undefined; // the store moves on; the notification was already built
     expect(await shown).toBe(true);
-    expect(f.shows[0]).toMatchObject({ title: 'LP-1004 · In medical', options: { body: 'S.L. · FA 4\nBring the friend to Main Med', data: { key: `${alert.requestId}:2` } } });
+    expect(f.shows[0]).toMatchObject({ title: 'S.L. · In medical', options: { body: 'FA 4\nBring the friend to Main Med', data: { key: `${alert.requestId}:2` } } });
   });
 
   it('reports failure so the store can toast instead: no permission, no worker, or showNotification throws', async () => {
@@ -371,11 +372,12 @@ describe('the notifier', () => {
     const b = { ...a, tag: 'other', key: 'other:1' };
     await system.showNotice(a);
     await system.showNotice(b);
-    system.close(a.tag, `${a.tag}:99`); // an older change: leaves the newer notification alone
+    const id = makeRow(4).id;
+    system.close(id, `${id}:99`); // an older change: leaves the newer notification alone
     await Promise.resolve();
     await Promise.resolve();
     expect(f.open.map((n) => n.tag)).toEqual([a.tag, 'other']);
-    system.close(a.tag, a.key);
+    system.close(id, a.key);
     await Promise.resolve();
     await Promise.resolve();
     expect(f.open.map((n) => n.tag)).toEqual(['other']);
@@ -578,7 +580,7 @@ describe('the browser host (stubbed globals)', () => {
     expect(system.state()).toEqual({ supported: true, permission: 'granted' });
     expect(system.route()).toBe('system');
     expect(await system.showNotice(sample())).toBe(true);
-    expect(b.showNotification).toHaveBeenCalledWith('LP-1004 · In medical', expect.objectContaining({ tag: sample().tag, renotify: true }));
+    expect(b.showNotification).toHaveBeenCalledWith(sample().title, expect.objectContaining({ tag: sample().tag, renotify: true }));
   });
 
   it('an iPhone Safari tab: unsupported, routed to the toast, never prompted', async () => {

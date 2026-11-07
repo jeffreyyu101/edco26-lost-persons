@@ -1,0 +1,406 @@
+/* The bell and the Activity inbox (design/screens/f34-states.html .ib .badge .act-row .sh .ibtn .empty .toast
+   .pop; f34-v2-1..4, 9). Text the mockup draws in gray-10 uses gray-11 here: gray-10 is under 4.5:1 on the
+   panel in light mode (spec §7, DECISIONS "Accessibility pass"). Glyphs are bare outlines (no containers). */
+
+/* ---- The bell ---- */
+.bell.bell {
+  position: relative;
+  flex: none;
+  /* 36 × 36 like search beside it: Radix's size-3 padding would otherwise make the box 52 px and push the
+     header's icons past their row (the title then truncates sooner). The hit area stays 44 px (lp-hit). */
+  box-sizing: border-box;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  margin: 0;
+}
+.bell svg {
+  color: var(--gray-11);
+}
+/* Monochrome count, offset to the bell's top-right so the bell stays visible. */
+.badge {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--gray-12);
+  color: var(--gray-1);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* ---- The panel (sheet and popover) ---- */
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+}
+.panel[data-variant='sheet'] {
+  flex: 1 0 auto;
+}
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px 8px 16px;
+  min-height: 44px;
+}
+.title {
+  flex: 1;
+  min-width: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--gray-12);
+  margin: 0;
+}
+.panel[data-variant='popover'] .title {
+  font-size: 17px;
+}
+.markAll.markAll {
+  position: relative;
+  margin: 0;
+  overflow: visible;
+}
+.markAll svg {
+  color: var(--gray-11);
+}
+/* "Mark all read" on hover and keyboard focus (not on touch screens). */
+.tip {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 6px);
+  right: 0;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--gray-12);
+  color: var(--gray-1);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.12s,
+    visibility 0s 0.12s;
+}
+.markAll:hover > .tip,
+.markAll:focus-visible > .tip {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0.3s, 0.3s;
+}
+@media (hover: none) {
+  .tip {
+    display: none;
+  }
+}
+.markAll[data-disabled] svg {
+  color: var(--gray-8);
+}
+.list {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.day {
+  padding: 12px 16px 4px 22px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--gray-11);
+}
+
+/* One row per request: [dot margin][glyph][line 1 / line 2][time]. The dot sits in the left margin so text
+   never shifts between read and unread. */
+.row {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  min-height: 64px;
+  padding: 10px 16px 10px 22px;
+  border: 0;
+  background: none;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.item + .item > .row {
+  box-shadow: inset 0 1px 0 var(--gray-a3);
+}
+.row:hover {
+  background: var(--gray-a2);
+}
+.row:active {
+  background: var(--gray-a3);
+}
+.row:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -2px;
+}
+.dot {
+  position: absolute;
+  left: 8px;
+  top: 19px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--gray-12);
+}
+.glyph {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  margin-top: 2px;
+}
+.text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.line1 {
+  font-size: 15px;
+  line-height: 22px;
+  color: var(--gray-12);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.line2 {
+  font-size: 14.5px;
+  line-height: 20px;
+  color: var(--gray-11);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row[data-read] .line1 {
+  font-weight: 400;
+  color: var(--gray-11);
+}
+.when {
+  flex: none;
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 220px;
+  padding: 24px 16px;
+  font-size: 15px;
+  color: var(--gray-11);
+}
+.empty svg {
+  color: var(--gray-11);
+}
+
+/* "3 marked read · Undo" (f34-v2-3): 5 s, docked at the bottom of the sheet (the panel fills it; a list
+   longer than the sheet scrolls under it). */
+.undo {
+  position: sticky;
+  bottom: 12px;
+  margin: auto 12px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 2px 4px 2px 16px;
+  border-radius: 12px;
+  background: var(--gray-12);
+  color: var(--gray-1);
+  box-shadow: var(--shadow-4);
+  font-size: 15px;
+  font-weight: 500;
+}
+.undoText {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.undoBtn {
+  flex: none;
+  min-width: 44px;
+  height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.undoBtn:focus-visible {
+  outline: 2px solid var(--gray-1);
+  outline-offset: -4px;
+}
+
+/* ---- Phone: a full-height sheet on Dialog (Escape, the scrim and a swipe close it, as the app's other
+   sheets) ---- */
+.sheet.sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: calc(env(safe-area-inset-top) + 24px);
+  margin: 0 auto;
+  width: 100%;
+  max-width: 560px;
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 0 calc(16px + env(safe-area-inset-bottom));
+  border-radius: 22px 22px 0 0;
+  background-color: var(--color-panel-solid);
+  box-shadow: var(--shadow-6);
+  overflow: hidden;
+}
+.sheetScroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+}
+/* The grabber, a button: 88 × 24 (44 tall with lp-hit), the 36 × 5 pill drawn in its middle. */
+.handle {
+  flex: none;
+  width: 88px;
+  height: 24px;
+  margin: -10px auto 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.handle::after {
+  content: '';
+  position: absolute;
+  left: calc(50% - 18px);
+  top: calc(50% - 2.5px);
+  width: 36px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--gray-a6);
+  pointer-events: none;
+}
+.handle:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sheet.sheet[data-state='open'] {
+    animation: lp-act-in 260ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
+@keyframes lp-act-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+:global(.rt-BaseDialogOverlay):has(.sheet)::before {
+  background-color: var(--black-a8);
+}
+
+/* ---- Desk: a popover anchored to the bell, 380 wide, at most 480 tall ---- */
+.popover.popover {
+  width: 380px;
+  max-width: calc(100vw - 24px);
+  max-height: min(480px, calc(100dvh - 80px));
+  padding: 8px 0 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 14px;
+}
+
+/* ---- Desk sidebar item and rail item ---- */
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--gray-11);
+  cursor: pointer;
+  text-align: left;
+}
+.navItem svg {
+  flex: none;
+  color: var(--gray-10);
+}
+.navItem:hover {
+  background: var(--gray-a3);
+  color: var(--gray-12);
+}
+.navItem:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -2px;
+}
+@media (pointer: coarse) {
+  .navItem {
+    height: 44px;
+  }
+}
+.navLabel {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.navBadge {
+  margin-left: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--gray-12);
+  color: var(--gray-1);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}

@@ -75,7 +75,7 @@ describe('(F5) my request going on the "Not found yet" hold', () => {
     server.change(mine.id, hold);
     await advance(6_000);
     expect(n.shown).toEqual([
-      { title: 'S.L.', body: 'Not found yet · recheck 11:40 PM', tag: mine.id, url: `/?r=${mine.id}`, key: `${mine.id}:2`, requireInteraction: false },
+      { title: 'S.L.', body: 'Not found yet · recheck 11:40 PM', tag: `lp-${mine.id}`, url: `/?r=${mine.id}`, key: `${mine.id}:2`, requireInteraction: false },
     ]);
     expect(s().toasts).toEqual([]);
     // The 10 s Undo lands after the alert: the request is plain Waiting for check again, status unchanged.
@@ -120,9 +120,9 @@ describe('alerts in the background are system notifications', () => {
     await advance(6_000);
     expect(n.shown).toEqual([
       {
-        title: 'LP-1004 · In medical',
-        body: 'S.L. · FA 3\nBring the friend to Main Med',
-        tag: mine.id,
+        title: 'S.L. · In medical',
+        body: 'FA 3\nBring the friend to Main Med',
+        tag: `lp-${mine.id}`,
         url: `/?r=${mine.id}`,
         key: `${mine.id}:2`,
         requireInteraction: true,
@@ -141,12 +141,13 @@ describe('alerts in the background are system notifications', () => {
     a.setPref('bell', true);
     server.put(makeRow(21, { caseNumber: 1014 }));
     await advance(6_000);
-    expect(n.shown.map((x) => [x.title, x.body])).toEqual([['New request · LP-1014', 'T.R. · FA 4']]);
+    expect(n.shown.map((x) => [x.title, x.body])).toEqual([['New request', 'T.R. · FA 4']]);
     server.put(makeRow(22));
     server.put(makeRow(23));
     server.put(makeRow(24));
     await advance(6_000);
-    expect(n.shown.at(-1)).toMatchObject({ title: '3 new requests', body: 'LP-1022, LP-1023, LP-1024', tag: 'lp-alerts', url: '/' });
+    // Initials, never LP numbers (F4).
+    expect(n.shown.at(-1)).toMatchObject({ title: '3 new requests', body: 'T.R., T.R., T.R.', tag: 'lp-alerts', url: '/' });
     expect(n.shown).toHaveLength(2);
     expect(s().toasts).toEqual([]);
   });
@@ -203,8 +204,8 @@ describe('alerts in the background are system notifications', () => {
     server.change(mine.id, { status: STATUS.waiting }); // the liaison's Undo, seen on the next poll
     await advance(6_000);
     expect(n.shown.map((x) => [x.title, x.tag, x.key])).toEqual([
-      ['LP-1004 · In medical', mine.id, `${mine.id}:2`],
-      ['LP-1004 · Waiting for check', mine.id, `${mine.id}:3`],
+      ['T.R. · In medical', `lp-${mine.id}`, `${mine.id}:2`],
+      ['T.R. · Waiting for check', `lp-${mine.id}`, `${mine.id}:3`],
     ]);
     // The out-of-date "In medical" may be closed by its own key; the new one never is.
     expect(n.closed.every((c) => c.tag === mine.id && c.key === `${mine.id}:2`)).toBe(true);
@@ -264,7 +265,8 @@ describe('alerts across tabs of one browser (the store’s side)', () => {
     n.elsewhere.add(`${more[2]!.id}:1`);
     for (const r of more) server.put(r);
     await advance(6_000);
-    expect(n.shown.map((x) => x.title)).toEqual(['New request · LP-1041', 'New request · LP-1042']);
+    expect(n.shown.map((x) => x.title)).toEqual(['New request', 'New request']);
+    expect(n.shown.map((x) => x.tag)).toEqual([`lp-${more[0]!.id}`, `lp-${more[1]!.id}`]);
   });
 
   it('tells the notifier when it is alerting: after the baseline sync, and no more once stopped', async () => {
@@ -322,7 +324,7 @@ describe('alerts across tabs of one browser (the store’s side)', () => {
     const second = makeRow(52, { caseNumber: 1052 });
     server.put(second);
     await advance(6_000);
-    expect(registration.shows.map((x) => x.title)).toEqual(['New request · LP-1052']);
+    expect(registration.shows.map((x) => x.title)).toEqual(['New request']);
     B.a.syncNow();
     await advance(50);
     expect(B.s().confirmed.has(second.id)).toBe(true);

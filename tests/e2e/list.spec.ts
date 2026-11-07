@@ -120,7 +120,7 @@ test('All: the large title is the view menu; a new request is the top row and op
   await expect(page.getByTestId('log-columns')).toHaveText(/^#\s*Friend\s*Status\s*Created\s*Updated$/);
   await expect(cell(page, r.id, 'number')).toHaveText(String(r.caseNumber));
   await expect(cell(page, r.id, 'name')).toHaveText(r.name);
-  // iPhone 14 is 390 px wide: under 400 px "Waiting for check" reads "Waiting" (the blue ring says the rest,
+  // iPhone 14 is 390 px wide: under 430 px "Waiting for check" reads "Waiting" (the blue ring says the rest,
   // the row's sentence says it in full), so the name keeps its room.
   await expect(cell(page, r.id, 'status')).toHaveText('Waiting', { useInnerText: true });
   await page.setViewportSize({ width: 430, height: 932 });
@@ -257,13 +257,15 @@ test('brand row on All only: one compact row with the logos, the title and the d
   await expect(page.getByTestId('status-chip')).toBeVisible();
   await expect(brand(page)).toBeVisible();
 
-  // Pending and My requests start at their large title (Pending v8), at the top of the page; Search keeps its
-  // own bar.
+  // Pending and My requests start at their large title (Pending v8), at the top of the page — under the
+  // alerts reminder while alerts don't work on this phone yet (F4: here, a Safari tab). Search keeps its own bar.
   for (const url of ['/?view=pending', '/?view=mine']) {
     await page.goto(url);
     await expect(page.getByTestId('view-switcher')).toBeVisible();
     await expect(brand(page), url).toHaveCount(0);
-    expect((await page.getByTestId('view-switcher').boundingBox())!.y, url).toBeLessThan(40);
+    const reminder = page.getByTestId('alerts-banner');
+    const top = (await reminder.count()) ? (await reminder.boundingBox())!.y + (await reminder.boundingBox())!.height : 0;
+    expect((await page.getByTestId('view-switcher').boundingBox())!.y - top, url).toBeLessThan(40);
   }
   await page.goto('/?q=');
   await expect(page.getByRole('searchbox', { name: 'Search requests' })).toBeVisible();
@@ -311,10 +313,13 @@ test('the X hides the brand row on this device: it stays hidden after a reload (
 
   await brand(page).getByRole('button', { name: 'Hide header' }).click();
   await expect(brand(page)).toHaveCount(0);
-  // The view starts at its title now.
+  // The view starts at its title now (under F4's alerts reminder while alerts don't work on this phone yet: here,
+  // a Safari tab on an iPhone).
   const after = (await page.getByTestId('view-switcher').boundingBox())!;
   expect(after.y).toBeLessThan(before.y);
-  expect(after.y).toBeLessThan(40);
+  const reminder = page.getByTestId('alerts-banner');
+  const top = (await reminder.count()) ? (await reminder.boundingBox())!.y + (await reminder.boundingBox())!.height : 0;
+  expect(after.y - top).toBeLessThan(40);
   expect(await page.evaluate(() => localStorage.getItem('lp-brand-hidden'))).toBe('1');
 
   // After a reload it is never drawn, not even for a frame before the prefs are read. Checked before every
@@ -623,8 +628,8 @@ test('All (option B): closed requests fold into "Archived N"; the fold opens in 
     .toBe(true);
   await expect(page.getByTestId('closed-rows').locator(`[data-request-id="${notIn.id}"]`)).toBeVisible();
   await expect(row(page, notIn.id)).toHaveAttribute('data-closed', '');
-  // iPhone 14 is under 400 px: "Not found in medical" reads "Not found" (the grey × says the rest, the row's
-  // sentence says it in full), like "Waiting"; from 400 px the full label, on one line.
+  // iPhone 14 is under 430 px: "Not found in medical" reads "Not found" (the grey × says the rest, the row's
+  // sentence says it in full), like "Waiting"; from 430 px the full label, on one line.
   await expect(cell(page, notIn.id, 'status')).toHaveText('Not found', { useInnerText: true });
   await expect(row(page, notIn.id)).toContainText(', Not found in medical, ');
   await page.setViewportSize({ width: 430, height: 932 });
@@ -720,7 +725,7 @@ test('at 375 px after midnight the name keeps at least 80 px; numbers and times 
   expect(layout.cutCells).toEqual([]);
   for (const label of layout.cutLabels) expect(label.name, `"${label.text}" cut`).toBeLessThanOrEqual(80.5);
   expect(layout.pageScrolls).toBe(false);
-  // Under 400 px the longest status reads "Not found" in the log (F2), whole.
+  // Under 430 px the longest status reads "Not found" in the log (F2), whole.
   await expect(cell(page, notIn.id, 'status')).toHaveText('Not found', { useInnerText: true });
 
   // My requests: the progress line ends at "Not found in medical", on one line and never cut (F2).
@@ -732,6 +737,45 @@ test('at 375 px after midnight the name keeps at least 80 px; numbers and times 
   await expect(last).toBeVisible();
   expect(await last.evaluate((el) => el.scrollWidth <= el.clientWidth + 0.5)).toBe(true);
   expect((await last.boundingBox())!.height).toBeLessThan(16);
+});
+
+// The deferred F2 fix (F3 + F4 release): on phones 400–429 px wide (Pixel 7a 412, iPhone 16 Pro 402, Plus 414 /
+// 428) the full "Not found in medical" beside an earlier day's created time ("Fri 11:02 PM") was cut, so the
+// short labels ("Waiting", "Not found") apply under 430 px, not 400. From 430 px the full labels, whole.
+test('under 430 px the log uses the short labels beside an earlier day\'s time; from 430 px the full ones, never cut', async ({ page }) => {
+  const later = Date.now() + 86_400_000;
+  await page.clock.setFixedTime(later);
+  await page.setViewportSize({ width: 400, height: 860 });
+  const r = await createRequest(page, { name: `${TAG} Kayla Alexandra Martinez-Rodriguez` });
+  const notIn = await notFound(page, await createRequest(page));
+  await page.goto('/');
+  await expect(row(page, r.id)).toBeVisible({ timeout: 10_000 });
+  await expect(cell(page, r.id, 'created')).toHaveText(formatCreatedTime(r.createdAt, later, TZ));
+  expect(formatCreatedTime(r.createdAt, later, TZ)).toMatch(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2}:\d{2} (AM|PM)$/);
+  await fold(page).click();
+  await expect(row(page, notIn.id)).toBeVisible();
+  const label = (id: string) => cell(page, id, 'status').locator(':scope > span').filter({ visible: true }).first();
+  for (const [width, waiting, closed] of [
+    [400, 'Waiting', 'Not found'],
+    [412, 'Waiting', 'Not found'],
+    [414, 'Waiting', 'Not found'],
+    [429, 'Waiting', 'Not found'],
+    [430, 'Waiting for check', 'Not found in medical'],
+  ] as const) {
+    await page.setViewportSize({ width, height: 860 });
+    await expect(cell(page, r.id, 'status'), `${width} px`).toHaveText(waiting, { useInnerText: true });
+    await expect(cell(page, notIn.id, 'status'), `${width} px`).toHaveText(closed, { useInnerText: true });
+    // The row's sentence always says the whole status.
+    await expect(row(page, notIn.id)).toContainText(', Not found in medical, ');
+    for (const id of [r.id, notIn.id]) {
+      expect(await label(id).evaluate((el) => el.scrollWidth <= el.clientWidth + 0.5), `${width} px: ${id} label cut`).toBe(true);
+      expect((await cell(page, id, 'status').boundingBox())!.height, `${width} px: one line`).toBeLessThan(24);
+    }
+    const layout = await logLayout(page);
+    expect(Math.min(...layout.nameWidths), `${width} px`).toBeGreaterThanOrEqual(79.5);
+    expect(layout.cutCells, `${width} px`).toEqual([]);
+    expect(layout.pageScrolls, `${width} px`).toBe(false);
+  }
 });
 
 test('view switcher: Pending and My requests with counts, the same large title, the menu returns to All', async ({ page }) => {
@@ -761,33 +805,39 @@ test('view switcher: Pending and My requests with counts, the same large title, 
   await expect(card).toContainText('Logged');
 });
 
-test('Alerts live in the avatar menu: On / Off, and "Alerts are on" the first time', async ({ page }) => {
+test('Alerts live in the avatar menu: it opens the Alerts sheet, whose New requests is the phone bell and server-side (F4)', async ({ page }) => {
+  // Start from off on the server (the switch is server-side and this identity is reused across runs).
+  const setNewRequests = async (on: boolean) =>
+    expect((await page.request.post('/api/push/prefs', { headers: { origin: BASE }, data: { newRequests: on } })).status()).toBe(200);
+  await setNewRequests(false);
   await page.goto('/');
   await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('account-trigger').click();
   const menu = page.getByRole('dialog', { name: 'Account' });
-  const alerts = menu.getByRole('switch', { name: 'Alerts' });
-  await expect(alerts).toHaveAttribute('aria-checked', 'false');
-  await expect(alerts).toContainText('Off');
   await expect(menu.getByText('Export CSV')).toHaveCount(0);
-
-  await alerts.click();
-  const sheet = page.getByRole('dialog', { name: 'Alerts are on' });
+  await menu.getByTestId('alerts-menu').click();
+  const sheet = page.getByRole('dialog', { name: 'Alerts' });
   await expect(sheet).toBeVisible();
-  await expect(sheet).toHaveAccessibleDescription('New requests alert you while this app is open.');
-  expect(await page.evaluate(() => localStorage.getItem('lp-bell'))).toBe('1');
-  await sheet.getByRole('button', { name: 'Got it' }).click();
-
-  // Once seen, switching it off and on again just flips it.
-  await page.getByTestId('account-trigger').click();
-  await expect(alerts).toHaveAttribute('aria-checked', 'true');
-  await expect(alerts).toContainText('On');
-  await alerts.click();
-  await expect(alerts).toHaveAttribute('aria-checked', 'false');
-  expect(await page.evaluate(() => localStorage.getItem('lp-bell'))).toBeNull();
-  await alerts.click();
-  await expect(alerts).toHaveAttribute('aria-checked', 'true');
+  const newRequests = sheet.getByRole('switch', { name: /New requests/ });
+  await expect(newRequests).toHaveAttribute('aria-checked', 'false');
+  await newRequests.click();
+  await expect(newRequests).toHaveAttribute('aria-checked', 'true');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('lp-bell'))).toBe('1');
+  // No "Alerts are on" intro on top of the sheet.
   await expect(page.getByRole('dialog', { name: 'Alerts are on' })).toHaveCount(0);
+  await newRequests.click();
+  await expect(newRequests).toHaveAttribute('aria-checked', 'false');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('lp-bell'))).toBeNull();
+  // Server-side: a reload reads it back.
+  await newRequests.click();
+  await expect(newRequests).toHaveAttribute('aria-checked', 'true');
+  await page.keyboard.press('Escape');
+  await page.reload();
+  await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('account-trigger').click();
+  await page.getByRole('dialog', { name: 'Account' }).getByTestId('alerts-menu').click();
+  await expect(page.getByRole('dialog', { name: 'Alerts' }).getByRole('switch', { name: /New requests/ })).toHaveAttribute('aria-checked', 'true');
+  await setNewRequests(false);
 });
 
 test('Pending: In medical → Friend coming, Undo, then Reunited closes it (greyed under Archived in All)', async ({ page }) => {
