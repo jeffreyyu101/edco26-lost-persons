@@ -144,6 +144,9 @@ for (const theme of ['light', 'dark'] as const) {
         await setStatus(page, await setStatus(page, await createRequest(page), 'Checked – Not Found', 'answer'), 'Checked – Not Found', 'answer');
         await setStatus(page, await setStatus(page, await createRequest(page), 'Found – Awaiting Reunion', 'answer'), 'Reunited – Closed', 'reunite');
         const other = await createRequest(page, { reportingLocation: 'Other', otherLocation: 'Base' });
+        // (F3) In medical with me en route: my en route row is a button named by what it shows (WCAG 2.5.3).
+        const walking = await setStatus(page, await createRequest(page), 'Found – Awaiting Reunion', 'answer');
+        await api(page.request, 'POST', `/api/requests/${walking.id}/enroute`, { action: 'set', etaMinutes: 5 });
         // A photo, so the profile's portrait is a button (its name must start with the count it shows).
         const png = syntheticPng(64, 64);
         const upload = await page.request.post(`/api/requests/${waiting.id}/photos`, {
@@ -277,6 +280,11 @@ for (const theme of ['light', 'dark'] as const) {
           await expect(page.getByTestId('messages').getByTestId('bubble-them')).toBeVisible({ timeout: 15_000 });
         });
         await visit(`/?r=${held.id}`, 'Profile (not found yet)', () => expect(page.getByTestId('recheck-row')).toBeVisible());
+        await visit(`/?r=${walking.id}`, 'Profile (my en route)', async () => {
+          const mine = page.getByTestId('status-block').getByRole('button', { name: /^Friend en route ~\d+ min$/ });
+          await expect(mine).toBeVisible({ timeout: 15_000 });
+          await expect(mine).toHaveAccessibleDescription(/^Friend en route, about \d+ min away\. Change or cancel yours\.$/);
+        });
         await visit(`/?r=${waiting.id}&edit=all`, 'Edit', () => expect(page.getByTestId('request-form-submit')).toBeVisible());
         await visit('/?dashboard=1', 'Dashboard', () => expect(page.getByTestId('open-count')).toBeVisible());
 

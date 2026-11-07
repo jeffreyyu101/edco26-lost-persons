@@ -354,6 +354,23 @@ describe('rows: carried activity and sameRow', () => {
     expect(activityOf(makeRow(2))).toMatchObject({ messageCount: 0, unread: 0, lastMessage: null, enroute: null });
   });
 
+  it('regression: medical\'s "Not found yet" on a Needs info request ends Needs info (status unchanged, the hold set), and so does its Undo', () => {
+    const before = withActivity({ recheckAt: null, notFoundChecks: 0 });
+    const held = makeRow(1, { rowVersion: 2, status: STATUS.waiting, recheckAt: '2026-11-07T03:20:00.000000+00:00', notFoundChecks: 1 });
+    expect(carryActivity(before, held)).toMatchObject({ needsInfo: false, messageCount: 2, unread: 1 });
+    const heldAsking = withActivity({ recheckAt: '2026-11-07T03:20:00.000000+00:00', notFoundChecks: 1 });
+    expect(carryActivity(heldAsking, makeRow(1, { rowVersion: 3, status: STATUS.waiting, recheckAt: null, notFoundChecks: 0 }))).toMatchObject({ needsInfo: false });
+    // An edit of a held request (hold unchanged) keeps it.
+    expect(carryActivity(heldAsking, makeRow(1, { rowVersion: 3, status: STATUS.waiting, recheckAt: '2026-11-07T03:20:00.000000+00:00', notFoundChecks: 1, clothing: 'Red' }))).toMatchObject({ needsInfo: true });
+  });
+
+  it('a row that has activity is taken as it is (activityOf zeros)', () => {
+    const before = withActivity();
+    const fresh = withActivity({ rowVersion: 2, unread: 0 });
+    expect(carryActivity(before, fresh)).toBe(fresh);
+    expect(activityOf(makeRow(2))).toMatchObject({ messageCount: 0, unread: 0, lastMessage: null, enroute: null });
+  });
+
   it('merging keeps the activity over a status answer, and equal activity objects keep the row', () => {
     const before = withActivity();
     const merged = mergeRows(new Map([[before.id, before]]), [makeRow(1, { rowVersion: 2, status: STATUS.inMedical })]);

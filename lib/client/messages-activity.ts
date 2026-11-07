@@ -22,12 +22,16 @@ export function activityOf(row: RequestSummary): RequestActivity {
 /**
  * A row from a response that does not carry activity (a status or edit answer built by lp_row alone) keeps
  * the activity the client had, adjusted for what the status change implies: Needs info ends with any status
- * change, and en route exists only In medical.
+ * change, the "Not found yet" hold and its Undo included (status still Waiting for check, but the server
+ * writes a status_changed audit row, which ends Needs info there too), and en route exists only In medical.
  */
 export function carryActivity(previous: RequestSummary | undefined, next: RequestSummary): RequestSummary {
   if (!previous || hasActivity(next) || !hasActivity(previous)) return next;
   const a = activityOf(previous);
-  const statusChanged = previous.status !== next.status;
+  const statusChanged =
+    previous.status !== next.status ||
+    (previous.recheckAt ?? null) !== (next.recheckAt ?? null) ||
+    (previous.notFoundChecks ?? 0) !== (next.notFoundChecks ?? 0);
   return {
     ...next,
     ...a,
@@ -46,12 +50,15 @@ export const messageAlertKey = (row: Pick<RequestSummary, 'id' | 'lastMessageAt'
 export interface MessageAlert {
   alert: AlertEvent;
   key: string;
+  /** The message's time (server time). */
+  at: string;
 }
 
 /**
  * A new message from someone else, on a request I'm involved in, since the rows the store held. Call it
  * BEFORE merging. Marks every alerted key in `seen`. `open`: request ids whose thread is on screen (no
- * alert: the bubble is the alert).
+ * alert: the bubble is the alert). A held row without the activity fields (cached by a build before
+ * messages, or a create answer) had no message this phone knew of: its first message alerts.
  */
 export function diffMessageAlerts(
   previous: ReadonlyMap<string, RequestSummary>,
@@ -64,15 +71,16 @@ export function diffMessageAlerts(
     if (!hasActivity(row) || !row.lastMessage || row.lastMessage.mine || !row.involved) continue;
     if (unreadOf(row) === 0 || !row.lastMessageAt) continue;
     const before = previous.get(row.id);
-    if (!before || !hasActivity(before)) continue;
-    if (before.lastMessageAt && row.lastMessageAt <= before.lastMessageAt) continue;
+    if (!before) continue;
+    const beforeAt = hasActivity(before) ? before.lastMessageAt : null;
+    if (beforeAt && row.lastMessageAt <= beforeAt) continue;
     const key = messageAlertKey(row);
     if (seen.has(key)) continue;
     seen.add(key);
     if (open(row.id)) continue;
     const who = initials(row.name);
     const subtitle = `${row.lastMessage.by || 'Staff'}: ${row.lastMessage.text}`;
-    out.push({ key, alert: { kind: 'message', requestId: row.id, title: who || 'New message', subtitle, count: 1 } });
+    out.push({ key, at: row.lastMessageAt, alert: { kind: 'message', requestId: row.id, title: who || 'New message', subtitle, count: 1 } });
   }
   return out;
 }

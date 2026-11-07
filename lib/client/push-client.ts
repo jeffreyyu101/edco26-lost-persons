@@ -591,10 +591,11 @@ export const SIGN_OUT_WAIT_MS = 3_000;
  * The page's own alert kinds whose events the server pushes in this build: every answer and status change.
  * Both Not found answers are pushed by the stage release (F5, lib/server/stage-notify.ts): the final one is the
  * page's 'not_in_medical', the "Not found yet" hold its 'status_changed' (alerts.ts holdAlert). A combined
- * alert ("3 new requests") is split before it is asked. Message alerts are toasts only (never a system
- * notification), so they are not listed.
+ * alert ("3 new requests") is split before it is asked. Messages are pushed too (F3, "Updates on my
+ * requests"): the page never shows a system notification for one, but in front it skips the toast of a message
+ * sent while it was hidden, which the push already showed (store-core pushedWhileHidden).
  */
-export const PUSHED_ALERT_KINDS: ReadonlySet<AlertEvent['kind']> = new Set<AlertEvent['kind']>(['in_medical', 'not_in_medical', 'reunited', 'new_request', 'status_changed']);
+export const PUSHED_ALERT_KINDS: ReadonlySet<AlertEvent['kind']> = new Set<AlertEvent['kind']>(['in_medical', 'not_in_medical', 'reunited', 'new_request', 'status_changed', 'message']);
 
 /**
  * The push carries this alert on this device: subscribed (the server confirmed it), the server pushes the

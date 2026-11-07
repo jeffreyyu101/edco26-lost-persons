@@ -405,6 +405,12 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
    * old one never closes a newer notification of the same request.
    */
   const systemAlerts = new Map<string, AlertToastMeta & { key: string | null }>();
+  /**
+   * The page's last hidden spell, in server time (estimated from the last sync); `until` is null while it is
+   * still hidden. Web Push showed a change made then on the lock screen: an iPhone suspends a hidden web app,
+   * so the sync back in front is the first to see it, and must not toast it again (never both).
+   */
+  let hiddenSpell: { from: number; until: number | null } | null = null;
 
   // outbox
   let workerRunning = false;
@@ -457,6 +463,22 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   let resumeSignOut: LogoutPending | null = null;
 
   const now = () => Date.now();
+  /** The server's clock now, from the last sync's serverTime (this device's clock before the first sync). */
+  const serverNow = () => {
+    const at = state.lastSyncAt ? Date.parse(state.lastSyncAt) : Number.NaN;
+    return Number.isFinite(at) && typeof state.lastSyncLocalAt === 'number' ? at + (now() - state.lastSyncLocalAt) : now();
+  };
+  const markHidden = (hidden: boolean) => {
+    if (hidden) hiddenSpell = { from: serverNow(), until: null };
+    else if (hiddenSpell && hiddenSpell.until === null) hiddenSpell.until = serverNow();
+  };
+  /** A change at `at` (server time) happened while the page was hidden, and this device's push carried it. */
+  const pushedWhileHidden = (kind: AlertEvent['kind'], at: string | null | undefined) => {
+    const t = at ? Date.parse(at) : Number.NaN;
+    if (!hiddenSpell || !Number.isFinite(t) || t < hiddenSpell.from) return false;
+    if (hiddenSpell.until !== null && t > hiddenSpell.until) return false;
+    return pushHooks()?.covers(kind) === true;
+  };
   const isLive = (id: number) => running && runId === id;
   const ownerGen = () => state.generation;
   const peerSigningOut = () => peerSignOutUntil > now();
@@ -698,8 +720,10 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       if (route !== 'system') closeSystemAlert(r.alert.requestId);
     }
     // Combined ("3 new requests") only counts what this tab shows. A device with Web Push (F4) leaves the
-    // system notification to the push: never both (lib/client/f4-bridge.ts).
-    const shown = route === 'none' ? [] : current.filter((r) => !plan.skip.has(r.key) && !(route === 'system' && pushHooks()?.covers(r.alert.kind)));
+    // system notification to the push, and a change made while the page was hidden too (the push showed it
+    // then): never both (lib/client/f4-bridge.ts).
+    const pushed = (r: RaisedAlert) => (route === 'system' ? pushHooks()?.covers(r.alert.kind) === true : pushedWhileHidden(r.alert.kind, r.at));
+    const shown = route === 'none' ? [] : current.filter((r) => !plan.skip.has(r.key) && !pushed(r));
     const raisedBy = new Map(shown.map((r) => [r.alert, r]));
     const sources = shown.map((r) => r.alert);
     for (const alert of coalesceAlerts(sources)) {
@@ -734,14 +758,15 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   /**
    * F3: a new message from someone else on a request I'm involved in. Toast + chime while the app is in
    * front, through the same delivery plan as the other alerts (one tab of this browser shows it); in the
-   * background nothing here (F4's Web Push carries it). Never for a thread on screen.
+   * background nothing here (F4's Web Push carries it), nor for a message sent while the page was hidden on a
+   * device whose push showed it. Never for a thread on screen.
    */
   const emitMessageAlerts = (raised: ReturnType<typeof diffMessageAlerts>) => {
     if (raised.length === 0 || !env?.visible()) return;
     const plan = notifier?.plan(raised.map((r) => r.key)) ?? TOAST_PLAN;
     if (plan.route !== 'toast') return;
     for (const r of raised) {
-      if (plan.skip.has(r.key)) continue;
+      if (plan.skip.has(r.key) || pushedWhileHidden('message', r.at)) continue;
       showAlertToast(r.alert, null);
     }
   };
@@ -2674,6 +2699,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       }
     }
     if (!e.online()) setConnection('offline');
+    if (!e.visible()) markHidden(true);
     offs.push(
       e.on('window', 'online', () => {
         netFailures = 0;
@@ -2690,6 +2716,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         triggerSync();
       }),
       e.on('document', 'visibilitychange', () => {
+        markHidden(!e.visible());
         if (e.visible()) {
           // A resumed tab confirms who is signed in before it syncs on, writes or sends queued requests.
           sessionMayHaveChanged();

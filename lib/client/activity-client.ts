@@ -9,13 +9,16 @@
 //   * The list loads when the sheet or popover opens.
 //   * Read state belongs to the request: opening it from anywhere (Activity, a list, a deep link, a push
 //     click) marks its row read (markRead); opening the sheet marks nothing.
-//   * Mark all read answers the ids it changed; Undo (5 s) sends them back.
+//   * Mark all read answers the ids it changed; Undo (5 s) sends them back. A list or ids answer fetched before
+//     or during either POST may predate it, so it is dropped, and the list (when open) is fetched again once
+//     the POST is answered: a slow GET never turns the rows unread again under the Undo.
 //   * The app icon badge (navigator.setAppBadge) is the unread count, set from the first sync after start
 //     too (a badge an earlier push left on the icon is cleared when nothing is unread).
 // Never logs anything.
 import { useSyncExternalStore } from 'react';
 import type { ActivityListResponse, ActivityReadResponse, ActivityRow, ActivityUnreadIdsResponse } from '../activity';
 import { subscribeSyncExtras, type ActivityUnread, type ApiRequest } from './f4-bridge';
+import type { HttpResult } from './http';
 import { viaStore } from './via-store';
 
 export interface ActivityState {
@@ -77,6 +80,11 @@ export function createActivityClient(host: ActivityHost): ActivityClient {
   let synced = false;
   /** Requests marked read here whose POST is on its way: a sync that still lists them doesn't bring them back. */
   const pendingRead = new Set<string>();
+  /** Mark all read / Undo POSTs on their way. */
+  let writes = 0;
+  /** Bumped as each of them starts and is answered: a list or ids answer fetched across one is out of date. */
+  let writeGen = 0;
+  const writeSettled = (gen: number) => writes === 0 && gen === writeGen;
 
   const set = (patch: Partial<ActivityState>) => {
     const before = state.unread;
@@ -89,8 +97,13 @@ export function createActivityClient(host: ActivityHost): ActivityClient {
   const loadUnread = async (): Promise<void> => {
     const seq = ++unreadSeq;
     const gen = epoch;
+    const wg = writeGen;
     const res = await host.request<ActivityUnreadIdsResponse>('/api/activity/unread', { timeoutMs: TIMEOUT_MS });
     if (seq !== unreadSeq || gen !== epoch) return;
+    if (!writeSettled(wg)) {
+      lastKey = null; // across a Mark all read / Undo: the next sync asks again
+      return;
+    }
     if (!res.ok || !Array.isArray(res.data.ids)) {
       lastKey = null; // the next sync tries again
       return;
@@ -112,14 +125,14 @@ export function createActivityClient(host: ActivityHost): ActivityClient {
           // Read on another device while this list is open: its rows turn read too.
           if (state.open) void refresh();
         }
-      } else if (pendingRead.size === 0 && u.count !== state.unread) {
+      } else if (pendingRead.size === 0 && writes === 0 && u.count !== state.unread) {
         set({ unread: u.count });
       }
     } else if (u.key !== lastKey) {
       // The count at once (the bell is live), unless a read of this page is still on its way (the fetch below
       // then settles it); then the ids, or the open list.
       lastKey = u.key;
-      if (pendingRead.size === 0 && u.count !== state.unread) set({ unread: Math.max(0, u.count) });
+      if (pendingRead.size === 0 && writes === 0 && u.count !== state.unread) set({ unread: Math.max(0, u.count) });
       if (state.open) void refresh();
       else void loadUnread();
     }
@@ -129,9 +142,11 @@ export function createActivityClient(host: ActivityHost): ActivityClient {
   const refresh = async (): Promise<void> => {
     const seq = ++fetchSeq;
     const gen = epoch;
+    const wg = writeGen;
     set({ loading: state.rows === null, failed: false });
     const res = await host.request<ActivityListResponse>('/api/activity', { timeoutMs: TIMEOUT_MS });
     if (seq !== fetchSeq || gen !== epoch) return;
+    if (!writeSettled(wg)) return; // across a Mark all read / Undo: fetched again once it is answered
     if (!res.ok || !Array.isArray(res.data.rows)) {
       lastKey = null; // the next sync tries again
       set({ loading: false, failed: state.rows === null });
@@ -145,6 +160,27 @@ export function createActivityClient(host: ActivityHost): ActivityClient {
 
   const markRows = (ids: ReadonlySet<string> | null, read: boolean) =>
     state.rows ? state.rows.map((r) => (ids === null || ids.has(r.requestId) ? { ...r, read } : r)) : null;
+
+  /** A Mark all read / Undo POST: every list or ids answer fetched before it is answered is dropped. */
+  const write = async <T>(path: string, json: unknown): Promise<HttpResult<T> | null> => {
+    const gen = epoch;
+    writes += 1;
+    writeGen += 1;
+    try {
+      const res = await host.request<T>(path, { method: 'POST', json, timeoutMs: TIMEOUT_MS });
+      return gen === epoch ? res : null;
+    } finally {
+      if (gen === epoch) {
+        writes -= 1;
+        writeGen += 1;
+        // The list as the server has it now (it also finishes a load the POST overtook); closed: the next sync.
+        if (writes === 0) {
+          if (state.open) void refresh();
+          else lastKey = null;
+        }
+      }
+    }
+  };
 
   return {
     getState: () => state,
@@ -177,11 +213,10 @@ export function createActivityClient(host: ActivityHost): ActivityClient {
       });
     },
     async markAllRead() {
-      const gen = epoch;
       const before = { unread: state.unread, unreadIds: state.unreadIds, rows: state.rows };
       set({ unread: 0, unreadIds: new Set(), rows: markRows(null, true) });
-      const res = await host.request<ActivityReadResponse>('/api/activity/read', { method: 'POST', json: { all: true }, timeoutMs: TIMEOUT_MS });
-      if (gen !== epoch) return null;
+      const res = await write<ActivityReadResponse>('/api/activity/read', { all: true });
+      if (!res) return null;
       if (!res.ok) {
         set(before);
         return null;
@@ -190,25 +225,52 @@ export function createActivityClient(host: ActivityHost): ActivityClient {
     },
     async undoMarkAll(ids) {
       if (ids.length === 0) return true;
-      const gen = epoch;
       const back = new Set(ids);
       const unreadIds = new Set([...state.unreadIds, ...ids]);
       set({ unreadIds, unread: unreadIds.size, rows: markRows(back, false) });
-      const res = await host.request('/api/activity/unread', { method: 'POST', json: { requestIds: [...ids] }, timeoutMs: TIMEOUT_MS });
-      if (gen !== epoch) return false;
-      if (!res.ok) void refresh();
-      return res.ok;
+      const res = await write('/api/activity/unread', { requestIds: [...ids] });
+      return res?.ok === true;
     },
     reset() {
       epoch += 1;
       fetchSeq += 1;
       unreadSeq += 1;
+      writes = 0;
+      writeGen += 1;
       lastKey = null;
       synced = false;
       pendingRead.clear();
       set({ ...INITIAL_ACTIVITY, unreadIds: new Set(), open: false });
       host.setBadge(0);
     },
+  };
+}
+
+/** What the read rule needs of the document (a test passes a fake). */
+export interface VisibilityDoc {
+  readonly visibilityState: DocumentVisibilityState;
+  addEventListener(type: 'visibilitychange', listener: () => void): void;
+  removeEventListener(type: 'visibilitychange', listener: () => void): void;
+}
+
+/**
+ * The request on screen (ActivityHost): its Activity row turns read when it is, or becomes, unread, but only
+ * while the page is visible, as the thread's own read (messages-core markRead). A hidden tab keeps polling,
+ * so a new event on the request open there stays unread (the bell, the app icon badge) until it is seen.
+ * Returns the remover.
+ */
+export function markReadWhileOpen(client: Pick<ActivityClient, 'getState' | 'subscribe' | 'markRead'>, requestId: string, doc: VisibilityDoc): () => void {
+  const check = () => {
+    if (doc.visibilityState !== 'visible') return;
+    if (client.getState().unreadIds.has(requestId)) client.markRead(requestId);
+  };
+  check();
+  // A deep link opens before the first sync says what is unread; an event can also arrive while it is open.
+  const off = client.subscribe(check);
+  doc.addEventListener('visibilitychange', check);
+  return () => {
+    off();
+    doc.removeEventListener('visibilitychange', check);
   };
 }
 

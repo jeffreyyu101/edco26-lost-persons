@@ -608,7 +608,7 @@ function isWebKit() {
   return /AppleWebKit/.test(ua) && !/Chrome\/|Chromium\/|Edg\/|Firefox\//.test(ua);
 }
 
-/** The payload, checked: {title, body, tag, url, kind, requestId, renotify, badge}. Never throws. */
+/** The payload, checked: {title, body, tag, url, kind, requestId, renotify, requireInteraction, badge}. Never throws. */
 function pushData(event) {
   let raw = null;
   try {
@@ -626,6 +626,7 @@ function pushData(event) {
     kind: text(raw && raw.kind, 40),
     requestId: text(raw && raw.requestId, 64) || null,
     renotify: !!(raw && raw.renotify === true),
+    requireInteraction: !!(raw && raw.requireInteraction === true),
     badge: raw && typeof raw.badge === 'number' && raw.badge >= 0 ? Math.floor(raw.badge) : null,
   };
 }
@@ -646,6 +647,7 @@ function showPush(data, silent) {
     body: data.body,
     tag: data.tag,
     renotify: data.renotify && !silent,
+    requireInteraction: data.requireInteraction && !silent,
     silent: !!silent,
     icon: PUSH_ICON,
     lang: 'en-US',

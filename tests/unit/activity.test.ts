@@ -107,9 +107,17 @@ describe('which events F4 raises (contract D)', () => {
 describe('push payload', () => {
   it('title = initials (New request for a new one), body = the scrubbed detail, one tag per request', () => {
     const p = pushPayload({ requestId: ID, kind: 'in_medical', detail: 'LP-1013 In medical · Chair 9' }, 'J.D.', 2);
-    expect(p).toMatchObject({ title: 'J.D.', body: 'In medical · Chair 9', tag: `lp-${ID}`, url: `/?r=${ID}`, renotify: false, badge: 2 });
+    expect(p).toMatchObject({ title: 'J.D.', body: 'In medical · Chair 9', tag: `lp-${ID}`, url: `/?r=${ID}`, renotify: true, requireInteraction: true, badge: 2 });
     expect(pushPayload({ requestId: ID, kind: 'new_request', detail: 'T.R. · 24 M · FA 4' }, 'T.R.', null).title).toBe('New request');
     expect(pushPayload({ requestId: ID, kind: 'message', detail: 'Rae C.: hi' }, 'A.L.', null).renotify).toBe(true);
+  });
+
+  it('regression: every event sounds when it replaces the request\'s earlier notification; only In medical stays until dismissed', () => {
+    for (const kind of ACTIVITY_KINDS) {
+      const p = pushPayload({ requestId: ID, kind, detail: 'Friend arrived' }, 'J.D.', null);
+      expect(p.renotify, kind).toBe(true);
+      expect(p.requireInteraction, kind).toBe(kind === 'in_medical');
+    }
   });
 
   it('never carries an LP number, a phone number or more than the limit', () => {

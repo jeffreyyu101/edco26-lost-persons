@@ -237,7 +237,7 @@ describe('the routes notify (contract D)', () => {
     expect(await activityOf(rae, r.id)).toBeNull();
     await eventually(() => danaPhone.deliveries.length === 1);
     const p = danaPhone.deliveries[0]!;
-    expect(p.payload).toMatchObject({ title: 'J.D.', body: 'In medical', tag: `lp-${r.id}`, url: `/?r=${r.id}`, kind: 'in_medical', renotify: false });
+    expect(p.payload).toMatchObject({ title: 'J.D.', body: 'In medical', tag: `lp-${r.id}`, url: `/?r=${r.id}`, kind: 'in_medical', renotify: true, requireInteraction: true });
     expect(p.urgency).toBe('high');
     expect(p.ttl).toBe('3600');
     const text = JSON.stringify(p.payload);

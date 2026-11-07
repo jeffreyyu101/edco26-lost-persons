@@ -10,7 +10,7 @@
 import { Button, IconButton, VisuallyHidden } from '@radix-ui/themes';
 import { Check, ChevronRight, X } from 'lucide-react';
 import { WalkIcon } from './WalkIcon';
-import { useState, type ReactNode } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import { Sheet } from '@/components/ui/Sheet';
 import type { EnrouteSummary, RequestSummary } from '@/lib/api-types';
 import { useEnroute, useFailedEnroute, useMessaging } from '@/lib/client/messages-hooks';
@@ -37,11 +37,12 @@ export interface EnrouteRowProps {
 /** The one en route row, or nothing when nobody is en route (or the request is not In medical). */
 export function EnrouteRow({ enroute, status, onEdit, pressed, testId = 'enroute-row' }: EnrouteRowProps) {
   const now = useNow();
+  const descId = useId();
   const view = enrouteView(enroute, now, status);
   if (!view) return null;
   const tappable = !!onEdit && view.state === 'enroute';
-  // Read-only: the visible pieces are hidden from screen readers and one sentence says it all instead.
-  const hide = tappable ? undefined : true;
+  // The visible pieces are hidden from screen readers. Read-only: one sentence says it all instead. Mine (a
+  // button): named by exactly what it shows ("Friend en route ~5 min", WCAG 2.5.3), described by the sentence.
   const content: ReactNode = (
     <>
       {view.state === 'arrived' ? (
@@ -49,16 +50,16 @@ export function EnrouteRow({ enroute, status, onEdit, pressed, testId = 'enroute
       ) : (
         <WalkIcon size={18} strokeWidth={2} className={s.enrIcon} aria-hidden />
       )}
-      <span className={s.enrLabel} aria-hidden={hide}>
+      <span className={s.enrLabel} aria-hidden>
         {view.label}
       </span>
       {view.count > 1 ? (
-        <span className={s.enrCount} aria-hidden={hide}>
+        <span className={s.enrCount} aria-hidden>
           {view.count}
         </span>
       ) : null}
       {view.eta ? (
-        <span className={s.enrEta} aria-hidden={hide}>
+        <span className={s.enrEta} aria-hidden>
           {view.eta}
         </span>
       ) : null}
@@ -73,10 +74,14 @@ export function EnrouteRow({ enroute, status, onEdit, pressed, testId = 'enroute
         data-tone={view.tone}
         data-pressed={pressed ? '' : undefined}
         data-testid={testId}
-        aria-label={`${view.sentence} Change or cancel yours.`}
+        aria-describedby={descId}
         onClick={onEdit}
       >
         {content}
+        <VisuallyHidden>{[view.label, view.count > 1 ? String(view.count) : null, view.eta].filter(Boolean).join(' ')}</VisuallyHidden>
+        <span id={descId} hidden>
+          {`${view.sentence} Change or cancel yours.`}
+        </span>
       </button>
     );
   }

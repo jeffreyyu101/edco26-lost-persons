@@ -20,7 +20,8 @@ const payload = (over: Record<string, unknown> = {}) => ({
   url: `/?r=${ID}`,
   kind: 'in_medical',
   requestId: ID,
-  renotify: false,
+  renotify: true,
+  requireInteraction: true,
   badge: 3,
   ...over,
 });
@@ -71,16 +72,26 @@ describe('push (no window in front)', () => {
     expect(worker.notifications).toHaveLength(1);
     const [n] = worker.notifications;
     expect(n?.title).toBe('J.D.');
-    expect(n?.options).toMatchObject({ body: 'In medical · Chair 9', tag: `lp-${ID}`, icon: '/icons/icon-192.png', renotify: false, silent: false });
+    expect(n?.options).toMatchObject({ body: 'In medical · Chair 9', tag: `lp-${ID}`, icon: '/icons/icon-192.png', renotify: true, requireInteraction: true, silent: false });
     expect(n?.data).toMatchObject({ url: `/?r=${ID}`, push: true, requestId: ID });
     expect(worker.badge()).toBe(3);
   });
 
-  it('a later push about the same request replaces the notification (one per request); messages sound again', async () => {
+  it('a later push about the same request replaces the notification (one per request) and sounds again', async () => {
     await worker.push(payload());
-    await worker.push(payload({ kind: 'message', body: 'Rae C.: Bring 1 person only', renotify: true }));
+    await worker.push(payload({ kind: 'message', body: 'Rae C.: Bring 1 person only', renotify: true, requireInteraction: false }));
     expect(worker.notifications).toHaveLength(1);
-    expect(worker.notifications[0]?.options).toMatchObject({ body: 'Rae C.: Bring 1 person only', renotify: true });
+    expect(worker.notifications[0]?.options).toMatchObject({ body: 'Rae C.: Bring 1 person only', renotify: true, requireInteraction: false });
+  });
+
+  it('regression: a later answer replaces medical\'s hold with sound; an older payload (no flags) is neither sticky nor renotifying', async () => {
+    await worker.push(payload({ kind: 'not_in_medical', body: 'Not found yet · recheck 4:40 PM', requireInteraction: false }));
+    await worker.push(payload());
+    expect(worker.notifications).toHaveLength(1);
+    expect(worker.notifications[0]?.options).toMatchObject({ body: 'In medical · Chair 9', renotify: true, requireInteraction: true });
+    const { renotify: _r, requireInteraction: _q, ...old } = payload({ kind: 'moved', body: 'Bed 3' });
+    await worker.push(old);
+    expect(worker.notifications[0]?.options).toMatchObject({ body: 'Bed 3', renotify: false, requireInteraction: false });
   });
 
   it('a hidden window, or a visible one that says it is not in front (a computer, unfocused), does not stop it', async () => {
@@ -168,7 +179,7 @@ describe('push while the app is in front (never both)', () => {
     pages.push(win('front', { focused: true, visible: true }));
     await w.push(payload({ renotify: true }));
     expect(w.shownLog).toHaveLength(1);
-    expect(w.shownLog[0]?.options).toMatchObject({ silent: true, renotify: false });
+    expect(w.shownLog[0]?.options).toMatchObject({ silent: true, renotify: false, requireInteraction: false });
     expect(w.notifications).toHaveLength(0);
   });
 

@@ -4,9 +4,9 @@
 // alert, and sign-out with queued messages. Synthetic data only.
 import { describe, expect, it } from 'vitest';
 import type { RequestSummary, ThreadMessage } from '@/lib/api-types';
-import { openKv } from '@/lib/client/persist';
+import { K, openKv } from '@/lib/client/persist';
 import type { MessagingApi } from '@/lib/client/messages-core';
-import { STATUS } from '@/lib/domain';
+import { STATUS, canonStaff } from '@/lib/domain';
 import { createMessaging } from '@/lib/client/messages-core';
 import { effectiveEnroute, failedEnrouteTap } from '@/lib/client/messages-logic';
 import { advance, settle } from './helpers/env';
@@ -343,6 +343,26 @@ describe('read, en route and the alert', () => {
     expect(toast?.title).not.toMatch(/LP-/);
     await advance(7_000);
     expect(s().toasts.filter((t) => t.subtitle === 'Rae C.: Any tattoos or marks?')).toHaveLength(1);
+  });
+
+  it('regression: a row cached by the build before messages (no activity fields) toasts its first message after the update', async () => {
+    const plain = makeRow(1, { createdBy: STAFF.dana.staff });
+    const server = new FakeServer([plain]);
+    const first = boot(server);
+    await ready();
+    await advance(3_500);
+    first.stop();
+    // The cache as the old build left it, with a cursor well inside the 6 h full-fetch window.
+    await openKv(first.fe.dbName)?.set(K.rows(canonStaff(STAFF.dana.staff) ?? ''), [plain]);
+    server.overlap = 0; // the delta resends nothing: the cached row stays without activity
+    const second = boot(server, { dbName: first.fe.dbName });
+    await ready();
+    expect(server.requests('GET', '/api/sync').at(-1)?.query.get('since')).not.toBeNull();
+    expect(second.s().confirmed.get(plain.id)?.messageCount).toBeUndefined();
+    server.put({ ...plain, messageCount: 1, unread: 1, lastMessageAt: '2026-11-07T03:01:00.000000+00:00', lastMessage: { by: 'Rae C.', mine: false, text: 'Any tattoos or marks?' }, needsInfo: true, enroute: null, involved: true });
+    await advance(7_000);
+    expect(second.s().confirmed.get(plain.id)?.messageCount).toBe(1);
+    expect(second.s().toasts.filter((t) => t.subtitle === 'Rae C.: Any tattoos or marks?')).toHaveLength(1);
   });
 });
 

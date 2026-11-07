@@ -5,7 +5,7 @@
 // sign-out. Synthetic ids only.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ActivityRow } from '@/lib/activity';
-import { createActivityClient } from '@/lib/client/activity-client';
+import { createActivityClient, markReadWhileOpen, type VisibilityDoc } from '@/lib/client/activity-client';
 import { publishSyncExtras } from '@/lib/client/f4-bridge';
 import { apiRequest } from '@/lib/client/http';
 
@@ -243,6 +243,58 @@ describe('read state belongs to the request', () => {
   });
 });
 
+describe('the request on screen', () => {
+  const fakeDoc = () => {
+    const listeners = new Set<() => void>();
+    const doc = {
+      visibilityState: 'visible' as DocumentVisibilityState,
+      addEventListener: (_: 'visibilitychange', l: () => void) => void listeners.add(l),
+      removeEventListener: (_: 'visibilitychange', l: () => void) => void listeners.delete(l),
+      show(state: DocumentVisibilityState) {
+        doc.visibilityState = state;
+        for (const l of [...listeners]) l();
+      },
+      listeners,
+    };
+    return doc satisfies VisibilityDoc;
+  };
+  const readPosts = () => server.calls.filter((c) => c.path === '/api/activity/read' && c.method === 'POST').map((c) => c.body);
+
+  it('opened while visible: its row turns read at once', async () => {
+    const client = make();
+    client.start();
+    publishSyncExtras(server.sync());
+    await settle();
+    const off = markReadWhileOpen(client, A, fakeDoc());
+    expect(client.getState().unreadIds.has(A)).toBe(false);
+    expect(readPosts()).toEqual([{ requestId: A }]);
+    off();
+  });
+
+  it('regression: a new event while the tab is hidden stays unread until the page is visible again', async () => {
+    const client = make();
+    client.start();
+    server.setRows([row(A, true), row(B, false, '2026-11-06T20:00:00Z')]);
+    publishSyncExtras(server.sync());
+    await settle();
+    const doc = fakeDoc();
+    const off = markReadWhileOpen(client, A, doc);
+    doc.show('hidden');
+    // A hidden poll: a new message on the open request.
+    server.setRows([row(A, false, '2026-11-06T21:10:00Z', 'Rae C.: Any tattoos?'), row(B, false, '2026-11-06T20:00:00Z')]);
+    publishSyncExtras(server.sync());
+    await settle();
+    expect(client.getState().unreadIds.has(A)).toBe(true);
+    expect(client.getState().unread).toBe(2);
+    expect(readPosts()).toEqual([]);
+    doc.show('visible');
+    expect(client.getState().unreadIds.has(A)).toBe(false);
+    expect(readPosts()).toEqual([{ requestId: A }]);
+    off();
+    expect(doc.listeners.size).toBe(0);
+  });
+});
+
 describe('Mark all read and Undo', () => {
   it('marks every row read, answers the ids, and Undo makes exactly those unread again', async () => {
     const client = make();
@@ -256,7 +308,68 @@ describe('Mark all read and Undo', () => {
     expect(await client.undoMarkAll(ids ?? [])).toBe(true);
     expect(client.getState().unread).toBe(2);
     expect(client.getState().rows?.filter((r) => !r.read).map((r) => r.requestId).sort()).toEqual([A, B].sort());
-    expect(server.calls.at(-1)).toMatchObject({ path: '/api/activity/unread', body: { requestIds: ids } });
+    expect(server.calls.filter((c) => c.method === 'POST').at(-1)).toMatchObject({ path: '/api/activity/unread', body: { requestIds: ids } });
+  });
+
+  it('regression: Mark all read while the list is still loading: the late list never turns the rows unread again', async () => {
+    badges = [];
+    publishSyncExtras(server.sync());
+    let releaseList: () => void = () => undefined;
+    const slowList = new Promise<void>((r) => (releaseList = r));
+    const fetch = server.fetch;
+    let held = 0;
+    const slow = createActivityClient({
+      request: (path, opts) =>
+        apiRequest(
+          async (p: string, init?: RequestInit) => {
+            // The first list GET (opening the sheet) answers before the POST but arrives after it.
+            if (p === '/api/activity' && held++ === 0) {
+              const res = await fetch(p, init);
+              await slowList;
+              return res;
+            }
+            return fetch(p, init);
+          },
+          path,
+          opts,
+        ),
+      setBadge: (n) => badges.push(n),
+    });
+    slow.start();
+    await settle();
+    expect(slow.getState().unread).toBe(2);
+    slow.setOpen(true);
+    await settle();
+    expect(slow.getState().rows).toBeNull();
+    const ids = await slow.markAllRead();
+    expect(ids?.sort()).toEqual([A, B].sort());
+    releaseList();
+    await settle();
+    await settle();
+    expect(slow.getState().unread).toBe(0);
+    expect(slow.getState().rows?.map((r) => r.read)).toEqual([true, true, true]);
+    expect(badges.at(-1)).toBe(0);
+  });
+
+  it('regression: Undo while the list fetched after Mark all read is on its way keeps the rows unread', async () => {
+    const client = make();
+    client.start();
+    client.setOpen(true);
+    await settle();
+    server.holdReads(true);
+    const marking = client.markAllRead();
+    await settle();
+    // A key move while the POST is on its way: the list it fetches predates the POST.
+    publishSyncExtras({ activityUnread: 2, activityKey: 'moved-key-1' });
+    await settle();
+    expect(client.getState().unread).toBe(0);
+    server.holdReads(false);
+    const ids = (await marking) ?? [];
+    expect(ids.sort()).toEqual([A, B].sort());
+    expect(await client.undoMarkAll(ids)).toBe(true);
+    await settle();
+    expect(client.getState().unread).toBe(2);
+    expect(client.getState().rows?.filter((r) => !r.read).map((r) => r.requestId).sort()).toEqual([A, B].sort());
   });
 
   it('a failed Mark all read puts the rows back', async () => {

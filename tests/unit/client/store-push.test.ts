@@ -106,6 +106,113 @@ describe('Web Push covers the page notification', () => {
   });
 });
 
+/** The page's own rule: a system notification while hidden, the toast in front (system-notify routeAlert). */
+function bootByVisibility(server: FakeServer) {
+  const shown: SystemNotice[] = [];
+  let visible = () => true;
+  const notifier: AlertNotifier = {
+    plan: () => ({ route: visible() ? 'toast' : 'system', skip: new Set<string>() }),
+    setActive: () => undefined,
+    show: async (alert, rowOf, sources) => {
+      shown.push(systemNotice(alert, rowOf, sources));
+      return true;
+    },
+    close: () => undefined,
+    closeAll: () => undefined,
+  };
+  const booted = boot(server, {}, (env) => {
+    env.notifier = () => notifier;
+    visible = env.visible;
+  });
+  /** The phone locks: hidden, and (an iPhone) suspended: no timer runs while the clock moves on. */
+  const lock = () => {
+    booted.fe.setVisible(false);
+    booted.fe.fire('document', 'visibilitychange');
+  };
+  const unlock = async (afterMs = 5 * 60_000) => {
+    vi.setSystemTime(Date.now() + afterMs);
+    booted.fe.setVisible(true);
+    booted.fe.fire('document', 'visibilitychange');
+    await advance(100);
+  };
+  return { ...booted, shown, lock, unlock };
+}
+
+describe('regression: a hidden, suspended page (an iPhone) never toasts what its push already showed', () => {
+  const MESSAGE = { by: 'Rae C.', mine: false, text: 'Any tattoos or marks?' };
+  const messageRow = () =>
+    makeRow(4, { createdBy: STAFF.dana.staff, messageCount: 0, unread: 0, lastMessage: null, lastMessageAt: null, needsInfo: false, enroute: null, involved: true });
+
+  it('subscribed: a change made while locked shows no toast when the app is opened (the lock screen had it)', async () => {
+    const mine = makeRow(4, { createdBy: STAFF.dana.staff });
+    const server = new FakeServer([mine]);
+    const { s, shown, lock, unlock } = bootByVisibility(server);
+    subscribed();
+    await ready();
+    lock();
+    server.change(mine.id, { status: STATUS.inMedical });
+    // The fake server's clock is its seq: put the change a minute into the lock.
+    server.rows.get(mine.id)!.row.updatedAt = new Date(Date.now() + 60_000).toISOString();
+    await unlock();
+    expect(s().confirmed.get(mine.id)?.status).toBe(STATUS.inMedical);
+    expect(s().toasts).toEqual([]);
+    expect(shown).toEqual([]);
+  });
+
+  it('subscribed: a change made after the app is opened again toasts as before', async () => {
+    const mine = makeRow(4, { createdBy: STAFF.dana.staff });
+    const server = new FakeServer([mine]);
+    const { s, lock, unlock } = bootByVisibility(server);
+    subscribed();
+    await ready();
+    lock();
+    await unlock();
+    server.change(mine.id, { status: STATUS.inMedical });
+    server.rows.get(mine.id)!.row.updatedAt = new Date(Date.now() + 10_000).toISOString();
+    await advance(6_000);
+    expect(s().toasts.map((t) => t.title)).toEqual(['LP-1004 · T.R. is in medical']);
+  });
+
+  it('not subscribed: the change made while locked toasts when the app is opened (nothing else showed it)', async () => {
+    const mine = makeRow(4, { createdBy: STAFF.dana.staff });
+    const server = new FakeServer([mine]);
+    const { s, lock, unlock } = bootByVisibility(server);
+    await ready();
+    lock();
+    server.change(mine.id, { status: STATUS.inMedical });
+    server.rows.get(mine.id)!.row.updatedAt = new Date(Date.now() + 60_000).toISOString();
+    await unlock();
+    expect(s().toasts.map((t) => t.title)).toEqual(['LP-1004 · T.R. is in medical']);
+  });
+
+  it('subscribed: a message sent while locked shows no toast when the app is opened; one after it does', async () => {
+    const row = messageRow();
+    const server = new FakeServer([row]);
+    const { s, lock, unlock } = bootByVisibility(server);
+    subscribed();
+    await ready();
+    lock();
+    server.put({ ...row, messageCount: 1, unread: 1, lastMessageAt: new Date(Date.now() + 60_000).toISOString(), lastMessage: MESSAGE });
+    await unlock();
+    expect(s().confirmed.get(row.id)?.messageCount).toBe(1);
+    expect(s().toasts).toEqual([]);
+    server.put({ ...row, messageCount: 2, unread: 2, lastMessageAt: new Date(Date.now() + 10_000).toISOString(), lastMessage: { ...MESSAGE, text: 'Bring 1 person only' } });
+    await advance(6_000);
+    expect(s().toasts.map((t) => t.subtitle)).toEqual(['Rae C.: Bring 1 person only']);
+  });
+
+  it('not subscribed: the message sent while locked toasts when the app is opened', async () => {
+    const row = messageRow();
+    const server = new FakeServer([row]);
+    const { s, lock, unlock } = bootByVisibility(server);
+    await ready();
+    lock();
+    server.put({ ...row, messageCount: 1, unread: 1, lastMessageAt: new Date(Date.now() + 60_000).toISOString(), lastMessage: MESSAGE });
+    await unlock();
+    expect(s().toasts.map((t) => t.subtitle)).toEqual(['Rae C.: Any tattoos or marks?']);
+  });
+});
+
 describe('the Activity count rides on sync', () => {
   it('the first page of a poll publishes activityUnread (an older server: nothing)', async () => {
     const server = new FakeServer([makeRow(1)]);

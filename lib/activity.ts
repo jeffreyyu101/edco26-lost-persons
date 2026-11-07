@@ -129,8 +129,14 @@ export interface PushPayload {
   url: string;
   kind: ActivityKind | 'test';
   requestId: string | null;
-  /** Sound and show again when it replaces an earlier one (messages). */
+  /**
+   * Sound and show again when it replaces an earlier one: every request event (one tag per request, so a
+   * later answer must never silently replace "In medical" or medical's question), as the page's own
+   * notification did (system-notify noticeOptions).
+   */
   renotify: boolean;
+  /** Stays on screen until dismissed (In medical: front of house walks the friend to Main Med), like its toast. */
+  requireInteraction?: boolean;
   /** The recipient's unread Activity count (the app icon badge), when known. */
   badge: number | null;
 }
@@ -295,7 +301,8 @@ export function pushPayload(event: Pick<ActivityEvent, 'requestId' | 'kind' | 'd
     url: `/?r=${event.requestId}`,
     kind: event.kind,
     requestId: event.requestId,
-    renotify: event.kind === 'message',
+    renotify: true,
+    requireInteraction: event.kind === 'in_medical',
     badge: typeof badge === 'number' && Number.isFinite(badge) && badge >= 0 ? Math.floor(badge) : null,
   };
 }

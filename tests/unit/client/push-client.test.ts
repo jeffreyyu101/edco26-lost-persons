@@ -425,8 +425,10 @@ describe('covers: the page stands down only for what the push carries', () => {
     expect(pushCovers(on, 'not_in_medical')).toBe(true);
     expect(pushCovers({ ...on, prefs: { newRequests: true, myUpdates: false } }, 'not_in_medical')).toBe(false);
   });
-  it('message alerts are toasts only: never covered', () => {
-    expect(pushCovers(on, 'message')).toBe(false);
+  it('messages are pushed with "Updates on my requests" (the page skips the toast of one sent while it was hidden)', () => {
+    expect(pushCovers(on, 'message')).toBe(true);
+    expect(pushCovers({ ...on, prefs: { newRequests: true, myUpdates: false } }, 'message')).toBe(false);
+    expect(pushCovers({ ...on, subscribed: false }, 'message')).toBe(false);
   });
   it('regression: a switch that is off means no push, so the page still notifies', () => {
     expect(pushCovers({ subscribed: true, prefs: { newRequests: true, myUpdates: false } }, 'in_medical')).toBe(false);

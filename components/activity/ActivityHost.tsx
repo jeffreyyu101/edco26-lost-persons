@@ -3,7 +3,8 @@
 // does not grow:
 //   * starts the push client for whoever is signed in (re-binds this device to them) and the Activity client;
 //     forgets both when the session ends or another staff member signs in;
-//   * a request opened from anywhere (Activity, a list, a deep link, a push click) marks its Activity row read;
+//   * a request opened from anywhere (Activity, a list, a deep link, a push click) marks its Activity row read,
+//     while the page is visible (a hidden tab's new event stays unread until it is seen, like the thread);
 //   * a push: the worker asks ({type: 'lp-push'} with a port) whether this page is in front by the page's own
 //     rule (system-notify inFront: visible, and on a computer focused) and shows nothing when it is; the page
 //     syncs at once, and its toast carries the event (lib/client/push-toast.ts: the push's own line when the
@@ -13,7 +14,7 @@
 import { useEffect, useRef } from 'react';
 import { AlertsSheet } from '@/components/alerts/AlertsSheet';
 import { usePushStarted } from '@/components/alerts/AlertsBanner';
-import { activityClient } from '@/lib/client/activity-client';
+import { activityClient, markReadWhileOpen } from '@/lib/client/activity-client';
 import { useView } from '@/lib/client/nav';
 import { useAlerts } from '@/lib/client/push-client';
 import { createPushToasts, type PushMessage } from '@/lib/client/push-toast';
@@ -51,17 +52,11 @@ export function ActivityHost() {
     client.start();
   }, [session.status, staff]);
 
-  // Read state belongs to the request: opening it marks its row read.
+  // Read state belongs to the request: opening it marks its row read (while it can be seen).
   const opened = openedRequestId(view);
   useEffect(() => {
     if (!opened || !staff) return;
-    const client = activityClient();
-    const check = () => {
-      if (client.getState().unreadIds.has(opened)) client.markRead(opened);
-    };
-    check();
-    // A deep link opens before the first sync says what is unread; an event can also arrive while it is open.
-    return client.subscribe(check);
+    return markReadWhileOpen(activityClient(), opened, document);
   }, [opened, staff]);
 
   // A push: say whether this page is in front (then the worker shows nothing and the app carries it), and sync.
