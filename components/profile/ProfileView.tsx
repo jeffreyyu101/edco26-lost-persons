@@ -14,8 +14,11 @@
 //                has them: a pin, "Chair 14" and a pencil, or "+ Location" (Pending v8, 2026-11-06 afternoon;
 //                the location editor is a sheet on the phone, a popover in the desk pane); who and when for
 //                the other answers
+//   preview      (R1, Brian 2026-11-07) the latest message on one line, only while the request needs info or
+//                has unread messages for me; a tap brings the thread into view (CardActivity ThreadPreview)
 //   details      Missing person / Friend or family, filled fields only, each with Edit; Phone has Call
 //   photos       tiles → full-screen viewer; Add tile (needs a connection) until there are 3
+//   messages     (F3; R1: below the details and photos, like Linear / Zendesk / GitHub issues) the thread
 //   audit trail  newest first (audit-trail.ts)
 //   actions      sticky, by status; disabled offline with "Needs a connection". Change answer (In medical,
 //                Not in medical) opens a menu: the other answer and Back to Waiting for check
@@ -31,6 +34,7 @@ import { CropSheet } from '@/components/photo/CropSheet';
 import { useCropQueue, type CropPick } from '@/components/photo/use-crop-queue';
 import { StatusEnroute } from '@/components/messages/Enroute';
 import { MessagesSection } from '@/components/messages/MessagesSection';
+import { ThreadPreview } from '@/components/messages/CardActivity';
 import { Banner, ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ProfileSkeleton } from '@/components/ui/Skeleton';
@@ -38,6 +42,7 @@ import { StageGlyph } from '@/components/ui/StageGlyph';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { RequestDetail, RequestSummary } from '@/lib/api-types';
 import { goBack, navigate } from '@/lib/client/nav';
+import { takeThreadParam } from '@/lib/client/thread-jump';
 import {
   useActions,
   useConnection,
@@ -52,6 +57,7 @@ import {
 import { FIELD_LABELS, MAX_PHOTOS, PHOTO_TIMING_LABEL, STATUS, canCancel, isHeld, isInMedical, isStatus, menuActions, parseStaff, postFull, primaryActions, sameStaff, statusMeta, telHref, waitTone, type PhotoTiming, type SettableStatus, type StatusAction, type StatusKind } from '@/lib/domain';
 import { displayStage, holdAnsweredAt, isMedicalTeam, notFoundAnswer } from '@/lib/stages';
 import { formatCaseNumber, formatDuration, formatListTime, minutesSince } from '@/lib/format';
+import { threadPreviewShown, unreadOf } from '@/lib/messaging';
 import { AddPhotosSheet, type PhotoPick } from './AddPhotos';
 import { AuditTrail, AuditTrailSkeleton } from './AuditTrail';
 import { buildAuditTrail, holdOrigin, statusOrigin, type StatusOrigin } from './audit-trail';
@@ -94,6 +100,10 @@ export function ProfileView({ id, presentation = 'page' }: ProfileViewProps) {
   useEffect(() => {
     if (!panel) window.scrollTo(0, 0);
   }, [id, panel]);
+  // (R2) "/?r=<id>&to=thread" (a message's notification): land at the thread once it shows.
+  useEffect(() => {
+    takeThreadParam(id);
+  }, [id]);
 
   if (!row) {
     const settled = !storeLoading && !detailLoading;
@@ -191,6 +201,18 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
     const timer = setTimeout(() => setSeenVersion(row.rowVersion), CONFLICT_BANNER_MS);
     return () => clearTimeout(timer);
   }, [conflict, row.rowVersion]);
+
+  // --- (R1) The latest-message line: while it needs info, or once unread messages for me came in ------------
+  // The thread marks itself read as soon as it loads (MessagesSection), so the page keeps what it saw: unread
+  // messages on arrival or while it was open (state adjusted during render, React's pattern).
+  const unread = unreadOf(row) > 0;
+  const [seenUnread, setSeenUnread] = useState(unread);
+  if (unread && !seenUnread) setSeenUnread(true);
+  const shownStage = displayStage(row, { now, timeZone });
+  const needsInfo = shownStage.key === 'needsInfo' ? shownStage : null;
+  const preview = threadPreviewShown(needsInfo !== null, seenUnread, row.lastMessage) ? (
+    <ThreadPreview row={row} needsInfo={needsInfo} unread={seenUnread && !row.lastMessage?.mine} />
+  ) : null;
 
   // --- Retry the detail when the connection comes back --------------------------------------------------
   const lastConnection = useRef(connection);
@@ -429,8 +451,7 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
 
         {panel ? actionBar : null}
 
-        {/* F3: the request's thread, at every status (updates.html v7). */}
-        <MessagesSection row={row} panel={panel} />
+        {preview}
 
         <Details row={row} />
 
@@ -476,6 +497,9 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
             </label>
           ) : null}
         </div>
+
+        {/* F3: the request's thread, at every status (updates.html v7); R1: after the details and photos. */}
+        <MessagesSection row={row} panel={panel} />
 
         {detailFailed ? null : (
           <>

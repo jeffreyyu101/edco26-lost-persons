@@ -25,7 +25,8 @@
 //     the notification centre. (F5) A request going on hold reads as contract B and recheck-6.png: "K.T." /
 //     "Not found yet · recheck 4:40 PM" (the alert's own words, alerts.ts holdAlert).
 //   * Click: public/sw.js focuses an app window and posts {type: 'lp-open', url}; this page opens that view
-//     in place (no reload, so an open form or sheet is not lost) and answers {ok}. A page that does not
+//     in place (no reload, so an open form or sheet is not lost) and answers {ok}. A message's opens the
+//     request at its thread ("/?r=<id>&to=thread", R2 2026-11-07; lib/client/thread-jump.ts). A page that does not
 //     answer (a sign-in page, an older build) is navigated by the worker instead.
 //
 // Off the first load (A25): the store loads this module with import() after start (store-core.ts
@@ -36,7 +37,9 @@ import { initials, isHeld, statusMeta } from '../domain';
 import { alertKey } from './alerts';
 import { hrefFor, navigate, parseView, viewToParams } from './nav';
 import type { AlertEvent } from './store-contract';
+import { requestThreadJump } from './thread-jump';
 import { uuid } from './uuid';
+import { threadPath, wantsThread } from '../thread-link';
 
 export type NotifyPermission = 'default' | 'granted' | 'denied';
 /** 'none': this tab is in the background and another app tab is in front, which toasts the alert itself. */
@@ -139,7 +142,7 @@ export interface SystemNotice {
   body: string;
   /** "lp-<request id>" (one notification per request; Web Push uses the same tag, F4), or COMBINED_TAG. */
   tag: string;
-  /** Path + query a click opens: "/?r=<id>", or "/" for a combined one. */
+  /** Path + query a click opens: "/?r=<id>", "/?r=<id>&to=thread" for a message (R2), or "/" for a combined one. */
   url: string;
   /** `${id}:${rowVersion}` of the row that alerted (null when combined): the cross-tab dedupe. */
   key: string | null;
@@ -180,7 +183,8 @@ export function systemNotice(
   }
   const id = alert.requestId;
   const row = rowOf(id);
-  const url = hrefFor({ r: id });
+  // (R2) A message opens the request at its thread.
+  const url = alert.kind === 'message' ? threadPath(id) : hrefFor({ r: id });
   const requireInteraction = alert.kind === 'in_medical';
   const tag = requestTag(id);
   if (!row) return { title: alert.kind === 'new_request' ? 'New request' : alert.title, body: '', tag, url, key: null, requireInteraction };
@@ -731,6 +735,8 @@ export function openFromNotification(url: string): boolean {
   }
   if (target.origin !== window.location.origin || target.pathname !== '/') return false;
   const params = viewToParams(parseView(target.searchParams));
+  // (R2) "/?r=<id>&to=thread" (a message): the request's Messages come into view, now or once it shows.
+  if (params.r && !params.edit && wantsThread(target.searchParams)) requestThreadJump(params.r);
   // Already showing it: no second history entry (Back would land on the same view).
   if (hrefFor(params) === `${window.location.pathname}${window.location.search}`) return true;
   navigate(params);

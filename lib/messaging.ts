@@ -275,6 +275,16 @@ export function previewText(last: LastMessage): { who: string; text: string } {
   return { who: last.mine ? 'You' : last.by || 'Staff', text: last.text };
 }
 
+/**
+ * (Request page order R1, Brian 2026-11-07) The request page's latest-message line under the status block shows
+ * only while the request needs info, or while it has unread messages for me. The thread marks itself read as
+ * soon as it loads, so the page passes `seenUnread`: unread messages from someone else came in while it was
+ * open (on arrival included). It goes once my own message is the latest (I answered).
+ */
+export function threadPreviewShown(needsInfo: boolean, seenUnread: boolean, last: Pick<LastMessage, 'mine'> | null | undefined): boolean {
+  return needsInfo || (seenUnread && !!last && !last.mine);
+}
+
 // The activity fields, EMPTY_ACTIVITY, hasActivity and unreadOf live in ./messaging-activity (the store's
 // first-load code needs only those); re-exported here so every other caller keeps one import.
 export { ACTIVITY_KEYS, EMPTY_ACTIVITY, hasActivity, unreadOf } from './messaging-activity';

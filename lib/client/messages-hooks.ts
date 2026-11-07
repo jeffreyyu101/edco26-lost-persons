@@ -75,22 +75,3 @@ export function useFailedEnroute(requestId: string): MessageJob | null {
   const jobs = useRequestJobs(requestId);
   return useMemo(() => failedEnrouteTap(jobs), [jobs]);
 }
-
-// ---------------------------------------------------------------------------------------------------
-// "Open the thread": a Message button navigates to the request and asks its Messages to come into view
-// with the composer focused. One flag, read once by the request's MessagesSection.
-// ---------------------------------------------------------------------------------------------------
-
-let focusRequest: { id: string; at: number } | null = null;
-
-export function requestThreadFocus(requestId: string): void {
-  focusRequest = { id: requestId, at: Date.now() };
-}
-
-/** True once for the request whose Message button was just tapped (within 5 s). */
-export function takeThreadFocus(requestId: string): boolean {
-  const f = focusRequest;
-  if (!f || f.id !== requestId || Date.now() - f.at > 5_000) return false;
-  focusRequest = null;
-  return true;
-}

@@ -667,7 +667,15 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 
   /** The in-app alert: its toast, and the listeners' chime and vibration. */
   const showAlertToast = (alert: AlertEvent, status: string | null, held?: boolean) => {
-    const toastId = showToast(alertToast(alert, (id) => navigate({ r: id })));
+    // (R2) A message's View lands at the request's thread (thread-jump loads with the views, off the first load).
+    const view = (id: string) =>
+      alert.kind === 'message'
+        ? void import('./thread-jump').then(
+            (m) => m.openThread(id),
+            () => navigate({ r: id }),
+          )
+        : navigate({ r: id });
+    const toastId = showToast(alertToast(alert, view));
     if (alert.requestId) alertToasts.set(toastId, { requestId: alert.requestId, kind: alert.kind, status, held });
     for (const l of [...alertListeners]) {
       try {

@@ -1,0 +1,428 @@
+import { randomUUID } from 'node:crypto';
+import { expect, test, type APIRequestContext, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import type { RequestDetail, RequestSummary, ThreadPage } from '../../lib/api-types';
+import { testBaseUrl } from '../../scripts/test-env.mjs';
+import { axeViolations, type AxeFinding } from './helpers/a11y';
+import { OVERFLOW_WIDTHS, expectNoOverflow } from './helpers/overflow';
+import { newSignedInContext, signedInAs } from './helpers/session';
+
+// Request page order (Brian 2026-11-07, design/DECISIONS.md "Request page order", spec R1–R3), end to end on the
+// real store, API and database, phone (iPhone 14) and desk (1440 × 900), Chromium and WebKit:
+//   R1  header → status block → the latest-message line → Details → Photos → Messages → Audit trail; the line
+//       shows for Needs info and for unread messages, and not otherwise (no messages, read, my reply latest)
+//   R2  the Message button, a desk row's unread badge, an Activity row whose latest event is a message, a
+//       message's notification (in place and as a new page) and the line itself land at the thread; the phone
+//       never focuses the composer (its keyboard stays down), the desk does; a row, a Pending card and an old
+//       "/?r=<id>" open at the top
+//   overflow at 375, 390, 820, 1180 and 1440 px in light and dark; axe on the request with the line.
+// Synthetic rows only (TEST-RO-…), closed again afterwards.
+
+const BASE = testBaseUrl();
+const FOH = { staffName: 'TEST-RO Dana Front', team: 'GC/HX - Dispatch' };
+const MED = { staffName: 'TEST-RO Rae Medic', team: 'Medical' };
+const TAG = `TEST-RO-${Date.now().toString(36)}`;
+const SYNC = { timeout: 20_000 };
+const DESK = { viewport: { width: 1440, height: 900 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 } as const;
+let seq = 0;
+
+test.use({ bypassCSP: true, serviceWorkers: 'block' });
+signedInAs(FOH);
+
+const created: Array<{ id: string; request: APIRequestContext }> = [];
+
+async function call<T>(request: APIRequestContext, method: 'GET' | 'POST', path: string, data?: unknown): Promise<T> {
+  const res = await request.fetch(path, { method, data, headers: { Origin: BASE } });
+  expect(res.ok(), `${method} ${path} → ${res.status()} ${await res.text()}`).toBe(true);
+  return (await res.json()) as T;
+}
+
+/** A request with every section filled, so the thread sits well below the first screen. */
+async function createRequest(request: APIRequestContext): Promise<RequestSummary> {
+  seq += 1;
+  const { request: row } = await call<{ request: RequestSummary }>(request, 'POST', '/api/requests', {
+    clientMutationId: randomUUID(),
+    reportingLocation: 'FA 3 – Kinetic',
+    name: `${TAG} P${seq}`,
+    age: 'mid-20s',
+    gender: 'Male',
+    clothing: `Synthetic ${TAG} red hoodie ${seq}`,
+    lastSeen: 'kineticFIELD rail',
+    hair: 'Long, blue braids',
+    contactName: `${TAG} Friend ${seq}`,
+    contactRelationship: 'Friend',
+    contactPhone: '(407) 555-0142',
+  });
+  created.push({ id: row.id, request });
+  return row;
+}
+
+const say = (request: APIRequestContext, id: string, body: string) => call(request, 'POST', `/api/requests/${id}/messages`, { clientMutationId: randomUUID(), body });
+
+async function inMedical(request: APIRequestContext, id: string): Promise<void> {
+  const row = await call<RequestDetail>(request, 'GET', `/api/requests/${id}`);
+  await call(request, 'POST', `/api/requests/${id}/status`, { status: 'Found – Awaiting Reunion', expectedVersion: row.rowVersion, kind: 'answer' });
+}
+
+test.afterEach(async () => {
+  for (const { id, request } of created.splice(0)) {
+    try {
+      const row = await call<RequestDetail>(request, 'GET', `/api/requests/${id}`);
+      if (row.status === 'Added') await request.fetch(`/api/requests/${id}/cancel`, { method: 'POST', data: { expectedVersion: row.rowVersion }, headers: { Origin: BASE } });
+      else if (row.status === 'Found – Awaiting Reunion')
+        await request.fetch(`/api/requests/${id}/status`, { method: 'POST', data: { status: 'Reunited – Closed', expectedVersion: row.rowVersion, kind: 'reunite' }, headers: { Origin: BASE } });
+    } catch {
+      // Best effort.
+    }
+  }
+});
+
+async function withMedical<T>(browser: Browser, run: (med: APIRequestContext) => Promise<T>): Promise<T> {
+  const ctx: BrowserContext = await newSignedInContext(browser, MED, { baseURL: BASE });
+  try {
+    return await run(ctx.request);
+  } finally {
+    await ctx.close();
+  }
+}
+
+const profile = (page: Page) => page.getByTestId('profile');
+const title = (page: Page) => profile(page).locator('h1');
+const line = (page: Page) => page.getByTestId('thread-preview');
+const messages = (page: Page) => page.getByTestId('messages');
+const threadHead = (page: Page) => messages(page).getByRole('heading', { name: 'Messages', exact: true });
+const composer = (page: Page) => messages(page).getByTestId('composer-input');
+const sectionHead = (page: Page, name: string) => profile(page).getByRole('heading', { name, exact: true });
+
+/**
+ * The request open at its Messages: the request's name scrolled past, the heading on screen in the top half of the
+ * request's scroller, or as far up as the scroller goes (little below it).
+ */
+async function expectAtThread(page: Page): Promise<void> {
+  await expect(threadHead(page)).toBeInViewport(SYNC);
+  await expect(title(page)).not.toBeInViewport();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const head = document.querySelector('[data-testid="messages"] h2');
+        const pane = document.querySelector('[data-testid="desk-pane"] [data-testid="profile"]')?.parentElement ?? null;
+        if (!head) return 'no heading';
+        const top = pane ? pane.getBoundingClientRect().top : 0;
+        const height = pane ? pane.clientHeight : window.innerHeight;
+        const atEnd = pane ? pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 2 : window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2;
+        return head.getBoundingClientRect().top - top < height / 2 || atEnd ? 'at thread' : `heading at ${Math.round(head.getBoundingClientRect().top - top)} of ${height}`;
+      }),
+    )
+    .toBe('at thread');
+}
+
+/** The request open at its top: its name on screen, nothing scrolled (on a phone the thread is below the screen). */
+async function expectAtTop(page: Page): Promise<void> {
+  await expect(title(page)).toBeInViewport(SYNC);
+  await page.waitForTimeout(600);
+  await expect(title(page)).toBeInViewport();
+  if (page.viewportSize()!.width < 768) await expect(threadHead(page)).not.toBeInViewport();
+  expect(await scrollOf(page)).toBe(0);
+}
+
+/** How far the request is scrolled: the window on a phone, the pane's body on the desk. */
+function scrollOf(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const pane = document.querySelector('[data-testid="desk-pane"] [data-testid="profile"]');
+    return pane?.parentElement ? pane.parentElement.scrollTop : window.scrollY;
+  });
+}
+
+/** The tops of the request's parts, in page order. */
+async function order(page: Page, withLine: boolean): Promise<number[]> {
+  const parts: Locator[] = [
+    title(page),
+    page.getByTestId('status-block'),
+    ...(withLine ? [line(page)] : []),
+    sectionHead(page, 'Missing person'),
+    sectionHead(page, 'Friend or family'),
+    sectionHead(page, 'Photos'),
+    threadHead(page),
+    sectionHead(page, 'Audit trail'),
+  ];
+  const tops: number[] = [];
+  for (const p of parts) tops.push((await p.boundingBox())?.y ?? Number.NaN);
+  return tops;
+}
+
+const ascending = (tops: number[]) => tops.every((t, i) => Number.isFinite(t) && (i === 0 || t > tops[i - 1]!));
+
+async function unreadOnServer(request: APIRequestContext, id: string): Promise<number> {
+  return (await call<ThreadPage>(request, 'GET', `/api/requests/${id}/messages`)).activity.unread;
+}
+
+/** What public/sw.js does on a notification click with an app window open: it asks the page to open the URL. */
+function workerAsksToOpen(page: Page, url: string): Promise<unknown> {
+  return page.evaluate(
+    (u) =>
+      new Promise((resolve) => {
+        const channel = new MessageChannel();
+        channel.port1.onmessage = (e) => resolve(e.data);
+        setTimeout(() => resolve(null), 1_000);
+        navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'lp-open', url: u }, ports: [channel.port2] }));
+      }),
+    url,
+  );
+}
+
+test.describe('phone', () => {
+  test('the order, and the line for Needs info until front of house answers', async ({ page, browser }) => {
+    test.slow();
+    const r = await createRequest(page.request);
+    await withMedical(browser, (med) => say(med, r.id, 'Any tattoos or marks?'));
+
+    await page.goto(`/?r=${r.id}`);
+    await expect(line(page)).toBeVisible(SYNC);
+    expect(ascending(await order(page, true)), (await order(page, true)).join(', ')).toBe(true);
+    await expect(line(page).getByTestId('stage-chip')).toHaveText('Needs info');
+    await expect(line(page)).toContainText('Any tattoos or marks?');
+    await expect(line(page).getByTestId('preview-unread')).toBeVisible();
+    await expect(line(page)).toHaveAccessibleName(/^Needs info\. Last message, unread, from .+: Any tattoos or marks\? Go to messages\.$/);
+    const box = (await line(page).boundingBox())!;
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    // Right under the status block.
+    const block = (await page.getByTestId('status-block').boundingBox())!;
+    expect(box.y - (block.y + block.height)).toBeLessThan(24);
+
+    // Front of house answers: Needs info ends, and the line goes.
+    await say(page.request, r.id, 'Butterfly tattoo, left wrist');
+    await expect(line(page)).toHaveCount(0, SYNC);
+    expect(ascending(await order(page, false))).toBe(true);
+  });
+
+  test('In medical with an unread message: the line with its dot; once read, and with no messages, no line', async ({ page, browser }) => {
+    test.slow();
+    const r = await createRequest(page.request);
+    const plain = await createRequest(page.request);
+    await withMedical(browser, async (med) => {
+      await inMedical(med, r.id);
+      await say(med, r.id, 'Bring 1 person only');
+    });
+    await expect.poll(() => unreadOnServer(page.request, r.id), SYNC).toBe(1);
+
+    await page.goto(`/?r=${r.id}`);
+    await expect(line(page)).toBeVisible(SYNC);
+    await expect(line(page)).toContainText('Bring 1 person only');
+    await expect(line(page).getByTestId('preview-unread')).toBeVisible();
+    await expect(line(page).getByTestId('stage-chip')).toHaveCount(0);
+    expect(ascending(await order(page, true))).toBe(true);
+    // The thread read it as it loaded; the line stays for this visit.
+    await expect.poll(() => unreadOnServer(page.request, r.id), SYNC).toBe(0);
+    await page.waitForTimeout(1_000);
+    await expect(line(page)).toBeVisible();
+
+    // Opened again with everything read: no line.
+    await page.goto(`/?r=${r.id}`);
+    await expect(messages(page)).toBeVisible(SYNC);
+    await expect(messages(page).getByTestId('bubble-them')).toHaveText('Bring 1 person only', SYNC);
+    await expect(line(page)).toHaveCount(0);
+
+    await page.goto(`/?r=${plain.id}`);
+    await expect(messages(page).getByTestId('thread-empty')).toBeVisible(SYNC);
+    await expect(line(page)).toHaveCount(0);
+    expect(ascending(await order(page, false))).toBe(true);
+  });
+
+  test('the line, the Message button and an Activity message land at the thread with the keyboard down; a row, a card and an answer at the top', async ({ page, context, browser }) => {
+    test.slow();
+    const res = await context.request.post('/api/activity/read', { headers: { origin: BASE }, data: { all: true } });
+    expect(res.status()).toBe(200);
+    const asked = await createRequest(page.request);
+    const answered = await createRequest(page.request);
+    await withMedical(browser, async (med) => {
+      await say(med, asked.id, 'Any tattoos or marks?');
+      await inMedical(med, answered.id);
+    });
+
+    // Activity first (opening a request reads its row): the message's row at the thread, the answer's at the top.
+    await page.goto('/');
+    const bell = page.getByTestId('activity-bell').filter({ visible: true });
+    await expect(bell).toHaveAccessibleName(/Activity, [1-9]\d* unread/, SYNC);
+    await bell.click();
+    const sheet = page.getByRole('dialog', { name: 'Activity' });
+    await sheet.locator('[data-testid="activity-row"][data-kind="message"]').first().click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(asked.id);
+    await expectAtThread(page);
+    await expect(composer(page)).not.toBeFocused();
+    await page.goto('/');
+    await bell.click();
+    await page.getByRole('dialog', { name: 'Activity' }).locator('[data-testid="activity-row"][data-kind="in_medical"]').first().click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(answered.id);
+    await expectAtTop(page);
+
+    // The line.
+    await page.goto(`/?r=${asked.id}`);
+    await expect(line(page)).toBeVisible(SYNC);
+    await expect(threadHead(page)).not.toBeInViewport();
+    await line(page).click();
+    await expectAtThread(page);
+    await expect(composer(page)).not.toBeFocused();
+    await expect(threadHead(page)).toBeFocused();
+
+    // My requests → Message.
+    await page.goto('/?view=mine');
+    const card = page.locator(`[data-testid="mine-card"]:has([data-request-id="${asked.id}"])`);
+    await expect(card).toBeVisible(SYNC);
+    await card.getByTestId('message-button').click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(asked.id);
+    await expectAtThread(page);
+    await expect(composer(page)).not.toBeFocused();
+
+    // Pending → the card itself opens at the top.
+    await page.goto('/?view=pending');
+    const check = page.locator(`[data-testid="check-card"]:has([data-request-id="${asked.id}"])`);
+    await expect(check).toBeVisible(SYNC);
+    await check.locator(`[data-request-id="${asked.id}"]`).click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(asked.id);
+    await expectAtTop(page);
+
+    // All → a row opens at the top.
+    await page.goto('/');
+    const row = page.locator(`[data-request-id="${answered.id}"]`).first();
+    await expect(row).toBeVisible(SYNC);
+    await row.click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(answered.id);
+    await expectAtTop(page);
+  });
+
+  test("a message's notification lands at the thread, in place or as a new page; an old address at the top", async ({ page, browser }) => {
+    test.slow();
+    const r = await createRequest(page.request);
+    await withMedical(browser, (med) => say(med, r.id, 'Any tattoos or marks?'));
+
+    // The app is open: the worker asks the page to open "/?r=<id>&to=thread" in place.
+    await page.goto('/');
+    await expect(page.locator('[data-view]').first()).toBeVisible(SYNC);
+    await expect.poll(() => workerAsksToOpen(page, `/?r=${r.id}&to=thread`), SYNC).toEqual({ ok: true });
+    await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(r.id);
+    await expectAtThread(page);
+    await expect(composer(page)).not.toBeFocused();
+
+    // A new page (no window was open, or one the worker navigated): the same, and `to` leaves the address.
+    await page.goto(`/?r=${r.id}&to=thread`);
+    await expectAtThread(page);
+    await expect.poll(() => new URL(page.url()).searchParams.get('to')).toBeNull();
+    expect(new URL(page.url()).searchParams.get('r')).toBe(r.id);
+    await expect(composer(page)).not.toBeFocused();
+
+    // An old "/?r=<id>" (an earlier build's notification, a shared link): the top.
+    await page.goto(`/?r=${r.id}`);
+    await expectAtTop(page);
+  });
+
+  test('axe and the 44 px line, light and dark', async ({ page, browser }) => {
+    test.slow();
+    const r = await createRequest(page.request);
+    await withMedical(browser, (med) => say(med, r.id, 'Any tattoos or marks?'));
+    for (const theme of ['light', 'dark'] as const) {
+      await page.addInitScript((t) => {
+        try {
+          localStorage.setItem('lp-theme', t);
+        } catch {
+          // ignore
+        }
+      }, theme);
+      await page.goto(`/?r=${r.id}`);
+      await expect(line(page)).toBeVisible(SYNC);
+      await page.waitForTimeout(500);
+      const found = (await axeViolations(page)).map((v: AxeFinding) => `${v.rule} · ${v.target} · ${v.summary}`);
+      expect(found, theme).toEqual([]);
+      const box = (await line(page).boundingBox())!;
+      expect(box.height, theme).toBeGreaterThanOrEqual(44);
+    }
+  });
+
+  test('no overflow at 375–1440 px, light and dark', async ({ page, browser }) => {
+    test.slow();
+    const r = await createRequest(page.request);
+    await withMedical(browser, (med) => say(med, r.id, 'Any tattoos or marks? Anything that stands out, like a tattoo, a piercing or a bracelet'));
+    for (const theme of ['light', 'dark'] as const) {
+      for (const width of OVERFLOW_WIDTHS) {
+        const phone = width < 768;
+        const ctx = await newSignedInContext(browser, FOH, { viewport: { width, height: 900 }, isMobile: phone, hasTouch: phone });
+        await ctx.addInitScript((t) => {
+          try {
+            localStorage.setItem('lp-theme', t);
+          } catch {
+            // ignore
+          }
+        }, theme);
+        const p = await ctx.newPage();
+        try {
+          await p.goto(`/?r=${r.id}`);
+          await expect(line(p)).toBeVisible(SYNC);
+          // One line: the text ends in an ellipsis inside the button.
+          expect((await line(p).boundingBox())!.height, `${width} ${theme}`).toBeLessThanOrEqual(46);
+          await expectNoOverflow(p, '[data-testid="profile"]', `request ${width} px ${theme}`);
+        } finally {
+          await ctx.close();
+        }
+      }
+    }
+  });
+});
+
+test.describe('desk', () => {
+  test.use(DESK);
+
+  test("a Pending card's Message and the line land at the thread with the composer focused; the order in the pane", async ({ page, browser }) => {
+    test.slow();
+    const r = await createRequest(page.request);
+    await withMedical(browser, (med) => say(med, r.id, 'Any tattoos or marks?'));
+
+    await page.goto('/?view=pending');
+    const card = page.locator(`[data-testid="check-card"]:has([data-request-id="${r.id}"])`);
+    await expect(card).toBeVisible(SYNC);
+    await card.getByTestId('message-button').click();
+    await expect(page.getByTestId('desk-pane')).toBeVisible();
+    await expectAtThread(page);
+    await expect(composer(page)).toBeFocused();
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+
+    // Back to its top: the order, then the line.
+    await page.evaluate(() => {
+      (document.activeElement as HTMLElement | null)?.blur();
+      document.querySelector('[data-testid="desk-pane"] [data-testid="profile"]')?.parentElement?.scrollTo(0, 0);
+    });
+    await expect(line(page)).toBeVisible(SYNC);
+    expect(ascending(await order(page, true))).toBe(true);
+    const acts = (await page.getByTestId('profile-actions').boundingBox())!;
+    expect((await line(page).boundingBox())!.y).toBeGreaterThan(acts.y);
+    await line(page).click();
+    await expectAtThread(page);
+    await expect(composer(page)).toBeFocused();
+  });
+
+  test("a row's unread badge lands at the thread with the composer focused; the rest of a row at the top", async ({ page, browser }) => {
+    test.slow();
+    const a = await createRequest(page.request);
+    const b = await createRequest(page.request);
+    await withMedical(browser, async (med) => {
+      await say(med, a.id, 'Any tattoos or marks?');
+      await say(med, b.id, 'Any tattoos or marks?');
+    });
+
+    await page.goto('/');
+    const rowA = page.locator(`[data-request-id="${a.id}"]`).first();
+    await expect(rowA.getByTestId('row-unread')).toHaveText('1', SYNC);
+    await rowA.getByTestId('row-unread').click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(a.id);
+    await expectAtThread(page);
+    await expect(composer(page)).toBeFocused();
+    // Only the pane scrolled: the page (and the list beside the pane) kept its place.
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+
+    const rowB = page.locator(`[data-request-id="${b.id}"]`).first();
+    await expect(rowB.getByTestId('row-unread')).toHaveText('1', SYNC);
+    await rowB.locator('[data-col="status"]').click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(b.id);
+    await expectAtTop(page);
+    await expect(composer(page)).not.toBeFocused();
+    // B had unread messages: its line is there, at the top.
+    await expect(line(page)).toBeVisible();
+  });
+});
