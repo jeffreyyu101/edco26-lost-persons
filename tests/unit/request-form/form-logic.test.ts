@@ -7,14 +7,12 @@ import { EMPTY_FORM_VALUES, formValuesFromRequest, toPatch, type RequestFormValu
 import { LIMITS, STATUS, isUuid } from '@/lib/domain';
 import {
   GENDER_CHIPS,
-  KEYBOARD_MIN_PX,
   MORE_FIELDS,
   canSaveEdit,
   changedKeys,
   findDuplicate,
   genderAfterChip,
   genderChipFor,
-  keyboardOpen,
   lastSeenWithChip,
   legacyPostOf,
   moreFieldsFor,
@@ -334,13 +332,7 @@ describe('photo intake (max 3)', () => {
 });
 
 describe('the on-screen keyboard', () => {
-  it('counts a keyboard only when the visual viewport is clearly shorter at no zoom', () => {
-    expect(keyboardOpen(844, 844, 1)).toBe(false);
-    expect(keyboardOpen(844, 844 - KEYBOARD_MIN_PX, 1)).toBe(false); // URL bar, accessory strip
-    expect(keyboardOpen(844, 508, 1)).toBe(true); // iPhone 14 keyboard
-    expect(keyboardOpen(844, 400, 2)).toBe(false); // pinch zoom, no keyboard
-  });
-
+  // Whether a keyboard is up: tests/unit/client/visual-viewport.test.ts (keyboardBox, shared with the sheets).
   it('scrolls the focused row into view with a margin, never past its top', () => {
     const view = { top: 60, bottom: 440 };
     // Already in view.

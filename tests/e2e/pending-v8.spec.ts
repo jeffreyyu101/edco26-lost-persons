@@ -269,6 +269,108 @@ test.describe('phone', () => {
     await expect(page.getByTestId('audit-item').first()).toContainText('Edited Location');
     await expect(page.getByTestId('audit-item').first()).toContainText('Bed 4');
   });
+
+  // (Hotfix F5.1, Brian 2026-11-07) The sheet on the iPhone keyboard. Playwright shows no keyboard, so
+  // window.visualViewport is a fake the test sizes and pans as a phone does: the keyboard alone, a pan to the
+  // field, and iOS 26 Safari's visible area running past the layout viewport's bottom. The sheet's bottom is the
+  // keyboard's top, the scrim covers everything else on screen, the page behind never moves, and when the field
+  // lets go of the focus the sheet goes back down at once; Skip leaves the page where it was.
+  test('the sheet sits on the keyboard: flush on it, the scrim over the rest, the page pinned; back down when the field lets go', async ({ page }) => {
+    await page.addInitScript(() => {
+      const vv = Object.assign(new EventTarget(), { width: innerWidth, height: innerHeight, offsetTop: 0, offsetLeft: 0, pageTop: 0, pageLeft: 0, scale: 1 });
+      Object.defineProperty(window, 'visualViewport', { configurable: true, get: () => vv });
+      Object.assign(window, {
+        __lpViewport: (box: { offsetTop: number; height: number }) => {
+          Object.assign(vv, box);
+          vv.dispatchEvent(new Event('resize'));
+          vv.dispatchEvent(new Event('scroll'));
+        },
+      });
+    });
+    const viewport = (box: { offsetTop: number; height: number }) =>
+      page.evaluate((b) => (window as unknown as { __lpViewport: (b: unknown) => void }).__lpViewport(b), box);
+    // Enough cards for the page to scroll; the last one (the newest) is answered.
+    const rows = [];
+    for (let i = 0; i < 6; i += 1) rows.push(await createRequest(page));
+    const r = rows.at(-1)!;
+    await page.goto('/?view=pending');
+    const card = checkCard(page, r.id);
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    await card.scrollIntoViewIfNeeded();
+    await page.evaluate(() => window.scrollBy(0, 120));
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+    const ref = page.locator('[data-testid="check-card"]').first();
+    const refTop = async () => (await ref.boundingBox())!.y;
+
+    await card.getByRole('button', { name: 'In medical', exact: true }).click();
+    const sheet = page.getByRole('dialog', { name: `${nameOf(r)} is in medical` });
+    const field = sheet.getByRole('textbox', { name: 'Location' });
+    await expect(field).toBeFocused();
+    const height = page.viewportSize()!.height;
+    const geometry = () =>
+      page.evaluate(() => {
+        const el = document.querySelector<HTMLElement>('.lp-sheet')!;
+        const overlay = el.closest<HTMLElement>('.rt-BaseDialogOverlay')!;
+        const o = overlay.getBoundingClientRect();
+        const scrim = getComputedStyle(overlay, '::before');
+        return {
+          top: el.getBoundingClientRect().top,
+          bottom: el.getBoundingClientRect().bottom,
+          kb: overlay.hasAttribute('data-kb'),
+          scrimTop: o.top + parseFloat(scrim.top),
+          scrimBottom: o.bottom - parseFloat(scrim.bottom),
+          body: getComputedStyle(document.body).position,
+        };
+      });
+    // The page is pinned as soon as the field has the focus.
+    await expect.poll(async () => (await geometry()).body).toBe('fixed');
+    const before = await refTop();
+
+    for (const box of [
+      { offsetTop: 0, height: height - 300 }, // the keyboard
+      { offsetTop: 120, height: height - 300 }, // the phone panned to the field
+      { offsetTop: 364, height: height - 300 }, // iOS 26 Safari: 64 px past the layout viewport's bottom
+    ]) {
+      const vvBottom = box.offsetTop + box.height;
+      await viewport(box);
+      await expect.poll(async () => Math.round((await geometry()).bottom), JSON.stringify(box)).toBe(vvBottom);
+      const g = await geometry();
+      expect(g.kb).toBe(true);
+      expect(g.scrimTop).toBeLessThanOrEqual(box.offsetTop);
+      expect(g.scrimBottom).toBeGreaterThanOrEqual(vvBottom);
+      // On screen above the sheet: the scrim (inside the dialog's overlay, outside the sheet), never the page.
+      const hit = await page.evaluate(
+        (ys: number[]) =>
+          ys.map((at) => {
+            const el = document.elementFromPoint(195, at);
+            return el?.closest('.lp-sheet') ? 'sheet' : el?.closest('.rt-BaseDialogOverlay') ? 'scrim' : 'page';
+          }),
+        [Math.max(box.offsetTop + 2, 2), Math.min(vvBottom, height) - 2],
+      );
+      expect(hit, JSON.stringify(box)).toEqual(['scrim', 'sheet']);
+      // The page behind doesn't scroll.
+      await page.evaluate(() => {
+        window.scrollBy(0, 200);
+        document.scrollingElement?.scrollBy(0, 200);
+      });
+      expect(await refTop()).toBeCloseTo(before, 0);
+    }
+
+    // The keyboard goes (the field lets go of the focus): the sheet is back at the bottom at once, before the
+    // phone reports it, and stays there.
+    await field.blur();
+    await expect.poll(async () => (await geometry()).kb).toBe(false);
+    await expect.poll(async () => Math.round((await geometry()).bottom)).toBe(height);
+    await viewport({ offsetTop: 0, height });
+    expect(Math.round((await geometry()).bottom)).toBe(height);
+
+    // Skip: the page is where it was.
+    await sheet.getByRole('button', { name: 'Skip' }).click();
+    await expect(sheet).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).position)).not.toBe('fixed');
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+    expect(await refTop()).toBeCloseTo(before, 0);
+  });
 });
 
 test.describe('desk 1440 × 900', () => {

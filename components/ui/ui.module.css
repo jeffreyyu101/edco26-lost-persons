@@ -172,12 +172,12 @@
   position: fixed;
   left: 0;
   right: 0;
-  bottom: var(--lp-kb, 0px);
+  bottom: 0;
   top: auto;
   margin: 0 auto;
   width: 100%;
   max-width: 560px;
-  max-height: calc(100dvh - var(--lp-kb, 0px) - env(safe-area-inset-top) - 24px);
+  max-height: calc(var(--lp-vv-h, 100dvh) - env(safe-area-inset-top) - 24px);
   overflow-y: auto;
   overscroll-behavior: contain;
   border-radius: 22px 22px 0 0;
@@ -188,12 +188,41 @@
 
 @supports not (height: 100dvh) {
   .sheet.sheet {
-    max-height: calc(100vh - var(--lp-kb, 0px) - 24px);
+    max-height: calc(var(--lp-vv-h, 100vh) - 24px);
   }
 }
 
+/* The sheet's overlay is its box (Sheet.tsx, lib/client/visual-viewport.ts): the screen, or with the keyboard up
+   (data-kb) the visual viewport above it, so the sheet's bottom: 0 is the keyboard's top wherever the phone
+   panned or put the layout viewport. Its scrim reaches far past it, so nothing on screen is ever undimmed. When
+   the keyboard goes, the box grows back to the screen in step with it. */
+:global(.rt-BaseDialogOverlay):has(.sheet) {
+  top: var(--lp-vv-top, 0px);
+  bottom: auto;
+  height: var(--lp-vv-h, 100%);
+  contain: layout;
+}
+
+:global(.rt-BaseDialogOverlay):has(.sheet):not([data-kb]) {
+  transition:
+    top 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+    height 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 :global(.rt-BaseDialogOverlay):has(.sheet)::before {
+  inset: -100vh 0;
   background-color: var(--black-a8);
+}
+
+/* The keyboard covers the home indicator; Safari's floating tab bar may sit over the sheet's foot (under). */
+:global(.rt-BaseDialogOverlay[data-kb]) .sheet.sheet {
+  padding-bottom: calc(16px + var(--lp-vv-under, 0px));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :global(.rt-BaseDialogOverlay):has(.sheet):not([data-kb]) {
+    transition: none;
+  }
 }
 
 @media (prefers-reduced-motion: no-preference) {

@@ -76,7 +76,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 22px 12px 14px 16px;
+  padding: 20px 12px 14px 16px;
 }
 
 .h1 {
@@ -154,16 +154,22 @@
 }
 
 /* The line under the title ("Updated just now" and Refresh now, components/ui/LiveIndicator.tsx), lined up
-   with its first letter. Its 32 px row starts where the title's box ends (the title's tap area reaches up
-   instead of down, .ttl::before), and Refresh now's tap area reaches 12 px down into the space below. */
+   with its first letter. Its 32 px row starts 12 px under the header's icons (pending-v9.html .lt / .live, the
+   same on every list view, hotfix F5.1), so the "⇅" toggle at its right end on All and My requests stands
+   clear of the avatar. Refresh now's tap area reaches 6 px up and down (the title's reaches up instead). */
 .live {
-  margin-top: -14px;
-  padding: 0 16px 12px;
+  margin-top: -4px;
+  padding: 0 16px 6px;
+}
+
+.live [data-testid='refresh-now']::before,
+.liveIn [data-testid='refresh-now']::before {
+  inset: -6px;
 }
 
 /* The offline / reconnecting button, search and the avatar. Every one has a 44 px tap area that never
    reaches into its neighbour's box. Like the title's, it grows up and sideways, never down: on All requests and
-   My requests the "⇅" toggle sits right under them at the live line's right end (Pending v9.1). */
+   My requests the "⇅" toggle sits under them at the live line's right end (Pending v9.1). */
 .icons {
   flex: none;
   display: flex;
@@ -1439,13 +1445,13 @@ button.qheadBtn:focus-visible {
 }
 
 /* ---- The live line's right end: "⇅ Newest" / "⇅ Updated" ↔ "⇅ Status" (All, My requests) --------------------
-   One tap; outlined while it names the default order, filled gray-a4 when sorted by status. 32 px with a 44 px
-   tap area that, like Refresh now's, reaches 12 px down and never up (the header's search and avatar are right
-   above it). Under 360 px of width it drops to its own row, left-aligned. The row keeps F2's line spacing (.live):
-   F1.2's "● Updated just now ⟳" (.liveLead) at its left. */
+   One tap; outlined while it names the default order, filled gray-a4 when sorted by status. A 32 px chip centred
+   on the line, its right edge on the avatar's, 12 px under it (pending-v9.html frames 6, 7, 9; hotfix F5.1), with
+   a 44 px tap area that reaches 6 px up and down, inside the row. Under 360 px of width it drops to its own row,
+   left-aligned. The row keeps the line's spacing (.live): F1.2's "● Updated just now ⟳" (.liveLead) at its left. */
 .liveRow {
   container-type: inline-size;
-  margin-top: -14px;
+  margin-top: -4px;
 }
 
 .liveIn {
@@ -1453,7 +1459,7 @@ button.qheadBtn:focus-visible {
   align-items: center;
   gap: 8px;
   box-sizing: border-box;
-  padding: 0 12px 12px 16px;
+  padding: 0 12px 6px 16px;
 }
 
 .liveLead {
@@ -1486,7 +1492,7 @@ button.qheadBtn:focus-visible {
 .sort::before {
   content: '';
   position: absolute;
-  inset: 0 -2px -12px;
+  inset: -6px -2px;
 }
 
 .sort[aria-pressed='true'] {
@@ -1501,7 +1507,7 @@ button.qheadBtn:focus-visible {
 }
 
 @container (max-width: 360px) {
-  /* 12 px apart: Refresh now's tap area reaches 12 px down, to the toggle's top and no further. */
+  /* 12 px apart: Refresh now's tap area reaches 6 px down and the toggle's 6 px up, and they meet. */
   .liveIn {
     flex-direction: column;
     align-items: flex-start;

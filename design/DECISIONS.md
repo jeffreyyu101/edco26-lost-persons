@@ -368,3 +368,7 @@ Brian: "send a link with the password in the url so it auto logs them in … the
 - **Server:** `POST /api/session` takes exactly one of `password` or `invite`. Only the code's SHA-256 is configured (`INVITE_CODE_SHA256`), compared in constant time, and it works only before `INVITE_EXPIRES_AT` (first link: 2026-11-09 12:00 UTC). With either unset the link is off. A link attempt counts toward the same sign-in limits as a password, a failed one as a failed attempt, and gets the same session cookie. Logs name the method only ("invite" or "password"). No database change.
 - **Recorded exception:** `signInSchema` is in the frozen `lib/validation.ts`; the change is additive (a body with a password parses exactly as before).
 - Code: `lib/join-link.ts`, `components/signin/SignInFlow.tsx`, `lib/server/invite.ts`, `scripts/make-invite.mjs`. Spec: `docs/BUILD_SPEC.md` J1. Operations: `HANDOFF.md` "Team join link".
+
+## Hotfix F5.1 (Brian, 2026-11-07, from his iPhone) — `screens/hotfix-f5-1-*.png`
+
+- **The live line sits 12 px under the header's icons on every list view, with "⇅" centred on it at its right end, clear of the avatar (pending-v9.html frames 6, 7, 9), and every sheet with a field sits flush on the iPhone keyboard with the scrim over everything else and the page behind pinned.**

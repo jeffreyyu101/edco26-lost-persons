@@ -371,6 +371,30 @@ test('with the keyboard up, Send sits just above it and the focused row stays in
   await expect.poll(async () => (await edges(submit(page))).bottom).toBeGreaterThan(visible);
 });
 
+// (Hotfix F5.1) Every sheet with a field rides the keyboard the same way (lib/client/visual-viewport.ts): the post
+// picker's "Where?" puts the sheet flush on it. Taller than the space left, the sheet scrolls and keeps the field in
+// view; the keyboard's Done submits, and the sheet goes back down with the keyboard.
+test('the post picker sits on the keyboard while "Where?" is typed', async ({ page }) => {
+  await fakeKeyboard(page);
+  await openNew(page);
+  const KEYBOARD = 336;
+  const height = page.viewportSize()!.height;
+  await page.getByRole('button', { name: /^Reporting from/ }).click();
+  const sheet = page.getByRole('dialog', { name: 'Reporting from' });
+  await sheet.locator('label', { hasText: 'Other' }).click();
+  await expect(sheet.getByLabel('Other location')).toBeFocused();
+  await setKeyboard(page, KEYBOARD);
+  await expect.poll(async () => Math.round((await edges(sheet)).bottom)).toBe(height - KEYBOARD);
+  const where = sheet.getByLabel('Other location');
+  await expect.poll(async () => (await edges(where)).bottom).toBeLessThanOrEqual(height - KEYBOARD - 12);
+  expect((await edges(where)).top).toBeGreaterThanOrEqual((await edges(sheet)).top);
+  await where.fill('TEST-F gate 9');
+  await setKeyboard(page, 0);
+  await expect.poll(async () => Math.round((await edges(sheet)).bottom)).toBe(height);
+  await sheet.getByRole('button', { name: 'Done' }).click();
+  await expect(page.getByRole('button', { name: 'Reporting from TEST-F gate 9. Change' })).toBeVisible();
+});
+
 test('a draft survives a reload, with its photo; Cancel discards it', async ({ page }) => {
   const name = uniqueName('draft');
   await openNew(page);
