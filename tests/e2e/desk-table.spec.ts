@@ -348,8 +348,9 @@ test.describe('desktop 1440 × 900', () => {
 
     // The sync starts failing with data on screen (3 server errors in a row): the table stays, and F1.2's
     // amber "Reconnecting…" banner (it replaced the red "Can't reach the log" one) sits above it; the top
-    // bar's line shows the last good time.
-    await page.unroute('**/api/sync*');
+    // bar's line shows the last good time. (unrouteAll waits for a delayed sync still in the handler above: its
+    // late continue() would otherwise throw "Route is already handled!" and end the test.)
+    await page.unrouteAll({ behavior: 'wait' });
     await page.route('**/api/sync*', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":{"code":"unavailable","message":"down"}}' }));
     const banner = main(page).getByTestId('connection-banner');
     await expect(banner).toHaveText('Reconnecting…', { timeout: 40_000 });
