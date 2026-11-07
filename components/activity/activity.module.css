@@ -109,6 +109,26 @@
 .markAll[data-disabled] svg {
   color: var(--gray-8);
 }
+/* The sheet's ✕: a full 44 × 44 target at the header's end (Radix's size-3 padding would make it 60), its glyph
+   where Mark all read's was. */
+.close.close {
+  box-sizing: border-box;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  margin: 0 -4px 0 0;
+}
+.close svg {
+  color: var(--gray-11);
+}
+/* The sheet's header stays put over the list (✕ always in reach) and is a handle for the swipe down. */
+.panel[data-variant='sheet'] .head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background-color: var(--color-panel-solid);
+  touch-action: none;
+}
 .list {
   display: flex;
   flex-direction: column;
@@ -266,14 +286,15 @@
   outline-offset: -4px;
 }
 
-/* ---- Phone: a full-height sheet on Dialog (Escape, the scrim and a swipe close it, as the app's other
-   sheets) ---- */
+/* ---- Phone: a tall sheet on Dialog (✕, Escape, the scrim and a swipe down close it, as the app's other
+   sheets). Its top leaves a strip of dimmed page to tap: at least 44 px below the status bar (the Home Screen
+   app draws under it, and iOS keeps taps there), and 8 % of the screen. ---- */
 .sheet.sheet {
   position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
-  top: calc(env(safe-area-inset-top) + 24px);
+  top: max(calc(env(safe-area-inset-top) + 44px), 8vh);
   margin: 0 auto;
   width: 100%;
   max-width: 560px;
@@ -294,17 +315,14 @@
   display: flex;
   flex-direction: column;
 }
-/* The grabber, a button: 88 × 24 (44 tall with lp-hit), the 36 × 5 pill drawn in its middle. */
+/* The grabber, a handle to drag: 88 × 24 (44 tall with lp-hit), the 36 × 5 pill drawn in its middle. */
 .handle {
   flex: none;
   width: 88px;
   height: 24px;
   margin: -10px auto 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
+  cursor: grab;
+  touch-action: none;
 }
 .handle::after {
   content: '';
@@ -317,14 +335,27 @@
   background: var(--gray-a6);
   pointer-events: none;
 }
-.handle:focus-visible {
-  outline: 2px solid var(--focus-8);
-  outline-offset: -2px;
-  border-radius: 8px;
-}
 @media (prefers-reduced-motion: no-preference) {
   .sheet.sheet[data-state='open'] {
     animation: lp-act-in 260ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  /* Swiped away (lib/client/sheet-swipe.ts): on down from where the finger let go. */
+  .sheet.sheet[data-lp-swiped][data-state='closed'] {
+    animation: lp-act-swiped 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
+/* Once dragged, the slide-in never replays (or holds the sheet away from the finger). */
+.sheet.sheet[data-lp-dragged][data-state='open'] {
+  animation: none;
+}
+@keyframes lp-act-swiped {
+  from {
+    opacity: 1;
+    transform: translateY(var(--lp-swipe-y, 0px));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(100%);
   }
 }
 @keyframes lp-act-in {

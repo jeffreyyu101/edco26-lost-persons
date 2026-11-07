@@ -13,7 +13,7 @@
 // countdown is held (store holdUndo); it restarts in full when the editor closes.
 import { Popover } from '@radix-ui/themes';
 import { CloudOff } from 'lucide-react';
-import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type RefObject, type TouchEvent } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type RefObject } from 'react';
 import { Sheet, SheetTitle } from '@/components/ui/Sheet';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import { useActions, useConnection } from '@/lib/client/store-contract';
@@ -52,8 +52,6 @@ export interface LocationEditorProps {
 
 /** A field placeholder, not a caption: medical write bed and beach-chair numbers here (Dani, 14:12). */
 const PLACEHOLDER = 'Bed or chair';
-/** A swipe down this far (px) closes the sheet, like the native ones. */
-const SWIPE_CLOSE_PX = 64;
 
 /**
  * A stand-in element for the desk popover: the first visible element matching `selector` each time the
@@ -176,49 +174,11 @@ function Form({ target, onClose, inputRef, titleId }: FormProps) {
   );
 }
 
+/** The swipe down that closes it (Skip) is every sheet's (components/ui/Sheet.tsx). */
 function PhoneSheet({ target, onClose }: { target: LocationTarget; onClose: () => void }) {
-  const wrap = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ y: number; dy: number } | null>(null);
-  const sheetOf = () => wrap.current?.closest<HTMLElement>('.lp-sheet') ?? null;
-
-  // Swipe down anywhere but the field closes it (Skip). The sheet follows the finger until it lets go.
-  const onTouchStart = (e: TouchEvent) => {
-    const t = e.target as HTMLElement;
-    if (t.closest('input') || e.touches.length !== 1) return;
-    drag.current = { y: e.touches[0]!.clientY, dy: 0 };
-  };
-  const onTouchMove = (e: TouchEvent) => {
-    const d = drag.current;
-    const sheet = sheetOf();
-    if (!d || !sheet) return;
-    d.dy = Math.max(0, e.touches[0]!.clientY - d.y);
-    sheet.style.transform = d.dy > 0 ? `translateY(${d.dy}px)` : '';
-    sheet.style.transition = 'none';
-  };
-  const onTouchEnd = () => {
-    const d = drag.current;
-    drag.current = null;
-    const sheet = sheetOf();
-    if (!d || !sheet) return;
-    sheet.style.transition = '';
-    if (d.dy >= SWIPE_CLOSE_PX) {
-      onClose();
-      return;
-    }
-    sheet.style.transform = '';
-  };
-
   return (
     <Sheet open onOpenChange={(open) => (open ? undefined : onClose())} titleInContent>
-      <div
-        ref={wrap}
-        className={s.sheetBody}
-        data-location-sheet=""
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
-        onTouchCancel={onTouchEnd}
-      >
+      <div data-location-sheet="">
         <Form target={target} onClose={onClose} />
       </div>
     </Sheet>
