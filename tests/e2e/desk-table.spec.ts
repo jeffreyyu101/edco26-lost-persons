@@ -333,7 +333,7 @@ test.describe('desktop 1440 × 900', () => {
     await expect(main(page).locator('[data-request-id]')).toHaveCount(0);
   });
 
-  test("states: the skeleton before the first sync, then the table; a failing sync shows the red banner", async ({ page }) => {
+  test("states: the skeleton before the first sync, then the table; a failing sync shows the Reconnecting banner", async ({ page }) => {
     await page.route('**/api/sync*', async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 1_500));
       await route.continue();
@@ -346,12 +346,18 @@ test.describe('desktop 1440 × 900', () => {
     await expect(table(page)).toBeVisible({ timeout: 15_000 });
     await expect(skeleton).toHaveCount(0);
 
-    // The sync starts failing with data on screen: the table stays, "Can't reach the log" above it.
+    // The sync starts failing with data on screen (3 server errors in a row): the table stays, and F1.2's
+    // amber "Reconnecting…" banner (it replaced the red "Can't reach the log" one) sits above it; the top
+    // bar's line shows the last good time.
     await page.unroute('**/api/sync*');
     await page.route('**/api/sync*', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":{"code":"unavailable","message":"down"}}' }));
-    const banner = main(page).getByRole('status').filter({ hasText: "Can't reach the log" });
-    await expect(banner).toBeVisible({ timeout: 30_000 });
-    await expect(banner.getByRole('button', { name: 'Try again' })).toBeVisible();
+    const banner = main(page).getByTestId('connection-banner');
+    await expect(banner).toHaveText('Reconnecting…', { timeout: 40_000 });
+    await expect(banner).toHaveAttribute('data-tone', 'amber');
+    const line = page.getByTestId('desk-topbar').getByTestId('live-indicator');
+    await expect(line).toHaveAttribute('data-state', 'reconnecting');
+    await expect(line.getByTestId('live-text')).toHaveText(/^Last updated \d{1,2}:\d{2} (AM|PM)$/);
+    await expect(main(page).getByText("Can't reach the log", { exact: true })).toHaveCount(0);
     await expect(table(page)).toBeVisible();
     expect((await banner.boundingBox())!.y).toBeLessThan((await table(page).boundingBox())!.y);
   });

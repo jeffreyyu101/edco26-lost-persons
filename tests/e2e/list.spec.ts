@@ -3,6 +3,7 @@ import { expect, test, type APIRequestContext, type Page, type Route } from '@pl
 import type { RequestDetail, RequestSummary } from '../../lib/api-types';
 import { formatCreatedTime } from '../../lib/format';
 import { loadTestEnv, testBaseUrl } from '../../scripts/test-env.mjs';
+import { confirmCrop } from './helpers/photo';
 import { syntheticPng } from './helpers/png';
 import { newSignedInContext, signedInAs } from './helpers/session';
 import { syncRows } from './helpers/sync';
@@ -309,17 +310,27 @@ test('the X hides the brand row on this device: it stays hidden after a reload (
   expect(after.y).toBeLessThan(40);
   expect(await page.evaluate(() => localStorage.getItem('lp-brand-hidden'))).toBe('1');
 
-  // After a reload it is never drawn, not even for a frame before the prefs are read.
+  // After a reload it is never drawn, not even for a frame before the prefs are read. Checked before every
+  // frame is painted (a rAF callback runs only once the page can render): the HTML also carries the desk's
+  // server-drawn copy (F2), which is display: none on a phone until the shell drops it, so a node in the DOM
+  // is not a row on screen.
   await page.addInitScript(() => {
-    const w = window as unknown as { __brandSeen?: boolean };
+    const w = window as unknown as { __brandSeen?: boolean; __frames?: number };
     w.__brandSeen = false;
-    new MutationObserver(() => {
-      if (document.querySelector('[data-testid="brand-card"]')) w.__brandSeen = true;
-    }).observe(document, { childList: true, subtree: true });
+    w.__frames = 0;
+    const tick = () => {
+      for (const el of document.querySelectorAll<HTMLElement>('[data-testid="brand-card"]')) {
+        if (el.getBoundingClientRect().height > 0) w.__brandSeen = true;
+      }
+      w.__frames = (w.__frames ?? 0) + 1;
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
   });
   await page.reload();
   await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 10_000 });
   await page.waitForTimeout(500);
+  expect(await page.evaluate(() => (window as unknown as { __frames?: number }).__frames)).toBeGreaterThan(5);
   expect(await page.evaluate(() => (window as unknown as { __brandSeen?: boolean }).__brandSeen)).toBe(false);
   await expect(brand(page)).toHaveCount(0);
 
@@ -706,7 +717,8 @@ test('at 375 px after midnight the name keeps at least 80 px; numbers and times 
   await page.goto('/?view=mine');
   const card = page.locator(`[data-testid="mine-card"]:has([data-request-id="${notIn.id}"])`);
   await expect(card).toBeVisible({ timeout: 10_000 });
-  const last = card.getByText('Not found in medical', { exact: true });
+  // (The card's status line says it too; this is the progress line's last step.)
+  const last = card.locator('[data-step="cur"]').getByText('Not found in medical', { exact: true });
   await expect(last).toBeVisible();
   expect(await last.evaluate((el) => el.scrollWidth <= el.clientWidth + 0.5)).toBe(true);
   expect((await last.boundingBox())!.height).toBeLessThan(16);
@@ -888,6 +900,7 @@ test('front of house logs a request with a photo; the liaison sees it in Pending
     await a.getByRole('group', { name: 'Missing person' }).getByLabel('Name', { exact: true }).fill(name);
     await a.getByLabel('Wearing').fill(`Synthetic ${TAG} silver jacket`);
     await a.locator('input[type=file]').setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: syntheticPng() });
+    await confirmCrop(a);
     await expect(a.getByRole('button', { name: /^1 photo/ })).toBeVisible();
     await a.getByTestId('request-form-submit').click();
     await expect(a.getByText(/^LP-\d{4,} saved$/)).toBeVisible();

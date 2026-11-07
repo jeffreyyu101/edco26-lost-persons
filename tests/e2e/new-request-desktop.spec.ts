@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { testBaseUrl } from '../../scripts/test-env.mjs';
 import { axeViolations, overlappingTargets, smallTargets } from './helpers/a11y';
+import { confirmCrop, confirmCrops } from './helpers/photo';
 import { syntheticPng } from './helpers/png';
 import { signedInAs } from './helpers/session';
 import { syncRows } from './helpers/sync';
@@ -222,6 +223,7 @@ test.describe('desktop, 1440 × 900', () => {
     await friend(page).getByLabel('Relation').fill('TEST-form sister');
     await friend(page).getByLabel('Notes').fill('TEST-form waiting at the ferris wheel');
     await page.locator('input[type=file]').setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: syntheticPng() });
+    await confirmCrop(page);
     await expect(page.getByRole('button', { name: /^1 photo, today/ })).toBeVisible();
 
     await friend(page).getByLabel('Phone').focus();
@@ -303,6 +305,7 @@ test.describe('desktop, 1440 × 900', () => {
       { name: 'a.png', mimeType: 'image/png', buffer: syntheticPng() },
       { name: 'b.png', mimeType: 'image/png', buffer: syntheticPng(100, 140) },
     ]);
+    await confirmCrops(page, 2);
     const slot = page.getByRole('button', { name: /^2 photos, today/ });
     await expect(slot).toBeVisible();
     await slot.click();
@@ -425,6 +428,7 @@ test.describe('accessibility', () => {
           await page.keyboard.press('Escape');
 
           await page.locator('input[type=file]').setInputFiles({ name: 'a.png', mimeType: 'image/png', buffer: syntheticPng() });
+          await confirmCrop(page);
           await page.getByRole('button', { name: /^1 photo, today/ }).click();
           await expect(page.getByRole('dialog', { name: 'Photos' })).toBeVisible();
           await settle(page);

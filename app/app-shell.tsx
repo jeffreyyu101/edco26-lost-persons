@@ -26,7 +26,6 @@ import { isDeskNow, useHydrated, useIsDesk } from '@/components/desk/breakpoints
 import { DeskFrame, useBrandInHtml } from '@/components/desk/DeskFrame';
 import { useMainView } from '@/components/desk/use-main-view';
 import { isFormView, paneRequestId, type MainView } from '@/components/desk/views';
-import { ConnectionBanner } from '@/components/ui/Banner';
 import { TestDataBanner } from '@/components/ui/TestDataBanner';
 import { ProfileSkeleton, RowSkeletons } from '@/components/ui/Skeleton';
 import { Snackbar, Toaster } from '@/components/ui/Toast';
@@ -58,6 +57,10 @@ const ProfileView = dynamic(() => loadProfile().then((m) => m.ProfileView), { ss
 const DashboardView = dynamic(() => loadDashboard().then((m) => m.DashboardView), { ssr: false });
 const OutboxPromptDialog = dynamic(() => loadDialogs().then((m) => m.OutboxPromptDialog), { ssr: false });
 const BellIntroSheet = dynamic(() => loadDialogs().then((m) => m.BellIntroSheet), { ssr: false });
+// The shell's fallback banner (ShellBanners: a phone's request page until its chunk is in) loads like the views
+// that draw their own, so the banner and the live status it derives stay off the first load (A25 budget). It is
+// the same module the views import: the shell's copy still steps aside while a view's is mounted.
+const ConnectionBanner = dynamic(() => import('@/components/ui/Banner').then((m) => m.ConnectionBanner), { ssr: false });
 // Desk only. The pane's profile skeleton has no chrome of its own: the pane draws the header.
 const PaneProfileView = dynamic(() => loadProfile().then((m) => m.ProfileView), { ssr: false, loading: () => <ProfileSkeleton chrome={false} /> });
 const DeskNav = dynamic(() => loadDesk().then((m) => m.DeskNav), { ssr: false });

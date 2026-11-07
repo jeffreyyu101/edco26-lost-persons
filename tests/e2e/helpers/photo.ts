@@ -1,5 +1,6 @@
 // Photo helpers for the e2e specs (design/DECISIONS.md v2.2 #10). Synthetic data only.
 //   confirmCrop(page)        the one tap that keeps a picked photo whole ("Use photo" in the crop step)
+//   confirmCrops(page, n)    the same for each of n photos picked together ("1 of n" … "n of n")
 //   screenPhotoJpeg(page)    a 12 MP "photo of a friend's phone screen": a dim venue, the phone and its
 //                            bezel, and on its screen a soft, washed-out portrait (glare veil, pixel grid,
 //                            sensor noise). Rendered by the browser as JPEG, then given an EXIF block with
@@ -12,6 +13,21 @@ export async function confirmCrop(page: Page): Promise<void> {
   const step = page.getByRole('dialog', { name: 'Crop photo' });
   await expect(step).toBeVisible();
   await step.getByRole('button', { name: 'Use photo' }).click();
+  await expect(step).toBeHidden();
+}
+
+/**
+ * Keeps each of `n` photos picked together whole. The photo that takes over in the open step ignores a tap for
+ * its first 350 ms (CropSheet FRESH_MS), so each later one waits that out first.
+ */
+export async function confirmCrops(page: Page, n: number): Promise<void> {
+  const step = page.getByRole('dialog', { name: 'Crop photo' });
+  for (let i = 1; i <= n; i += 1) {
+    if (n > 1) await expect(step.getByText(`${i} of ${n}`, { exact: true })).toBeVisible();
+    else await expect(step).toBeVisible();
+    if (i > 1) await page.waitForTimeout(500);
+    await step.getByRole('button', { name: 'Use photo' }).click();
+  }
   await expect(step).toBeHidden();
 }
 

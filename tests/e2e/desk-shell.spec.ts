@@ -429,12 +429,14 @@ test.describe('desktop 1440 × 900', () => {
     await expect.poll(() => imagesLoaded(card)).toBe(true);
     expect(await brandContrast(page, card)).toEqual([]);
 
-    // It scrolls away; the top bar stays at the top with search and New request.
+    // It scrolls away; the top bar stays at the top with search and New request. (With only a few open rows the
+    // table's min-height lets the page scroll exactly the row's height and margin: its bottom edge then sits
+    // at 0, which is gone too.)
     await page.evaluate(() => window.scrollTo(0, 600));
     await expect.poll(async () => {
       const b = (await card.boundingBox())!;
       return b.y + b.height;
-    }).toBeLessThan(0);
+    }).toBeLessThanOrEqual(0);
     expect((await bar.boundingBox())!.y).toBeCloseTo(0, 0);
     await expect(page.getByRole('searchbox', { name: 'Search requests' })).toBeInViewport();
     await expect(page.getByTestId('desk-new')).toBeInViewport();

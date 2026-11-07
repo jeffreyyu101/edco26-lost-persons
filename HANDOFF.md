@@ -78,7 +78,8 @@ screenshots.
   sheet or a centred dialog. Phones under 768 px are unchanged.
 - **Pending v8 and where medical has them** (Dani's request): Pending is To check | Friend coming (two
   columns on the desk); after In medical a sheet asks for the bed or chair (optional, free text, at most 60
-  characters), kept until someone edits it. **This needs the migration below, before the deploy.**
+  characters), kept until someone edits it; the answer's 10 s Undo waits while that sheet is open. **This
+  needs the migration below, before the deploy.**
 - **The brand row on the desk** is the phone's compact row with the same X and "Show header", and the
   **live line** ("Updated just now", Refresh now) sits in the desk's top bar next to the title.
 - **"Not in medical" now reads "Not found in medical"**, and its answer button reads **"Not found"**

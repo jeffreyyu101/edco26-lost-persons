@@ -381,8 +381,10 @@ test.describe('desk 1440 × 900', () => {
     await pop.getByRole('button', { name: 'Skip' }).focus();
     await page.keyboard.press('Enter');
     await expect(pop).toHaveCount(0);
-    const focused = await page.evaluate(() => document.activeElement?.closest('[data-pending-card]')?.getAttribute('data-testid') ?? null);
-    expect(focused).not.toBeNull();
+    // On a card again (the one before b, or one a sync added after it), once the popover has handed it back.
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement?.closest('[data-pending-card]')?.getAttribute('data-testid') ?? null))
+      .not.toBeNull();
   });
 
   test('a docked request narrows the board into the tabs; the pane edits the location in a popover', async ({ page }) => {

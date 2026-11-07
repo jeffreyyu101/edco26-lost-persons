@@ -84,6 +84,12 @@ async function installSpy(context: BrowserContext, mode: Mode): Promise<void> {
   }, mode);
 }
 
+/**
+ * The avatar menu's trigger on screen. On a laptop (the desk, from 768 px) the sidebar and the icon rail each
+ * carry one and CSS shows one of them; on a phone there is only the list header's.
+ */
+const accountTrigger = (page: Page) => page.getByTestId('account-trigger').filter({ visible: true });
+
 /** The liaison on a laptop (desktop Chrome), Alerts optionally on. */
 async function desktop(browser: Browser, mode: Mode, opts: { bell?: boolean } = {}): Promise<BrowserContext> {
   const d = devices['Desktop Chrome'];
@@ -187,7 +193,7 @@ test.describe('desktop (Chromium)', () => {
       // The grant is real for this origin (see installSpy for the headless-shell getter).
       expect(await page.evaluate(() => navigator.permissions.query({ name: 'notifications' }).then((s) => s.state))).toBe('granted');
       // Once the service worker is active the menu shows the granted state (no "Allow" button).
-      await page.getByTestId('account-trigger').click();
+      await accountTrigger(page).click();
       const menu = page.getByRole('dialog', { name: 'Account' });
       await expect(menu.getByTestId('notify-state')).toHaveAttribute('data-state', 'granted', { timeout: 30_000 });
       await expect(menu.getByTestId('notify-state')).toHaveText('System notifications on');
@@ -252,7 +258,7 @@ test.describe('desktop (Chromium)', () => {
       await openApp(other);
       // Both have system notifications on (their worker answers lp-caps).
       for (const page of [list, other]) {
-        await page.getByTestId('account-trigger').click();
+        await accountTrigger(page).click();
         const menu = page.getByRole('dialog', { name: 'Account' });
         await expect(menu.getByTestId('notify-state')).toHaveAttribute('data-state', 'granted', { timeout: 30_000 });
         await page.keyboard.press('Escape');
@@ -303,7 +309,7 @@ test.describe('desktop (Chromium)', () => {
       const page = await desk.newPage();
       watch(page);
       await openApp(page);
-      await page.getByTestId('account-trigger').click();
+      await accountTrigger(page).click();
       const menu = page.getByRole('dialog', { name: 'Account' });
       const state = menu.getByTestId('notify-state');
       await expect(state).toHaveAttribute('data-state', 'denied', { timeout: 30_000 });
@@ -337,7 +343,7 @@ test.describe('desktop (Chromium)', () => {
       const page = await desk.newPage();
       watch(page);
       await openApp(page);
-      await page.getByTestId('account-trigger').click();
+      await accountTrigger(page).click();
       const menu = page.getByRole('dialog', { name: 'Account' });
       const allow = menu.getByTestId('notify-allow');
       await expect(allow).toBeVisible({ timeout: 30_000 });
@@ -360,7 +366,7 @@ test.describe('desktop (Chromium)', () => {
       expect(await page.evaluate(() => window.__lpAsked)).toBe(2);
       await sheet.getByRole('button', { name: 'Got it' }).click();
 
-      await page.getByTestId('account-trigger').click();
+      await accountTrigger(page).click();
       await expect(menu.getByTestId('notify-state')).toHaveAttribute('data-state', 'granted');
       await expect(menu.getByTestId('notify-allow')).toHaveCount(0);
       // Off and on again: already answered, so no prompt.
@@ -381,7 +387,7 @@ test('iPhone: the avatar menu and the "Alerts are on" sheet are unchanged, and n
   await page.evaluate(() =>
     Promise.race([navigator.serviceWorker?.ready.then(() => true) ?? Promise.resolve(false), new Promise((resolve) => setTimeout(resolve, 8_000))]),
   );
-  await page.getByTestId('account-trigger').click();
+  await accountTrigger(page).click();
   const menu = page.getByRole('dialog', { name: 'Account' });
   await expect(menu.getByRole('switch', { name: 'Alerts' })).toBeVisible();
   await expect(menu.getByTestId('notify-allow')).toHaveCount(0);
