@@ -41,6 +41,7 @@ import { ProfileSkeleton } from '@/components/ui/Skeleton';
 import { StageGlyph } from '@/components/ui/StageGlyph';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { RequestDetail, RequestSummary } from '@/lib/api-types';
+import { useThreadLoaded } from '@/lib/client/messages-hooks';
 import { goBack, navigate } from '@/lib/client/nav';
 import { takeThreadParam } from '@/lib/client/thread-jump';
 import {
@@ -52,7 +53,9 @@ import {
   useNow,
   useRequest,
   useSession,
+  useStoreSelector,
   type MutationResult,
+  type StoreState,
 } from '@/lib/client/store-contract';
 import { FIELD_LABELS, MAX_PHOTOS, PHOTO_TIMING_LABEL, STATUS, canCancel, isHeld, isInMedical, isStatus, menuActions, parseStaff, postFull, primaryActions, sameStaff, statusMeta, telHref, waitTone, type PhotoTiming, type SettableStatus, type StatusAction, type StatusKind } from '@/lib/domain';
 import { displayStage, holdAnsweredAt, isMedicalTeam, notFoundAnswer } from '@/lib/stages';
@@ -86,6 +89,8 @@ const NEEDS_CONNECTION = 'Needs a connection';
 const NO_NAME = 'Name not provided';
 
 const close = () => goBack({});
+/** (R1) The store has synced since this page loaded: its rows are no longer only the phone's cache. */
+const selectSynced = (s: StoreState) => s.lastSyncLocalAt !== null;
 const nameOf = (row: RequestSummary) => row.name.trim() || NO_NAME;
 
 export function ProfileView({ id, presentation = 'page' }: ProfileViewProps) {
@@ -204,8 +209,13 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
 
   // --- (R1) The latest-message line: while it needs info, or once unread messages for me came in ------------
   // The thread marks itself read as soon as it loads (MessagesSection), so the page keeps what it saw: unread
-  // messages on arrival or while it was open (state adjusted during render, React's pattern).
-  const unread = unreadOf(row) > 0;
+  // messages on arrival or while it was open (state adjusted during render, React's pattern). Only a count this
+  // visit heard from the server is kept: a sync since the page loaded, the request's detail, or its thread (each
+  // writes the row before the thread can mark it read). The phone's cache read at start can be behind (read on
+  // another device, or just before a reload) and would keep a dot for a message already read.
+  const synced = useStoreSelector(selectSynced);
+  const threadLoaded = useThreadLoaded(row.id);
+  const unread = unreadOf(row) > 0 && (synced || detail !== null || threadLoaded);
   const [seenUnread, setSeenUnread] = useState(unread);
   if (unread && !seenUnread) setSeenUnread(true);
   const shownStage = displayStage(row, { now, timeZone });

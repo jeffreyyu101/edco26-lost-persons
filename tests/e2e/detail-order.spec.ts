@@ -14,6 +14,7 @@ import { newSignedInContext, signedInAs } from './helpers/session';
 //       message's notification (in place and as a new page) and the line itself land at the thread; the phone
 //       never focuses the composer (its keyboard stays down), the desk does; a row, a Pending card and an old
 //       "/?r=<id>" open at the top
+//       (a count only from the phone's cache, read meanwhile on another device, keeps no line, not even for a moment)
 //   overflow at 375, 390, 820, 1180 and 1440 px in light and dark; axe on the request with the line.
 // Synthetic rows only (TEST-RO-…), closed again afterwards.
 
@@ -155,6 +156,51 @@ async function unreadOnServer(request: APIRequestContext, id: string): Promise<n
   return (await call<ThreadPage>(request, 'GET', `/api/requests/${id}/messages`)).activity.unread;
 }
 
+/**
+ * The request's unread count in the phone's row cache (IndexedDB `lp-client` / `kv`, `cache:<event>:<staff>:rows`),
+ * or null. Never creates the database (an upgrade is aborted), so call it once the app has started.
+ */
+function cachedUnread(page: Page, id: string): Promise<number | null> {
+  return page.evaluate(
+    (rid) =>
+      new Promise<number | null>((resolve) => {
+        const open = indexedDB.open('lp-client');
+        open.onupgradeneeded = () => open.transaction?.abort();
+        open.onerror = () => resolve(null);
+        open.onsuccess = () => {
+          const db = open.result;
+          const done = (value: number | null) => {
+            db.close();
+            resolve(value);
+          };
+          if (!db.objectStoreNames.contains('kv')) return done(null);
+          const os = db.transaction('kv', 'readonly').objectStore('kv');
+          const keys = os.getAllKeys();
+          keys.onerror = () => done(null);
+          keys.onsuccess = () => {
+            const key = keys.result.map(String).find((k) => k.startsWith('cache:') && k.endsWith(':rows'));
+            if (!key) return done(null);
+            const get = os.get(key);
+            get.onerror = () => done(null);
+            get.onsuccess = () => {
+              const rows = get.result as Array<{ id?: string; unread?: number }> | undefined;
+              const row = Array.isArray(rows) ? rows.find((x) => x.id === rid) : undefined;
+              done(row ? (row.unread ?? 0) : null);
+            };
+          };
+        };
+      }),
+    id,
+  );
+}
+
+/** The app with the request in its list, and its row cache holding `unread` for it. */
+async function cachedWithUnread(page: Page, id: string, unread: number): Promise<void> {
+  await page.goto('/');
+  await expect(page.locator(`[data-request-id="${id}"]`).first()).toBeVisible(SYNC);
+  await expect.poll(() => cachedUnread(page, id), SYNC).toBe(unread);
+}
+
 /** What public/sw.js does on a notification click with an app window open: it asks the page to open the URL. */
 function workerAsksToOpen(page: Page, url: string): Promise<unknown> {
   return page.evaluate(
@@ -225,6 +271,45 @@ test.describe('phone', () => {
     await expect(messages(page).getByTestId('thread-empty')).toBeVisible(SYNC);
     await expect(line(page)).toHaveCount(0);
     expect(ascending(await order(page, false))).toBe(true);
+  });
+
+  test('a reload after the thread was read elsewhere: no line, not even for a moment; an unread message in the cache still shows it', async ({ page, browser }) => {
+    test.slow();
+    const r = await createRequest(page.request);
+    await withMedical(browser, async (med) => {
+      await inMedical(med, r.id);
+      await say(med, r.id, 'Bring 1 person only');
+    });
+    await expect.poll(() => unreadOnServer(page.request, r.id), SYNC).toBe(1);
+
+    // Unread in the cache and on the server: the line, with its dot, once this visit hears from the server.
+    await cachedWithUnread(page, r.id, 1);
+    await page.goto(`/?r=${r.id}`);
+    await expect(line(page)).toBeVisible(SYNC);
+    await expect(line(page).getByTestId('preview-unread')).toBeVisible();
+    await expect.poll(() => unreadOnServer(page.request, r.id), SYNC).toBe(0);
+
+    // A new message reaches the phone's cache; the phone leaves the app; the same staff reads it on another device.
+    await withMedical(browser, (med) => say(med, r.id, 'Gate C, by the info tent'));
+    await cachedWithUnread(page, r.id, 1);
+    await page.goto('about:blank');
+    const thread = await call<ThreadPage>(page.request, 'GET', `/api/requests/${r.id}/messages`);
+    await call(page.request, 'POST', `/api/requests/${r.id}/messages/read`, { upto: thread.messages[thread.messages.length - 1]!.createdAt });
+    expect(await unreadOnServer(page.request, r.id)).toBe(0);
+
+    // Reopened with the cache still counting it unread: the line never shows.
+    await page.addInitScript(() => {
+      const w = window as unknown as { __lineSeen?: boolean };
+      w.__lineSeen = false;
+      new MutationObserver(() => {
+        if (document.querySelector('[data-testid="thread-preview"]')) w.__lineSeen = true;
+      }).observe(document, { childList: true, subtree: true });
+    });
+    await page.goto(`/?r=${r.id}`);
+    await expect(messages(page).getByTestId('bubble-them').last()).toHaveText('Gate C, by the info tent', SYNC);
+    await page.waitForTimeout(2_000);
+    await expect(line(page)).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { __lineSeen?: boolean }).__lineSeen)).toBe(false);
   });
 
   test('the line, the Message button and an Activity message land at the thread with the keyboard down; a row, a card and an answer at the top', async ({ page, context, browser }) => {

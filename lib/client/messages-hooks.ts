@@ -39,6 +39,15 @@ export function useThread(requestId: string): ThreadState | null {
   return useMessagingSlice(select);
 }
 
+/**
+ * The request's thread has come back from the server since this page loaded (a copy from the phone's cache does
+ * not count). That load wrote the request's activity, its unread count included, into the row first.
+ */
+export function useThreadLoaded(requestId: string): boolean {
+  const select = useCallback((s: MessagingSnapshot) => (s.threads.get(requestId)?.loadedAt ?? 0) > 0, [requestId]);
+  return useMessagingSlice(select);
+}
+
 /** This phone's queued messages and en route taps for a request, oldest first. */
 export function useRequestJobs(requestId: string): readonly MessageJob[] {
   const select = useCallback((s: MessagingSnapshot) => {

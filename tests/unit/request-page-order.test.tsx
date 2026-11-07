@@ -40,12 +40,13 @@ const ENGINE = {
   subscribe: () => () => undefined,
 } as unknown as MessagingApi;
 
-function store(id: string, patch: (row: RequestSummary) => RequestSummary = (r) => r): AppStore {
+function store(id: string, patch: (row: RequestSummary) => RequestSummary = (r) => r, synced = true): AppStore {
   const base = createStubStore({ eventTimezone: 'America/New_York', now: NOW });
   const state = base.getState();
   const confirmed = new Map(state.confirmed);
   confirmed.set(id, patch(confirmed.get(id)!));
-  const next = { ...state, confirmed };
+  // `synced: false`: the rows are only what the phone's cache had at start (no sync since the page loaded).
+  const next = { ...state, confirmed, ...(synced ? {} : { lastSyncAt: null, lastSyncLocalAt: null }) };
   return { getState: () => next, subscribe: () => () => {}, actions: { ...base.actions, messages: ENGINE } };
 }
 
@@ -121,6 +122,20 @@ describe('the latest-message line (R1)', () => {
       [IN_MEDICAL, (r) => ({ ...r, lastMessage: MINE, messageCount: 2, unread: 0 })],
     ];
     for (const [id, patch] of cases) expect(preview(render(store(id, patch), <ProfileView id={id} />))).toBeNull();
+  });
+
+  it("not from the phone's cache alone: an unread count read at start, before any sync, detail or thread came back, shows no line", () => {
+    // The cache can be behind: the message was read on another device, or just before a reload.
+    const unreadRow = (r: RequestSummary) => ({ ...r, lastMessage: { by: 'Rae C.', mine: false, text: 'Bring 1 person only' }, messageCount: 1, unread: 1 });
+    expect(preview(render(store(IN_MEDICAL, unreadRow, false), <ProfileView id={IN_MEDICAL} />))).toBeNull();
+    // Once this visit heard from the server (here a sync since the page loaded; the detail and the thread's own load
+    // count too, end to end in tests/e2e/detail-order.spec.ts, as a server render reads no engine snapshot).
+    expect(preview(render(store(IN_MEDICAL, unreadRow, true), <ProfileView id={IN_MEDICAL} />))).toContain('data-testid="preview-unread"');
+    // Needs info is not a kept count: it shows from the row as it is.
+    const asked = (r: RequestSummary) => ({ ...r, needsInfo: true, lastMessage: FROM_MEDICAL, messageCount: 1, unread: 1 });
+    const line = preview(render(store(WAITING, asked, false), <ProfileView id={WAITING} />))!;
+    expect(line).toContain('data-testid="stage-chip"');
+    expect(line).not.toContain('preview-unread');
   });
 
   it('the rule: Needs info, or unread from someone else seen on this visit, until my own message is the latest', () => {
