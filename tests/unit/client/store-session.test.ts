@@ -89,6 +89,36 @@ describe('sign out (A14)', () => {
     expect(server.requests('GET', '/api/sync').length).toBeGreaterThan(n);
   });
 
+  it("F6 follow-up: a confirmed sign-out forgets the bell (the staff member's server switch); a failed one keeps it", async () => {
+    // The page's localStorage (lib/client/prefs.ts reads window.localStorage).
+    const local = new MemoryStorage();
+    vi.stubGlobal('window', { localStorage: local, addEventListener() {}, removeEventListener() {} });
+    let stop = () => {};
+    try {
+      const server = new FakeServer([makeRow(1)]);
+      const booted = boot(server);
+      const { a, s } = booted;
+      stop = booted.stop;
+      await ready();
+      // ActivityHost copied the server's switch (Medical's team default, say), and the server had answered.
+      a.setPref('bellIntroSeen', true);
+      a.setPref('bell', true);
+      local.setItem('lp-bell-server', '1');
+      server.override = (req) => (req.path === '/api/session' && req.method === 'DELETE' ? apiError(503, 'unavailable', 'Try again') : undefined);
+      expect(await finish(a.signOut(), 5_000)).toMatchObject({ ok: false });
+      expect(s().prefs).toMatchObject({ bell: true, bellIntroSeen: true });
+      expect(local.getItem('lp-bell')).toBe('1');
+      server.override = null;
+      expect(await finish(a.signOut(), 5_000)).toEqual({ ok: true });
+      // The next staff member on this phone starts from their own switch, not this one.
+      expect(s().prefs).toMatchObject({ bell: false, bellIntroSeen: false });
+      expect(['lp-bell', 'lp-bell-intro-seen', 'lp-bell-server'].map((k) => local.getItem(k))).toEqual([null, null, null]);
+    } finally {
+      stop();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('regression: a DELETE lost to the network is retried, and only a confirmed one signs out', async () => {
     const server = new FakeServer([makeRow(1)]);
     const { a, s, fe } = boot(server);

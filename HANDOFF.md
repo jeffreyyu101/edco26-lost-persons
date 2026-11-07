@@ -159,6 +159,11 @@ screenshots.
 - **Medical starts with "New requests" on** (lock-screen push and the in-app toast) unless they switched it off in the
   Alerts sheet (Brian, 2026-11-07 02:15). On by that default alone it adds no Activity row: their bell and app badge
   count what they counted before.
+- **Follow-ups** (`fix/f6-followups`, client only, deploy any time): on a shared phone the next staff member no longer
+  inherits New requests from the last one's bell (a Medical team default, say); a "× Not located" tapped while the first
+  Not found is still saving counts once the hold has shown for 0.5 s (a faster second tap is still a double tap). The
+  WebKit offline e2e failure was WebKit logging a request cut off by the test's navigation, not an app error (the
+  spec now skips that line). DECISIONS "F6 follow-ups", BUILD_SPEC A106.
 - **Deploy first, then the migration** ([F6 in production](#f6-in-production)): this build works on today's database.
 - Decisions: `design/DECISIONS.md` "F6 inactivity auto-close"; spec: `docs/BUILD_SPEC.md` §24 (A96–A103).
 
@@ -242,6 +247,8 @@ screenshots.
 
 ### F6 in production
 
+**Done 2026-11-07:** deployed 11:07 ET, migrated 11:08 ET; the first run (11:10) closed 25, all quiet (the backlog).
+
 Production has the F3 + F4 file (`main` cf78f90). This release's file is that file with section 9 appended (the
 auto-close) and these additive changes in place: step 2's status list gains `'Closed – Inactive'` (so the first paste
 replaces `patients_status_check` once, `NOT VALID`, keeping every value in use), `lp_row` adds `quiet_close`,
@@ -257,8 +264,9 @@ verbatim with no Reopen, raises an in-app alert for each one on its phones, and 
 untold close is given up after 15 minutes).
 
 1. **Deploy** (merge to `main`; Vercel deploys it; no new environment variable). Ask staff to tap "Update ready ·
-   Reload". A phone left on the old build still works; it only shows the closes verbatim, grey, with no Reopen, until
-   it reloads.
+   Reload". A phone left on the old build still works, but until it reloads it shows the closes verbatim, grey, with
+   no Reopen, and toasts the closes of its own requests like any other update ("N updates" when more than 2 land at
+   once): the backlog is quiet only on the new build.
 2. **Before** (SQL Editor, as `postgres`):
    - `select public.lp_stages_recheck_minutes();` returns `20`, and
      `select count(*) from pg_proc where proname like 'lp\_push\_%' or proname like 'lp\_activity\_%';` returns `12`

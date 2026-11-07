@@ -85,7 +85,7 @@ import {
   type StoredDraft,
   type StoredStaff,
 } from './persist';
-import { readPrefs, subscribePrefs, writePref } from './prefs';
+import { forgetBell, readPrefs, subscribePrefs, writePref } from './prefs';
 import { dropBrowserPush, provideApi, publishSyncExtras, pushHooks } from './f4-bridge';
 import { SESSION_CHANNEL, clearLogoutPending, readLogoutPending, writeLogoutPending, type LogoutPending } from './session-signals';
 import { startServiceWorker, type SwController } from './sw-client';
@@ -291,6 +291,11 @@ const SESSION_FRESH_MS = 60_000;
  * waits between them), so only a tab that died mid sign-out lets it run out.
  */
 const PEER_SIGN_OUT_HOLD_MS = 45_000;
+/**
+ * (F6 follow-up) A second Not found within this long of the first one's hold showing is the other half of a
+ * double tap (the platforms' double-tap window is 300–500 ms); later, the medic tapped the "× Not located" on screen.
+ */
+const DOUBLE_TAP_MS = 500;
 
 type PollOutcome = 'ok' | 'network' | 'http5xx' | 'http4xx' | 'unauthorized' | 'offline' | 'stale';
 type SignOutResult = Awaited<ReturnType<StoreActions['signOut']>>;
@@ -1377,7 +1382,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     to: SettableStatus,
     kind: StatusKind,
     undoVersion: number | null,
-    tapHeld?: boolean,
+    tapHeld?: boolean | 'shown',
     restore?: HoldFields,
   ): Promise<MutationResult> => {
     // (F5) The hold's client side (loadHold). Nothing is on screen yet, so a failed load is only the toast.
@@ -1395,6 +1400,11 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     // (F5) A Not found tapped on a request that was not on hold, queued behind one that has put it on hold (a
     // double tap): already satisfied. Sent, it would be the final answer.
     if (undoVersion === null && to === STATUS.notInMedical && kind === 'answer' && tapHeld === false && isHeld(row)) {
+      return { ok: true, changed: false, request: row };
+    }
+    // (F6 follow-up) A "× Not located" tapped on the hold this phone showed ahead of the server: the final answer only
+    // once that hold is the server's. The first tap failed or the request moved on: nothing is sent.
+    if (undoVersion === null && to === STATUS.notInMedical && kind === 'answer' && tapHeld === 'shown' && !isHeld(row)) {
       return { ok: true, changed: false, request: row };
     }
     // (F5) A first Not found keeps the status and goes on hold (lib/client/hold-rules.ts predicts it); (Pending v9.1)
@@ -2080,7 +2090,10 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   // ---- sign out (A14) ----
   const clearLocalData = async (discardOutbox: boolean) => {
     const store = kv;
+    // (F6 follow-up) The bell copied the signed-out staff member's server switch: the next one starts from theirs.
+    forgetBell();
     set({
+      prefs: { ...state.prefs, bell: false, bellIntroSeen: false },
       confirmed: new Map(),
       pending: new Map(),
       myIds: new Set(),
@@ -2341,7 +2354,14 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       // (Pending v9.1) While an Undo is on its way the card on screen is the one it brings back (its overlay, held
       // again after the final Not found's Undo): a "× Not found" tapped there is meant as the final answer.
       const confirmedRow = undoing.get(id) ?? state.confirmed.get(id);
-      const tapHeld = confirmedRow ? isHeld(confirmedRow) : false;
+      let tapHeld: boolean | 'shown' = confirmedRow ? isHeld(confirmedRow) : false;
+      // (F6 follow-up) The first Not found's hold has been on screen for longer than a double tap: this is the
+      // "× Not located" the medic saw, queued behind the first and sent as the final answer once the hold is saved.
+      const overlay = state.pending.get(id);
+      const row = state.confirmed.get(id);
+      if (!tapHeld && status === STATUS.notInMedical && kind === 'answer' && row && overlay?.kind === 'status') {
+        if (isHeld({ ...row, ...overlay.fields }) && now() - overlay.startedAt >= DOUBLE_TAP_MS) tapHeld = 'shown';
+      }
       return serialize(id, async () => (await writeGate(false)) ?? runStatus(id, status, kind, null, tapHeld));
     },
 

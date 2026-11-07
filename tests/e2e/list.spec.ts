@@ -6,7 +6,7 @@ import { loadTestEnv, testBaseUrl } from '../../scripts/test-env.mjs';
 import { confirmCrop } from './helpers/photo';
 import { syntheticPng } from './helpers/png';
 import { newSignedInContext, signedInAs } from './helpers/session';
-import { syncRows } from './helpers/sync';
+import { answerSaved, syncRows } from './helpers/sync';
 
 // List views end to end (spec §8 List views, §9.4 "it appears in All and My requests", "a second context
 // sees it in Pending … taps In medical", "Friend coming → Reunited", "undo", "search", "a tile filtering
@@ -883,8 +883,9 @@ test('Not found leaves Pending; ?status= shows a filter chip that clears to All'
   const r = await createRequest(page);
   await page.goto('/?view=pending');
   await expect(checkCard(page, r.id)).toBeVisible({ timeout: 10_000 });
-  // (v9.1) The first Not found holds it, in place with a "Pending" chip; the second closes it.
-  await checkCard(page, r.id).getByTestId('not-found-answer').click();
+  // (v9.1) The first Not found holds it, in place with a "Pending" chip; the second closes it (once the first is
+  // saved: sooner it is a double tap).
+  await answerSaved(page, r.id, () => checkCard(page, r.id).getByTestId('not-found-answer').click());
   await expect(checkCard(page, r.id).getByTestId('hold-chip')).toHaveText('Pending');
   await checkCard(page, r.id).getByTestId('not-found-answer').click();
   await expect(checkCard(page, r.id)).toHaveCount(0);

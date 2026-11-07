@@ -65,6 +65,55 @@ describe('the hold in the store', () => {
     expect(s().confirmed.get(R1.id)).toMatchObject({ status: STATUS.waiting, notFoundChecks: 1 });
   });
 
+  it('F6 follow-up: a "× Not located" tapped once the predicted hold has been on screen past a double tap is the final answer, sent after the hold is saved', async () => {
+    const server = new FakeServer([R1]);
+    const { a, s } = boot(server);
+    await ready();
+    const g = gate();
+    holdingServer(server, g.wait);
+    const first = a.setStatus(R1.id, STATUS.notInMedical, 'answer');
+    await advance(0);
+    // The hold shows at once ("Pending" + "× Not located"); the server has not answered yet.
+    expect(applyOverlay(s().confirmed.get(R1.id)!, s().pending.get(R1.id))).toMatchObject({ status: STATUS.waiting, notFoundChecks: 1 });
+    // A quick second tap is still the other half of a double tap…
+    await advance(200);
+    const bounce = a.setStatus(R1.id, STATUS.notInMedical, 'answer');
+    // …but the medic who reads "× Not located" and taps it means it.
+    await advance(600);
+    const meant = a.setStatus(R1.id, STATUS.notInMedical, 'answer');
+    expect(statusPosts(server)).toHaveLength(1);
+    g.open();
+    expect(await finish(first)).toMatchObject({ ok: true, changed: true });
+    expect(await finish(bounce)).toMatchObject({ ok: true, changed: false });
+    expect(await finish(meant)).toMatchObject({ ok: true, changed: true });
+    expect(statusPosts(server).map((r) => r.body)).toEqual([
+      { status: STATUS.notInMedical, expectedVersion: 1, kind: 'answer' },
+      { status: STATUS.notInMedical, expectedVersion: 2, kind: 'answer' },
+    ]);
+    expect(s().confirmed.get(R1.id)?.status).toBe(STATUS.notInMedical);
+  });
+
+  it('F6 follow-up: that deliberate tap sends nothing when the hold it was tapped on never reached the server', async () => {
+    const server = new FakeServer([R1]);
+    const { a, s } = boot(server);
+    await ready();
+    const g = gate();
+    server.override = async (req: FakeRequest) => {
+      if (!req.path.endsWith('/status')) return undefined;
+      await g.wait();
+      return apiError(503, 'unavailable', 'Try again');
+    };
+    const first = a.setStatus(R1.id, STATUS.notInMedical, 'answer');
+    await advance(800);
+    const meant = a.setStatus(R1.id, STATUS.notInMedical, 'answer');
+    g.open();
+    expect(await finish(first)).toMatchObject({ ok: false });
+    expect(await finish(meant)).toMatchObject({ ok: true, changed: false });
+    expect(statusPosts(server)).toHaveLength(1);
+    expect(s().confirmed.get(R1.id)?.status).toBe(STATUS.waiting);
+    expect(s().confirmed.get(R1.id)?.recheckAt ?? null).toBeNull();
+  });
+
   it('a Not found on a request already on hold is the final answer', async () => {
     const server = new FakeServer([R1]);
     const { a, s } = boot(server);
