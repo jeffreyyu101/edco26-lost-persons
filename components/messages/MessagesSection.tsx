@@ -13,6 +13,7 @@ import { Button, ContextMenu, DropdownMenu, IconButton, Skeleton, TextArea, Visu
 import { ArrowDown, ArrowUp, Check, CloudOff, Copy, Ellipsis, MessageCircle, RotateCcw, Trash2, Undo2 } from 'lucide-react';
 import { WalkIcon } from './WalkIcon';
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
 import type { RequestSummary } from '@/lib/api-types';
 import { meFor } from '@/lib/client/messages-core';
 import { useMessaging, useOpenThread, useRequestJobs, useThread, takeThreadFocus } from '@/lib/client/messages-hooks';
@@ -233,9 +234,16 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
           </button>
         ) : null}
       </div>
-      <VisuallyHidden>
-        <div ref={live} aria-live="polite" aria-atomic="true" data-testid="thread-live" />
-      </VisuallyHidden>
+      {/* At the end of <body>, not in the request: a live region inside it would make a modal menu's
+          aria-hidden split the request into pieces (aria-hidden keeps live regions readable). */}
+      {typeof document === 'undefined'
+        ? null
+        : createPortal(
+            <VisuallyHidden>
+              <div ref={live} aria-live="polite" aria-atomic="true" data-testid="thread-live" />
+            </VisuallyHidden>,
+            document.body,
+          )}
 
       <Composer
         lines={lines}
@@ -354,7 +362,9 @@ function Composer({
   onArrived: () => void;
 }) {
   const [value, setValue] = useState('');
+  const counterId = useId();
   const length = messageLength(value);
+  const showCounter = length >= MESSAGE_COUNTER_FROM;
   const ready = length > 0 && length <= MESSAGE_MAX;
 
   const fit = useCallback(() => {
@@ -418,6 +428,7 @@ function Composer({
           maxLength={MESSAGE_MAX}
           placeholder="Message"
           aria-label="Message"
+          aria-describedby={showCounter ? counterId : undefined}
           onChange={(e) => setValue(e.currentTarget.value)}
           onKeyDown={onKeyDown}
           data-testid="composer-input"
@@ -437,9 +448,10 @@ function Composer({
           <ArrowUp size={17} strokeWidth={2.5} aria-hidden />
         </IconButton>
       </div>
-      {length >= MESSAGE_COUNTER_FROM ? (
-        <span className={s.counter} data-over={length > MESSAGE_MAX ? '' : undefined} aria-live="polite">
+      {showCounter ? (
+        <span className={s.counter} id={counterId} data-over={length > MESSAGE_MAX ? '' : undefined}>
           {length} / {MESSAGE_MAX}
+          <VisuallyHidden> characters</VisuallyHidden>
         </span>
       ) : null}
     </div>

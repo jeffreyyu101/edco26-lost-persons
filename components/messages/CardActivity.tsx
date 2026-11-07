@@ -7,7 +7,7 @@
 //   Pending → To check: the preview above the answers, and a 44 px Message button left of them.
 //   Pending → Friend coming: the en route row, then Message | Reunited.
 //   Desk tables: a count after the name. Pending's Friend coming tab and the nav's Pending: a dot.
-import { Button, IconButton } from '@radix-ui/themes';
+import { Button, IconButton, VisuallyHidden } from '@radix-ui/themes';
 import { Check, MessageSquare } from 'lucide-react';
 import { WalkIcon } from './WalkIcon';
 import type { ReactNode } from 'react';
@@ -30,10 +30,14 @@ function who(row: RequestSummary): string {
   return initials(row.name) || 'this request';
 }
 
-/** Starts with the visible "Message" (WCAG 2.5.3), then who and how many unread. */
+/**
+ * Holds the visible text in order (WCAG 2.5.3): "Message" then the badge's count, so "Message 4" is in the
+ * name: "Message, 4 unread messages about J.D." / "Message about J.D.".
+ */
 function messageLabel(row: RequestSummary): string {
   const n = unreadOf(row);
-  return n > 0 ? `Message about ${who(row)}, ${n} unread` : `Message about ${who(row)}`;
+  if (n === 0) return `Message about ${who(row)}`;
+  return `Message, ${n} unread ${n === 1 ? 'message' : 'messages'} about ${who(row)}`;
 }
 
 /** "Message" with the unread count on its corner (full-width or half of a two-button row). */
@@ -52,6 +56,8 @@ export function MessageButton({ row }: { row: RequestSummary }) {
     >
       <MessageSquare size={16} strokeWidth={1.75} aria-hidden />
       Message
+      {/* The space keeps "Message 4" apart in the text that label-in-name checks compare with the name. */}
+      {n > 0 ? ' ' : null}
       {n > 0 ? (
         <span className={s.badge} aria-hidden data-testid="unread-badge">
           {n}
@@ -91,12 +97,14 @@ export function PreviewRow({ row }: { row: RequestSummary }) {
   if (!last || !(row.messageCount ?? 0)) return null;
   const p = previewText(last);
   const unread = unreadOf(row) > 0;
+  const sentence = `Last message${unread ? ', unread' : ''}, from ${last.mine ? 'you' : p.who}: ${p.text}`;
   return (
-    <div className={s.preview} data-testid="message-preview" aria-hidden>
-      {unread ? <span className={s.udot} data-testid="preview-unread" /> : null}
-      <span className={s.previewText}>
+    <div className={s.preview} data-testid="message-preview">
+      {unread ? <span className={s.udot} data-testid="preview-unread" aria-hidden /> : null}
+      <span className={s.previewText} aria-hidden>
         <span className={s.previewWho}>{p.who}:</span> {p.text}
       </span>
+      <VisuallyHidden>{sentence}</VisuallyHidden>
     </div>
   );
 }

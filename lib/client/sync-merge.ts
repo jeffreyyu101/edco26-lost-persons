@@ -1,7 +1,7 @@
 // Pure merge rules for the store (spec §7 Sync / Mutations, v2.1 A11). No I/O.
 import type { RequestPatch, RequestSummary } from '../api-types';
 import { postShort, splitName } from '../domain';
-import { carryActivity } from './messages-logic';
+import { carryActivity } from './messages-activity';
 
 /** Equal plain JSON values (the F3 activity objects lastMessage / enroute arrive as new objects every poll). */
 function sameJson(a: unknown, b: unknown): boolean {

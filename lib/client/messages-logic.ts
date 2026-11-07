@@ -2,12 +2,14 @@
 //   * the message / en route outbox: what is due, how a failure is classified, which jobs may go out
 //   * the thread: merging pages, bubbles grouped like iMessage, the receipt under my latest message
 //   * the optimistic en route row while a tap is queued
-//   * the in-app alert for a new message from someone else on a request I'm involved in
+// Carrying a row's activity and the in-app message alert are in ./messages-activity (first-load code),
+// re-exported here.
 import type { EnrouteSummary, RequestSummary, ThreadMessage, ThreadReceipt } from '../api-types';
-import { canonStaff, initials, isInMedical, sameStaff } from '../domain';
-import { hasActivity, unreadOf, type RequestActivity } from '../messaging';
-import type { AlertEvent } from './store-contract';
+import { canonStaff, sameStaff } from '../domain';
+import { unreadOf } from '../messaging';
 import type { HttpFailure } from './http';
+
+export { activityOf, carryActivity, diffMessageAlerts, messageAlertKey, type MessageAlert } from './messages-activity';
 
 // ---------------------------------------------------------------------------------------------------
 // Jobs (the durable outbox of messages and en route taps, IndexedDB `mjob:<id>`)
@@ -264,82 +266,11 @@ export function effectiveEnroute(server: EnrouteSummary | null | undefined, myJo
 // Rows
 // ---------------------------------------------------------------------------------------------------
 
-/** The activity fields of a row (zeros for a row without them). */
-export function activityOf(row: RequestSummary): RequestActivity {
-  return {
-    messageCount: row.messageCount ?? 0,
-    lastMessageAt: row.lastMessageAt ?? null,
-    unread: unreadOf(row),
-    needsInfo: row.needsInfo === true,
-    lastMessage: row.lastMessage ?? null,
-    enroute: row.enroute ?? null,
-    involved: row.involved === true,
-  };
-}
-
-/**
- * A row from a response that does not carry activity (a status or edit answer built by lp_row alone) keeps
- * the activity the client had, adjusted for what the status change implies: Needs info ends with any status
- * change, and en route exists only In medical.
- */
-export function carryActivity(previous: RequestSummary | undefined, next: RequestSummary): RequestSummary {
-  if (!previous || hasActivity(next) || !hasActivity(previous)) return next;
-  const a = activityOf(previous);
-  const statusChanged = previous.status !== next.status;
-  return {
-    ...next,
-    ...a,
-    needsInfo: statusChanged ? false : a.needsInfo,
-    enroute: isInMedical(next.status) ? a.enroute : null,
-  };
-}
-
 /** Unread messages over every request (the Pending tab and nav dots count requests with unread > 0). */
 export function unreadRequests(rows: readonly RequestSummary[]): number {
   let n = 0;
   for (const r of rows) if (unreadOf(r) > 0) n += 1;
   return n;
-}
-
-// ---------------------------------------------------------------------------------------------------
-// Alerts (toast + chime while visible; F4's Web Push covers the background)
-// ---------------------------------------------------------------------------------------------------
-
-/** Key of a message alert: the same in every tab that raises it. */
-export const messageAlertKey = (row: Pick<RequestSummary, 'id' | 'lastMessageAt'>) => `${row.id}:m:${row.lastMessageAt ?? ''}`;
-
-export interface MessageAlert {
-  alert: AlertEvent;
-  key: string;
-}
-
-/**
- * A new message from someone else, on a request I'm involved in, since the rows the store held. Call it
- * BEFORE merging. Marks every alerted key in `seen`. `open`: request ids whose thread is on screen (no
- * alert: the bubble is the alert).
- */
-export function diffMessageAlerts(
-  previous: ReadonlyMap<string, RequestSummary>,
-  rows: readonly RequestSummary[],
-  seen: Set<string>,
-  open: (id: string) => boolean,
-): MessageAlert[] {
-  const out: MessageAlert[] = [];
-  for (const row of rows) {
-    if (!hasActivity(row) || !row.lastMessage || row.lastMessage.mine || !row.involved) continue;
-    if (unreadOf(row) === 0 || !row.lastMessageAt) continue;
-    const before = previous.get(row.id);
-    if (!before || !hasActivity(before)) continue;
-    if (before.lastMessageAt && row.lastMessageAt <= before.lastMessageAt) continue;
-    const key = messageAlertKey(row);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    if (open(row.id)) continue;
-    const who = initials(row.name);
-    const subtitle = `${row.lastMessage.by || 'Staff'}: ${row.lastMessage.text}`;
-    out.push({ key, alert: { kind: 'message', requestId: row.id, title: who || 'New message', subtitle, count: 1 } });
-  }
-  return out;
 }
 
 /** Canonical staff of a job's operator (for prompts and filters). */

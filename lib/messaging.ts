@@ -259,31 +259,10 @@ export function previewText(last: LastMessage): { who: string; text: string } {
   return { who: last.mine ? 'You' : last.by || 'Staff', text: last.text };
 }
 
-/** The activity fields of a RequestSummary (all optional: rows cached before this build have none). */
-export const ACTIVITY_KEYS = ['messageCount', 'lastMessageAt', 'unread', 'needsInfo', 'lastMessage', 'enroute', 'involved'] as const;
-export type ActivityKey = (typeof ACTIVITY_KEYS)[number];
-export type RequestActivity = Required<Pick<RequestSummary, ActivityKey>>;
-
-/** No messages, nobody en route. */
-export const EMPTY_ACTIVITY: RequestActivity = {
-  messageCount: 0,
-  lastMessageAt: null,
-  unread: 0,
-  needsInfo: false,
-  lastMessage: null,
-  enroute: null,
-  involved: false,
-};
-
-/** True when the row carries activity fields (a row from this build's sync or detail). */
-export function hasActivity(row: Partial<Pick<RequestSummary, 'messageCount'>>): boolean {
-  return typeof row.messageCount === 'number';
-}
-
-/** The row's unread count (0 for rows without activity). */
-export function unreadOf(row: Pick<RequestSummary, 'unread'>): number {
-  return typeof row.unread === 'number' && row.unread > 0 ? row.unread : 0;
-}
+// The activity fields, EMPTY_ACTIVITY, hasActivity and unreadOf live in ./messaging-activity (the store's
+// first-load code needs only those); re-exported here so every other caller keeps one import.
+export { ACTIVITY_KEYS, EMPTY_ACTIVITY, hasActivity, unreadOf } from './messaging-activity';
+export type { ActivityKey, RequestActivity } from './messaging-activity';
 
 /** "In medical" or the status's own short label (never hard-coded): for screen-reader sentences. */
 export function statusShort(status: string): string {

@@ -1,5 +1,6 @@
 // Boots the real store against the fake API (fake-indexeddb, fake timers with no poll jitter).
 import { afterEach, beforeEach, vi } from 'vitest';
+import { createMessaging } from '@/lib/client/messages-core';
 import { createAppStore, type StoreEnv } from '@/lib/client/store-core';
 import type { DraftPhoto } from '@/lib/client/store-contract';
 import { EMPTY_FORM_VALUES, type RequestFormValues } from '@/lib/client/form-values';
@@ -25,7 +26,8 @@ export function installStoreHooks(): void {
 export function boot(server: FakeServer, opts: EnvOptions = {}, tweak?: (env: StoreEnv) => void) {
   const fe = fakeEnv(server, opts);
   tweak?.(fe.env);
-  const store = createAppStore({ eventTimezone: TZ, env: () => fe.env });
+  // The messages engine without the dynamic import, so its load settles with the fake timers.
+  const store = createAppStore({ eventTimezone: TZ, env: () => fe.env, loadMessaging: () => Promise.resolve(createMessaging) });
   const stop = store.start?.() ?? (() => {});
   stops.push(stop);
   return { store, fe, stop, s: () => store.getState(), a: store.actions };

@@ -10,8 +10,8 @@ import { newSignedInContext } from './helpers/session';
 // never part of the gate. Synthetic rows, closed again afterwards.
 
 const BASE = testBaseUrl();
-const RUN = Date.now().toString(36).slice(-4);
-const FOH = { staffName: `Dana Kent ${RUN}`, team: 'GC/HX - Special Operations/Med Transpo' };
+// Real-looking names ("Dana K.", "Rae C."): run on a freshly seeded stack so My requests holds only these rows.
+const FOH = { staffName: 'Dana Kent', team: 'GC/HX - Special Operations/Med Transpo' };
 const MED = { staffName: 'Rae Chen', team: 'Medical' };
 const OUT = 'design/screens';
 
@@ -24,7 +24,7 @@ async function call<T>(request: APIRequestContext, method: 'GET' | 'POST' | 'PAT
   return (await res.json()) as T;
 }
 
-const created: Array<{ id: string; request: APIRequestContext }> = [];
+const created: Array<{ id: string }> = [];
 
 async function make(request: APIRequestContext, name: string, age: string, gender: string, clothing: string): Promise<RequestSummary> {
   const { request: row } = await call<{ request: RequestSummary }>(request, 'POST', '/api/requests', {
@@ -35,7 +35,7 @@ async function make(request: APIRequestContext, name: string, age: string, gende
     gender,
     clothing,
   });
-  created.push({ id: row.id, request });
+  created.push({ id: row.id });
   return row;
 }
 
@@ -59,8 +59,11 @@ async function themed(browser: Browser, who: typeof FOH, width: number, height: 
   return ctx;
 }
 
-test.afterAll(async () => {
-  for (const { id, request } of created.splice(0)) {
+test.afterAll(async ({ browser }) => {
+  // The contexts that made the rows are closed by now: close the rows as front of house (who logged them all).
+  const ctx = await newSignedInContext(browser, FOH);
+  const request = ctx.request;
+  for (const { id } of created.splice(0)) {
     try {
       const row = await call<RequestDetail>(request, 'GET', `/api/requests/${id}`);
       if (row.status === 'Added') await request.fetch(`/api/requests/${id}/cancel`, { method: 'POST', data: { expectedVersion: row.rowVersion }, headers: { Origin: BASE } });
@@ -70,6 +73,7 @@ test.afterAll(async () => {
       // Best effort.
     }
   }
+  await ctx.close();
 });
 
 test('F3 screens', async ({ browser, browserName }) => {

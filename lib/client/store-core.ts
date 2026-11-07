@@ -42,8 +42,8 @@ import {
 import { DRAFT_DEBOUNCE_MS, LEGACY_QUEUE_KEY, MUTATION_TIMEOUT_MS, SYNC, UNDO_MS } from './constants';
 import { createBodyFromLegacyQueueItem, hasAnyDetail, toCreateBody } from './form-values';
 import { apiRequest, isDefinitive, isUncertain, type FetchLike, type HttpFailure, type HttpResult, type RequestOptions } from './http';
-import { createMessaging, type MessagingEngine } from './messages-core';
-import { diffMessageAlerts } from './messages-logic';
+import { diffMessageAlerts } from './messages-activity';
+import { createLazyMessaging, type CreateMessaging } from './messages-lazy';
 import { navigate } from './nav';
 import {
   CREATE_DEFINITIVE,
@@ -196,6 +196,8 @@ export interface CreateAppStoreOptions {
   eventTimezone: string;
   /** Tests inject a fake environment; the browser one is used otherwise. */
   env?: () => StoreEnv;
+  /** (F3) Loads the messages engine; a dynamic import by default (tests pass it in directly). */
+  loadMessaging?: () => Promise<CreateMessaging>;
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -2142,7 +2144,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     markRowsDirty();
   };
 
-  const messaging: MessagingEngine = createMessaging({
+  // The engine itself loads after start (messages-lazy.ts): it is not part of the first-load JS (A25).
+  const messaging = createLazyMessaging({
     call,
     online: () => !!env && env.online() && state.connection !== 'offline',
     visible: () => !!env && env.visible(),
@@ -2166,7 +2169,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     showUndo: showCustomUndo,
     broadcast: () => broadcast({ type: 'mjobs' }),
     locks: () => env?.locks ?? null,
-  });
+  }, options.loadMessaging);
 
   // ---- actions ----
   const actions: StoreActions = {
@@ -2359,6 +2362,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 
     async signOut(opts) {
       const unsent = state.outbox.length;
+      // The engine loads after start; its queued messages count only once it has read them.
+      await messaging.ready().catch(() => undefined);
       const messages = messaging.unsentCount();
       if ((unsent > 0 || messages > 0) && !opts?.discardOutbox) {
         return { ok: false, reason: 'outbox', count: unsent, ...(messages > 0 ? { messages } : {}) };

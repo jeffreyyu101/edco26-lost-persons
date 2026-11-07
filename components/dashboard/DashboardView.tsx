@@ -200,16 +200,22 @@ function EnrouteTile({ stats }: { stats: Stats }) {
       className={`${s.tap} ${s.tile} ${s.tileWide}`}
       onClick={() => show({ view: 'pending' })}
       data-testid="tile-enroute"
-      // Starts with the visible text (WCAG 2.5.3): "Friends en route 3".
-      aria-label={n === null ? `Friends en route ${NO_VALUE} not available. Opens Pending.` : `Friends en route ${n}, now. Opens Pending.`}
     >
-      <span className={s.lb} aria-hidden>
+      {/* Named by its own text, like the tiles above (WCAG 2.5.3): "Friends en route 3". */}
+      <span className={s.lb}>
         <WalkIcon size={14} strokeWidth={2} className={s.enrGlyph} />
         <span>Friends en route</span>
-      </span>
-      <span className={s.v} data-testid="tile-enroute-value" aria-hidden>
-        {n === null ? NO_VALUE : n}
-      </span>
+      </span>{' '}
+      {n === null ? (
+        <span className={s.v} data-testid="tile-enroute-value">
+          <span aria-hidden>{NO_VALUE}</span>
+          <VisuallyHidden>not available</VisuallyHidden>
+        </span>
+      ) : (
+        <span className={s.v} data-testid="tile-enroute-value">
+          {n}
+        </span>
+      )}
     </button>
   );
 }

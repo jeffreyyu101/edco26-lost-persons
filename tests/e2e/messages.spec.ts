@@ -197,21 +197,28 @@ test('a message written offline shows "Sending…" and is sent exactly once when
 
 test.describe('no overflow', () => {
   for (const width of OVERFLOW_WIDTHS) {
-    test(`thread, cards and the en route sheet at ${width} px`, async ({ browser, page }) => {
+    test(`thread, cards, the To check card and the en route sheet at ${width} px`, async ({ browser, page }) => {
       test.setTimeout(90_000);
       const phone = width < 768;
       const ctx = await newSignedInContext(browser, FOH, { viewport: { width, height: phone ? 844 : 900 }, isMobile: phone, hasTouch: phone });
       const p = await ctx.newPage();
       try {
         const r = await createRequest(page.request);
+        // A Waiting request medical asked about and front of house answered: Pending → To check's card.
+        const waiting = await createRequest(page.request);
         const medCtx = await newSignedInContext(browser, MED);
         try {
           for (const text of ['Any tattoos or marks?', 'Bring 1 person only — and a very long line that has to wrap inside its bubble without pushing anything sideways']) {
             await call(medCtx.request, 'POST', `/api/requests/${r.id}/messages`, { clientMutationId: randomUUID(), body: text });
           }
+          await call(medCtx.request, 'POST', `/api/requests/${waiting.id}/messages`, { clientMutationId: randomUUID(), body: 'Any tattoos or marks?' });
         } finally {
           await medCtx.close();
         }
+        await call(page.request, 'POST', `/api/requests/${waiting.id}/messages`, {
+          clientMutationId: randomUUID(),
+          body: 'Butterfly tattoo on the left wrist, and a long answer that has to ellipsize on one line in the preview',
+        });
         await call(page.request, 'POST', `/api/requests/${r.id}/messages`, { clientMutationId: randomUUID(), body: 'Got it, just me and the friend' });
         await setStatus(page.request, r.id, 'Found – Awaiting Reunion', 'answer');
         await call(page.request, 'POST', `/api/requests/${r.id}/enroute`, { action: 'set', etaMinutes: 5 });
@@ -235,6 +242,19 @@ test.describe('no overflow', () => {
           // The desk shows My requests as a table row: the unread count after the name, no overflow.
           await expect(p.locator(`button[data-request-id="${r.id}"]`)).toBeVisible(SYNC);
           await expectNoOverflow(p, `button[data-request-id="${r.id}"]`);
+        }
+
+        // Medical: Pending → To check, the card with Message, the reply's preview and the two answers.
+        const mctx = await newSignedInContext(browser, MED, { viewport: { width, height: phone ? 844 : 900 }, isMobile: phone, hasTouch: phone });
+        try {
+          const mp = await mctx.newPage();
+          await mp.goto('/?view=pending');
+          const check = checkCard(mp, waiting.id);
+          await expect(check.getByTestId('message-preview')).toContainText('Butterfly tattoo', SYNC);
+          await check.scrollIntoViewIfNeeded();
+          await expectNoOverflow(mp, `[data-testid="check-card"][data-pending-card="${waiting.id}"]`);
+        } finally {
+          await mctx.close();
         }
       } finally {
         await ctx.close();
