@@ -5,6 +5,9 @@
 // change ("Chair 9 → Bed 3"), an edit, the location that completes an answer, or an answer on a request
 // someone else logged. Never both: nothing when an alert toast for that request (or a combined one) showed
 // within RECENT_MS of the push, nothing for a request this page does not hold, nothing for a test alert.
+// Nothing for a message either (F3 + F4 release): the page's own message alert (messages-activity.ts
+// diffMessageAlerts) owns it, and stays silent while that request's thread is on screen (the bubble is the
+// alert), which a toast from the push would break.
 // Loaded with the Activity host (never on the first load). Never logs anything.
 import type { StoreActions, StoreState } from './store-contract';
 import { navigate } from './nav';
@@ -68,7 +71,7 @@ export function createPushToasts(store: PushToastStore, now: () => number = Date
       store.actions.syncNow();
       const id = text(message.requestId, 64);
       const title = text(message.title, 80);
-      if (!front || !id || !title || message.kind === 'test') return;
+      if (!front || !id || !title || message.kind === 'test' || message.kind === 'message') return;
       const body = text(message.body, 240);
       const at = now();
       // Wait for the sync this push asked for: one that was already on its way when it came may predate the

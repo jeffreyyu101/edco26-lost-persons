@@ -120,7 +120,7 @@ test('All: the large title is the view menu; a new request is the top row and op
   await expect(page.getByTestId('log-columns')).toHaveText(/^#\s*Friend\s*Status\s*Created\s*Updated$/);
   await expect(cell(page, r.id, 'number')).toHaveText(String(r.caseNumber));
   await expect(cell(page, r.id, 'name')).toHaveText(r.name);
-  // iPhone 14 is 390 px wide: under 400 px "Waiting for check" reads "Waiting" (the blue ring says the rest,
+  // iPhone 14 is 390 px wide: under 430 px "Waiting for check" reads "Waiting" (the blue ring says the rest,
   // the row's sentence says it in full), so the name keeps its room.
   await expect(cell(page, r.id, 'status')).toHaveText('Waiting', { useInnerText: true });
   await page.setViewportSize({ width: 430, height: 932 });
@@ -624,8 +624,8 @@ test('All (option B): closed requests fold into "Archived N"; the fold opens in 
     .toBe(true);
   await expect(page.getByTestId('closed-rows').locator(`[data-request-id="${notIn.id}"]`)).toBeVisible();
   await expect(row(page, notIn.id)).toHaveAttribute('data-closed', '');
-  // iPhone 14 is under 400 px: "Not found in medical" reads "Not found" (the grey × says the rest, the row's
-  // sentence says it in full), like "Waiting"; from 400 px the full label, on one line.
+  // iPhone 14 is under 430 px: "Not found in medical" reads "Not found" (the grey × says the rest, the row's
+  // sentence says it in full), like "Waiting"; from 430 px the full label, on one line.
   await expect(cell(page, notIn.id, 'status')).toHaveText('Not found', { useInnerText: true });
   await expect(row(page, notIn.id)).toContainText(', Not found in medical, ');
   await page.setViewportSize({ width: 430, height: 932 });
@@ -721,7 +721,7 @@ test('at 375 px after midnight the name keeps at least 80 px; numbers and times 
   expect(layout.cutCells).toEqual([]);
   for (const label of layout.cutLabels) expect(label.name, `"${label.text}" cut`).toBeLessThanOrEqual(80.5);
   expect(layout.pageScrolls).toBe(false);
-  // Under 400 px the longest status reads "Not found" in the log (F2), whole.
+  // Under 430 px the longest status reads "Not found" in the log (F2), whole.
   await expect(cell(page, notIn.id, 'status')).toHaveText('Not found', { useInnerText: true });
 
   // My requests: the progress line ends at "Not found in medical", on one line and never cut (F2).
@@ -733,6 +733,45 @@ test('at 375 px after midnight the name keeps at least 80 px; numbers and times 
   await expect(last).toBeVisible();
   expect(await last.evaluate((el) => el.scrollWidth <= el.clientWidth + 0.5)).toBe(true);
   expect((await last.boundingBox())!.height).toBeLessThan(16);
+});
+
+// The deferred F2 fix (F3 + F4 release): on phones 400–429 px wide (Pixel 7a 412, iPhone 16 Pro 402, Plus 414 /
+// 428) the full "Not found in medical" beside an earlier day's created time ("Fri 11:02 PM") was cut, so the
+// short labels ("Waiting", "Not found") apply under 430 px, not 400. From 430 px the full labels, whole.
+test('under 430 px the log uses the short labels beside an earlier day\'s time; from 430 px the full ones, never cut', async ({ page }) => {
+  const later = Date.now() + 86_400_000;
+  await page.clock.setFixedTime(later);
+  await page.setViewportSize({ width: 400, height: 860 });
+  const r = await createRequest(page, { name: `${TAG} Kayla Alexandra Martinez-Rodriguez` });
+  const notIn = await notFound(page, await createRequest(page));
+  await page.goto('/');
+  await expect(row(page, r.id)).toBeVisible({ timeout: 10_000 });
+  await expect(cell(page, r.id, 'created')).toHaveText(formatCreatedTime(r.createdAt, later, TZ));
+  expect(formatCreatedTime(r.createdAt, later, TZ)).toMatch(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2}:\d{2} (AM|PM)$/);
+  await fold(page).click();
+  await expect(row(page, notIn.id)).toBeVisible();
+  const label = (id: string) => cell(page, id, 'status').locator(':scope > span').filter({ visible: true }).first();
+  for (const [width, waiting, closed] of [
+    [400, 'Waiting', 'Not found'],
+    [412, 'Waiting', 'Not found'],
+    [414, 'Waiting', 'Not found'],
+    [429, 'Waiting', 'Not found'],
+    [430, 'Waiting for check', 'Not found in medical'],
+  ] as const) {
+    await page.setViewportSize({ width, height: 860 });
+    await expect(cell(page, r.id, 'status'), `${width} px`).toHaveText(waiting, { useInnerText: true });
+    await expect(cell(page, notIn.id, 'status'), `${width} px`).toHaveText(closed, { useInnerText: true });
+    // The row's sentence always says the whole status.
+    await expect(row(page, notIn.id)).toContainText(', Not found in medical, ');
+    for (const id of [r.id, notIn.id]) {
+      expect(await label(id).evaluate((el) => el.scrollWidth <= el.clientWidth + 0.5), `${width} px: ${id} label cut`).toBe(true);
+      expect((await cell(page, id, 'status').boundingBox())!.height, `${width} px: one line`).toBeLessThan(24);
+    }
+    const layout = await logLayout(page);
+    expect(Math.min(...layout.nameWidths), `${width} px`).toBeGreaterThanOrEqual(79.5);
+    expect(layout.cutCells, `${width} px`).toEqual([]);
+    expect(layout.pageScrolls, `${width} px`).toBe(false);
+  }
 });
 
 test('view switcher: Pending and My requests with counts, the same large title, the menu returns to All', async ({ page }) => {

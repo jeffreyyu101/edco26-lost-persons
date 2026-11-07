@@ -593,14 +593,16 @@ button.lr:focus-visible {
   text-overflow: ellipsis;
 }
 
-/* Under 400 px "Waiting for check" reads "Waiting" (list-helpers.narrowStatusLabel): with a created time
+/* Under 430 px "Waiting for check" reads "Waiting" (list-helpers.narrowStatusLabel): with a created time
    from an earlier day ("Fri 11:02 PM") the full label would leave the name two letters. (F5) Not in medical
-   reads its answer's label there: the same today, "Not found" for "Not found in medical" after the rename. */
+   reads its answer's label there: "Not found" for "Not found in medical". (F3 + F4 release, the deferred F2
+   fix) 430, not 400: at 400–429 px (Pixel 7a, Galaxy S24, iPhone Pro / Plus at 402 / 414 / 428) "Not found in
+   medical" beside an earlier day's time was cut. */
 .stNarrow {
   display: none;
 }
 
-@media (max-width: 399.98px) {
+@media (max-width: 429.98px) {
   .stWide {
     display: none;
   }

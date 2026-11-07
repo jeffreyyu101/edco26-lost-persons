@@ -7,7 +7,7 @@
 // once more where the text leaves the server. The push title is the request's initials (never a full name on
 // a lock screen), except a new request: "New request". Status words always come from STATUS_META, so a
 // later rename of a label flows through.
-import { STATUS, STATUS_META, ageGender, initials, joinName } from './domain';
+import { NOT_FOUND_YET_LABEL, STATUS, STATUS_META, ageGender, initials, joinName } from './domain';
 import { agoPhrase, formatClockAmPm, eventDate, minutesSince } from './format';
 
 // ---------------------------------------------------------------------------------------------------
@@ -337,8 +337,8 @@ export const ACTIVITY_GLYPH: Readonly<Record<ActivityKind, ActivityGlyph>> = {
   edited: { icon: 'pencil', tone: 'gray' },
 };
 
-/** The "Not found yet" hold (F5): its detail starts with these words. */
-export const NOT_FOUND_YET = 'Not found yet';
+/** The "Not found yet" hold (F5): its detail starts with these words (lib/domain's label, so a rename flows through). */
+export const NOT_FOUND_YET = NOT_FOUND_YET_LABEL;
 
 export function activityGlyph(kind: ActivityKind, detail: string): ActivityGlyph {
   if (kind === 'not_in_medical' && detail.startsWith(NOT_FOUND_YET)) return { icon: 'hourglass', tone: 'violet' };

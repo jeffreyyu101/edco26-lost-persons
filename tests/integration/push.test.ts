@@ -13,6 +13,7 @@
 // Synthetic data only; every request is closed afterwards.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { RequestSummary, SyncResponse } from '@/lib/api-types';
+import { STATUS_META } from '@/lib/domain';
 import { admin, api, cookieFor, createRequest, newStaff, staffOf, withTestServer, type Staff } from './harness';
 import { eventually, startPushService, type FakeDevice, type PushService } from './push-service';
 
@@ -262,24 +263,53 @@ describe('the routes notify (contract D)', () => {
     expect(danaPhone.deliveries.map((d) => d.payload.body)).toEqual(['In medical', 'In medical · Chair 9', 'Chair 9 → Bed 3']);
   });
 
-  it('a Not in medical answer through these routes notifies NOBODY (the Not found yet hold, F5, owns it)', async () => {
+  // F3 + F4 release: F5's stage-notify sends both Not found answers (not_in_medical); F4's status events never
+  // do, and a hold (the status stays Waiting for check) never reads as "Back to Waiting for check".
+  it('Not found: the hold and the final answer each notify ONCE as not_in_medical (F5); an Undo is Back to Waiting', async () => {
     const dana = newStaff();
     const rae = medical();
     const danaPhone = push.device();
     await subscribe(dana, danaPhone);
     const r = await createRequest(dana);
-    const answered = await setStatus(r, 'Checked – Not Found', 'answer', rae);
-    // Back to waiting and Not in medical again (a changed answer): still nothing for not_in_medical.
-    const back = await setStatus(answered, 'Added', 'undo', rae);
-    const back2 = await setStatus(back, 'Checked – Not Found', 'answer', rae);
+    // The first Not found: the "Not found yet" hold (the row stays Waiting for check, recheck in 20 minutes).
+    const held = await setStatus(r, 'Checked – Not Found', 'answer', rae);
+    expect(held.status).toBe('Added');
+    expect(held.recheckAt).toBeTruthy();
+    const first = await eventually(() => activityOf(dana, r.id).then((a) => a ?? undefined));
+    expect(first).toMatchObject({ kind: 'not_in_medical', read_at: null });
+    expect(first.detail).toMatch(/^Not found yet · recheck \d{1,2}:\d{2} (AM|PM)$/);
+    await eventually(() => danaPhone.deliveries.length === 1);
+    // The final Not found closes it: the status's own label (STATUS_META, "Not found in medical").
+    const closed = await setStatus(held, 'Checked – Not Found', 'answer', rae);
+    expect(closed.status).toBe('Checked – Not Found');
+    await eventually(() => activityOf(dana, r.id).then((a) => a?.detail === STATUS_META['Checked – Not Found'].label && a));
+    await eventually(() => danaPhone.deliveries.length === 2);
+    // Undo of the final answer: back to Waiting for check (on hold again), F4's back_to_waiting.
+    await setStatus(closed, 'Added', 'undo', rae);
+    await eventually(() => activityOf(dana, r.id).then((a) => a?.kind === 'back_to_waiting' && a));
+    await eventually(() => danaPhone.deliveries.length === 3);
     await new Promise((resolve) => setTimeout(resolve, 1_500));
-    const row = await activityOf(dana, r.id);
-    // Only the Back to Waiting for check in between.
-    expect(row?.kind).toBe('back_to_waiting');
-    const { data } = await admin().from('lp_activity').select('kind').eq('request_id', r.id).eq('kind', 'not_in_medical');
-    expect(data).toEqual([]);
-    expect(danaPhone.deliveries.map((d) => d.payload.kind)).toEqual(['back_to_waiting']);
-    expect(back2.status).toBe('Checked – Not Found');
+    // Exactly once each: three pushes, never a back_to_waiting for the hold itself; still ONE Activity row.
+    expect(danaPhone.deliveries.map((d) => d.payload.kind)).toEqual(['not_in_medical', 'not_in_medical', 'back_to_waiting']);
+    for (const d of danaPhone.deliveries) expect(JSON.stringify(d.payload)).not.toMatch(/LP-?\d/);
+    const { data: one } = await admin().from('lp_activity').select('kind').eq('staff', canon(dana)).eq('request_id', r.id);
+    expect(one).toHaveLength(1);
+    // The actor never hears about their own answers.
+    expect(await activityOf(rae, r.id)).toBeNull();
+  });
+
+  it('F3 + F4 release: whoever gave the first Not found (the hold) is involved, so a later message reaches them', async () => {
+    const dana = newStaff();
+    const rae = medical();
+    const r = await createRequest(dana);
+    await setStatus(r, 'Checked – Not Found', 'answer', rae);
+    const { data, error } = await admin().rpc('lp_involved_staff', { p_request: r.id });
+    expect(error).toBeNull();
+    expect(data as string[]).toEqual(expect.arrayContaining([canon(dana), canon(rae)]));
+    const res = await api(`/api/requests/${r.id}/messages`, { json: { clientMutationId: crypto.randomUUID(), body: 'Friend is still here' }, cookie: await cookieFor(dana) });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const row = await eventually(() => activityOf(rae, r.id).then((a) => (a?.kind === 'message' ? a : undefined)));
+    expect(row.detail).toMatch(/: Friend is still here$/);
   });
 
   it('a new request reaches whoever has New requests on (never its logger); a retry tells nobody again', async () => {

@@ -260,7 +260,7 @@ export function updatedSince(
 }
 
 /**
- * The status label the log shows on a narrow phone (under 400 px wide), where "Waiting for check" or "Not found
+ * The status label the log shows on a narrow phone (under 430 px wide), where "Waiting for check" or "Not found
  * in medical" would take the name's room: "Waiting", "Not found" (the glyph says the rest; STATUS_META
  * narrowLabel). Null when the label is already short. The row's sentence always says the full status.
  */

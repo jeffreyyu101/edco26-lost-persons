@@ -144,6 +144,16 @@ describe('a push while the app is in front', () => {
     expect(g.toasts).toHaveLength(0);
   });
 
+  it('F3 + F4 release: never for a message (the page\'s own message alert owns it, silent while its thread is on screen)', async () => {
+    const f = fakeStore();
+    const toasts = createPushToasts(f.store);
+    toasts.handle(push({ kind: 'message', title: 'J.D.', body: 'Rae C.: Bring 1 person only' }), true);
+    expect(f.syncs()).toBe(1); // it still syncs
+    f.poll();
+    await vi.advanceTimersByTimeAsync(PUSH_SYNC_WAIT_MS + 10);
+    expect(f.toasts).toHaveLength(0);
+  });
+
   it('stop() (sign-out, unmount) drops what is waiting', async () => {
     const f = fakeStore();
     const toasts = createPushToasts(f.store);
