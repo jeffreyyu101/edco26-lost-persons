@@ -83,6 +83,12 @@ export interface RequestSummary {
   recheckAt?: IsoDateTime | null;
   /** Not found answers in this round: 0, 1 while held, 2 after the final Not found (shown as "2 checks"). */
   notFoundChecks?: number;
+  // Added 2026-11-07 (F6). Optional: rows cached before this build (and a database before F6) do not carry it.
+  /**
+   * Closed · inactive as a backlog (idle well past the hour when the job closed it: the first run after the
+   * migration, or after the job was paused). Nobody is told: no Activity row, no push, and no in-app alert.
+   */
+  quietClose?: boolean;
   // Added 2026-11-06 evening (F3 Messages + en route, spec §18 A55). All optional: rows cached on a phone
   // before them, and mutation responses (built by lp_row alone), do not carry them; the client keeps the
   // previous values then (sync-merge carryActivity). Sync and the detail always send them.

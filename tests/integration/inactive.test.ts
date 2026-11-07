@@ -329,19 +329,25 @@ rollback;`).split('\n');
     const medSet = `test-s staff ${randomUUID().slice(0, 8)} · medical`;
     const foh = `test-s staff ${randomUUID().slice(0, 8)} · gc/hx - dispatch`;
     const ep = (s: string) => `https://push.example.test/${encodeURIComponent(s)}`;
+    // A Medical row an old bell turned on before (never set in the sheet): it keeps its Activity rows (not the team default).
+    const medBell = `test-s staff ${randomUUID().slice(0, 8)} · medical`;
     const out = psqlScript(`begin;
 insert into public.lp_push_prefs (staff, team, new_requests, new_requests_set) values
-  (${lit(med)}, 'Medical', false, false), (${lit(medSet)}, 'Medical', false, true), (${lit(foh)}, 'GC/HX - Dispatch', false, false);
+  (${lit(med)}, 'Medical', false, false), (${lit(medSet)}, 'Medical', false, true), (${lit(foh)}, 'GC/HX - Dispatch', false, false),
+  (${lit(medBell)}, 'Medical', true, false);
 insert into public.lp_push_subscriptions (endpoint, p256dh, auth, staff, team, new_requests) values
   (${lit(ep(med))}, 'p256dh-key-0123456789', 'auth-0123', ${lit(med)}, 'Medical', false),
   (${lit(ep(medSet))}, 'p256dh-key-0123456789', 'auth-0123', ${lit(medSet)}, 'Medical', false),
-  (${lit(ep(foh))}, 'p256dh-key-0123456789', 'auth-0123', ${lit(foh)}, 'GC/HX - Dispatch', false);
+  (${lit(ep(foh))}, 'p256dh-key-0123456789', 'auth-0123', ${lit(foh)}, 'GC/HX - Dispatch', false),
+  (${lit(ep(medBell))}, 'p256dh-key-0123456789', 'auth-0123', ${lit(medBell)}, 'Medical', true);
 ${migrationBody()}
-select string_agg(pr.new_requests::text || '/' || s.new_requests::text, ',' order by pr.staff = ${lit(med)} desc, pr.staff = ${lit(medSet)} desc)
+select string_agg(pr.new_requests::text || '/' || s.new_requests::text || '/' || pr.new_requests_team_default::text, ','
+                  order by pr.staff = ${lit(med)} desc, pr.staff = ${lit(medSet)} desc, pr.staff = ${lit(medBell)} desc)
   from public.lp_push_prefs pr join public.lp_push_subscriptions s on s.staff = pr.staff
- where pr.staff in (${lit(med)}, ${lit(medSet)}, ${lit(foh)});
+ where pr.staff in (${lit(med)}, ${lit(medSet)}, ${lit(foh)}, ${lit(medBell)});
 rollback;`).split('\n');
-    expect(out[out.length - 1]).toBe('true/true,false/false,false/false');
+    // prefs / device / on by the Medical default alone (push only, no Activity row).
+    expect(out[out.length - 1]).toBe('true/true/true,false/false/false,true/true/false,false/false/false');
   });
 });
 
@@ -436,7 +442,8 @@ describe('telling the staff involved (F4 Activity + push, once)', () => {
     expect(psql(`select notified_at is null from public.lp_inactive_closes where request_id = ${lit(r.id)}`)).toBe('t');
     const cookie = await cookieFor(newStaff());
     const res = await api(`/api/sync?ids=${r.id}`, { cookie });
-    expect(res.body.rows[0]).toMatchObject({ status: STATUS.inactive });
+    // A fresh close is not quiet: phones raise their in-app alert for it as for any status change.
+    expect(res.body.rows[0]).toMatchObject({ status: STATUS.inactive, quietClose: false });
     const told = await eventually(() => activityOf(FOH, r.id).then((a) => a?.kind === 'closed_inactive' && a));
     expect(told).toMatchObject({ detail: 'Closed · inactive', actor: SYSTEM_STAFF });
     expect(await eventually(() => activityOf(MEDIC, r.id).then((a) => a?.kind === 'closed_inactive' && a))).toMatchObject({ detail: 'Closed · inactive' });
@@ -451,10 +458,22 @@ describe('telling the staff involved (F4 Activity + push, once)', () => {
     const backlog = await answered();
     backdate(backlog.id, 3 * INACTIVE_MINUTES);
     expect(closeInactive([backlog.id])).toBe(1);
-    expect(psql(`select notified_at is not null from public.lp_inactive_closes where request_id = ${lit(backlog.id)}`)).toBe('t');
-    await api(`/api/sync?ids=${backlog.id}`, { cookie });
+    expect(psql(`select (notified_at is not null) || '|' || quiet from public.lp_inactive_closes where request_id = ${lit(backlog.id)}`)).toBe('true|true');
+    expect(psql(`select quiet from public.lp_inactive_closes where request_id = ${lit(r.id)}`)).toBe('f');
+    // Regression (review): the row says it is quiet, so no phone raises an in-app alert for it either.
+    const quiet = await api(`/api/sync?ids=${backlog.id}`, { cookie });
+    expect(quiet.body.rows[0]).toMatchObject({ status: STATUS.inactive, quietClose: true });
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect((await activityOf(FOH, backlog.id))?.kind).not.toBe('closed_inactive');
+    // Reopened, it is an ordinary row again; a later close of it after a normal idle hour is told.
+    const closedRow = await dbRow(backlog.id);
+    const reopened = await setStatus({ id: backlog.id, rowVersion: closedRow.row_version }, IN_MEDICAL, 'reopen', FOH);
+    expect(reopened.status, reopened.text).toBe(200);
+    expect(reopened.body.request).toMatchObject({ status: IN_MEDICAL, quietClose: false });
+    backdate(backlog.id, INACTIVE_MINUTES + 1);
+    expect(closeInactive([backlog.id])).toBe(1);
+    expect((await api(`/api/sync?ids=${backlog.id}`, { cookie })).body.rows[0]).toMatchObject({ status: STATUS.inactive, quietClose: false });
+    await eventually(() => activityOf(FOH, backlog.id).then((a) => a?.kind === 'closed_inactive' && a));
   });
 
   it('lp_inactive_claim: a close is claimed once, only while it is still Closed · inactive (rolled back)', async () => {

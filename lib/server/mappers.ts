@@ -80,6 +80,8 @@ export function mapRow(raw: unknown): RequestSummary {
     // (F5) The "Not found yet" hold. A database without step 1d sends neither: not held, no checks.
     recheckAt: str(r.recheck_at),
     notFoundChecks: reqNum(r.not_found_checks),
+    // (F6) A backlog auto-close nobody is told about. A database before F6 sends nothing: false.
+    quietClose: r.quiet_close === true,
   };
 }
 

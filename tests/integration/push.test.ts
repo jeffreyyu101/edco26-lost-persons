@@ -117,6 +117,18 @@ describe('POST /api/push/prefs', () => {
     const dana = newStaff();
     expect(await subscribe(dana, push.device())).toMatchObject({ newRequests: false });
     // So a new request reaches the Medical phone with nothing set, on its lock screen.
+    // Medical staff who turned it on themselves (the sheet, or a device's old bell) keep their Activity rows.
+    const kai = medical();
+    const kaiPhone = push.device();
+    await subscribe(kai, kaiPhone);
+    expect((await api('/api/push/prefs', { json: { newRequests: true }, cookie: await cookieFor(kai) })).body).toMatchObject({ newRequests: true });
+    const ivy = medical();
+    const ivyPhone = push.device();
+    expect(await subscribe(ivy, ivyPhone, { bell: true })).toMatchObject({ newRequests: true });
+    const raeCookie = await cookieFor(rae);
+    // The device echoes the server's switch back as its bell (ActivityHost): it stays the team's default.
+    expect((await api('/api/push/prefs', { json: { bell: true }, cookie: raeCookie })).body).toMatchObject({ newRequests: true });
+    const unreadBefore = (await api('/api/activity/unread', { cookie: raeCookie })).body.count;
     const res = await api('/api/requests', {
       json: { clientMutationId: crypto.randomUUID(), reportingLocation: 'FA 3 – Kinetic', name: 'Kim TEST-S Ode', age: '30' },
       cookie: await cookieFor(dana),
@@ -124,6 +136,23 @@ describe('POST /api/push/prefs', () => {
     expect(res.status).toBe(201);
     const id = res.body.request.id as string;
     await eventually(() => raePhone.deliveries.some((d) => d.payload.requestId === id && d.payload.kind === 'new_request'));
+    await eventually(() => kaiPhone.deliveries.some((d) => d.payload.requestId === id && d.payload.kind === 'new_request'));
+    await eventually(() => ivyPhone.deliveries.some((d) => d.payload.requestId === id && d.payload.kind === 'new_request'));
+    // Regression (review; "show nothing extra"): on by the Medical default alone it is the push only, no Activity row,
+    // so Rae's bell and app badge never count every request logged.
+    expect(await activityOf(rae, id)).toBeNull();
+    expect((await api('/api/activity/unread', { cookie: raeCookie })).body.count).toBe(unreadBefore);
+    expect(await activityOf(kai, id)).toMatchObject({ kind: 'new_request', read_at: null });
+    expect(await activityOf(ivy, id)).toMatchObject({ kind: 'new_request', read_at: null });
+    // Set in the sheet (even to on), it is Rae's own choice from then: the Activity rows come back.
+    expect((await api('/api/push/prefs', { json: { newRequests: true }, cookie: raeCookie })).body).toMatchObject({ newRequests: true });
+    const res2 = await api('/api/requests', {
+      json: { clientMutationId: crypto.randomUUID(), reportingLocation: 'FA 3 – Kinetic', name: 'Lou TEST-S Ode', age: '31' },
+      cookie: await cookieFor(dana),
+    });
+    expect(res2.status).toBe(201);
+    const id2 = res2.body.request.id as string;
+    await eventually(() => activityOf(rae, id2).then((a) => a?.kind === 'new_request' && a));
   });
 
   it('regression: a device with the old bell ON is never turned off by another device of theirs (bell off) that came first', async () => {
@@ -268,8 +297,9 @@ describe('the routes notify (contract D)', () => {
     const row = await eventually(() => activityOf(dana, r.id).then((a) => a ?? undefined));
     expect(row).toMatchObject({ kind: 'in_medical', detail: 'In medical', read_at: null });
     expect(row.actor).toBe(staffOf(rae));
-    // The actor's own answer is never theirs to hear: Rae's row is the new request their Medical default (F6 7b) asked for.
-    expect((await activityOf(rae, r.id))?.kind).toBe('new_request');
+    // The actor's own answer is never theirs to hear. (F6 7b: Rae's Medical default pushes the new request, but writes
+    // no Activity row.)
+    expect(await activityOf(rae, r.id)).toBeNull();
     await eventually(() => danaPhone.deliveries.length === 1);
     const p = danaPhone.deliveries[0]!;
     expect(p.payload).toMatchObject({ title: 'J.D.', body: 'In medical', tag: `lp-${r.id}`, url: `/?r=${r.id}`, kind: 'in_medical', renotify: true, requireInteraction: true });

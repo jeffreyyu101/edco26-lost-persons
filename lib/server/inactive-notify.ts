@@ -23,11 +23,14 @@ function log(code: string, counts: Record<string, number> = {}): void {
   console.warn(JSON.stringify({ lp: 'notify', code, ...counts }));
 }
 
-/** The rows of a sync answer that an auto-close may still have to tell: Closed · inactive within the window. */
-export function inactiveCandidates(rows: readonly Pick<RequestSummary, 'id' | 'status' | 'closedAt'>[], now: number = Date.now()): string[] {
+/**
+ * The rows of a sync answer that an auto-close may still have to tell: Closed · inactive within the window, never
+ * a backlog close (quietClose: lp_close_inactive marked it told already).
+ */
+export function inactiveCandidates(rows: readonly Pick<RequestSummary, 'id' | 'status' | 'closedAt' | 'quietClose'>[], now: number = Date.now()): string[] {
   const out: string[] = [];
   for (const row of rows) {
-    if (!isInactiveClosed(row.status) || !isUuid(row.id)) continue;
+    if (!isInactiveClosed(row.status) || !isUuid(row.id) || row.quietClose === true) continue;
     const at = row.closedAt ? Date.parse(row.closedAt) : NaN;
     if (Number.isFinite(at) && now - at <= INACTIVE_NOTIFY_WINDOW_MS && at - now <= 60_000) out.push(row.id);
     if (out.length >= MAX_IDS) break;

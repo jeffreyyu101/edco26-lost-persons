@@ -25,7 +25,7 @@ import {
   statusChangeEvent,
 } from '@/lib/activity';
 import type { RequestSummary, Stats } from '@/lib/api-types';
-import { alertStillCurrent, statusAlert } from '@/lib/client/alerts';
+import { alertStillCurrent, diffAlerts, statusAlert, type AlertContext } from '@/lib/client/alerts';
 import { byNewestClosed, friendComingOrder, statusGroups, waitingOrder } from '@/lib/client/status-order';
 import {
   AUTO_CLOSE_KIND,
@@ -240,6 +240,24 @@ describe('Activity and alerts', () => {
     expect(statusAlert(r)).toMatchObject({ kind: 'status_changed', title: 'LP-1004 · S.L. — closed · inactive' });
     expect(alertStillCurrent('in_medical', STATUS.inMedical, r)).toBe(false);
   });
+
+  it('regression: a backlog close (quietClose) raises no in-app alert on the logger\'s open phone; a fresh close does', () => {
+    const ctx = (): AlertContext => ({ sessionStaff: 'Dana Kim · GC/HX - Dispatch', myIds: new Set(), ownMutationIds: new Set(), ownKeys: new Set(), bell: false, seen: new Set() });
+    const inMedical = (r: RequestSummary): RequestSummary => ({ ...r, status: STATUS.inMedical, closedAt: null, updatedBy: 'Rae Chen · Medical', rowVersion: r.rowVersion - 1, quietClose: false });
+    const fresh = row({ caseNumber: 1004, name: 'Sky Lane', quietClose: false });
+    const backlog = row({ caseNumber: 1005, name: 'Ari Moss', quietClose: true });
+    const before = new Map([fresh, backlog].map((r) => [r.id, inMedical(r)]));
+    const c = ctx();
+    expect(diffAlerts(before, [fresh, backlog], c)).toEqual([expect.objectContaining({ requestId: fresh.id, title: 'LP-1004 · S.L. — closed · inactive' })]);
+    // Nothing was marked seen for the quiet one: a later real change of it (Reopen by someone else) still alerts.
+    expect(c.seen.has(`${backlog.id}:${backlog.rowVersion}`)).toBe(false);
+    const reopened: RequestSummary = { ...backlog, status: STATUS.inMedical, closedAt: null, updatedBy: 'Rae Chen · Medical', rowVersion: backlog.rowVersion + 1, quietClose: false };
+    expect(diffAlerts(new Map([[backlog.id, backlog]]), [reopened], ctx())).toEqual([expect.objectContaining({ kind: 'in_medical', requestId: backlog.id })]);
+    // A cached row from before this build (no quietClose) alerts as before.
+    const legacy: RequestSummary = { ...fresh, id: '00000000-0000-4000-8000-0000000000ff' };
+    delete legacy.quietClose;
+    expect(diffAlerts(new Map([[legacy.id, inMedical(legacy)]]), [legacy], ctx())).toHaveLength(1);
+  });
 });
 
 describe('the dashboard', () => {
@@ -280,7 +298,9 @@ describe('the sync tells new auto-closes', () => {
     const old = row({ closedAt: at(16) });
     const reunited = row({ status: STATUS.reunited, closedAt: at(1) });
     const noTime = row({ closedAt: null });
-    expect(inactiveCandidates([fresh, edge, old, reunited, noTime], now)).toEqual([fresh.id, edge.id]);
+    // A backlog close is never told (the database marked it told already): no claim for it either.
+    const backlog = row({ closedAt: at(2), quietClose: true });
+    expect(inactiveCandidates([fresh, edge, old, reunited, noTime, backlog], now)).toEqual([fresh.id, edge.id]);
     expect(inactiveCandidates([], now)).toEqual([]);
   });
 });

@@ -33,6 +33,7 @@
 --      lp_inactive_closes, lp_close_inactive(), lp_inactive_claim(), and the pg_cron job 'lp-close-inactive'
 --      every 5 minutes (enabled and scheduled only where pg_cron can run; a NOTICE says which). Additive.
 --      Pause the job with: select cron.unschedule('lp-close-inactive');
+--      Deploy the F6 build BEFORE pasting this (HANDOFF.md "F6 in production"): it works on a database without it.
 -- =====================================================================================================
 
 begin;
@@ -435,6 +436,9 @@ $fn$;
 
 -- lp_row: THE row JSON (snake_case) for sync and every mutation response: every known patients column
 -- plus first_photo_id and photo_count over active photos. The server maps it through an allowlist.
+-- (F6) quiet_close: a 'Closed – Inactive' request whose close is a backlog nobody is told about (section 9,
+-- lp_inactive_closes.quiet), so no phone raises an alert for it either. False for every other row. Read only for
+-- a row in that status, so this function never touches section 9's table on a database without it.
 -- Internal helper (called from the RPC functions, which carry the timeouts).
 create function public.lp_row(p public.patients)
 returns jsonb
@@ -446,12 +450,19 @@ as $fn$
 declare
   v_count integer;
   v_first uuid;
+  v_quiet boolean := false;
 begin
   select pg_catalog.count(*)::integer,
          (pg_catalog.array_agg(ph.id order by ph.created_at, ph.id))[1]
     into v_count, v_first
   from public.patient_photos ph
   where ph.patient_id = p.id and ph.is_active;
+
+  if p.status = 'Closed – Inactive' then
+    select coalesce(pg_catalog.bool_or(c.quiet), false) into v_quiet
+      from public.lp_inactive_closes c
+     where c.request_id = p.id and c.closed_at = p.closed_at;
+  end if;
 
   return pg_catalog.jsonb_build_object(
     'id', p.id,
@@ -490,7 +501,9 @@ begin
   ) || pg_catalog.jsonb_build_object(
     -- (F5) The "Not found yet" hold (step 1d): when the recheck is due, and how many Not found answers.
     'recheck_at', p.recheck_at,
-    'not_found_checks', p.not_found_checks
+    'not_found_checks', p.not_found_checks,
+    -- (F6) A backlog auto-close: nobody is told (above).
+    'quiet_close', v_quiet
   );
 end
 $fn$;
@@ -2592,6 +2605,10 @@ create table if not exists public.lp_push_prefs (
 );
 -- (A table made by an earlier draft of this section gets the column too.)
 alter table public.lp_push_prefs add column if not exists new_requests_set boolean not null default false;
+-- (F6 7b) New requests is on only by the Medical team's default (never set in the Alerts sheet, and no device's old
+-- bell turned it on first): the lock-screen push of a new request, but no Activity row (lp_activity_record), so the
+-- bell and the app badge keep counting their own requests. Additive: false for every row that exists.
+alter table public.lp_push_prefs add column if not exists new_requests_team_default boolean not null default false;
 alter table public.lp_push_prefs enable row level security;
 
 create table if not exists public.lp_push_subscriptions (
@@ -2658,7 +2675,10 @@ $f4drop$;
 -- (F6, Brian 2026-11-07 02:15: Main Med gets distracted; the lock-screen push is the chosen alert.) Staff of the
 -- Medical team (the canonical staff string's team is 'medical') start with New requests ON, and so does a Medical
 -- staff member's row that never had the switch set in the Alerts sheet (new_requests_set false); everyone else
--- keeps the rule above. A switch set in the sheet always stays as set.
+-- keeps the rule above. A switch set in the sheet always stays as set. new_requests_team_default marks a switch
+-- that is on by that default alone ("show nothing extra": the push, no Activity row). It stays marked until the
+-- switch is set in the sheet, because each device then echoes the switch back as its bell (ActivityHost); a row
+-- a device's old bell had turned on before is never marked.
 create function public.lp_push_prefs_sync(
   p_staff text, p_team text, p_new_requests boolean, p_my_updates boolean, p_default_new_requests boolean)
 returns jsonb
@@ -2673,20 +2693,23 @@ declare
   v_staff text;
   v_team text := pg_catalog.left(pg_catalog.btrim(coalesce(p_team, '')), 120);
   v_row public.lp_push_prefs;
+  v_bell boolean := coalesce(p_default_new_requests, false);
+  v_medical boolean;
   v_default boolean;
 begin
   perform public.lp_require_staff(p_staff);
   v_staff := public.lp_canon_staff(p_staff);
   -- (F6) The device's old bell, or the Medical team's default (on).
-  v_default := coalesce(p_default_new_requests, false)
-               or coalesce((pg_catalog.regexp_match(v_staff, '^(.*) · (.*)$'))[2] = 'medical', false);
+  v_medical := coalesce((pg_catalog.regexp_match(v_staff, '^(.*) · (.*)$'))[2] = 'medical', false);
+  v_default := v_bell or v_medical;
 
-  insert into public.lp_push_prefs as pr (staff, team, new_requests, my_updates, new_requests_set)
+  insert into public.lp_push_prefs as pr (staff, team, new_requests, my_updates, new_requests_set, new_requests_team_default)
   values (
     v_staff, v_team,
     coalesce(p_new_requests, v_default),
     coalesce(p_my_updates, true),
-    p_new_requests is not null)
+    p_new_requests is not null,
+    p_new_requests is null and v_medical and not v_bell)
   on conflict (staff) do update set
     team = excluded.team,
     new_requests = case
@@ -2695,6 +2718,12 @@ begin
       else pr.new_requests or v_default
     end,
     new_requests_set = pr.new_requests_set or p_new_requests is not null,
+    new_requests_team_default = case
+      when p_new_requests is not null or pr.new_requests_set then false
+      when pr.new_requests_team_default then true
+      when pr.new_requests then false
+      else v_medical and not v_bell
+    end,
     my_updates = coalesce(p_my_updates, pr.my_updates),
     updated_at = case when p_new_requests is null and p_my_updates is null then pr.updated_at else now() end
   returning * into v_row;
@@ -2892,6 +2921,9 @@ $fn$;
 -- unread, at now() (it moves to the top). Their rows older than 3 days, and beyond their newest 100, go.
 -- Returns {written: [staff], targets: [{endpoint, p256dh, auth, staff}] (devices whose switch for this kind
 -- is on), unread: {staff: count}, firstName, lastName} (the request's name, for the push title's initials).
+-- (F6 7b) A new request is pushed to a Medical staff member whose New requests is on by the team's default alone
+-- (lp_push_prefs.new_requests_team_default), but writes them no Activity row: not in `written`, never in their
+-- bell or badge count.
 create function public.lp_activity_record(p_recipients text[], p_request uuid, p_kind text, p_actor text, p_detail text)
 returns jsonb
 language plpgsql
@@ -2904,6 +2936,7 @@ as $fn$
 declare
   v_actor text := public.lp_canon_staff(coalesce(p_actor, ''));
   v_staff text[];
+  v_rows text[];
   v_patient public.patients;
   v_targets jsonb;
   v_unread jsonb;
@@ -2928,19 +2961,28 @@ begin
       'firstName', v_patient.first_name, 'lastName', v_patient.last_name);
   end if;
 
+  -- (F6 7b) Who gets an Activity row: everyone, except for a new request the staff on by the Medical default alone.
+  if p_kind = 'new_request' then
+    select coalesce(pg_catalog.array_agg(s), '{}'::text[]) into v_rows
+    from pg_catalog.unnest(v_staff) s
+    where not exists (select 1 from public.lp_push_prefs pr where pr.staff = s and pr.new_requests_team_default);
+  else
+    v_rows := v_staff;
+  end if;
+
   insert into public.lp_activity as a (staff, request_id, kind, actor, detail, at, read_at)
   select s, p_request, p_kind, pg_catalog.left(coalesce(p_actor, ''), 200), pg_catalog.left(coalesce(p_detail, ''), 200), now(), null
-  from pg_catalog.unnest(v_staff) s
+  from pg_catalog.unnest(v_rows) s
   on conflict (staff, request_id) do update set
     kind = excluded.kind, actor = excluded.actor, detail = excluded.detail, at = excluded.at, read_at = null;
 
   delete from public.lp_activity a
-  where a.staff = any (v_staff)
+  where a.staff = any (v_rows)
     and (a.at < now() - interval '3 days'
       or (a.staff, a.request_id) not in (
         select b.staff, b.request_id from (
           select x.staff, x.request_id, pg_catalog.row_number() over (partition by x.staff order by x.at desc, x.request_id) as n
-          from public.lp_activity x where x.staff = any (v_staff)) b
+          from public.lp_activity x where x.staff = any (v_rows)) b
         where b.n <= 100));
 
   select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
@@ -2956,7 +2998,7 @@ begin
     where a.staff = any (v_staff) and a.read_at is null and a.at >= now() - interval '3 days'
     group by a.staff) u;
 
-  return pg_catalog.jsonb_build_object('written', pg_catalog.to_jsonb(v_staff), 'targets', v_targets, 'unread', v_unread,
+  return pg_catalog.jsonb_build_object('written', pg_catalog.to_jsonb(v_rows), 'targets', v_targets, 'unread', v_unread,
     'firstName', v_patient.first_name, 'lastName', v_patient.last_name);
 end
 $fn$;
@@ -3123,7 +3165,8 @@ grant execute on function public.lp_activity_unread(text) to service_role;
 --                        lp_inactive_claim), or at once for a close it will not tell. Those are a backlog: idle more
 --                        than 15 minutes past the limit when closed (the first run after this file, or after the job
 --                        was paused), so a deploy never sends a burst of stale alerts; and closes nobody claimed
---                        within 15 minutes.
+--                        within 15 minutes. quiet marks a backlog close: lp_row sends it as quiet_close, so no
+--                        phone raises its in-app alert or system notification for it either.
 --    Pause the job:      select cron.unschedule('lp-close-inactive');   (paste this file again to schedule it again)
 -- -----------------------------------------------------------------------------------------------------
 
@@ -3143,8 +3186,11 @@ create table if not exists public.lp_inactive_closes (
   closed_at timestamptz not null,
   idle_since timestamptz not null,
   notified_at timestamptz,
+  quiet boolean not null default false,
   primary key (request_id, closed_at)
 );
+-- (A table made by an earlier draft of this section gets the column too.)
+alter table public.lp_inactive_closes add column if not exists quiet boolean not null default false;
 create index if not exists lp_inactive_closes_pending_idx on public.lp_inactive_closes (closed_at) where notified_at is null;
 alter table public.lp_inactive_closes enable row level security;
 revoke all on table public.lp_inactive_closes from public, anon, authenticated;
@@ -3158,7 +3204,7 @@ drop function if exists public.lp_inactive_claim(uuid[]);
 -- 'Closed – Inactive', closed_at = now, updated_by 'System' (the touch trigger bumps row_version and updated_at,
 -- so every phone's next sync has it; F3's trigger clears its en route rows), one audit row status_changed by
 -- 'System' {status 'Closed – Inactive', kind 'auto_close', idle_since, inactive_minutes} with the note "No activity
--- for 1 h", and one lp_inactive_closes row. Rows another transaction holds are skipped (SKIP LOCKED: someone is
+-- for 1 h", and one lp_inactive_closes row (quiet and told already when it is a backlog). Rows another transaction holds are skipped (SKIP LOCKED: someone is
 -- changing them right now) and come up again on the next run. Idempotent: a second call closes nothing more.
 --   p_only (tests and manual use): only these requests, when they are eligible. The job passes nothing.
 -- SECURITY DEFINER so the pg_cron job (run as the role that scheduled it) needs no table grants; service_role only.
@@ -3214,8 +3260,8 @@ begin
       from closed c
     returning 1
   ), noted as (
-    insert into public.lp_inactive_closes (request_id, closed_at, idle_since, notified_at)
-    select c.id, v_now, c.idle_since, case when c.idle_since >= v_quiet then null else v_now end
+    insert into public.lp_inactive_closes (request_id, closed_at, idle_since, notified_at, quiet)
+    select c.id, v_now, c.idle_since, case when c.idle_since >= v_quiet then null else v_now end, c.idle_since < v_quiet
       from closed c
     on conflict do nothing
     returning 1
@@ -3282,10 +3328,11 @@ grant execute on function public.lp_close_inactive(uuid[]) to service_role;
 grant execute on function public.lp_inactive_claim(uuid[]) to service_role;
 
 -- (F6, Brian 2026-11-07 02:15) Medical staff whose "New requests" switch was never set in the Alerts sheet get it
--- ON now, on every device of theirs (lp_push_prefs_sync keeps it so from here on). Anyone who set it keeps it.
+-- ON now, on every device of theirs (lp_push_prefs_sync keeps it so from here on), marked as the team's default
+-- (the push only, no Activity row). Anyone who set it, or whose old bell had turned it on, keeps it as it is.
 with medical as (
   update public.lp_push_prefs pr
-     set new_requests = true, updated_at = now()
+     set new_requests = true, new_requests_team_default = true, updated_at = now()
    where not pr.new_requests_set
      and not pr.new_requests
      and (pg_catalog.regexp_match(pr.staff, '^(.*) · (.*)$'))[2] = 'medical'

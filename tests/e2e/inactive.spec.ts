@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import type { RequestDetail, RequestSummary } from '../../lib/api-types';
 import { INACTIVE_MINUTES, STATUS, STATUS_META } from '../../lib/domain';
+import { formatCaseNumber } from '../../lib/format';
 import { localDbUrl, testBaseUrl } from '../../scripts/test-env.mjs';
 import { OVERFLOW_WIDTHS, expectNoOverflow } from './helpers/overflow';
 import { newSignedInContext, signedInAs, type TestStaff } from './helpers/session';
@@ -46,20 +47,29 @@ const psql = (sql: string) =>
   execFileSync('psql', [localDbUrl(), '-v', 'ON_ERROR_STOP=1', '-q', '-At', '-c', sql], { encoding: 'utf8' }).trim();
 const lit = (id: string) => `'${id.replace(/'/g, "''")}'`;
 
-/** In medical (answered by medical), an hour and a minute idle, then closed by lp_close_inactive. */
-async function inactiveRequest(page: Page): Promise<RequestSummary> {
+/** A request the signed-in staff logged, answered In medical by medical. */
+async function answeredRequest(page: Page): Promise<RequestSummary> {
   const medic = await newSignedInContext(page.context().browser()!, MEDIC);
   try {
     const r = await createRequest(page.request);
-    await call(medic.request, 'POST', `/api/requests/${r.id}/status`, { status: STATUS.inMedical, expectedVersion: r.rowVersion, kind: 'answer' });
+    return (await call<{ request: RequestSummary }>(medic.request, 'POST', `/api/requests/${r.id}/status`, { status: STATUS.inMedical, expectedVersion: r.rowVersion, kind: 'answer' })).request;
   } finally {
     await medic.close();
   }
-  const r = created[created.length - 1]!;
+}
+
+/** Moves the request's activity (audit rows, created_at) `minutes` into the past. */
+function backdate(id: string, minutes: number): void {
   psql(
-    `update public.audit_events set occurred_at = occurred_at - interval '${INACTIVE_MINUTES + 1} minutes' where patient_id = ${lit(r.id)};` +
-      ` update public.patients set created_at = created_at - interval '${INACTIVE_MINUTES + 1} minutes' where id = ${lit(r.id)};`,
+    `update public.audit_events set occurred_at = occurred_at - interval '${minutes} minutes' where patient_id = ${lit(id)};` +
+      ` update public.patients set created_at = created_at - interval '${minutes} minutes' where id = ${lit(id)};`,
   );
+}
+
+/** In medical (answered by medical), an hour and a minute idle, then closed by lp_close_inactive. */
+async function inactiveRequest(page: Page): Promise<RequestSummary> {
+  const r = await answeredRequest(page);
+  backdate(r.id, INACTIVE_MINUTES + 1);
   expect(psql(`select public.lp_close_inactive(array[${lit(r.id)}]::uuid[])`)).toBe('1');
   return call<RequestDetail>(page.request, 'GET', `/api/requests/${r.id}`);
 }
@@ -135,6 +145,25 @@ test('Closed · inactive: folded in Archived, its detail with Reopen; Reopen ret
   await expect.poll(async () => (await call<RequestDetail>(page.request, 'GET', `/api/requests/${r.id}`)).status).toBe(STATUS.inMedical);
   await page.goto('/?view=pending');
   await expect(page.locator(`[data-testid="friend-coming-card"][data-pending-card="${r.id}"]`)).toBeVisible({ timeout: 20_000 });
+});
+
+test('regression: a backlog close raises no alert on the logger\'s open phone; a fresh close does', async ({ page }) => {
+  test.setTimeout(90_000);
+  const fresh = await answeredRequest(page);
+  const backlog = await answeredRequest(page);
+  // The logger's phone is open on All requests with both In medical (the store's baseline: no alert for them).
+  await page.goto('/');
+  for (const r of [fresh, backlog]) await expect(page.locator(`[data-request-id="${r.id}"]`).first()).toBeVisible({ timeout: 20_000 });
+  // One idle just past the hour, one long past it (the first run after the migration, or after a paused job).
+  backdate(fresh.id, INACTIVE_MINUTES + 1);
+  backdate(backlog.id, 3 * INACTIVE_MINUTES);
+  expect(psql(`select public.lp_close_inactive(array[${lit(fresh.id)}, ${lit(backlog.id)}]::uuid[])`)).toBe('2');
+  const toast = (r: RequestSummary) => page.locator('.lp-toast').filter({ hasText: new RegExp(`${formatCaseNumber(r.caseNumber)} · .+ — closed · inactive`) });
+  // The next poll brings both (one statement closed them, so one sync): the fresh close is a status change like any
+  // other; the backlog is closed quietly.
+  await expect(toast(fresh)).toBeVisible({ timeout: 20_000 });
+  await expect(toast(backlog)).toHaveCount(0);
+  await expect(page.locator('.lp-toast').filter({ hasText: /\d+ updates/ })).toHaveCount(0);
 });
 
 test('overflow 375–1440 px: the row, the request and the dashboard tile, each on one line', async ({ page }) => {
