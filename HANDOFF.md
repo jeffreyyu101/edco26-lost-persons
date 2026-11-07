@@ -89,6 +89,13 @@ screenshots.
   double tap or a held key in the crop step answers one photo, never the next.
 - **System notifications** (above) ship in this release too.
 
+### 2026-11-07 (team join link, `feat/join-link`, ships after F5)
+
+- **A team join link signs staff in with step 1 only** (Brian, 2026-11-06 23:55): `https://<host>/signin#join=<code>`
+  → name and team → Continue → the app, no password screen. The code is its own secret, not the event
+  password, and the password keeps working. No database change. See [Team join link](#team-join-link) for
+  the variables, and how to make, rotate and switch off a code.
+
 ## The production migration
 
 [`supabase/migrations/20261106000000_rework.sql`](supabase/migrations/20261106000000_rework.sql) is the only
@@ -143,7 +150,8 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 - **Environment variables.** Keep the names Jeffrey's project already has. `NEXT_PUBLIC_SUPABASE_URL` and
   `SUPABASE_SECRET_KEY` (or `SUPABASE_SERVICE_ROLE_KEY`) stay the same. Set `SESSION_SECRET` (32 characters
   or more) and keep `APP_SHARED_PASSWORD_HASH_B64`. `EVENT_TIMEZONE` defaults to `America/New_York`. All
-  of them are listed in `.env.example`.
+  of them are listed in `.env.example`. `INVITE_CODE_SHA256` and `INVITE_EXPIRES_AT` are optional (the team
+  join link, below).
 - **Region.** Pin Functions to the region closest to the Supabase project (Project Settings → Functions →
   Function Region). The Vercel project is on `iad1` (Washington, D.C.) and the Supabase project is in
   `us-east-2` (Ohio), so **`cle1` (Cleveland) is closer**. Almost every request reads or writes the database,
@@ -160,6 +168,35 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 - **After the F2 deploy, ask staff to tap "Update ready · Reload"** when it shows. Until a phone reloads,
   a request's history on it shows a saved medical location as "Edited" with no field name ("— → Chair 14",
   and screen readers hear no field name either). Nothing breaks and the value is right; the reload fixes it.
+
+## Team join link
+
+`https://<host>/signin#join=<code>` (or `https://<host>/#join=<code>`) opens sign-in, keeps the code for that
+tab only (sessionStorage) and takes it out of the address bar at once; name and team then sign straight in.
+A wrong, expired or switched-off code just shows the password step. Anyone with the link can sign in until it
+expires, so share it like the password (the staff group chat, never a public post or a screenshot).
+
+- **Variables** (Production, server-only, mark them Sensitive). Both optional; with either unset the link is
+  off and sign-in is password only, so the build can go out before them.
+  - `INVITE_CODE_SHA256`: the hex SHA-256 of the code. The code itself is never stored on the server.
+  - `INVITE_EXPIRES_AT`: when the link stops working, ISO with `Z` or an offset: `2026-11-09T12:00:00Z`.
+  - A value the server can't read turns the link off (never the app) and logs
+    `{"lp":"env","message":"INVITE_… …; team links are off"}` once per instance. Each sign-in logs
+    `{"lp":"signin","method":"invite"|"password","ok":…}`, never the code.
+- **Make a code** (on your own machine; it prints to the terminal and writes no file):
+  `node scripts/make-invite.mjs https://edco26-lost-persons.vercel.app` prints `JOIN_CODE` (32 random bytes,
+  base64url), `INVITE_CODE_SHA256` (its SHA-256) and `JOIN_LINK`. Without the script:
+  `node -e "const c=require('crypto').randomBytes(32).toString('base64url');console.log(c);console.log(require('crypto').createHash('sha256').update(c).digest('hex'))"`.
+- **Turn it on:** set both variables in Vercel, then **redeploy** (a variable change only reaches a new
+  deployment). Open `JOIN_LINK` in a private window: the address bar shows `/signin` with no `#join=…`,
+  and name + team land in the app. Then share `JOIN_LINK`.
+- **Rotate:** make a new code, replace `INVITE_CODE_SHA256`, redeploy, share the new link. The old link then
+  shows the password step.
+- **Switch off:** delete `INVITE_CODE_SHA256` (or set `INVITE_EXPIRES_AT` to a past time) and redeploy. Who
+  already signed in stays signed in (12 h from last use, 36 h at most); changing `SESSION_SECRET` signs
+  everyone out.
+- **Limits:** a link attempt counts toward the same sign-in limits as a password (10 failed per name and
+  network, 100 per network, in 15 minutes).
 
 ## Morning checklist (things tests can't cover)
 
@@ -196,6 +233,8 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 - [ ] The re-run of the migration on production **before** this build deploys (lp_stats + age → text): dry
       run, then commit (see above).
 - [ ] Several staff sign in at once behind the venue Wi-Fi (one shared IP).
+- [ ] Team join link (once its variables are set): tapped in iMessage on an iPhone, it opens Safari on
+      sign-in with no `#join=…` in the address bar; name + team open the app. A wrong code shows the password step.
 
 ## Known limits
 
@@ -215,6 +254,9 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 - **Sign-in limits:** 10 wrong passwords per name and IP, and 100 per IP, in 15 minutes. A whole team behind
   one venue IP shares the 100.
 - **A Home Screen app and the Safari tab are separate.** Each has its own sign-in, saved requests and queue.
+  A team join link tapped in Messages opens Safari, so it signs in the Safari tab, not the Home Screen app.
+- **A team join link is as strong as the password.** Anyone holding it can sign in until `INVITE_EXPIRES_AT`
+  or until it is rotated; the name and team are still self-declared.
 - **There is no export in the app.** The end-of-event files come from `docs/export.sql`. They hold names and
   phone numbers: don't leave them on shared devices.
 - **Up to three photos per request.** Photos from Jeffrey's app with no timing show "Timing unknown".

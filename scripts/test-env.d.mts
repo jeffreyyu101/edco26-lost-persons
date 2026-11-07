@@ -7,3 +7,5 @@ export declare function loadTestEnv(options?: { keys?: boolean }): Record<string
 export declare function childTestEnv(extra?: Record<string, string>, options?: { keys?: boolean }): Record<string, string>;
 export declare function testBaseUrl(): string;
 export declare const NO_DOTENV_PRELOAD: string;
+export declare const TEST_INVITE_CODE: string;
+export declare const TEST_INVITE_ENV: Readonly<{ INVITE_CODE_SHA256: string; INVITE_EXPIRES_AT: string }>;

@@ -84,12 +84,20 @@ export function rememberedIdentity(prefs: Pick<Prefs, 'rememberedName' | 'rememb
   return prefs.rememberedName && prefs.rememberedTeam ? { name: prefs.rememberedName, team: prefs.rememberedTeam } : null;
 }
 
-/** The POST /api/session body: a card value as `team`, anything else as Other + `otherTeam`. */
-export function signInBody(identity: Identity, password: string): SignInBody {
+/** The identity part of a POST /api/session body: a card value as `team`, anything else as Other + `otherTeam`. */
+function identityBody(identity: Identity): Pick<SignInBody, 'staffName' | 'team' | 'otherTeam'> {
   const card = cardFor(identity.team);
-  return card
-    ? { staffName: identity.name, team: card, password }
-    : { staffName: identity.name, team: OTHER_TEAM, otherTeam: identity.team, password };
+  return card ? { staffName: identity.name, team: card } : { staffName: identity.name, team: OTHER_TEAM, otherTeam: identity.team };
+}
+
+/** The POST /api/session body with the event password. */
+export function signInBody(identity: Identity, password: string): SignInBody {
+  return { ...identityBody(identity), password };
+}
+
+/** The POST /api/session body with a team join link's code instead of the password (J1). */
+export function inviteSignInBody(identity: Identity, invite: string): SignInBody {
+  return { ...identityBody(identity), invite };
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -102,7 +110,7 @@ export const DEFAULT_RETRY_SECONDS = 15 * 60;
 export type SignInOutcome =
   /** Signed in. `session` is the SessionInfo body, or null if it was unreadable (the cookie is set). */
   | { kind: 'ok'; session: SessionInfo | null }
-  /** 401: wrong event password. */
+  /** 401: wrong event password (or a team link the server refused). */
   | { kind: 'password' }
   /** 429: too many attempts for this name + network. */
   | { kind: 'rate_limited'; retryAfterSeconds: number }

@@ -4,6 +4,7 @@
 // Rules (spec §3): tests use .env.test only — never .env.local — and refuse to run unless the Supabase
 // URL host is 127.0.0.1 or localhost.
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,6 +46,17 @@ export function assertLocalUrl(label, url) {
   }
 }
 
+/**
+ * The team join link in local tests (J1): a synthetic code that works only against a test server. Every
+ * test environment turns the link on with it (INVITE_CODE_SHA256 = its SHA-256, far-off expiry) unless
+ * .env.test sets its own INVITE_* values.
+ */
+export const TEST_INVITE_CODE = 'local-test-join-code-not-for-production-0123456789';
+export const TEST_INVITE_ENV = Object.freeze({
+  INVITE_CODE_SHA256: createHash('sha256').update(TEST_INVITE_CODE, 'utf8').digest('hex'),
+  INVITE_EXPIRES_AT: '2099-01-01T00:00:00Z',
+});
+
 // The local Supabase keys are NOT committed (GitHub push protection rejects even the CLI's fixed local
 // defaults). They come from `supabase status -o env` for this project's local stack, cached in the
 // gitignored .env.test.local so it runs once.
@@ -84,12 +96,13 @@ function localSupabaseKeys(expectedUrl) {
 }
 
 /**
- * Reads .env.test plus the local stack's keys (never .env.local) and checks every URL is local.
+ * Reads .env.test plus the local stack's keys (never .env.local) and checks every URL is local. The test
+ * join link (TEST_INVITE_ENV) is on unless .env.test says otherwise.
  * `{ keys: false }` skips the keys, for checks that never touch the database (unit tests in CI, where no local
  * stack runs).
  */
 export function loadTestEnv({ keys = true } = {}) {
-  const env = parseEnv(readFileSync(join(ROOT, '.env.test'), 'utf8'));
+  const env = { ...TEST_INVITE_ENV, ...parseEnv(readFileSync(join(ROOT, '.env.test'), 'utf8')) };
   if (keys && !env.SUPABASE_SECRET_KEY) Object.assign(env, localSupabaseKeys(env.NEXT_PUBLIC_SUPABASE_URL));
   assertLocalUrl('.env.test NEXT_PUBLIC_SUPABASE_URL', env.NEXT_PUBLIC_SUPABASE_URL);
   for (const [key, value] of Object.entries(env)) {

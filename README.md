@@ -36,6 +36,8 @@ message.
 | `SESSION_SECRET` | yes | 32 characters or more. Changing it signs everyone out. |
 | `APP_SHARED_PASSWORD_HASH_B64` or `APP_SHARED_PASSWORD` | one of them | The event password, as a base64 bcrypt hash or as plain text. If both are set, the hash wins. |
 | `EVENT_TIMEZONE` | no | Defaults to `America/New_York`. Every displayed time uses it. |
+| `INVITE_CODE_SHA256` | no | The team join link: hex SHA-256 of the code (`node scripts/make-invite.mjs`). Unset: password only. |
+| `INVITE_EXPIRES_AT` | with the one above | ISO time the team join link stops working, e.g. `2026-11-09T12:00:00Z`. Unset: the link is off. |
 
 To make a password hash without writing the password into a file:
 
@@ -119,7 +121,8 @@ Pending.
 
 - **Sign-in.** Step 1 is your name and team, and step 2 is the event password. The phone remembers step 1.
   Sessions last 12 hours from the last use, and 36 hours at most. Too many wrong passwords from one place
-  pauses sign-in for a while.
+  pauses sign-in for a while. A team join link (`/signin#join=<code>`, HANDOFF "Team join link") skips the
+  password: step 1, then the app.
 - **One page, several views.** All requests, Pending (Friend coming, then Waiting for check), My requests
   (with a progress line), Search, New request, the profile, Edit and the dashboard. Views are URL parameters
   on `/`, so Back and shared links work. The view menu is the large page title ("All requests 13 ⌄").
