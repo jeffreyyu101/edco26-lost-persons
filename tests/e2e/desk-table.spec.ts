@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import type { ChangeResponse, CreateResponse, RequestDetail, RequestSummary } from '../../lib/api-types';
-import { testBaseUrl } from '../../scripts/test-env.mjs';
+import { formatCreatedTime } from '../../lib/format';
+import { loadTestEnv, testBaseUrl } from '../../scripts/test-env.mjs';
 import { axeViolations, overlappingTargets, smallTargets } from './helpers/a11y';
+import { backdateInSync, textCut, widestEarlierDay } from './helpers/earlier-day';
 import { signedInAs } from './helpers/session';
 import { syncRows } from './helpers/sync';
 
@@ -23,6 +25,7 @@ const ALL_COLUMNS = ['#', 'Friend', 'Status', 'Post', 'Created', 'Updated', 'Log
 const SIX_COLUMNS = ['#', 'Friend', 'Status', 'Post', 'Created', 'Updated'];
 const FIVE_COLUMNS = ['#', 'Friend', 'Status', 'Created', 'Updated'];
 const NOT_IN_MEDICAL = 'Checked – Not Found';
+const TZ = (loadTestEnv() as Record<string, string | undefined>)['EVENT_TIMEZONE'] || 'America/New_York';
 
 test.use({ bypassCSP: true, serviceWorkers: 'block' });
 signedInAs(STAFF);
@@ -489,6 +492,37 @@ test.describe('the narrowest desk, 768 × 1024 (touch)', () => {
     await columnsLineUp(page, one!.id);
     for (const col of ['number', 'status', 'post', 'created', 'updated']) expect(await notCut(page, one!.id, col), col).toBe(true);
     expect((await cell(page, one!.id, 'friend').boundingBox())!.width).toBeGreaterThan(100);
+  });
+});
+
+// Review fix (2026-11-06): in WebKit the 88 px Created column drew "Thu 11:58 P…" for a request logged before
+// midnight (768–1023 with nothing docked, and docked at 1024–1279), while scrollWidth said it fit.
+test.describe('an earlier day\'s time in the narrow layouts', () => {
+  test.use({ viewport: { width: 768, height: 1024 }, isMobile: false, hasTouch: true, deviceScaleFactor: 2 });
+
+  test('"Mon 12:58 AM" (the widest) stays whole at 768 and 820, and docked at 1024 and 1279; so do the other columns', async ({ page }) => {
+    const tag = nextTag();
+    const [one] = await createRequests(page, 1, tag);
+    const earlier = widestEarlierDay(TZ);
+    const shown = formatCreatedTime(earlier.at, Date.now(), TZ);
+    expect(shown).toBe(`${earlier.weekday} 12:58 AM`);
+    await backdateInSync(page, [one!.id], earlier.at);
+    const steps = [
+      { width: 768, height: 1024, url: '/', columns: SIX_COLUMNS },
+      { width: 820, height: 1180, url: '/', columns: SIX_COLUMNS },
+      { width: 1024, height: 768, url: `/?r=${one!.id}`, columns: FIVE_COLUMNS },
+      { width: 1279, height: 800, url: `/?r=${one!.id}`, columns: FIVE_COLUMNS },
+    ];
+    for (const step of steps) {
+      await page.setViewportSize({ width: step.width, height: step.height });
+      await page.goto(step.url);
+      await expect(cell(page, one!.id, 'created'), `${step.width}`).toHaveText(shown, { timeout: 15_000 });
+      expect(await shownColumns(page), `${step.width}`).toEqual(step.columns);
+      await columnsLineUp(page, one!.id);
+      for (const col of ['number', 'status', 'created', 'updated']) {
+        expect(await textCut(cell(page, one!.id, col)), `${step.width} ${col}`).toBe(false);
+      }
+    }
   });
 });
 

@@ -28,7 +28,14 @@ async function waitForSchema(): Promise<void> {
 
 describe('20261106000000_rework.sql', () => {
   it('applies twice on the app database and on the upgrade fixture (scripts/verify-migration.sh)', async () => {
-    const { stdout } = await run('bash', ['scripts/verify-migration.sh'], { cwd: ROOT, maxBuffer: 4 * 1024 * 1024, timeout: 120_000 });
+    // The stack under test (SUPABASE_DB_URL from .env.test, else the default stack), never another one.
+    const { stdout } = await run('bash', ['scripts/verify-migration.sh'], {
+      cwd: ROOT,
+      env: { ...process.env, SUPABASE_DB_URL: dbUrl() },
+      maxBuffer: 4 * 1024 * 1024,
+      timeout: 120_000,
+    });
+    expect(stdout).toContain(`1. App database (${dbUrl()})`);
     expect(stdout).toContain('re-apply #1: ok');
     expect(stdout).toContain('re-apply #2: ok');
     expect(stdout).toContain('apply #1: ok');
@@ -37,6 +44,20 @@ describe('20261106000000_rework.sql', () => {
     expect(stdout).toContain('verify-migration: all good');
     await waitForSchema();
   }, 150_000);
+
+  // Review fix (2026-11-06): the script read only `supabase status` (the default stack), so on an isolated
+  // stack it re-applied the file to, and built its fixture on, someone else's database.
+  it('verify-migration.sh takes SUPABASE_DB_URL, behind its local-host guard', () => {
+    const remote = spawnSync('bash', ['scripts/verify-migration.sh'], {
+      cwd: ROOT,
+      env: { ...process.env, SUPABASE_DB_URL: 'postgresql://postgres:x@db.example.com:5432/postgres' },
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+    expect(remote.status).not.toBe(0);
+    expect(remote.stderr).toContain("refusing to run: DB host is 'db.example.com'.");
+    expect(remote.stdout).not.toContain('App database');
+  });
 
   it('the scratch fixture database is dropped afterwards', () => {
     expect(psql("select count(*) from pg_database where datname = 'lp_upgrade_fixture'")).toBe('0');

@@ -22,9 +22,10 @@
   box-sizing: border-box;
 }
 
-/* Nothing docked: Post shows (desktop-new-tablet.html .rail.wideT, iPad portrait 820 × 1180). */
+/* Nothing docked: Post shows (desktop-new-tablet.html .rail.wideT, iPad portrait 820 × 1180). Created is
+   96 px wherever it is narrow: the widest earlier-day time, "Mon 12:58 AM", is 92 px (88 cut it in WebKit). */
 .table {
-  --tbl-cols: 56px minmax(0, 1fr) 160px 120px 88px 64px;
+  --tbl-cols: 56px minmax(0, 1fr) 160px 120px 96px 64px;
   --tbl-gap: 10px;
   --tbl-pad-l: 24px;
   --tbl-pad-r: calc(20px + env(safe-area-inset-right));
@@ -64,7 +65,7 @@
    "Not found in medical" on one line, uncut (the longest status, F2); the name gives way. */
 @media (min-width: 1024px) and (max-width: 1279.98px) {
   [data-pane] .table {
-    --tbl-cols: 48px minmax(0, 1fr) 154px 88px 56px;
+    --tbl-cols: 48px minmax(0, 1fr) 154px 96px 56px;
     --tbl-gap: 10px;
     --tbl-pad-l: 20px;
     --tbl-pad-r: 16px;

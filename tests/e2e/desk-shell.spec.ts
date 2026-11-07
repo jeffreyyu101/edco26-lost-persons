@@ -143,6 +143,46 @@ async function openSearchResults(page: Page, tag: string) {
   await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
 }
 
+/**
+ * Whether the top bar cuts its title (with the count) or the live line's words. The text's laid-out width
+ * against its box, to the sub-pixel: a clip of a fraction of a pixel already draws the ellipsis, and
+ * scrollWidth (whole pixels, and equal to clientWidth in WebKit while it draws one) misses it. With `worst`,
+ * first the longest values the bar shows: a 3-digit count and a 2-digit-hour clock ("Last updated 10:42 PM").
+ */
+function topBarCut(page: Page, worst = false): Promise<{ title: boolean; line: boolean }> {
+  return page.evaluate((longest) => {
+    const top = document.querySelector('[data-testid="desk-topbar"]')!;
+    const title = top.querySelector('h1');
+    const line = top.querySelector<HTMLElement>('[data-testid="live-text"]');
+    if (longest) {
+      const count = title?.querySelector('span');
+      if (count) count.textContent = '999';
+      if (line) line.textContent = 'Last updated 10:42 PM';
+    }
+    const isCut = (el: Element | null) => {
+      if (!el) return true;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      return range.getBoundingClientRect().width > el.getBoundingClientRect().width + 0.01;
+    };
+    return { title: isCut(title), line: isCut(line) };
+  }, worst);
+}
+
+/** Fails every list sync (503) until the line shows Reconnecting's clock time; returns the undo. */
+async function failSyncs(page: Page): Promise<() => Promise<void>> {
+  const bar = page.getByTestId('desk-topbar');
+  const refresh = bar.getByRole('button', { name: 'Refresh now', exact: true });
+  await page.route('**/api/sync*', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":{"code":"unavailable","message":"down"}}' }));
+  for (let i = 0; i < 6 && (await bar.getByTestId('live-indicator').getAttribute('data-state')) !== 'reconnecting'; i += 1) {
+    await refresh.click();
+    await expect(refresh).not.toHaveAttribute('data-refreshing', { timeout: 15_000 });
+  }
+  await expect(bar.getByTestId('live-indicator')).toHaveAttribute('data-state', 'reconnecting', { timeout: 40_000 });
+  await expect(bar.getByTestId('live-text')).toHaveText(/^Last updated \d{1,2}:\d{2} (AM|PM)$/);
+  return () => page.unroute('**/api/sync*');
+}
+
 test.describe('desktop 1440 × 900', () => {
   test.use({ viewport: { width: 1440, height: 900 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
 
@@ -156,12 +196,7 @@ test.describe('desktop 1440 × 900', () => {
       await expect(bar.getByRole('heading', { level: 1 })).toHaveText(/^All requests \d+$/);
       await expect(bar.getByTestId('live-text')).toHaveText('Updated just now');
       // Nothing cut (at 1440 the title read "All requests…" and the line "Updated just …" beside a 260 px field).
-      const cut = await page.evaluate(() => {
-        const top = document.querySelector('[data-testid="desk-topbar"]')!;
-        const isCut = (el: Element | null) => !!el && el.scrollWidth > el.clientWidth + 0.5;
-        return { title: isCut(top.querySelector('h1')), line: isCut(top.querySelector('[data-testid="live-text"]')) };
-      });
-      expect(cut, `${width}`).toEqual({ title: false, line: false });
+      expect(await topBarCut(page), `${width}`).toEqual({ title: false, line: false });
       // In order and apart: the line, then search (the field, or its icon), then New request.
       const line = (await bar.getByTestId('live-indicator').boundingBox())!;
       const field = bar.getByRole('searchbox', { name: 'Search requests' });
@@ -815,6 +850,64 @@ test.describe('iPad landscape 1180 × 820, the pane\'s actions', () => {
 
 test.describe('iPad portrait 820 × 1180 (touch)', () => {
   test.use({ viewport: { width: 820, height: 1180 }, isMobile: false, hasTouch: true, deviceScaleFactor: 1 });
+
+  // Review fix (2026-11-06): on a portrait iPad (790–849 px: iPad 810, iPad Air 820, iPad Pro 11" 834) the bar
+  // read "All requests…" / "My requests…" (no count) and "Updated just …", or "Last updated 8:…" while
+  // Reconnecting: the title and the line gave way while the 260 px search field kept its width.
+  test('790–849 px: All and My requests keep the title, its count and the line whole, healthy and Reconnecting; the field gives way', async ({ page }) => {
+    test.slow();
+    await createRequests(page, 1);
+    const bar = page.getByTestId('desk-topbar');
+    const widths = [790, 800, 810, 820, 834, 849];
+    for (const [url, heading] of [
+      ['/', /^All requests \d+$/],
+      ['/?view=mine', /^My requests \d+$/],
+    ] as const) {
+      await page.setViewportSize({ width: 820, height: 1180 });
+      await page.goto(url);
+      await expect(bar.getByRole('heading', { level: 1 }), url).toHaveText(heading, { timeout: 15_000 });
+      await expect(bar.getByTestId('live-text'), url).toHaveText('Updated just now', { timeout: 15_000 });
+      const check = async (state: string) => {
+        for (const width of widths) {
+          await page.setViewportSize({ width, height: 1180 });
+          expect(await topBarCut(page), `${url} ${state} ${width}`).toEqual({ title: false, line: false });
+          // The full bar still: the field (narrower, never under 140 px) and "New request", inside the bar.
+          const field = (await bar.getByRole('search').boundingBox())!;
+          const add = (await page.getByTestId('desk-new').boundingBox())!;
+          const top = (await bar.boundingBox())!;
+          expect(field.width, `${url} ${state} ${width}`).toBeGreaterThanOrEqual(139.5);
+          expect(add.x + add.width, `${url} ${state} ${width}`).toBeLessThanOrEqual(top.x + top.width);
+          await expect(page.getByTestId('desk-new')).toContainText('New request');
+        }
+      };
+      await check('healthy');
+      const restore = await failSyncs(page);
+      try {
+        await check('reconnecting');
+        // The longest values: a 3-digit count and "Last updated 10:42 PM" (set in place, measured at once).
+        for (const width of widths) {
+          await page.setViewportSize({ width, height: 1180 });
+          expect(await topBarCut(page, true), `${url} longest ${width}`).toEqual({ title: false, line: false });
+        }
+      } finally {
+        await restore();
+      }
+    }
+  });
+
+  test('768–780 px with search open (a bar under 680 px): the field narrows before the line\'s words clip', async ({ page }) => {
+    const bar = page.getByTestId('desk-topbar');
+    await page.goto('/?q=TEST-shell');
+    await expect(bar.getByRole('heading', { level: 1, name: 'Search' })).toBeVisible({ timeout: 15_000 });
+    await expect(bar.getByTestId('live-text')).toHaveText('Updated just now', { timeout: 15_000 });
+    for (const width of [768, 774, 780]) {
+      await page.setViewportSize({ width, height: 1024 });
+      // The search icon is gone (the field shows) and "New" is short: the field is what gives way.
+      await expect(bar.getByRole('button', { name: 'Search', exact: true })).toBeHidden();
+      expect(await topBarCut(page, true), `${width}`).toEqual({ title: false, line: false });
+      expect((await bar.getByRole('search').boundingBox())!.width, `${width}`).toBeGreaterThanOrEqual(119.5);
+    }
+  });
 
   test('the request is a 480 px sheet over the list, which stays visible and usable', async ({ page }) => {
     const tag = nextTag();

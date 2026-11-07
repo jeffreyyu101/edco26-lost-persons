@@ -157,6 +157,9 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 - **Request size.** Photo uploads stay under 3.9 MB, because Vercel caps request bodies at 4.5 MB.
 - **Redeploys during the event** are safe. Open phones show "Update ready · Reload", and a reload never
   happens while a new request is unsent.
+- **After the F2 deploy, ask staff to tap "Update ready · Reload"** when it shows. Until a phone reloads,
+  a request's history on it shows a saved medical location as "Edited" with no field name ("— → Chair 14",
+  and screen readers hear no field name either). Nothing breaks and the value is right; the reload fixes it.
 
 ## Morning checklist (things tests can't cover)
 

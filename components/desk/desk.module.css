@@ -488,12 +488,12 @@
 }
 
 /* The live line next to the title (components/ui/LiveIndicator.tsx; live-indicator.html Desktop frame: the dot
-   10 px after the count). When the bar is short of room the search field narrows first (to 160 px, below); only
-   then do the line's words clip with an ellipsis, the dot and Refresh now staying. Flex shrink is weighted by
-   size, so the line's tiny factor leaves nearly all of it to the field until the field is at its minimum.
-   (Not `.live`: that is the lockup's corner dot above.) */
+   10 px after the count). Wherever the search field shows, the field gives way first and the line keeps its words
+   (below); only a bar with no room left clips the words with an ellipsis, the dot and Refresh now staying. No
+   fractional shrink factor: even a sub-pixel clip draws the ellipsis. (Not `.live`: that is the lockup's corner
+   dot above.) */
 .liveLine {
-  flex: 0 0.02 auto;
+  flex: 0 1 auto;
   margin-left: 4px;
 }
 
@@ -628,9 +628,11 @@
   display: none;
 }
 
+/* Search open in a narrow bar: the field takes only the room left over (a zero basis, and nearly all of the free
+   space ahead of the spacer, up to 320 px), so it narrows to its 120 px before the line's words clip. */
 @container (max-width: 679.98px) {
   .search {
-    flex: 1 1 auto;
+    flex: 1000 1 0;
     width: auto;
     min-width: 120px;
     max-width: 320px;
@@ -641,10 +643,15 @@
    desktop-new-tablet.html iPad portrait). Narrower (a docked request on an iPad in landscape): the search
    icon and "New". */
 @container (min-width: 680px) {
+  /* Only the field narrows (260 to 140 px): the title with a 4-digit count, "Last updated 12:59 PM" and New
+     request with its cap still fit at 680. */
   .search {
     display: flex;
     flex: 0 1 260px;
-    min-width: 160px;
+    min-width: 140px;
+  }
+  .liveLine {
+    flex-shrink: 0;
   }
   .searchIcon {
     display: none;
