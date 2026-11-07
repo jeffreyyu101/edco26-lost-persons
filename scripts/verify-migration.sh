@@ -13,13 +13,21 @@
 #      and an other_location-only edit audits both halves of the post (A35). Then drops the scratch database.
 #
 #   bash scripts/verify-migration.sh
+#
+# The database is SUPABASE_DB_URL when it is set (as the integration harness's dbUrl() reads it, so a test
+# run against an isolated stack checks that stack), else the default stack's from `supabase status`.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 die() { echo "verify-migration: $*" >&2; exit 1; }
 
-status_env="$(supabase status -o env 2>/dev/null)" || die "the local stack is not running. Start it with: supabase start"
-db_url="$(printf '%s\n' "$status_env" | grep -E '^DB_URL=' | cut -d= -f2- | tr -d '"')"
+if [[ -n "${SUPABASE_DB_URL:-}" ]]; then
+  db_url="$SUPABASE_DB_URL"
+else
+  status_env="$(supabase status -o env 2>/dev/null)" || die "the local stack is not running. Start it with: supabase start"
+  db_url="$(printf '%s\n' "$status_env" | grep -E '^DB_URL=' | cut -d= -f2- | tr -d '"')"
+fi
+[[ -n "$db_url" ]] || die "no database URL (set SUPABASE_DB_URL, or start the local stack: supabase start)"
 host="$(node -e 'try{process.stdout.write(new URL(process.argv[1]).hostname)}catch{process.stdout.write("invalid")}' "$db_url")"
 case "$host" in 127.0.0.1|localhost) ;; *) die "refusing to run: DB host is '$host'." ;; esac
 

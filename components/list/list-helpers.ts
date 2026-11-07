@@ -55,6 +55,16 @@ export function cardDescription(row: Pick<RequestSummary, 'clothing' | 'physical
   return parts.join(' · ');
 }
 
+/**
+ * Who is on the way to Main Med, for a Friend coming card (pending-v8.html .coming): the friend's name in
+ * bold, then "boyfriend, on the way". Without a name it reads "Friend", without a relation "on the way".
+ */
+export function friendComingLine(row: Pick<RequestSummary, 'contactName' | 'contactRelationship'>): { friend: string; rest: string } {
+  const friend = clean(row.contactName).replace(/\s+/g, ' ') || 'Friend';
+  const relation = clean(row.contactRelationship).replace(/\s+/g, ' ');
+  return { friend, rest: relation ? `${relation}, on the way` : 'on the way' };
+}
+
 /** When the request entered its current status (Friend coming time, My requests "3m"). */
 export function statusSince(row: Pick<RequestSummary, 'status' | 'createdAt' | 'updatedAt' | 'foundAt' | 'reunionStartedAt' | 'closedAt'>): string {
   if (row.status === STATUS.waiting) return row.createdAt;
@@ -101,23 +111,23 @@ export interface StepperModel {
   color: string;
 }
 
-const STEPS = ['Logged', 'Checked', 'In medical', 'Reunited'];
+const STEPS = ['Logged', 'Checked', statusMeta(STATUS.inMedical).shortLabel, statusMeta(STATUS.reunited).shortLabel];
 
 export function stepperModel(status: string): StepperModel {
   switch (status) {
     case STATUS.waiting:
       return { steps: STEPS, current: 1, mode: 'pend', color: 'var(--blue-9)' };
     case STATUS.notInMedical:
-      // Not in medical is final: the line ends there (DECISIONS: Logged → Checked → Not in medical). It is
-      // closed, so it is grey like the other closed statuses (2026-11-06).
-      return { steps: ['Logged', 'Checked', 'Not in medical'], current: 2, mode: 'cur', color: 'var(--gray-9)' };
+      // Not found in medical is final: the line ends there (DECISIONS: Logged → Checked → Not found in medical).
+      // It is closed, so it is grey like the other closed statuses (2026-11-06).
+      return { steps: ['Logged', 'Checked', statusMeta(STATUS.notInMedical).shortLabel], current: 2, mode: 'cur', color: 'var(--gray-9)' };
     case STATUS.inMedical:
     case STATUS.legacyBringFriend:
       return { steps: STEPS, current: 2, mode: 'cur', color: 'var(--green-9)' };
     case STATUS.reunited:
       return { steps: STEPS, current: 3, mode: 'cur', color: 'var(--gray-9)' };
     case STATUS.discharged:
-      return { steps: ['Logged', 'Checked', 'In medical', 'Discharged'], current: 3, mode: 'cur', color: 'var(--gray-9)' };
+      return { steps: ['Logged', 'Checked', statusMeta(STATUS.inMedical).shortLabel, statusMeta(STATUS.discharged).shortLabel], current: 3, mode: 'cur', color: 'var(--gray-9)' };
     case STATUS.cancelled:
       return { steps: ['Logged', 'Cancelled'], current: 1, mode: 'cur', color: 'var(--gray-9)' };
     default:
@@ -267,12 +277,12 @@ export function updatedSince(
 }
 
 /**
- * The status label the log shows on a narrow phone (under 400 px wide), where "Waiting for check" would take
- * the name's room: "Waiting" (the blue ring says the rest). Null when the label is already short. The row's
- * sentence always says the full status.
+ * The status label the log shows on a narrow phone (under 400 px wide), where "Waiting for check" or "Not found
+ * in medical" would take the name's room: "Waiting", "Not found" (the glyph says the rest; STATUS_META
+ * narrowLabel). Null when the label is already short. The row's sentence always says the full status.
  */
 export function narrowStatusLabel(status: string): string | null {
-  return status === STATUS.waiting ? 'Waiting' : null;
+  return statusMeta(status).narrowLabel ?? null;
 }
 
 /** The status as a screen reader says it: "Waiting for check", "In medical, friend coming". */

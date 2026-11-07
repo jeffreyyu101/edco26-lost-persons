@@ -40,7 +40,9 @@ export function statusAlert(row: RequestSummary): AlertEvent {
   if (isInMedical(row.status)) {
     return { kind: 'in_medical', requestId: row.id, title: `${s} is in medical`, subtitle: 'Bring the friend to Main Med', count: 1 };
   }
-  if (row.status === STATUS.notInMedical) return { kind: 'not_in_medical', requestId: row.id, title: `${s} — not in medical`, count: 1 };
+  if (row.status === STATUS.notInMedical) {
+    return { kind: 'not_in_medical', requestId: row.id, title: `${s} — ${statusMeta(STATUS.notInMedical).shortLabel.toLowerCase()}`, count: 1 };
+  }
   if (row.status === STATUS.reunited) return { kind: 'reunited', requestId: row.id, title: `${s} reunited`, count: 1 };
   return { kind: 'status_changed', requestId: row.id, title: `${s} — ${statusMeta(row.status).shortLabel.toLowerCase()}`, count: 1 };
 }
@@ -89,6 +91,8 @@ export interface RaisedAlert {
   alert: AlertEvent;
   /** The row's status when the alert was raised (null for alerts with no request). */
   status: string | null;
+  /** `${id}:${rowVersion}` of the row that raised it: the same in every tab that raises this alert. */
+  key: string;
 }
 
 /** The alerts of `rows`, each paired with the status of the row that raised it (see diffAlerts). */
@@ -99,7 +103,7 @@ export function diffRaisedAlerts(
 ): RaisedAlert[] {
   const out: RaisedAlert[] = [];
   for (const row of rows) {
-    for (const alert of diffAlerts(previous, [row], ctx)) out.push({ alert, status: row.status });
+    for (const alert of diffAlerts(previous, [row], ctx)) out.push({ alert, status: row.status, key: alertKey(row) });
   }
   return out;
 }

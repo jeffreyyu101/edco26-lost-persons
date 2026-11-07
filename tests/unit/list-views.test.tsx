@@ -4,16 +4,19 @@
 import { Theme } from '@radix-ui/themes';
 import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DeskContext } from '@/components/desk/desk-context';
 import { ConnectionIndicator } from '@/components/list/AppHeader';
 import { BRAND_DATES_LONG, BRAND_DATES_SHORT, HIDE_HEADER_LABEL } from '@/components/list/BrandCard';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { AllView, MineView, PendingView, SearchView } from '@/components/list/ListViews';
+import { PENDING_TAB_KEY, readPendingTab } from '@/components/list/PendingTabs';
 import { switcherLabel } from '@/components/list/ViewSwitcher';
 import {
   NO_NAME,
   archivedFoldLabel,
   cardDescription,
+  friendComingLine,
   highlightParts,
   isClosed,
   isFresh,
@@ -84,7 +87,7 @@ describe('list helpers', () => {
     expect(statusSince(byCase(1004))).toBe(byCase(1004).reunionStartedAt); // in medical
     expect(statusSince(byCase(1005))).toBe(byCase(1005).foundAt); // legacy Bring friend, no reunion time
     expect(statusSince(byCase(1003))).toBe(byCase(1003).closedAt); // reunited
-    expect(statusSince(byCase(1009))).toBe(byCase(1009).updatedAt); // not in medical
+    expect(statusSince(byCase(1009))).toBe(byCase(1009).updatedAt); // not found in medical
   });
 
   it('isFresh: the last minute only, tolerating a slightly fast database clock', () => {
@@ -104,9 +107,9 @@ describe('list helpers', () => {
     expect(mineFreshTone({ ...byCase(1012), createdAt: iso(0.2) }, NOW, STUB_SESSION.staff)).toBeNull();
   });
 
-  it('stepperModel follows the status (Not in medical ends the line)', () => {
+  it('stepperModel follows the status (Not found in medical ends the line)', () => {
     expect(stepperModel(STATUS.waiting)).toMatchObject({ steps: ['Logged', 'Checked', 'In medical', 'Reunited'], current: 1, mode: 'pend' });
-    expect(stepperModel(STATUS.notInMedical)).toMatchObject({ steps: ['Logged', 'Checked', 'Not in medical'], current: 2, mode: 'cur' });
+    expect(stepperModel(STATUS.notInMedical)).toMatchObject({ steps: ['Logged', 'Checked', 'Not found in medical'], current: 2, mode: 'cur' });
     expect(stepperModel(STATUS.inMedical)).toMatchObject({ current: 2, mode: 'cur', color: 'var(--green-9)' });
     expect(stepperModel(STATUS.legacyBringFriend)).toMatchObject({ current: 2, mode: 'cur' });
     expect(stepperModel(STATUS.reunited)).toMatchObject({ current: 3, mode: 'cur' });
@@ -171,6 +174,13 @@ describe('list helpers', () => {
     expect(hairHit && searchDisplay(hairHit).lineRanges.length).toBe(1);
   });
 
+  it('friendComingLine: "<friend> · <relation>, on the way", with fallbacks', () => {
+    expect(friendComingLine({ contactName: ' Chris  P. ', contactRelationship: 'boyfriend' })).toEqual({ friend: 'Chris P.', rest: 'boyfriend, on the way' });
+    expect(friendComingLine({ contactName: 'Ana P.', contactRelationship: '  ' })).toEqual({ friend: 'Ana P.', rest: 'on the way' });
+    expect(friendComingLine({ contactName: null, contactRelationship: 'Sister' })).toEqual({ friend: 'Friend', rest: 'Sister, on the way' });
+    expect(friendComingLine({ contactName: null, contactRelationship: null })).toEqual({ friend: 'Friend', rest: 'on the way' });
+  });
+
   it('copy helpers', () => {
     expect(resultCount(1)).toBe('1 result');
     expect(resultCount(0)).toBe('0 results');
@@ -212,7 +222,7 @@ describe('list helpers', () => {
   it('log rows: a full sentence per row, the bare number, the Archived fold name', () => {
     expect(logRowLabel(byCase(1013), '11:02 PM', 'updated 2 minutes ago')).toBe('LP-1013, T.R., Waiting for check, created 11:02 PM, updated 2 minutes ago');
     expect(logRowLabel(byCase(1004), 'Thu 9:58 PM', 'not updated yet')).toBe('LP-1004, S.L., In medical, friend coming, created Thu 9:58 PM, not updated yet');
-    expect(logRowLabel({ ...byCase(1009), name: '' }, '10:44 PM', 'updated 6 minutes ago')).toBe('LP-1009, No name, Not in medical, created 10:44 PM, updated 6 minutes ago');
+    expect(logRowLabel({ ...byCase(1009), name: '' }, '10:44 PM', 'updated 6 minutes ago')).toBe('LP-1009, No name, Not found in medical, created 10:44 PM, updated 6 minutes ago');
     expect(searchLogLabel(byCase(1012), '10:58 PM', 'not updated yet', '…pink braids')).toBe('LP-1012, Kayla Martinez, Waiting for check, created 10:58 PM, not updated yet. …pink braids');
     expect(statusPhrase(STATUS.legacyBringFriend)).toBe('In medical, friend coming');
     expect(logNumber(998)).toBe('998');
@@ -223,12 +233,14 @@ describe('list helpers', () => {
     expect(logNumberRanges(998, [[0, 2]])).toEqual([]);
     expect(archivedFoldLabel(1)).toBe('Archived 1 request');
     expect(archivedFoldLabel(6)).toBe('Archived 6 requests');
-    // On a narrow phone only the long open label gets shorter, so the name keeps its room (review fix).
+    // On a narrow phone only the two long labels get shorter, so the name keeps its room (review fix; F2:
+    // "Not found in medical" reads "Not found" there, like its answer button).
     expect(narrowStatusLabel(STATUS.waiting)).toBe('Waiting');
-    for (const st of [STATUS.inMedical, STATUS.legacyBringFriend, STATUS.notInMedical, STATUS.reunited, STATUS.discharged, STATUS.cancelled, 'Some legacy value']) {
+    expect(narrowStatusLabel(STATUS.notInMedical)).toBe('Not found');
+    for (const st of [STATUS.inMedical, STATUS.legacyBringFriend, STATUS.reunited, STATUS.discharged, STATUS.cancelled, 'Some legacy value']) {
       expect(narrowStatusLabel(st)).toBeNull();
     }
-    // Not in medical is closed and grey everywhere, the stepper included.
+    // Not found in medical is closed and grey everywhere, the stepper included.
     expect(stepperModel(STATUS.notInMedical).color).toBe('var(--gray-9)');
     expect(isClosed(STATUS.notInMedical)).toBe(true);
   });
@@ -259,6 +271,16 @@ describe('search, filter and sort', () => {
     expect(searchRequests(rows, 'info booth').map((h) => h.row.caseNumber)).toEqual([997]);
     expect(searchRequests(rows, 'oasis').every((h) => h.field === 'post')).toBe(true);
     expect(searchRequests(rows, '   ')).toEqual([]);
+  });
+
+  it('matches the medical location ("Chair 14", Pending v8), also on rows cached without the field', () => {
+    const located = rows.map((r) => (r.caseNumber === 1004 ? { ...r, medicalLocation: 'Beach chair 14' } : r));
+    const hits = searchRequests(located, 'chair 14');
+    expect(hits.map((h) => [h.row.caseNumber, h.field, h.text])).toEqual([[1004, 'medicalLocation', 'Beach chair 14']]);
+    expect(searchDisplay(hits[0]!).line).toBe('Beach chair 14');
+    // The stub rows carry no medicalLocation key at all (like a phone's cache from before): no throw, no hit.
+    expect(rows.every((r) => !('medicalLocation' in r))).toBe(true);
+    expect(searchRequests(rows, 'chair')).toEqual([]);
   });
 
   it('All is newest first; the status filter treats legacy Bring friend as In medical; post matches the post key', () => {
@@ -322,6 +344,9 @@ const render = (store: AppStore, node: ReactNode) =>
   );
 
 describe('list views render', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
   const idOf = (n: number) => `5eed0000-0000-4000-8000-${String(n).padStart(12, '0')}`;
   /** The opening tag of the element carrying data-request-id for LP-n (its class and attributes). */
   const rowTag = (html: string, n: number) => {
@@ -425,7 +450,7 @@ describe('list views render', () => {
     const at = open.map((n) => html.indexOf(`data-request-id="${idOf(n)}"`));
     expect(at[0]).toBeGreaterThan(attention);
     for (let i = 1; i < at.length; i++) expect(at[i]).toBeGreaterThan(at[i - 1]!);
-    // Every closed one (Not in medical included) is folded: not rendered, counted in the fold.
+    // Every closed one (Not found in medical included) is folded: not rendered, counted in the fold.
     const all = [...store.getState().confirmed.values()];
     const closed = all.filter((r) => statusMeta(r.status).bucket === 'closed');
     expect(closed.map((r) => r.caseNumber)).toEqual(expect.arrayContaining([1009, 1008, 1006, 1003, 1002, 1001]));
@@ -451,14 +476,23 @@ describe('list views render', () => {
     const at = closed.map((n) => html.indexOf(`data-request-id="${idOf(n)}"`));
     expect(at[0]).toBeGreaterThan(group);
     for (let i = 1; i < at.length; i++) expect(at[i]).toBeGreaterThan(at[i - 1]!);
-    // Greyed: Not in medical and Reunited rows carry the closed style; open rows do not.
+    // Greyed: Not found in medical and Reunited rows carry the closed style; open rows do not.
     expect(rowTag(html, 1009)).toContain('data-closed');
     expect(rowTag(html, 1003)).toContain('data-closed');
     expect(rowTag(html, 1013)).not.toContain('data-closed');
   });
 
-  it('All requests opens with the compact brand row, above the sticky bar; Pending, My requests and Search do not', () => {
+  it('All requests opens with the compact brand row, above the sticky bar; Pending, My requests and Search do not (v8)', () => {
     const store = storeWith((s) => ({ ...s, myIds: new Set([...s.confirmed.keys()]) }));
+    // Pending v8 (Brian, 2026-11-06 afternoon): Pending and My requests get just the large title.
+    for (const node of [<PendingView key="pending" />, <MineView key="mine" />]) {
+      const html = render(store, node);
+      expect(html).not.toContain('brand-card');
+      expect(html.match(/<h1[\s>]/g)?.length).toBe(1);
+      // The large title is the first thing in the view.
+      expect(html.indexOf('<header')).toBeLessThan(html.indexOf('data-testid="view-switcher"'));
+      expect(html.slice(0, html.indexOf('<header'))).not.toMatch(/<img /);
+    }
     for (const node of [<AllView key="all" status={null} post={null} />, <AllView key="filtered" status={STATUS.waiting} post={null} />]) {
       const html = render(store, node);
       const card = html.indexOf('data-testid="brand-card"');
@@ -490,7 +524,8 @@ describe('list views render', () => {
       expect(brand).not.toContain('orbit');
       // The X: a button named "Hide header".
       expect(HIDE_HEADER_LABEL).toBe('Hide header');
-      expect(brand).toMatch(/<button type="button" class="[^"]*hide[^"]*" aria-label="Hide header" data-testid="brand-hide">/);
+      // The desk's server-drawn copy has no handler: its slot catches the click by data-brand-hide.
+      expect(brand).toMatch(/<button type="button" class="[^"]*hide[^"]*" aria-label="Hide header" data-brand-hide="" data-testid="brand-hide">/);
       // The row adds no heading (the view menu title stays the h1).
       expect(brand).not.toMatch(/<h[1-6][\s>]/);
       expect(html.match(/<h1[\s>]/g)?.length).toBe(1);
@@ -521,6 +556,10 @@ describe('list views render', () => {
     const failed = render(storeWith((s) => ({ ...s, hasData: false, hydrated: true, connection: 'error' })), <AllView status={null} post={null} />);
     expect(failed).toContain('Can&#x27;t reach the log');
     expect(failed).toContain('data-testid="brand-card"');
+    // Pending: no card (v8), the same error state.
+    const pending = render(storeWith((s) => ({ ...s, hasData: false, hydrated: true, connection: 'error' })), <PendingView />);
+    expect(pending).toContain('Can&#x27;t reach the log');
+    expect(pending).not.toContain('brand-card');
   });
 
   it('the line sits right under the title on All, Pending and My requests: a plain dot, "Updated just now", Refresh now', () => {
@@ -585,7 +624,7 @@ describe('list views render', () => {
     for (const r of store.getState().confirmed.values()) {
       if (statusMeta(r.status).bucket === 'closed') expect(pending).not.toContain(`data-request-id="${r.id}"`);
     }
-    // My requests: no Archived fold, and Not in medical (LP-1009) and Reunited (LP-1003) are on the page.
+    // My requests: no Archived fold, and Not found in medical (LP-1009) and Reunited (LP-1003) are on the page.
     const mine = render(store, <MineView />);
     expect(mine).not.toContain('data-testid="closed-fold"');
     expect(mine).not.toContain('Archived');
@@ -640,7 +679,7 @@ describe('list views render', () => {
     const html = render(store, <AllView status={null} post="FA 3 – Kinetic" />);
     expect(html).not.toContain('data-testid="closed-fold"');
     expect(html).not.toContain('Waiting to send');
-    // LP-1009 (Not in medical) and LP-1002 (Discharged) are at FA 3: listed in place, greyed.
+    // LP-1009 (Not found in medical) and LP-1002 (Discharged) are at FA 3: listed in place, greyed.
     expect(html).toContain(`data-request-id="${idOf(1009)}"`);
     expect(rowTag(html, 1009)).toContain('data-closed');
     expect(rowTag(html, 1012)).not.toContain('data-closed');
@@ -672,7 +711,7 @@ describe('list views render', () => {
     const store = storeWith((s) => ({ ...s, outbox: [outboxItem()] }));
     const html = render(store, <AllView status={STATUS.notInMedical} post={null} />);
     expect(html).toContain('data-testid="status-chip"');
-    expect(html).toContain('Not in medical 2 shown. Clear this filter');
+    expect(html).toContain('Not found in medical 2 shown. Clear this filter');
     expect(html).not.toContain('Waiting to send');
   });
 
@@ -737,7 +776,7 @@ describe('list views render', () => {
     expect(mine).toMatch(/aria-label="My requests \d+, change view"/);
   });
 
-  it('My requests: Not in medical is closed, greyed, in the Closed area after the open requests', () => {
+  it('My requests: Not found in medical is closed, greyed, in the Closed area after the open requests', () => {
     // Every stub row is "mine" for this check (created by the signed-in staff).
     const store = storeWith((s) => ({ ...s, myIds: new Set([...s.confirmed.keys()]) }));
     const html = render(store, <MineView />);
@@ -746,26 +785,116 @@ describe('list views render', () => {
     const card = (n: number) => html.indexOf(`data-request-id="${idOf(n)}"`);
     for (const n of [1013, 1012, 1007, 1004]) expect(card(n)).toBeLessThan(area);
     for (const n of [1009, 1008, 1003, 1001]) expect(card(n)).toBeGreaterThan(area);
-    // The Not in medical card is dimmed like every closed card.
+    // The Not found in medical card is dimmed like every closed card.
     const tag = html.slice(html.lastIndexOf('data-testid="mine-card"', card(1009)) - 300, card(1009));
     expect(tag).toMatch(/dimCard/);
   });
 
-  it('Pending: Waiting for check cards with both answers first, then Friend coming cards (friend, post, time)', () => {
+  it('Pending (phone): the To check | Friend coming control under the title, To check by default, one list at a time', () => {
     const html = render(storeWith((s) => s), <PendingView />);
-    // Brian, 2026-11-06 19:40: waiting for check is the priority, so it comes first.
-    expect(html.indexOf('Waiting for check')).toBeGreaterThan(-1);
-    expect(html.indexOf('Waiting for check')).toBeLessThan(html.indexOf('Friend coming'));
-    expect(html.indexOf('data-testid="check-card"')).toBeLessThan(html.indexOf('data-testid="friend-coming-card"'));
-    // (The stub's 3 minutes can read 2m: useNow's clock is read when the module loads.)
-    expect(html).toMatch(/<span>Jess T\. · from FA 3 · [23]m<\/span>/);
+    // The segmented control sits in the sticky bar, under the large title, with both counts.
+    const tabs = html.indexOf('data-testid="pending-tabs"');
+    expect(tabs).toBeGreaterThan(html.indexOf('data-testid="view-switcher"'));
+    expect(html).toMatch(/role="tablist" aria-label="Pending"/);
+    expect(html).toMatch(/role="tab"[^>]*aria-selected="true"[^>]*data-tab="check"/);
+    expect(html).toMatch(/role="tab"[^>]*aria-selected="false"[^>]*data-tab="coming"/);
+    const segText = (tab: string) => {
+      const at = html.indexOf(`data-tab="${tab}"`);
+      return html.slice(at, html.indexOf('</button>', at)).replace(/<svg[^]*?<\/svg>/g, '').replace(/<[^>]+>/g, '').replace(/<!-- -->/g, '').trim();
+    };
+    expect(segText('check').replace(/^[^>]*>/, '')).toMatch(/^To check\s*4$/);
+    expect(segText('coming').replace(/^[^>]*>/, '')).toMatch(/^Friend coming\s*3$/);
+    // One list: the 4 To check cards (oldest first), no Friend coming card, no section headers.
     expect(html.match(/data-testid="check-card"/g)?.length).toBe(4);
+    expect(html).not.toContain('data-testid="friend-coming-card"');
+    expect(html).not.toContain('Waiting for check');
+    const order = [1010, 1011, 1012, 1013].map((n) => html.indexOf(`data-request-id="${idOf(n)}"`));
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(html).toMatch(/role="tabpanel"[^>]*aria-labelledby="[^"]*-tab-check"/);
+    // The answer buttons: "Not found" and "In medical" (ANSWER_LABEL), never the status's long label.
+    expect(html).toContain('>Not found<');
+    expect(html).not.toContain('Not found in medical');
+  });
+
+  it('Pending To check card: photo only when there is one, the name, minutes with a clock, wearing, "post · LP-####"', () => {
+    const html = render(storeWith((s) => s), <PendingView />);
+    const card = (n: number) => {
+      const at = html.indexOf(`data-request-id="${idOf(n)}"`);
+      const start = html.lastIndexOf('data-testid="check-card"', at);
+      const next = html.indexOf('data-testid="check-card"', at);
+      return html.slice(start, next > 0 ? next : undefined);
+    };
+    // LP-1012 has photos, the other three have none: no empty placeholder (Brian, v8).
+    expect(html.match(/data-testid="card-photo"/g)?.length).toBe(1);
+    expect(card(1012)).toContain('data-testid="card-photo"');
+    expect(card(1010)).not.toContain('card-photo');
+    // "FA 4 · LP-1010": the post first, then the number, one quiet line.
+    expect(card(1010)).toMatch(/>FA 4 · LP-1010</);
+    expect(card(1010)).toContain('Neon green bikini top, white platform boots, red bandana');
+    // Minutes beside the name: B.W. ~24m red, D.F. ~16m amber, T.R. ~1m grey, each with the clock.
+    expect(card(1010)).toMatch(/data-tone="red" data-testid="card-minutes"><svg[^]*?<\/svg>2[34]m</);
+    expect(card(1011)).toMatch(/data-tone="amber" data-testid="card-minutes"><svg[^]*?<\/svg>1[56]m</);
+    expect(card(1013)).toMatch(/data-tone="gray" data-testid="card-minutes"><svg[^]*?<\/svg>(now|1m)</);
+    // The card's sentence: who, where from, how long; then what they wear.
+    expect(card(1010)).toMatch(/aria-label="B\.W\., 23 F\. FA 4 · LP-1010\. Waiting 2[34] minutes\. Neon green/);
+  });
+
+  it('Pending on the desk: both queues side by side, the Friend coming card with its location chip and who is coming', () => {
+    const store = storeWith((s) => {
+      const confirmed = new Map(s.confirmed);
+      const sl = confirmed.get(idOf(1004))!;
+      confirmed.set(sl.id, { ...sl, medicalLocation: 'Chair 14' });
+      return { ...s, confirmed };
+    });
+    const html = render(
+      store,
+      <DeskContext.Provider value>
+        <PendingView />
+      </DeskContext.Provider>,
+    );
+    expect(html).toContain('data-testid="pending-board"');
+    expect(html).not.toContain('brand-card');
+    // The line under the title is the desk top bar's (components/desk/TopBar.tsx), not the list's.
+    expect(html).not.toContain('data-testid="live-indicator"');
+    // Both columns, To check first, each with its header and count; the board's own control (for a narrow
+    // main column) is there too, and the phone's is not in the sticky bar.
+    expect(html.indexOf('data-testid="pending-column-check"')).toBeLessThan(html.indexOf('data-testid="pending-column-coming"'));
+    expect(html.match(/data-testid="pending-tabs"/g)?.length).toBe(1);
+    expect(html.match(/data-testid="check-card"/g)?.length).toBe(4);
+    expect(html.match(/data-testid="friend-coming-card"/g)?.length).toBe(3);
     expect(html.match(/>Reunited</g)?.length).toBe(3);
-    expect(html).toContain('Not in medical');
-    // Wait badges: B.W. ~24m (red), D.F. ~16m (amber), T.R. ~1m (grey).
-    expect(html).toMatch(/data-accent-color="red"[^>]*><svg.*?<\/svg>2[34]m</);
-    expect(html).toMatch(/data-accent-color="amber"[^>]*><svg.*?<\/svg>1[56]m</);
-    expect(html).toMatch(/data-accent-color="gray"[^>]*><svg.*?<\/svg>(now|1m)</);
+    // Friend coming: the location chip (green with a pin) or a quiet "+ Location"; "<friend> · <relation>, on the way".
+    expect(html).toMatch(/aria-label="Chair 14, edit location"/);
+    expect(html.match(/aria-label="Add location"/g)?.length).toBe(2);
+    expect(html).toMatch(/<b>Jess T\.<\/b> · <!-- -->Friend, on the way/);
+    expect(html).toMatch(/<b>Ty B\.<\/b> · <!-- -->Friend, on the way/);
+    // No coloured arrow line, no "from FA 3" any more.
+    expect(html).not.toMatch(/from FA 3/);
+    // Minutes since the answer, without the clock: S.L. answered ~3 minutes ago.
+    const sl = html.slice(html.lastIndexOf('data-testid="friend-coming-card"', html.indexOf(`data-request-id="${idOf(1004)}"`)));
+    expect(sl).toMatch(/data-tone="gray" data-testid="card-minutes">[23]m</);
+  });
+
+  it('the remembered Pending tab: Friend coming once chosen, To check otherwise (storage blocked too)', () => {
+    const saved = new Map<string, string>();
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (k: string) => saved.get(k) ?? null,
+        setItem: (k: string, v: string) => saved.set(k, v),
+        removeItem: (k: string) => saved.delete(k),
+      },
+    });
+    expect(readPendingTab()).toBe('check');
+    saved.set(PENDING_TAB_KEY, 'coming');
+    expect(readPendingTab()).toBe('coming');
+    saved.set(PENDING_TAB_KEY, 'nonsense');
+    expect(readPendingTab()).toBe('check');
+    vi.stubGlobal('window', {
+      get localStorage(): Storage {
+        throw new Error('blocked');
+      },
+    });
+    expect(readPendingTab()).toBe('check');
   });
 
   it('Pending offline: answer buttons look disabled and say why', () => {

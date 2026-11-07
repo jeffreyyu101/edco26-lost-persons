@@ -5,6 +5,7 @@ import { Theme } from '@radix-ui/themes';
 import type { Metadata, Viewport } from 'next';
 import { headers } from 'next/headers';
 import type { ReactNode } from 'react';
+import { BRAND_HIDDEN_SCRIPT } from '@/lib/brand-pref';
 import { THEME_SCRIPT } from '@/lib/theme';
 import { HydrationMarker } from './hydration-marker';
 
@@ -42,8 +43,9 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Applies the saved Light / Dark / Auto theme before first paint (no flash). */}
-        <script nonce={nonce} suppressHydrationWarning dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        {/* Applies the saved Light / Dark / Auto theme, and a brand row hidden on this device, before first
+            paint (no flash). */}
+        <script nonce={nonce} suppressHydrationWarning dangerouslySetInnerHTML={{ __html: THEME_SCRIPT + BRAND_HIDDEN_SCRIPT }} />
       </head>
       <body>
         <Theme accentColor="gray" grayColor="gray" radius="medium">

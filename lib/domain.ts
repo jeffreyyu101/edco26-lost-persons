@@ -57,8 +57,8 @@ export function isStatus(value: unknown): value is Status {
 }
 
 /**
- * v2.1 A3. Dimming and Reopen apply to `closed` only. v2.2 (Jeffrey, 2026-11-06 09:11): Not in medical counts as
- * closed and is greyed out, so there is no separate `answered` bucket any more.
+ * v2.1 A3. Dimming and Reopen apply to `closed` only. v2.2 (Jeffrey, 2026-11-06 09:11): Not found in medical (then
+ * "Not in medical") counts as closed and is greyed out, so there is no separate `answered` bucket any more.
  */
 export type StatusBucket = 'open' | 'closed';
 
@@ -79,14 +79,37 @@ export interface StatusMeta {
   label: string;
   /** Short label for compact places (audit "from → to", alerts), e.g. "In medical". */
   shortLabel: string;
+  /**
+   * An even shorter label for the log's status cell on a narrow phone (under 400 px), where the short one
+   * would take the name's room: "Waiting", "Not found" (the glyph says the rest). Absent: the short label
+   * fits everywhere. The row's sentence always says the full status.
+   */
+  narrowLabel?: string;
   tone: StatusTone;
   glyph: GlyphKind;
   bucket: StatusBucket;
 }
 
+/**
+ * The answer buttons (the Pending cards, the profile, the Change answer menu): "Not found" and "In medical"
+ * (Brian, 2026-11-06 18:00). The status itself reads "Not found in medical" (STATUS_META); the database value
+ * stays 'Checked – Not Found'.
+ */
+export const ANSWER_LABEL = {
+  notFound: 'Not found',
+  inMedical: 'In medical',
+} as const;
+
 export const STATUS_META: Readonly<Record<Status, StatusMeta>> = {
-  [STATUS.waiting]: { label: 'Waiting for check', shortLabel: 'Waiting for check', tone: 'blue', glyph: 'waiting', bucket: 'open' },
-  [STATUS.notInMedical]: { label: 'Not in medical', shortLabel: 'Not in medical', tone: 'gray', glyph: 'notInMedical', bucket: 'closed' },
+  [STATUS.waiting]: { label: 'Waiting for check', shortLabel: 'Waiting for check', narrowLabel: 'Waiting', tone: 'blue', glyph: 'waiting', bucket: 'open' },
+  [STATUS.notInMedical]: {
+    label: 'Not found in medical',
+    shortLabel: 'Not found in medical',
+    narrowLabel: ANSWER_LABEL.notFound,
+    tone: 'gray',
+    glyph: 'notInMedical',
+    bucket: 'closed',
+  },
   [STATUS.inMedical]: { label: 'In medical · friend coming', shortLabel: 'In medical', tone: 'green', glyph: 'inMedical', bucket: 'open' },
   [STATUS.reunited]: { label: 'Reunited', shortLabel: 'Reunited', tone: 'gray', glyph: 'closed', bucket: 'closed' },
   [STATUS.discharged]: { label: 'Discharged', shortLabel: 'Discharged', tone: 'gray', glyph: 'closed', bucket: 'closed' },
@@ -165,15 +188,15 @@ export interface StatusAction {
   label: string;
   to: SettableStatus;
   kind: StatusKind;
-  /** Answer taps (Not in medical, In medical, Reunited, Change answer) get the 6 s Undo snackbar. */
+  /** Answer taps (Not found, In medical, Reunited, Change answer) get the 10 s Undo snackbar. */
   undoable: boolean;
   /** Only the request's creator may do it (server-checked; the UI hides it for others). */
   creatorOnly: boolean;
 }
 
 const ACTION: Readonly<Record<StatusActionId, Omit<StatusAction, 'creatorOnly'> & { creatorOnly?: boolean }>> = {
-  notInMedical: { id: 'notInMedical', label: 'Not in medical', to: STATUS.notInMedical, kind: 'answer', undoable: true },
-  inMedical: { id: 'inMedical', label: 'In medical', to: STATUS.inMedical, kind: 'answer', undoable: true },
+  notInMedical: { id: 'notInMedical', label: ANSWER_LABEL.notFound, to: STATUS.notInMedical, kind: 'answer', undoable: true },
+  inMedical: { id: 'inMedical', label: ANSWER_LABEL.inMedical, to: STATUS.inMedical, kind: 'answer', undoable: true },
   changeToNotInMedical: { id: 'changeToNotInMedical', label: 'Change answer', to: STATUS.notInMedical, kind: 'change', undoable: true },
   changeToInMedical: { id: 'changeToInMedical', label: 'Change answer', to: STATUS.inMedical, kind: 'change', undoable: true },
   reunited: { id: 'reunited', label: 'Reunited', to: STATUS.reunited, kind: 'reunite', undoable: true },
@@ -187,8 +210,8 @@ function action(id: StatusActionId, overrides: Partial<StatusAction> = {}): Stat
 
 /**
  * The sticky action bar on the profile / the Pending cards (spec §8):
- *   Waiting → Not in medical, In medical · In medical → Change answer, Reunited ·
- *   Not in medical → Change answer · closed / unknown → none.
+ *   Waiting → Not found, In medical · In medical → Change answer, Reunited ·
+ *   Not found in medical → Change answer · closed / unknown → none.
  */
 export function primaryActions(status: string): StatusAction[] {
   switch (status) {
@@ -440,6 +463,8 @@ export const LIMITS = {
   age: 40,
   /** Free text since 2026-11-06 (Jeffrey); GENDERS are quick-fill options. */
   gender: 40,
+  /** Where medical has the patient ("Chair 14"), free text (Dani + Brian, 2026-11-06 afternoon). */
+  medicalLocation: 60,
 } as const;
 
 /** The old numeric age range. The server no longer enforces it: age is free text (LIMITS.age). */
@@ -490,6 +515,8 @@ export const FIELD_COLUMNS = {
   contactNotes: 'contact_notes',
   firstName: 'first_name',
   lastName: 'last_name',
+  /** Set from Pending and the request once medical has the patient; never part of the request form. */
+  medicalLocation: 'medical_location',
 } as const;
 
 export type EditableField = keyof typeof FIELD_COLUMNS;
@@ -537,6 +564,7 @@ export const FIELD_LABELS = {
   contactPhone: 'Phone',
   contactRelationship: 'Relation',
   contactNotes: 'Contact notes',
+  medicalLocation: 'Location',
 } as const;
 export type DisplayField = keyof typeof FIELD_LABELS;
 

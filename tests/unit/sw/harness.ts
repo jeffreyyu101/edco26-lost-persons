@@ -200,6 +200,12 @@ export function serve(network: FakeNetwork, build: Build, options: { manifest?: 
 
 export interface PageClient {
   id: string;
+  /** Window clients (notification clicks): the page's URL, focus state and WindowClient methods. */
+  url?: string;
+  focused?: boolean;
+  focus?: () => Promise<PageClient | null>;
+  navigate?: (url: string) => Promise<PageClient | null>;
+  postMessage?: (message: unknown, transfer?: unknown[]) => void;
 }
 
 type Listener = (event: Record<string, unknown>) => void;
@@ -215,6 +221,10 @@ export interface Worker {
   /** A fetch event. Resolves to the response (undefined when the worker passes it through) once every waitUntil settled. */
   fetch(path: string, mode?: 'navigate' | 'no-cors' | 'cors'): Promise<Response | undefined>;
   message(data: unknown): Promise<unknown>;
+  /** A click on a notification carrying `data`. Resolves once every waitUntil settled. */
+  notificationClick(data: unknown): Promise<{ closed: boolean }>;
+  /** URLs passed to clients.openWindow, in order. */
+  opened: string[];
 }
 
 export function scriptUrl(version: string): string {
@@ -236,6 +246,7 @@ export function loadWorker(options: {
   const worker = (v: string | null | undefined) => (v ? { scriptURL: scriptUrl(v) } : null);
   const registration = { active: worker(options.active), waiting: worker(options.waiting), installing: worker(options.installing) };
   let skipped = 0;
+  const opened: string[] = [];
   const self = {
     location: new URL(scriptUrl(options.version)),
     registration,
@@ -243,6 +254,10 @@ export function loadWorker(options: {
       matchAll: async () => pages.slice(),
       get: async (id: string) => pages.find((p) => p.id === id),
       claim: async () => undefined,
+      openWindow: async (url: string) => {
+        opened.push(url);
+        return null;
+      },
     },
     skipWaiting: async () => {
       skipped += 1;
@@ -260,6 +275,7 @@ export function loadWorker(options: {
     Headers,
     setTimeout,
     clearTimeout,
+    MessageChannel,
     console,
   });
 
@@ -303,6 +319,12 @@ export function loadWorker(options: {
       await dispatch('message', { data, ports: [{ postMessage: (m: unknown) => (reply = m) }] });
       return reply;
     },
+    notificationClick: async (data) => {
+      let closed = false;
+      await dispatch('notificationclick', { notification: { data, close: () => (closed = true) } });
+      return { closed };
+    },
+    opened,
   };
 }
 

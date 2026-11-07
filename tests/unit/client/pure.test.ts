@@ -114,7 +114,7 @@ describe('alerts diff (spec §7 Alerts)', () => {
     expect(alerts).toEqual([
       { kind: 'in_medical', requestId: mine.id, title: 'LP-1004 · S.L. is in medical', subtitle: 'Bring the friend to Main Med', count: 1 },
     ]);
-    expect(diffAlerts(map(mine), [{ ...next, status: STATUS.notInMedical }], ctx())[0]?.title).toBe('LP-1004 · S.L. — not in medical');
+    expect(diffAlerts(map(mine), [{ ...next, status: STATUS.notInMedical }], ctx())[0]?.title).toBe('LP-1004 · S.L. — not found in medical');
     expect(diffAlerts(map(mine), [{ ...next, status: STATUS.reunited }], ctx())[0]?.title).toBe('LP-1004 · S.L. reunited');
     expect(diffAlerts(map(mine), [{ ...next, status: STATUS.waiting, rowVersion: 3 }], ctx({}))).toEqual([]); // same status
     const back = diffAlerts(map({ ...mine, status: STATUS.inMedical }), [{ ...next, status: STATUS.waiting }], ctx());

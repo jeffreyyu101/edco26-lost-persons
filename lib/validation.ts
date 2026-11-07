@@ -132,14 +132,22 @@ export type CreateRequestBody = z.input<typeof createRequestSchema>;
 export type CreateRequestInput = z.output<typeof createRequestSchema>;
 
 /**
+ * Where medical has the patient ("Chair 14", "Bed 3 · triage"): free text, trimmed, '' → null, at most
+ * LIMITS.medicalLocation (Dani + Brian, 2026-11-06 afternoon). Edit only: a new request has none yet.
+ */
+export const medicalLocationField = optionalText(LIMITS.medicalLocation);
+
+/**
  * The `patch` of PATCH /api/requests/:id: only the keys being changed; at least one. Omitted = unchanged,
  * null = clear. The "Other needs a location" rule applies to the MERGED row (lp_update_fields); here only
- * an explicit clear of otherLocation with reportingLocation 'Other' is rejected.
+ * an explicit clear of otherLocation with reportingLocation 'Other' is rejected. `medicalLocation` is
+ * accepted here only (never on create).
  */
 export const requestPatchSchema = z
   .strictObject({
     reportingLocation: postField.optional(),
     ...fieldShape,
+    medicalLocation: medicalLocationField.optional(),
   })
   .superRefine(patchOtherNeedsLocation)
   .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to change' });

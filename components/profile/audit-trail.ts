@@ -3,8 +3,8 @@
 // no I/O, so it is unit-tested (tests/unit/profile/audit-trail.test.ts).
 //
 //   status / cancelled / legacy_*  → "from → to" with glyphs (legacy actions normalised: medical_search
-//                                    not found → Not in medical, medical_search_found → In medical,
-//                                    check_completed → "Not in medical (rechecked)")
+//                                    not found → Not found in medical, medical_search_found → In medical,
+//                                    check_completed → "Not found in medical (rechecked)")
 //   edit                           → "Edited <label>" with old (struck) → new; Name and Post merged
 //                                    (domain.displayChanges)
 //   photo                          → "Photo added" with the timing; back-to-back uploads by the same
@@ -186,7 +186,7 @@ export function buildAuditTrail(audit: readonly AuditEvent[], timeZone: string):
         items.push({
           ...common,
           ...plain,
-          status: statusChange(event.previous.status, STATUS.notInMedical, 'Not in medical (rechecked)'),
+          status: statusChange(event.previous.status, STATUS.notInMedical, `${statusMeta(STATUS.notInMedical).shortLabel} (rechecked)`),
         });
         break;
       case 'edit': {

@@ -1,7 +1,7 @@
 'use client';
 // Small client hooks for the list views.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { useActions, useConnection } from '@/lib/client/store-contract';
+import { useActions, useConnection, type MutationResult } from '@/lib/client/store-contract';
 import type { SettableStatus, StatusKind } from '@/lib/domain';
 
 /** `flag`, but only once it has stayed true for `delayMs` (no flicker for fast background polls). */
@@ -90,9 +90,13 @@ export function primeKeyboard(): void {
 /**
  * A status tap from a list card (Not in medical / In medical / Reunited). The store owns the overlay, the
  * Undo snackbar and every failure toast. Offline (status changes are not queued in v1) the buttons look
- * disabled and a tap explains why instead.
+ * disabled and a tap explains why instead (and returns null). Otherwise the store's result, for a screen
+ * that follows up on the answer (the location sheet after In medical).
  */
-export function useStatusTap(): { offline: boolean; tap: (id: string, to: SettableStatus, kind: StatusKind) => void } {
+export function useStatusTap(): {
+  offline: boolean;
+  tap: (id: string, to: SettableStatus, kind: StatusKind) => Promise<MutationResult> | null;
+} {
   const actions = useActions();
   const { connection } = useConnection();
   const offline = connection === 'offline';
@@ -100,9 +104,9 @@ export function useStatusTap(): { offline: boolean; tap: (id: string, to: Settab
     (id: string, to: SettableStatus, kind: StatusKind) => {
       if (offline) {
         actions.showToast({ tone: 'amber', icon: 'cloud-off', title: 'Needs a connection', durationMs: 3_000 });
-        return;
+        return null;
       }
-      void actions.setStatus(id, to, kind);
+      return actions.setStatus(id, to, kind);
     },
     [actions, offline],
   );

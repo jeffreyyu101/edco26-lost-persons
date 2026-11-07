@@ -92,6 +92,10 @@ a.mitem:hover {
 .mitem.static {
   cursor: default;
 }
+/* "Blocked in browser" (v2.5 A52): a quiet state, not a call to action. */
+.mitem.quiet {
+  color: var(--gray-11);
+}
 .sp {
   flex: 1;
 }

@@ -6,10 +6,12 @@
 // All requests opens with the brand row (Jeffrey, 2026-11-06 10:31: logos, event details and "Is my friend in
 // medical?"; made one compact row with an X by Brian, 2026-11-06 afternoon), which scrolls away. Its X hides
 // it on this device, and the avatar menu's "Show header" brings it back. Pending and My requests start at
-// their title. Each view owns its sticky bar (the large title that is the view menu, search, and the avatar
-// with its offline / reconnecting badge), the line under the title ("Updated just now" and Refresh now), the
-// Reconnecting / Offline banner (all four from one useLiveStatus()), the filter chips, and the New request
-// button. Skeletons show only while there is no cached data yet.
+// their large title (Pending v8, Brian 2026-11-06 afternoon). Each view owns its sticky bar (the large title
+// that is the view menu, search, and the avatar with its offline / reconnecting badge), the line under the
+// title ("Updated just now" and Refresh now), the Reconnecting / Offline banner (all four from one
+// useLiveStatus()), the filter chips (Pending: its To check | Friend coming control), and the New request
+// button. Skeletons show only while there is no cached data yet. From 768 px the desk shell draws the brand
+// row, the title and the line (in its top bar); the list keeps the banner and the chips.
 //
 // All requests (option B): queued requests on top, then open requests (newest first), then every closed
 // request folded into one "Archived N" row (Brian, 2026-11-06) that opens in place (remembered for the
@@ -18,12 +20,14 @@
 // the reporter theirs (Not in medical included), so they can tell the friend.
 import { Button, Text } from '@radix-ui/themes';
 import { MapPin, Plus, Search as SearchIcon, X } from 'lucide-react';
-import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { AccountMenu } from '@/components/account/AccountMenu';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LiveIndicator } from '@/components/ui/LiveIndicator';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
+import { PendingBoard } from '@/components/desk/PendingBoard';
+import { LocationEditor, anchorFor, type LocationTarget, type Measurable } from '@/components/profile/LocationEditor';
 import type { RequestSummary } from '@/lib/api-types';
 import { goBack, navigate } from '@/lib/client/nav';
 import { splitOpenClosed } from '@/lib/client/selectors';
@@ -48,11 +52,14 @@ import {
 } from '@/lib/client/store-contract';
 import { refreshSync } from '@/lib/client/refresh-now';
 import { useLiveStatus } from '@/lib/client/use-live-status';
-import { parsePostFilterKey, postFilterLabel, statusMeta, type GlyphKind } from '@/lib/domain';
+import { STATUS, parsePostFilterKey, postFilterLabel, statusMeta, type GlyphKind } from '@/lib/domain';
 import { formatCreatedTime, formatUpdatedAgo, updatedPhrase } from '@/lib/format';
+import { useInDesk } from '@/components/desk/desk-context';
 import { AppHeader } from './AppHeader';
 import { BrandCard } from './BrandCard';
 import { CheckCard, ComingCard, MineCard, OutboxCard } from './cards';
+import { displayName } from './list-helpers';
+import { PendingTabs, pendingTabIds, usePendingTab } from './PendingTabs';
 import { primeKeyboard, useScrollMemory, useStatusTap, useStickyHeight } from './hooks';
 import { mineFreshTone, resultCount, searchDisplay, updatedSince } from './list-helpers';
 import { AllSkeleton, MineSkeleton, PendingSkeleton } from './ListSkeletons';
@@ -95,8 +102,12 @@ function Chrome({ view, chips, filtered = false, skeleton, children }: ChromePro
   const snackbar = useSnackbar();
   const prefs = usePrefs();
   const { rootRef, stickyRef } = useStickyHeight();
-  // The brand row is on All only, unless its X hid it on this device.
-  const brand = view === 'all' && !prefs.brandHidden;
+  // From 768 px the desk shell draws the brand row (above its top bar) and this view's chrome, the line under
+  // the title included (in its top bar): the list's own brand row and line are phone only.
+  const inDesk = useInDesk();
+  // The brand row is on All only (Pending v8: Pending and My requests get just the large title), unless its X
+  // hid it on this device.
+  const brand = !inDesk && view === 'all' && !prefs.brandHidden;
 
   const select = (next: ListViewName) => {
     if (next === view && !filtered) return;
@@ -149,7 +160,7 @@ function Chrome({ view, chips, filtered = false, skeleton, children }: ChromePro
           }}
           account={<AccountMenu onShowHeader={view === 'all' && prefs.brandHidden ? showBrand : undefined} />}
         />
-        <LiveIndicator className={s.live} line={live} onRefresh={refresh} />
+        {inDesk ? null : <LiveIndicator className={s.live} line={live} onRefresh={refresh} />}
         {loading ? null : <ConnectionBanner status={live} />}
         {chips}
       </div>
@@ -313,8 +324,11 @@ export function AllView({ status, post, open = false }: AllViewProps) {
 }
 
 // ---------------------------------------------------------------------------------------------------
-// Pending: Waiting for check (oldest first), then Friend coming (oldest first). Brian, 2026-11-06 19:40:
-// waiting for check is the priority, so it comes first.
+// Pending v8 (design/screens/pending-v8.html, Brian + Dani 2026-11-06 afternoon): To check (oldest first) and
+// Friend coming (oldest answer first). The phone shows one at a time under a segmented control (To check by
+// default, the last tab remembered); the desk shows both side by side (components/desk/PendingBoard.tsx).
+// In medical saves at once (overlay + Undo, as before) and then asks where medical has them: the phone's
+// bottom sheet, the desk's popover at the card. A Friend coming card's location chip edits it.
 // ---------------------------------------------------------------------------------------------------
 
 function SectionHeader({ kind, label, count }: { kind: GlyphKind; label: string; count: number }) {
@@ -331,37 +345,185 @@ function SectionHeader({ kind, label, count }: { kind: GlyphKind; label: string;
   );
 }
 
-export function PendingView() {
+/** The location being asked for or edited, and where the desk popover points. */
+interface Locating {
+  target: LocationTarget;
+  anchor: RefObject<Measurable | null>;
+  /** After an answer: the To check card that takes the answered one's place (the next, else the one before). */
+  after: string | null;
+}
+
+/** The open button of the card for `id` in `testId`'s queue on the desk board, if it is on screen. */
+function deskCardButton(testId: 'check-card' | 'friend-coming-card', id?: string): HTMLElement | null {
+  const card = id ? `[data-testid="${testId}"][data-pending-card="${id}"]` : `[data-testid="${testId}"]`;
+  const buttons = Array.from(document.querySelectorAll<HTMLElement>(`[data-desk-main] ${card} [data-request-id]`));
+  return buttons.find((el) => el.getClientRects().length > 0) ?? null;
+}
+
+export interface PendingViewProps {
+  /** Desk: the request open in the pane beside the board (its queue is the one shown when the board stacks). */
+  selected?: string | null;
+}
+
+export function PendingView({ selected = null }: PendingViewProps = {}) {
   const { friendComing, waiting } = usePending();
   const loading = useIsLoading();
   const now = useNow();
+  const inDesk = useInDesk();
   const { offline, tap } = useStatusTap();
+  const actions = useActions();
+  const [tab, chooseTab, showTab] = usePendingTab();
+  const [locating, setLocating] = useState<Locating | null>(null);
+  const idBase = useId();
   useScrollMemory('pending', !loading);
+  // The To check queue as last rendered, for the handlers (memoised cards keep their callbacks).
+  const queue = useRef(waiting);
+  useEffect(() => {
+    queue.current = waiting;
+  }, [waiting]);
 
+  // Desk: a request opened beside the board shows its own queue. A docked request narrows the main column
+  // and the board stacks into the tabs; switching to the queue that holds it (in the same render as the
+  // pane opens) keeps its card, its highlight and the focus on screen, and J / K walk that queue. Only when
+  // another request opens: a tab picked by hand afterwards stays picked. Not remembered on this device.
+  const [followed, setFollowed] = useState<string | null>(null);
+  const openQueue =
+    inDesk && selected ? (waiting.some((r) => r.id === selected) ? 'check' : friendComing.some((r) => r.id === selected) ? 'coming' : null) : null;
+  if (inDesk && selected !== followed && (selected === null || openQueue !== null)) {
+    setFollowed(selected);
+    if (openQueue && openQueue !== tab) showTab(openQueue);
+  }
+  useEffect(() => {
+    if (!inDesk || !followed) return;
+    const el = deskCardButton('check-card', followed) ?? deskCardButton('friend-coming-card', followed);
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [inDesk, followed]);
+  // The other list starts at its top (the title and the control stay on screen, they are sticky).
+  const setTab = useCallback(
+    (next: typeof tab) => {
+      if (next !== tab) window.scrollTo(0, 0);
+      chooseTab(next);
+    },
+    [tab, chooseTab],
+  );
+
+  const openLocation = useCallback((row: RequestSummary, mode: LocationTarget['mode'], card: HTMLElement | null) => {
+    const waitingNow = queue.current;
+    const at = mode === 'answer' ? waitingNow.findIndex((r) => r.id === row.id) : -1;
+    setLocating({
+      target: { id: row.id, name: displayName(row.name), mode, initial: (row.medicalLocation ?? '').trim() },
+      // The desk popover points at what was tapped: the To check card (where it stays once the card has
+      // moved on to Friend coming), or the location chip.
+      anchor: anchorFor(
+        mode === 'answer' ? `[data-desk-main] [data-testid="check-card"][data-pending-card="${row.id}"]` : `[data-desk-main] [data-location-anchor="${row.id}"]`,
+        card?.getBoundingClientRect() ?? null,
+      ),
+      after: at < 0 ? null : (waitingNow[at + 1] ?? waitingNow[at - 1])?.id ?? null,
+    });
+  }, []);
+  const closeLocation = useCallback(() => setLocating(null), []);
+
+  const onNotInMedical = useCallback((row: RequestSummary) => void tap(row.id, STATUS.notInMedical, 'answer'), [tap]);
+  const onReunited = useCallback((row: RequestSummary) => void tap(row.id, STATUS.reunited, 'reunite'), [tap]);
+  const onInMedical = useCallback(
+    (row: RequestSummary, card: HTMLElement | null) => {
+      const result = tap(row.id, STATUS.inMedical, 'answer');
+      if (!result) return;
+      // iOS opens the keyboard only for a focus made during the tap: the sheet's field takes it over.
+      if (!inDesk) primeKeyboard();
+      openLocation(row, 'answer', card);
+      // The answer didn't stick (someone else answered first, no signal): nothing to locate.
+      void result.then((r) => {
+        if (!r.ok) setLocating((cur) => (cur?.target.id === row.id && cur.target.mode === 'answer' ? null : cur));
+      });
+    },
+    [tap, inDesk, openLocation],
+  );
+  const onLocate = useCallback(
+    (row: RequestSummary, card: HTMLElement | null) => {
+      if (offline) {
+        actions.showToast({ tone: 'amber', icon: 'cloud-off', title: 'Needs a connection', durationMs: 3_000 });
+        return;
+      }
+      if (!inDesk) primeKeyboard();
+      openLocation(row, 'edit', card);
+    },
+    [actions, offline, inDesk, openLocation],
+  );
+  // The desk popover hands the focus back to the chip that opened it. After an answer the tapped card has
+  // left To check: the focus goes to the card that took its place (the next one, or the one before when it
+  // was the last), so Tab and J / K carry on through the queue from there; with To check empty, to the
+  // answered card in Friend coming.
+  const returnFocus = useCallback(() => {
+    if (!locating) return null;
+    const { target, after } = locating;
+    if (target.mode === 'edit') {
+      const chips = Array.from(document.querySelectorAll<HTMLElement>(`[data-desk-main] [data-location-anchor="${target.id}"]`));
+      return chips.find((el) => el.getClientRects().length > 0) ?? null;
+    }
+    return (
+      (after ? deskCardButton('check-card', after) : null) ?? deskCardButton('check-card') ?? deskCardButton('friend-coming-card', target.id)
+    );
+  }, [locating]);
+
+  const counts = { check: waiting.length, coming: friendComing.length };
+  const editor = (
+    <LocationEditor
+      target={locating?.target ?? null}
+      desk={inDesk}
+      anchor={locating?.anchor}
+      returnFocus={returnFocus}
+      onClose={closeLocation}
+    />
+  );
+
+  if (inDesk) {
+    return (
+      <Chrome view="pending" skeleton={<PendingSkeleton />}>
+        <PendingBoard
+          waiting={waiting}
+          friendComing={friendComing}
+          now={now}
+          offline={offline}
+          tab={tab}
+          onTab={setTab}
+          idBase={idBase}
+          onNotInMedical={onNotInMedical}
+          onInMedical={onInMedical}
+          onReunited={onReunited}
+          onLocate={onLocate}
+        />
+        {editor}
+      </Chrome>
+    );
+  }
+
+  const ids = pendingTabIds(idBase, tab);
+  const shown = tab === 'check' ? waiting : friendComing;
   return (
-    <Chrome view="pending" skeleton={<PendingSkeleton />}>
+    <Chrome
+      view="pending"
+      chips={<PendingTabs tab={tab} onChange={setTab} counts={loading ? null : counts} idBase={idBase} />}
+      skeleton={<PendingSkeleton />}
+    >
       {friendComing.length + waiting.length === 0 ? (
         <EmptyState icon="inbox" title="Nothing pending" />
+      ) : shown.length === 0 ? (
+        <div className={s.tabBody} role="tabpanel" id={ids.panel} aria-labelledby={ids.tab}>
+          <EmptyState icon="inbox" title={tab === 'check' ? 'Nothing to check' : 'No friends coming'} />
+        </div>
       ) : (
-        <div className={s.scroll} data-testid="request-list">
-          {waiting.length > 0 ? (
-            <section className={s.scroll} style={{ padding: 0 }} aria-label={`Waiting for check, ${waiting.length}`}>
-              <SectionHeader kind="waiting" label="Waiting for check" count={waiting.length} />
-              {waiting.map((row) => (
-                <CheckCard key={row.id} row={row} now={now} offline={offline} onTap={tap} />
+        <div className={s.scroll} role="tabpanel" id={ids.panel} aria-labelledby={ids.tab} data-testid="request-list" data-tab={tab}>
+          {tab === 'check'
+            ? waiting.map((row) => (
+                <CheckCard key={row.id} row={row} now={now} offline={offline} onNotInMedical={onNotInMedical} onInMedical={onInMedical} />
+              ))
+            : friendComing.map((row) => (
+                <ComingCard key={row.id} row={row} now={now} offline={offline} onReunited={onReunited} onLocate={onLocate} />
               ))}
-            </section>
-          ) : null}
-          {friendComing.length > 0 ? (
-            <section className={s.scroll} style={{ padding: 0 }} aria-label={`Friend coming, ${friendComing.length}`}>
-              <SectionHeader kind="inMedical" label="Friend coming" count={friendComing.length} />
-              {friendComing.map((row) => (
-                <ComingCard key={row.id} row={row} now={now} offline={offline} onTap={tap} />
-              ))}
-            </section>
-          ) : null}
         </div>
       )}
+      {editor}
     </Chrome>
   );
 }

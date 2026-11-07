@@ -8,6 +8,7 @@ import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { DashboardContent, DashboardView } from '@/components/dashboard/DashboardView';
+import { DeskContext } from '@/components/desk/desk-context';
 import type { Stats } from '@/lib/api-types';
 import { StoreContext, type AppStore, type StoreState } from '@/lib/client/store-contract';
 import { createStubStore } from '@/lib/client/store-stub';
@@ -83,7 +84,7 @@ describe('dashboard render', () => {
     expect(html).not.toContain('/api/export');
   });
 
-  it('tiles: Open and Closed big, then Waiting, In medical, Not in medical, Reunited, with their numbers', () => {
+  it('tiles: Open and Closed big, then Waiting, In medical, Not found in medical, Reunited, with their numbers', () => {
     const html = render(storeWith(), <DashboardContent stats={v7Stats()} />);
     const order = ['tile-open', 'tile-closed', 'tile-waiting', 'tile-in-medical', 'tile-not-in-medical', 'tile-reunited'].map((id) => at(html, `data-testid="${id}"`));
     expect([...order].sort((a, b) => a - b)).toEqual(order);
@@ -91,14 +92,14 @@ describe('dashboard render', () => {
     expect(slice(html, 'tile-closed')).toMatch(/>Closed<\/span><\/span> <span[^>]*><span[^>]*>6</);
     expect(slice(html, 'tile-waiting')).toMatch(/>Waiting for check<\/span><\/span> <span[^>]*><span[^>]*>4</);
     expect(slice(html, 'tile-in-medical')).toMatch(/>In medical<\/span><\/span> <span[^>]*><span[^>]*>3</);
-    expect(slice(html, 'tile-not-in-medical')).toMatch(/>Not in medical<\/span><\/span> <span[^>]*><span[^>]*>2</);
+    expect(slice(html, 'tile-not-in-medical')).toMatch(/>Not found in medical<\/span><\/span> <span[^>]*><span[^>]*>2</);
     expect(slice(html, 'tile-reunited')).toMatch(/>Reunited<\/span><\/span> <span[^>]*><span[^>]*>2</);
     // Closed is not a filter (there is no closed-bucket view); every other tile opens a view.
     expect(html).toMatch(/<div[^>]*data-testid="tile-closed"/);
     for (const id of ['tile-open', 'tile-waiting', 'tile-in-medical', 'tile-not-in-medical', 'tile-reunited']) {
       expect(html).toMatch(new RegExp(`<button[^>]*data-testid="${id}"`));
     }
-    // Not in medical is closed and grey: the grey × glyph, like the closed check on Reunited.
+    // Not found in medical is closed and grey: the grey × glyph, like the closed check on Reunited.
     expect(slice(html, 'tile-not-in-medical', 600)).toMatch(/data-glyph="notInMedical"[^>]*><circle[^>]*fill="var\(--gray-9\)"/);
     expect(slice(html, 'tile-reunited', 600)).toMatch(/data-glyph="closed"[^>]*><circle[^>]*fill="var\(--gray-9\)"/);
     expect(slice(html, 'tile-waiting', 600)).toContain('var(--blue-9)');
@@ -148,8 +149,8 @@ describe('dashboard render', () => {
     // (useNow's clock is read when the module loads, so 2 minutes can read as 1.)
     // The name starts with exactly what the row shows (WCAG 2.5.3), then the sentence.
     expect(recent).toMatch(/aria-label="1007 Jordan Diaz In medical ([12])m\. In medical · friend coming, FA 4, updated \1 minutes? ago\."/);
-    expect(recent).toMatch(/aria-label="1009 A\.N\. Not in medical ([56])m\. Not in medical, FA 3, updated \1 minutes ago\."/);
-    // Closed rows are marked (greyed); Not in medical is one of them now.
+    expect(recent).toMatch(/aria-label="1009 A\.N\. Not found in medical ([56])m\. Not found in medical, FA 3, updated \1 minutes ago\."/);
+    // Closed rows are marked (greyed); Not found in medical is one of them now.
     expect(recent).toMatch(/data-closed=""[^>]*data-request-id="5eed0000-0000-4000-8000-000000001009"/);
     expect(recent).toMatch(/data-closed=""[^>]*data-request-id="5eed0000-0000-4000-8000-000000001006"/);
     expect(recent).not.toMatch(/data-closed=""[^>]*data-request-id="5eed0000-0000-4000-8000-000000001010"/);
@@ -249,6 +250,24 @@ describe('dashboard render', () => {
       expect(html, connection).toMatch(/<\/header><div class="[^"]*banner[^"]*"><div class="lp-banner[^"]*" data-tone="amber" data-testid="connection-banner"/);
       expect(html, connection).toContain('>Reconnecting…</span>');
     }
+  });
+
+  it('in the desk shell: no title row and no line (the top bar is the title and holds the line), the banner stays, six desk-sized tile placeholders', () => {
+    const desk = render(
+      storeWith((s) => ({ ...s, connection: 'offline' })),
+      <DeskContext.Provider value>
+        <DashboardView />
+      </DeskContext.Provider>,
+    );
+    expect(desk).not.toContain('<h1');
+    expect(desk).not.toContain('aria-label="Back to requests"');
+    expect(desk).not.toContain('dashboard-connection');
+    expect(desk).not.toContain('data-testid="live-indicator"');
+    // The list's sync failing: the same Reconnecting banner at the top of the column, with its live region.
+    expect(desk).toMatch(/^(<[^>]*>)*?<div class="[^"]*app[^"]*" data-testid="dashboard"><div class="[^"]*banner[^"]*"><div class="lp-banner[^"]*" data-tone="amber" data-testid="connection-banner"/);
+    expect(desk).toContain('data-testid="live-announcement"');
+    expect(desk).toContain('aria-label="Loading dashboard"');
+    expect(desk.match(/height:92px/g) ?? []).toHaveLength(6);
   });
 
   it('renders the stub store’s own stats (the shape lp_stats returns)', async () => {

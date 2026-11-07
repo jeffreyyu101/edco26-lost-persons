@@ -48,7 +48,7 @@ describe('dashboard model', () => {
     expect(countParts(null)).toBeNull();
   });
 
-  it('Closed = Not in medical + Reunited + Discharged + Cancelled', () => {
+  it('Closed = Not found in medical + Reunited + Discharged + Cancelled', () => {
     expect(closedTotal({ notInMedical: 2, reunited: 2, discharged: 1, cancelled: 1 })).toBe(6);
     expect(closedTotal({ notInMedical: 0, reunited: 0, discharged: 0, cancelled: 0 })).toBe(0);
   });

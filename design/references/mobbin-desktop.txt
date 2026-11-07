@@ -1,0 +1,78 @@
+1. Sign-in
+
+- Linear · "Log in to Linear": under the main button it says "You used email to log in last time". On a shared Command machine, show the last person's name and team as a chip they tap to confirm. Don't fill it in automatically, or requests get logged under the wrong name. https://mobbin.com/api/mcp/short/pGcztIAo
+- Vercel · "Your first deploy is just a sign-up away": the choices are a two-row radio list inside the card, and the selected row gets a check. The next field only appears after a choice, and Continue stays disabled until both are filled. Use this for step 1: team as radio rows, name below, one Continue. https://mobbin.com/api/mcp/short/aITXC15u
+- OpenAI Platform · "Enter your password": step 2 shows the step-1 value as a read-only field with "Edit" at its right edge. Show "Jane Doe · Medical  Edit" above the shared password, with no back button or breadcrumb. https://mobbin.com/api/mcp/short/sHopdvHT
+- Manus · "Enter your password": a wrong password turns the field border red and puts a one-line error ("Password does not match") right under it. Nothing else on the page moves, and a plain "Back" link sits under Continue. https://mobbin.com/api/mcp/short/4eFeQkZR
+
+2. Request log
+
+- Linear · "All issues" (grouped by status): each group header is one 32px row with status glyph, name, count, collapse chevron and "+". Rows run glyph → muted ID → title → date on the right. A collapsed Done/Archived group therefore takes up exactly one row. https://mobbin.com/api/mcp/short/EC4mPYTE
+- Twenty · "Tasks" with record panel: the table stays usable while a right panel takes about 40% of the width. The panel has × close, Home/Timeline/Files tabs and an "Open ⌘↵" button that turns it into a full page. The selected row stays highlighted. https://mobbin.com/api/mcp/short/AZ8uJRvj
+- Plain · "Tasks": each sidebar view has a count on the right (My threads 0, Tasks 2, Not assigned 4), so queue size shows without clicking. In the right panel, Created and Updated are the first two fields ("12h ago by you") instead of sitting in the header. https://mobbin.com/api/mcp/short/f2ds4eUD
+- Plane · "Your work": the ID is the first column, muted and fixed-width. Status, priority and date sit in fixed-width columns on the right so they line up across rows, and the title takes the leftover space and truncates. Keep the alignment; keep colour only on status. https://mobbin.com/api/mcp/short/ZIgPq5bc
+
+3. Request detail
+
+- Plain · "Brand Kit Order Tracking" thread: three panes. ↑/↓ buttons above the queue move to the next request without going back. Status changes appear in the timeline as one muted line with a glyph. Attachments show as small thumbnails, and the action bar shows single-key hints (Reply R, Note N). https://mobbin.com/api/mcp/short/S9114vRU
+- Attio · "sweetgreen" record: activity is grouped by period ("This week", "June"). One edit is one entry that lists each change as "Stage → Meeting" and can collapse with "Hide all changes". That's the audit-trail format to copy; leave out the coloured chips. https://mobbin.com/api/mcp/short/1pU8ZBkg
+- Lightfield · task panel: labels sit in a fixed muted column (about 90px, icon plus label) beside the values. Empty fields show grey placeholders ("Set due date") instead of disappearing. Activity comes last, with times trailing in grey ("· 2m ago"). https://mobbin.com/api/mcp/short/rgWSCEye
+- Front · "Issue a refund": system events ("Tag added", "Assigned to Alex Smith") are small centred lines between messages. Current status is an inline pill with a "Change status" menu. Resolving shows a toast with Undo in the bottom left, which suits one-click Found or Closed. https://mobbin.com/api/mcp/short/A3ViXs3L
+
+4. New request
+
+- Linear · new issue modal: only title and description are text fields. Every other property is a pill button in a row below them (Todo, Priority, Assignee, Labels, …), and each opens its own picker. There's a "Create more" toggle next to submit and ↗ to expand to a full page. https://mobbin.com/api/mcp/short/OX1FSUIv
+- Stripe · "Create customer": only Name, Email and Language are open. Billing, Tax, Shipping and Invoice are collapsed headings with chevrons, plus a "More options" link, so the modal fits on one screen. Drop the purple. https://mobbin.com/api/mcp/short/UPOApFZ8
+- Attio · "Create Person": the modal opens over the table, which stays visible. Small labels sit above muted placeholders ("Set Name…"). The main button shows its shortcut ("Create record ⌘↵") next to a "Create more" toggle. https://mobbin.com/api/mcp/short/cx5uAbVl
+- Supabase · "Create a new database trigger" (side sheet): labels on the left (~30%) and controls on the right, separated by thin lines. Cancel and Create stay pinned at the bottom of a full-height right sheet. This is the tablet version, where a centred modal would cover the list. Cut most of its help text. https://mobbin.com/api/mcp/short/Pieoica4
+
+5. Operations dashboard
+
+- Plausible · site overview: one strip of six figures separated by thin lines. Each has a small uppercase label, a large value and a change with an arrow (↓5%, ↑1%). The date-range menu shows one-key shortcuts on the right (D, R, W, T, M…). Keep the structure, drop the purple. https://mobbin.com/api/mcp/short/Mcrd35Ea
+- Vercel · "Analytics": the stat tiles double as tabs; the selected one is underlined and controls the chart. Below are cards with a list of rows, a faint bar behind each label, a right-aligned uppercase count column and tabs in the card header. https://mobbin.com/api/mcp/short/8C2KvXsW
+- Jobber · Home "Workflow": each stage tile has one big count with a status word ("2 New") and two small counts under it ("Overdue (0)"). That maps directly to New / Searching / Found with an Overdue count, and an Activity Feed slides in from the right. Drop the coloured top bars. https://mobbin.com/api/mcp/short/tjD2IGLj
+- Bonsai · "Dashboard": a fixed right column (about 280px) holds the activity timeline: dot and connector line, one event sentence, grey timestamp on its own line. Secondary figures sit under the chart as a plain row of label/value pairs with no cards. https://mobbin.com/api/mcp/short/pNdVkKL8
+
+Six desktop layout rules
+
+1. Breakpoints follow Radix Themes: sm 768, md 1024, lg 1280, xl 1640.
+   - Under 768 is the existing mobile app.
+   - 768–1279 (tablet): the sidebar shrinks to a 56px icon rail, the list goes full width, and detail opens as a 480px sheet over the right side. The list stays visible and scrollable behind it.
+   - From 1280: 240px sidebar, list and a docked detail pane side by side.
+   - From 1640: the detail pane widens to 560px.
+2. Widths:
+   - Sidebar 240px, resizable 200–280.
+   - List at least 560px.
+   - Detail pane 440px by default, resizable 380–640, remembered per browser.
+   - Create modal 640px max; create side sheet on tablet 480px.
+   - Sign-in column 360px.
+   - Dashboard content 1440px max, centred. The request log has no max width.
+3. List:
+   - 36px rows (Inter 13–14px) and 32px group headers that stick while scrolling.
+   - Columns: status glyph 24px, ID 72px, title fills the rest and truncates, created 88px, updated 88px.
+   - IDs, times and counts use tabular-nums. Times are relative ("12m") in the cell, with the exact time in a tooltip.
+   - Archived/Done starts collapsed and remembers its state.
+4. Keyboard:
+   - Movement: J/K or ↑/↓ moves the selection, Enter opens it in the pane, Esc closes the pane and returns focus to the row.
+   - Actions: C new request, / search, ⌘K command menu, S status menu, A assign, ⌘↵ submit, ? shortcut sheet.
+   - Never use ⌘L, ⌘T, ⌘W or ⌘N (the browser owns them).
+   - Shortcuts appear only in tooltips, on the right edge of menus and in the ? sheet. They're never written out on screen.
+5. Detail pane, top to bottom:
+   - Sticky header: ID, status glyph, title, status actions, ↑/↓ for previous/next.
+   - Fields with a 96px muted label column.
+   - Photos as a row of three 96px square thumbnails that open a lightbox with ←/→.
+   - Timeline last: system events as one muted line each, notes as full rows.
+   - Status changes give a 5-second Undo toast instead of a confirm dialog.
+6. Dashboard:
+   - 12-column grid with 24px gutters.
+   - Four figure tiles in one row from 1024; a 2×2 grid between 768 and 1023.
+   - The activity column is 320px on the right from 1280 and moves below the bar lists under that.
+   - Bars are neutral grey (--gray-a5); only status glyphs get colour. "Updated 14:32" sits muted at the top right.
+
+The image links expire after about 30 days, so download any you want to keep; I can give you the permanent Mobbin page links on request.
+
+---
+
+**Your Mobbin AI usage is high this month**
+
+Usage is unlimited during beta. If your usage stays at this level, you may need to purchase more credits once limits take effect. [View usage and plan options](https://mobbin.com/settings/billing-and-usage?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp)

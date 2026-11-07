@@ -1,0 +1,165 @@
+/* Quick-crop step (CropSheet.tsx). The photo is dimmed outside the selection; white corner brackets with
+   44 px targets; the two actions share the bottom row. Same surface in light and dark: the theme sets the
+   panel and stage colours, the dim and the white brackets sit on the photo itself. */
+
+.body {
+  display: grid;
+  gap: 14px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+}
+
+.headEnd {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.count {
+  font-variant-numeric: tabular-nums;
+}
+
+.stage {
+  display: grid;
+  place-items: center;
+  /* Room for the part of each corner target that reaches outside the photo. */
+  padding: 12px;
+  border-radius: var(--radius-4);
+  background: var(--gray-a3);
+  overflow: hidden;
+}
+
+.stage:not([data-ready]) {
+  min-height: 240px;
+}
+
+.frame {
+  position: relative;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.frame img {
+  display: block;
+  -webkit-user-drag: none;
+}
+
+.frame:not([data-ready]) img {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.frame[data-ready] img {
+  width: 100%;
+  height: 100%;
+}
+
+.shade {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.hole {
+  position: absolute;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.55);
+}
+
+.sel {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  cursor: move;
+}
+
+.sel[data-full] {
+  cursor: crosshair;
+}
+
+.sel:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+
+.corner {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+}
+
+/* The visible bracket: two 3 px white bars meeting at the corner point (10 px in from the target's edge). */
+.corner::before,
+.corner::after {
+  content: '';
+  position: absolute;
+  background: #fff;
+  border-radius: 1.5px;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.35);
+}
+.corner::before {
+  width: 20px;
+  height: 3px;
+}
+.corner::after {
+  width: 3px;
+  height: 20px;
+}
+
+.corner[data-corner='nw'] {
+  cursor: nwse-resize;
+}
+.corner[data-corner='nw']::before,
+.corner[data-corner='nw']::after {
+  left: 8.5px;
+  top: 8.5px;
+}
+
+.corner[data-corner='ne'] {
+  cursor: nesw-resize;
+}
+.corner[data-corner='ne']::before,
+.corner[data-corner='ne']::after {
+  right: 8.5px;
+  top: 8.5px;
+}
+
+.corner[data-corner='sw'] {
+  cursor: nesw-resize;
+}
+.corner[data-corner='sw']::before,
+.corner[data-corner='sw']::after {
+  left: 8.5px;
+  bottom: 8.5px;
+}
+
+.corner[data-corner='se'] {
+  cursor: nwse-resize;
+}
+.corner[data-corner='se']::before,
+.corner[data-corner='se']::after {
+  right: 8.5px;
+  bottom: 8.5px;
+}
+
+.corner:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -2px;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}

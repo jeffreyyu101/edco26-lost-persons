@@ -2,12 +2,15 @@
 // Step 1 (design/screens/sign-in.html `Who`): name with a person icon, "Your team" 2×2 cards in the spec §4
 // order, the "Other team" field, Continue (disabled until valid). A card and the Other text are mutually
 // exclusive: picking a card clears the text, typing a team clears the card.
+// From 768 px (desktop-sign-in.html): ↵ on Continue and Enter continues from anywhere but a text field or
+// another button; 1–4 pick a team (cap in each card's corner) unless focus is in a text field.
 import { Button, Flex, RadioCards, Text, TextField } from '@radix-ui/themes';
 import { Ambulance, Cross, House, Radio, UserRound, type LucideIcon } from 'lucide-react';
-import { useId, type FormEvent, type KeyboardEvent } from 'react';
+import { useId, useRef, type FormEvent, type KeyboardEvent } from 'react';
 import { OTHER_TEAM_MAX, STAFF_NAME_MAX, TEAMS, type TeamValue } from '@/lib/domain';
+import { isEnterControl, isTextEntry, useStepKeys, useWide } from './desktop';
 import { checkWho, type Identity, type WhoDraft } from './logic';
-import { Brand, ErrorLine } from './parts';
+import { ErrorLine, Kbd, StepCard } from './parts';
 import styles from './signin.module.css';
 
 const TEAM_ICONS: Record<(typeof TEAMS)[number]['icon'], LucideIcon> = {
@@ -32,11 +35,37 @@ export function WhoStep({ draft, onDraft, onContinue, autoFocus }: WhoStepProps)
   const teamLabelId = useId();
   const nameErrorId = useId();
   const otherErrorId = useId();
+  const formRef = useRef<HTMLFormElement>(null);
+  const teamsRef = useRef<HTMLDivElement>(null);
+  const wide = useWide();
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (check.identity) onContinue(check.identity);
   };
+
+  const pickTeam = (value: TeamValue) => onDraft({ ...draft, team: value, otherTeam: '' });
+
+  useStepKeys(wide, (event) => {
+    if (event.key === 'Enter') {
+      // Text fields submit natively (or drop focus, below); buttons and links keep their own Enter. A radio
+      // card swallows Enter (WAI-ARIA), so from a card or the page Enter continues.
+      if (isTextEntry(event.target) || isEnterControl(event.target)) return;
+      event.preventDefault();
+      formRef.current?.requestSubmit();
+      return;
+    }
+    const index = ['1', '2', '3', '4'].indexOf(event.key);
+    const team = TEAMS[index];
+    if (!team || event.defaultPrevented || isTextEntry(event.target)) return;
+    event.preventDefault();
+    pickTeam(team.value);
+    // Keep keyboard focus with the choice when it was already on the cards (Radix's roving focus).
+    const group = teamsRef.current;
+    if (group && document.activeElement && group.contains(document.activeElement)) {
+      group.querySelector<HTMLElement>(`[role="radio"][value="${CSS.escape(team.value)}"]`)?.focus();
+    }
+  });
 
   // Return on the name field with no team yet: drop the keyboard so the team cards are visible.
   const nameKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -47,9 +76,8 @@ export function WhoStep({ draft, onDraft, onContinue, autoFocus }: WhoStepProps)
   };
 
   return (
-    <>
-      <Brand title="Staff sign-in" appLine />
-      <form method="post" noValidate onSubmit={submit}>
+    <StepCard title="Staff sign-in" appLine>
+      <form ref={formRef} method="post" noValidate onSubmit={submit}>
         <Flex direction="column" gap="3">
           <TextField.Root
             size="3"
@@ -79,22 +107,27 @@ export function WhoStep({ draft, onDraft, onContinue, autoFocus }: WhoStepProps)
             Your team
           </Text>
           <RadioCards.Root
+            ref={teamsRef}
             size="1"
             columns="2"
             gap="2"
             highContrast
             value={draft.team ?? ''}
             onValueChange={(value) => {
-              if (isTeamValue(value)) onDraft({ ...draft, team: value, otherTeam: '' });
+              if (isTeamValue(value)) pickTeam(value);
             }}
             aria-labelledby={teamLabelId}
           >
-            {TEAMS.map((team) => {
+            {TEAMS.map((team, i) => {
               const Icon = TEAM_ICONS[team.icon];
+              const key = String(i + 1);
               return (
-                <RadioCards.Item key={team.value} value={team.value}>
+                <RadioCards.Item key={team.value} value={team.value} aria-keyshortcuts={wide ? key : undefined}>
                   <Flex direction="column" align="start" gap="2" width="100%" py="1">
-                    <Icon size={18} strokeWidth={1.75} className={styles.ti} aria-hidden />
+                    <Flex width="100%" align="center">
+                      <Icon size={18} strokeWidth={1.75} className={styles.ti} aria-hidden />
+                      <Kbd k={key} variant="corner" />
+                    </Flex>
                     <Text size="2" className={styles.cardLabel}>
                       {team.label}
                     </Text>
@@ -125,11 +158,20 @@ export function WhoStep({ draft, onDraft, onContinue, autoFocus }: WhoStepProps)
           />
           {check.otherTeamError ? <ErrorLine id={otherErrorId}>{check.otherTeamError}</ErrorLine> : null}
 
-          <Button type="submit" size="3" mt="1" highContrast disabled={!check.identity}>
+          <Button
+            type="submit"
+            size="3"
+            mt="1"
+            highContrast
+            disabled={!check.identity}
+            className={styles.submit}
+            aria-keyshortcuts={wide ? 'Enter' : undefined}
+          >
             Continue
+            <Kbd k="↵" />
           </Button>
         </Flex>
       </form>
-    </>
+    </StepCard>
   );
 }

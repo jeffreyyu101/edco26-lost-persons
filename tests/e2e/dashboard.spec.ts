@@ -56,7 +56,7 @@ async function numbers(page: Page) {
   };
 }
 
-/** Closed = Not in medical + Reunited + Discharged + Cancelled, as the tiles show them. */
+/** Closed = Not found in medical + Reunited + Discharged + Cancelled, as the tiles show them. */
 async function closedNumbers(page: Page) {
   const value = async (id: string) => Number(await page.getByTestId(`${id}-value`).innerText());
   return {
@@ -126,7 +126,7 @@ test('open counts move by the deltas of this test, and tiles and bars open All f
     .poll(() => numbers(page), POLL)
     .toEqual({ open: before.open + 1, waiting: before.waiting, inMedical: before.inMedical + 1, fa4: before.fa4 + 1 });
 
-  // The cancelled one counts as closed (Closed = Not in medical + Reunited + Discharged + Cancelled).
+  // The cancelled one counts as closed (Closed = Not found in medical + Reunited + Discharged + Cancelled).
   await expect.poll(async () => (await closedNumbers(page)).closed, POLL).toBeGreaterThanOrEqual(closedBefore.closed + 1);
 
   // Recently updated lists it, number first, and opens its profile.
@@ -164,7 +164,9 @@ test('open counts move by the deltas of this test, and tiles and bars open All f
   await page.goBack();
   await page.getByTestId('tile-open').click();
   await expect(page).toHaveURL(/\?view=pending$/);
-  await expect(page.locator(`[data-request-id="${row.id}"]`).first()).toBeVisible();
+  // Pending v8 shows one queue at a time on a phone: the In medical request is under Friend coming.
+  await page.getByRole('tab', { name: /^Friend coming/ }).click();
+  await expect(page.locator(`[data-testid="friend-coming-card"] [data-request-id="${row.id}"]`)).toBeVisible();
   await page.goBack();
   // Regression: the bar opens the open requests it counts (?open=1), so the chip's count is the bar's.
   const fa4Bar = page.getByRole('button', { name: /^FA 4 – Oasis \d+ open$/ });
@@ -457,7 +459,7 @@ test.describe('with /api/stats mocked', () => {
     expect(waiting.y).toBeGreaterThan(open.bottom);
     // The two big numbers sit on one line.
     expect((await box(page, 'open-count')).bottom).toBe((await box(page, 'tile-closed-value')).bottom);
-    // Not in medical's number lines up with Reunited's even though Reunited has a second line.
+    // Not found in medical's number lines up with Reunited's even though Reunited has a second line.
     expect((await box(page, 'tile-not-in-medical-value')).bottom).toBe((await box(page, 'tile-reunited-value')).bottom);
     const posts = await regionBox(page, 'Open by post');
     const recent = await regionBox(page, 'Recently updated');
@@ -551,15 +553,47 @@ test.describe('with /api/stats mocked', () => {
     await expect(page).toHaveURL(/\?r=5eed0000-0000-4000-8000-000000001010$/);
   });
 
-  test('768 px and wider: six tiles in one row, posts beside recent, performance in two columns', async ({ page }) => {
+  // The desk (from 768 px, components/desk): the dashboard sits in the shell's main column and follows its
+  // width (v7-laptop.png). Six tiles in one row from 1024 px with room, else 3 × 2 (open statuses over closed
+  // ones); every value in a row on one line; posts beside recent and Performance in two columns with room,
+  // stacked when a request docks beside it.
+  const TILE_ORDER = ['tile-open', 'tile-waiting', 'tile-in-medical', 'tile-closed', 'tile-not-in-medical', 'tile-reunited'];
+  const VALUE_IDS = ['open-count', 'tile-waiting-value', 'tile-in-medical-value', 'tile-closed-value', 'tile-not-in-medical-value', 'tile-reunited-value'];
+  const hScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+
+  test('768 px and wider: in the desk column, six tiles in one row or 3 × 2, values on one line, posts beside recent, two-column performance', async ({ page }) => {
     await routeStats(page, mockStats());
     await page.setViewportSize({ width: 1100, height: 800 });
     await page.goto('/?dashboard=1');
     await expect(page.getByTestId('open-count')).toHaveText('7');
-    const order = ['tile-open', 'tile-waiting', 'tile-in-medical', 'tile-closed', 'tile-not-in-medical', 'tile-reunited'];
-    const boxes = await Promise.all(order.map((id) => box(page, id)));
+    await expect(page.getByTestId('desk-rail')).toBeVisible();
+    // The shell's top bar is the title: one h1, no Back, and the live line beside it (live-indicator.html,
+    // Desktop frame): the last stats fetch in minutes and Refresh now. One line on the page; no chip.
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Dashboard');
+    await expect(page.getByRole('button', { name: 'Back to requests' })).toHaveCount(0);
+    const line = page.getByTestId('desk-topbar').getByTestId('live-indicator');
+    await expect(line).toHaveAttribute('data-state', 'healthy');
+    await expect(line.getByTestId('live-text')).toHaveText('Updated just now');
+    await expect(line).toContainText('Dashboard updated just now.');
+    await expect(line.getByRole('button', { name: 'Refresh now', exact: true })).toBeVisible();
+    await expect(page.getByTestId('live-indicator')).toHaveCount(1);
+    await expect(page.getByTestId('dashboard-connection')).toHaveCount(0);
+    await expect(page.getByTestId('connection-banner')).toHaveCount(0);
+    // The tiles start where the top bar's title does.
+    const title = (await page.getByRole('heading', { level: 1 }).boundingBox())!;
+    expect(Math.abs((await box(page, 'tile-open')).x - Math.round(title.x))).toBeLessThanOrEqual(1);
+
+    // 1100 px (a 1040 px column): six in one row, values on one line, the split bar and Reunited's
+    // "+1 discharged · 1 cancelled" under them.
+    let boxes = await Promise.all(TILE_ORDER.map((id) => box(page, id)));
     for (const b of boxes) expect(b.y).toBe(boxes[0]?.y);
     for (let i = 1; i < boxes.length; i += 1) expect(boxes[i]?.x).toBeGreaterThan(boxes[i - 1]?.x ?? Infinity);
+    let values = await Promise.all(VALUE_IDS.map((id) => box(page, id)));
+    for (const v of values) expect(Math.abs(v.bottom - values[0]!.bottom)).toBeLessThanOrEqual(1);
+    const split = await box(page, 'open-split');
+    expect(split.y).toBeGreaterThanOrEqual(values[0]!.bottom);
+    expect(split.right - split.x).toBeGreaterThan(100);
+    expect((await box(page, 'reunited-sub')).y).toBeGreaterThanOrEqual(values[5]!.bottom);
     const posts = await regionBox(page, 'Open by post');
     const recent = await regionBox(page, 'Recently updated');
     expect(Math.round(recent.y)).toBe(Math.round(posts.y));
@@ -569,10 +603,104 @@ test.describe('with /api/stats mocked', () => {
     expect(answer.y).toBe(longest.y);
     expect(answer.x).toBeGreaterThan(longest.right);
 
-    // An iPad in portrait is still the wide layout.
-    await page.setViewportSize({ width: 768, height: 1024 });
-    const narrow = await Promise.all(order.map((id) => box(page, id)));
-    for (const b of narrow) expect(b.y).toBe(narrow[0]?.y);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+    // iPad portrait: 3 × 2, Open / Waiting / In medical over Closed / Not found in medical / Reunited, each row's
+    // values on one line; posts still beside recent.
+    for (const width of [820, 768]) {
+      await page.setViewportSize({ width, height: 1024 });
+      await expect.poll(async () => (await box(page, 'tile-closed')).y, `${width}`).toBeGreaterThan((await box(page, 'tile-open')).y);
+      boxes = await Promise.all(TILE_ORDER.map((id) => box(page, id)));
+      values = await Promise.all(VALUE_IDS.map((id) => box(page, id)));
+      for (const row of [boxes.slice(0, 3), boxes.slice(3)]) for (const b of row) expect(b.y, `${width}`).toBe(row[0]!.y);
+      expect(boxes[3]!.y, `${width}`).toBeGreaterThan(boxes[0]!.bottom);
+      for (const i of [1, 2]) expect(boxes[i]!.x, `${width}`).toBeGreaterThan(boxes[i - 1]!.x);
+      expect(boxes[3]!.x, `${width}`).toBe(boxes[0]!.x);
+      for (const row of [values.slice(0, 3), values.slice(3)]) for (const v of row) expect(Math.abs(v.bottom - row[0]!.bottom), `${width}`).toBeLessThanOrEqual(1);
+      const p = await regionBox(page, 'Open by post');
+      const r = await regionBox(page, 'Recently updated');
+      expect(Math.round(r.y), `${width}`).toBe(Math.round(p.y));
+      expect(await hScroll(page), `${width}`).toBe(false);
+    }
+  });
+
+  test('desk: with a request docked beside it the dashboard narrows (3 × 2, sections stacked); offline, the line beside the title and the banner', async ({ page, context }) => {
+    await routeStats(page, mockStats());
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto('/?dashboard=1');
+    await expect(page.getByTestId('open-count')).toHaveText('7');
+    // Six in a row while nothing is open (a 964 px column).
+    let boxes = await Promise.all(TILE_ORDER.map((id) => box(page, id)));
+    for (const b of boxes) expect(b.y).toBe(boxes[0]!.y);
+
+    // Longest wait opens its request in the pane: the column is 544 px now.
+    await page.getByTestId('perf-longest-wait').click();
+    await expect(page.getByTestId('desk-pane')).toBeVisible();
+    await expect(page.getByTestId('dashboard')).toBeVisible();
+    await expect.poll(async () => (await box(page, 'tile-closed')).y).toBeGreaterThan((await box(page, 'tile-open')).bottom);
+    boxes = await Promise.all(TILE_ORDER.map((id) => box(page, id)));
+    for (const row of [boxes.slice(0, 3), boxes.slice(3)]) for (const b of row) expect(b.y).toBe(row[0]!.y);
+    const posts = await regionBox(page, 'Open by post');
+    const recent = await regionBox(page, 'Recently updated');
+    expect(recent.y).toBeGreaterThan(posts.y + posts.height - 1);
+    const longest = await box(page, 'perf-longest-wait');
+    const answer = await box(page, 'perf-answer');
+    expect(answer.y).toBeGreaterThan(longest.y);
+    // Nothing in the column runs under the pane.
+    const pane = (await page.getByTestId('desk-pane').boundingBox())!;
+    for (const id of TILE_ORDER) expect((await box(page, id)).right).toBeLessThanOrEqual(Math.round(pane.x));
+    expect(await hScroll(page)).toBe(false);
+
+    // Offline (F1.2): the gray banner at the top of the column, and the line beside the title shows the last
+    // good time with a gray dot; the numbers stay. Back online, the line is healthy again.
+    const line = page.getByTestId('desk-topbar').getByTestId('live-indicator');
+    await context.setOffline(true);
+    try {
+      await expect(line).toHaveAttribute('data-state', 'offline', { timeout: 15_000 });
+      await expect(line.getByTestId('live-text')).toHaveText(/^Last updated \d{1,2}:\d{2} (AM|PM)$/);
+      await expect(page.getByTestId('dashboard').getByTestId('connection-banner')).toHaveText(/^Offline · \d+ waiting to send$/);
+      const t = (await page.getByTestId('desk-topbar').getByRole('heading', { level: 1 }).boundingBox())!;
+      const c = (await line.boundingBox())!;
+      expect(c.x).toBeGreaterThan(t.x + t.width - 1);
+      expect(c.x).toBeLessThan(t.x + t.width + 24);
+      // The line never runs under the search icon or New request.
+      expect(c.x + c.width).toBeLessThanOrEqual((await page.getByTestId('desk-new').boundingBox())!.x);
+      await expect(page.getByTestId('open-count')).toBeVisible();
+    } finally {
+      await context.setOffline(false);
+    }
+    await expect(line).toHaveAttribute('data-state', 'healthy', { timeout: 20_000 });
+    await expect(page.getByTestId('connection-banner')).toHaveCount(0);
+  });
+
+  test('desk: the top bar\'s line follows the lists\' thresholds with the banner (one failed stats fetch shows nothing; the 3rd server error is Reconnecting)', async ({ page }) => {
+    await routeStats(page, mockStats());
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/?dashboard=1');
+    await expect(page.getByTestId('open-count')).toHaveText('7');
+    const line = page.getByTestId('desk-topbar').getByTestId('live-indicator');
+    const refresh = line.getByRole('button', { name: 'Refresh now', exact: true });
+    const banner = page.getByTestId('dashboard').getByTestId('connection-banner');
+    await expect(line).toHaveAttribute('data-state', 'healthy');
+    await page.unroute('**/api/stats');
+    await page.route('**/api/stats', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":{"code":"unavailable","message":"Try again"}}' }));
+    // One failed fetch: the line and the banner both stay as they were (they read the same `failing`).
+    await refresh.click();
+    await expect(refresh).not.toHaveAttribute('data-refreshing', { timeout: 10_000 });
+    await expect(line).toHaveAttribute('data-state', 'healthy');
+    await expect(line.getByTestId('live-text')).toHaveText('Updated just now');
+    await expect(page.getByTestId('connection-banner')).toHaveCount(0);
+    // The 3rd server error in a row: Reconnecting in the top bar and the amber banner together.
+    for (let i = 0; i < 2; i += 1) {
+      await refresh.click();
+      await expect(refresh).not.toHaveAttribute('data-refreshing', { timeout: 10_000 });
+    }
+    await expect(line).toHaveAttribute('data-state', 'reconnecting');
+    await expect(line.getByTestId('live-text')).toHaveText(/^Last updated \d{1,2}:\d{2} (AM|PM)$/);
+    await expect(banner).toHaveText('Reconnecting…');
+    // Stats back: one Refresh now clears both.
+    await page.unroute('**/api/stats');
+    await routeStats(page, mockStats());
+    await refresh.click();
+    await expect(line).toHaveAttribute('data-state', 'healthy', { timeout: 15_000 });
+    await expect(page.getByTestId('connection-banner')).toHaveCount(0);
   });
 });

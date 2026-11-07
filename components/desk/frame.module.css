@@ -1,0 +1,214 @@
+/* Desk frame (design/screens/desktop-log.html .win / .side / .main / .top / .panel, desktop-new-tablet.html
+   .rail / .sheet). Under 768 px nothing here applies except hiding the empty desk slots: the phone app is
+   unchanged. The document stays the scroller on the desk too (the list's scroll memory and sticky bars keep
+   working); the sidebar, top bar and docked pane are sticky. */
+
+.nav,
+.brand,
+.top {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .frame {
+    --desk-nav: calc(60px + env(safe-area-inset-left));
+    --desk-top: calc(56px + env(safe-area-inset-top));
+    display: grid;
+    grid-template-columns: var(--desk-nav) minmax(0, 1fr);
+    min-height: 100vh;
+    min-height: 100dvh;
+    background: var(--color-background);
+  }
+
+  .nav {
+    display: flex;
+    flex-direction: column;
+    position: sticky;
+    top: 0;
+    align-self: start;
+    z-index: 6;
+    height: 100vh;
+    height: 100dvh;
+    box-sizing: border-box;
+    padding-left: env(safe-area-inset-left);
+    background: var(--gray-2);
+    border-right: 1px solid var(--gray-a4);
+  }
+
+  .main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Jeffrey's brand row on All requests (components/list/brand.module.css places it for the desk): above the
+     top bar, scrolling away under it. A container, so the row can fit its words to the column. */
+  .brand {
+    display: block;
+    container: desk-brand / inline-size;
+    padding-top: env(safe-area-inset-top);
+  }
+  /* Hidden with its X on this device: the pre-paint script marks <html> (lib/brand-pref.ts), so the row the
+     server drew never shows, not even before hydration drops it. */
+  :global(html[data-brand-hidden]) .brand {
+    display: none;
+  }
+
+  .top {
+    display: block;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    height: var(--desk-top);
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top);
+    background: var(--color-background);
+    border-bottom: 1px solid var(--gray-a4);
+  }
+
+  .content {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* 768–1023: the request is a 480 px sheet over the right of the list. No scrim: the list stays visible and
+     usable behind it. No transform (an animated sheet would trap the photo viewer's position: fixed). */
+  .pane {
+    position: fixed;
+    z-index: 7;
+    top: calc(10px + env(safe-area-inset-top));
+    right: calc(10px + env(safe-area-inset-right));
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    width: min(480px, calc(100vw - var(--desk-nav) - 20px));
+    display: flex;
+    flex-direction: column;
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--color-background);
+    box-shadow:
+      0 0 0 1px var(--gray-a4),
+      0 24px 64px -12px rgba(0, 0, 0, 0.45);
+  }
+
+  /* A form covers the main column and the pane; the sidebar stays in view (inert while it is open). Layout
+     containment makes this layer the containing block of the form's own position: fixed frame. */
+  .form {
+    position: fixed;
+    z-index: 8;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: var(--desk-nav);
+    contain: layout;
+    background: var(--color-background);
+    border-left: 1px solid var(--gray-a4);
+  }
+  /* The form portalled its own dialog (side sheet / modal): nothing to cover, the list shows behind it. */
+  .form:empty {
+    display: none;
+  }
+
+  /* ---- Phone chrome inside the main column --------------------------------------------------------------
+     The list views are the phone's (another wave swaps in the desk table). Their own header (title, live dot,
+     search, bell, avatar), the view switcher row and the floating New request button are phone chrome the
+     shell supplies here, so they are hidden; the offline banner and the filter chips stay. The list's brand
+     card (F1) is phone chrome too: the list skips it in the desk (useInDesk) and it is hidden here as well;
+     the desk draws its own in the brand slot. Hooks used: the list root's data-view, its first child (the
+     sticky block: header, banner, view bar), data-testid="view-switcher" and the *-chip test ids. If the list
+     reads useInDesk() and drops the chrome itself, these rules simply stop matching. (The dashboard reads
+     useInDesk() and has no phone chrome here.) */
+  .content > [data-view],
+  .content > [data-testid='dashboard'] {
+    min-height: 0;
+  }
+  .content > [data-view] > :first-child {
+    top: var(--desk-top);
+    padding-top: 0;
+  }
+  .content > [data-view] > [data-testid='brand-card'],
+  .content > [data-view] > :first-child > header,
+  .content > [data-view] > :first-child > form[role='search'],
+  .content > [data-view] > :first-child > div > div:has(> [data-testid='view-switcher']),
+  .content > [data-view] > :first-child > div:has(> div > [data-testid='view-switcher']):not(:has([data-testid$='-chip'])),
+  .content > [data-view] > button {
+    display: none;
+  }
+  .content > [data-view] > :first-child > div:has(> div > [data-testid='view-switcher']) {
+    padding-top: 2px;
+  }
+  .content > [data-view] > main {
+    padding-bottom: 24px;
+  }
+  .content [data-request-id] {
+    scroll-margin-top: calc(var(--desk-top) + 72px);
+    scroll-margin-bottom: 16px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .frame[data-pane] {
+    grid-template-columns: var(--desk-nav) minmax(0, 1fr) 420px;
+  }
+
+  /* Docked beside the list. */
+  .pane {
+    position: sticky;
+    top: 0;
+    right: auto;
+    bottom: auto;
+    align-self: start;
+    z-index: 4;
+    width: auto;
+    height: 100vh;
+    height: 100dvh;
+    border-radius: 0;
+    box-shadow: none;
+    border-left: 1px solid var(--gray-a4);
+  }
+}
+
+@media (min-width: 1280px) {
+  .frame {
+    --desk-nav: calc(232px + env(safe-area-inset-left));
+  }
+  .frame[data-pane] {
+    grid-template-columns: var(--desk-nav) minmax(0, 1fr) 452px;
+  }
+}
+
+/* ---- The Undo snackbar on the desk ------------------------------------------------------------------------
+   The shell's snackbar (components/ui/Toast.tsx, .lp-snack) is centred on the window on a phone. On the desk
+   it stays in the main column, clear of the sidebar / rail and of an open request: it never covers the
+   pane's actions, and the pane never covers it. On an iPad in portrait the request is a sheet over the list,
+   so the snackbar sits at the foot of that sheet, where the answer was given. */
+@media (min-width: 768px) {
+  :global(body):has(.frame[data-desk]) :global(.lp-snack) {
+    left: calc(60px + env(safe-area-inset-left) + 12px);
+    right: calc(12px + env(safe-area-inset-right));
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023.98px) {
+  :global(body):has(.frame[data-desk][data-pane]) :global(.lp-snack) {
+    left: auto;
+    right: calc(22px + env(safe-area-inset-right));
+    box-sizing: border-box;
+    width: min(456px, calc(100vw - 60px - 44px));
+    margin: 0;
+  }
+}
+
+@media (min-width: 1024px) {
+  :global(body):has(.frame[data-desk][data-pane]) :global(.lp-snack) {
+    right: calc(420px + 12px);
+  }
+}
+
+@media (min-width: 1280px) {
+  :global(body):has(.frame[data-desk]) :global(.lp-snack) {
+    left: calc(232px + env(safe-area-inset-left) + 12px);
+  }
+  :global(body):has(.frame[data-desk][data-pane]) :global(.lp-snack) {
+    right: calc(452px + 12px);
+  }
+}

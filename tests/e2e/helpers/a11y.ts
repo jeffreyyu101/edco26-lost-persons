@@ -3,7 +3,7 @@
 // extends it, which is how the compact controls get a 44 px hit area without changing their layout).
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import type { Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 
 const require = createRequire(import.meta.url);
 const AXE_SOURCE = readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
@@ -182,6 +182,31 @@ export async function overlappingTargets(page: Page, scope = 'body'): Promise<Ov
       }
       return null;
     };
+    // The part of the page a control can show in: its scrolling / clipping ancestors' boxes, up to its
+    // fixed layer. A field half scrolled out of a form's scroller is cut off at the scroller's edge, so the
+    // part under the pinned footer is neither seen nor tapped.
+    const clipOf = (el: Element): Box => {
+      const box: Box = { left: -Infinity, top: -Infinity, right: Infinity, bottom: Infinity };
+      if (getComputedStyle(el).position === 'fixed') return box;
+      for (let n: Element | null = el.parentElement; n; n = n.parentElement) {
+        const s = getComputedStyle(n);
+        if (s.overflowX !== 'visible' || s.overflowY !== 'visible') {
+          const r = n.getBoundingClientRect();
+          box.left = Math.max(box.left, r.left);
+          box.top = Math.max(box.top, r.top);
+          box.right = Math.min(box.right, r.right);
+          box.bottom = Math.min(box.bottom, r.bottom);
+        }
+        if (s.position === 'fixed') break;
+      }
+      return box;
+    };
+    const clip = (a: Box, c: Box): Box => ({
+      left: Math.max(a.left, c.left),
+      top: Math.max(a.top, c.top),
+      right: Math.min(a.right, c.right),
+      bottom: Math.min(a.bottom, c.bottom),
+    });
     const items: Array<{ el: HTMLElement; name: string; own: Box; hit: Box; layer: Element | null }> = [];
     for (const el of Array.from(root.querySelectorAll<HTMLElement>(SELECTOR))) {
       const style = getComputedStyle(el);
@@ -221,7 +246,8 @@ export async function overlappingTargets(page: Page, scope = 'body'): Promise<Ov
         (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 50) ||
         el.getAttribute('data-testid') ||
         el.tagName.toLowerCase();
-      items.push({ el, name, own, hit, layer: layerOf(el) });
+      const c = clipOf(el);
+      items.push({ el, name, own: clip(own, c), hit: clip(hit, c), layer: layerOf(el) });
     }
     const contains = (a: Box, b: Box) => a.left <= b.left + 1 && a.top <= b.top + 1 && a.right >= b.right - 1 && a.bottom >= b.bottom - 1;
     const area = (a: Box, b: Box) => Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
@@ -239,4 +265,69 @@ export async function overlappingTargets(page: Page, scope = 'body'): Promise<Ov
     }
     return out;
   }, scope);
+}
+
+/**
+ * Text on the brand row (components/list/BrandCard.tsx) lies on a gradient with two glows, which axe can only
+ * mark "needs review". So this measures it: the row is captured with its text made transparent, and each run
+ * of text is compared with every pixel behind its line box. Returns one line per run under 4.5:1 (the bar for
+ * small text, applied to the title too). `card` is the phone list's row by default; the desk's is inside its
+ * brand slot (data-testid="desk-brand").
+ */
+export async function brandContrast(page: Page, card: Locator = page.getByTestId('brand-card')): Promise<string[]> {
+  const layout = await card.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const runs: Array<{ text: string; color: string; x: number; y: number; w: number; h: number }> = [];
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const text = (n.textContent ?? '').trim();
+      if (!text) continue;
+      const range = document.createRange();
+      range.selectNodeContents(n);
+      const color = getComputedStyle(n.parentElement!).color;
+      for (const r of Array.from(range.getClientRects())) runs.push({ text, color, x: r.left - box.left, y: r.top - box.top, w: r.width, h: r.height });
+    }
+    return { width: box.width, runs };
+  });
+  // "Is my friend", "in medical?" and the dates (the long dates on a wide screen instead of the short ones).
+  expect(layout.runs.length).toBeGreaterThanOrEqual(3);
+  const hide = await page.addStyleTag({ content: '[data-testid="brand-card"] * { color: transparent !important; }' });
+  const png = await card.screenshot({ animations: 'disabled' });
+  await hide.evaluate((el) => (el as Element).remove());
+  return page.evaluate(
+    async ({ data, width, runs }) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${data}`;
+      await img.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(img, 0, 0);
+      const scale = img.width / width;
+      const channel = (v: number) => {
+        const c = v / 255;
+        return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      };
+      const luminance = (r: number, g: number, b: number) => 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+      const out: string[] = [];
+      for (const run of runs) {
+        const [r, g, b] = (run.color.match(/[\d.]+/g) ?? []).map(Number) as [number, number, number];
+        const text = luminance(r, g, b);
+        const x0 = Math.max(0, Math.floor(run.x * scale));
+        const y0 = Math.max(0, Math.floor(run.y * scale));
+        const x1 = Math.min(img.width, Math.ceil((run.x + run.w) * scale));
+        const y1 = Math.min(img.height, Math.ceil((run.y + run.h) * scale));
+        const px = ctx.getImageData(x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0)).data;
+        let worst = Infinity;
+        for (let i = 0; i < px.length; i += 4) {
+          const back = luminance(px[i]!, px[i + 1]!, px[i + 2]!);
+          worst = Math.min(worst, (Math.max(text, back) + 0.05) / (Math.min(text, back) + 0.05));
+        }
+        if (worst < 4.5) out.push(`"${run.text}" ${run.color}: ${worst.toFixed(2)}:1`);
+      }
+      return out;
+    },
+    { data: png.toString('base64'), width: layout.width, runs: layout.runs },
+  );
 }

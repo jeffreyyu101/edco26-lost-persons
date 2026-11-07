@@ -157,6 +157,29 @@ describe('requestPatchSchema / updateRequestSchema', () => {
   });
 });
 
+describe('medicalLocation (Pending v8, Dani + Brian 2026-11-06 afternoon)', () => {
+  it('a patch takes it: trimmed, blank → null (clear), at most 60 characters', () => {
+    expect(requestPatchSchema.parse({ medicalLocation: '  Chair 14 ' })).toEqual({ medicalLocation: 'Chair 14' });
+    expect(requestPatchSchema.parse({ medicalLocation: '   ' })).toEqual({ medicalLocation: null });
+    expect(requestPatchSchema.parse({ medicalLocation: null })).toEqual({ medicalLocation: null });
+    expect(requestPatchSchema.parse({ medicalLocation: 'x'.repeat(60) }).medicalLocation).toHaveLength(60);
+    // Code points, like SQL char_length: 60 emoji are 60 characters.
+    expect(requestPatchSchema.safeParse({ medicalLocation: '🩺'.repeat(60) }).success).toBe(true);
+    expect(requestPatchSchema.safeParse({ medicalLocation: 'x'.repeat(61) }).success).toBe(false);
+    expect(requestPatchSchema.safeParse({ medicalLocation: 'Bed \u0000' }).success).toBe(false);
+    expect(requestPatchSchema.safeParse({ medicalLocation: 14 }).success).toBe(false);
+    expect(updateRequestSchema.parse({ patch: { medicalLocation: 'Bed 3 · triage' }, expectedVersion: 4 })).toEqual({
+      patch: { medicalLocation: 'Bed 3 · triage' },
+      expectedVersion: 4,
+    });
+  });
+
+  it('a new request never carries one (only set once medical has them)', () => {
+    const res = createRequestSchema.safeParse({ clientMutationId: CMID, reportingLocation: 'Base', medicalLocation: 'Chair 1' });
+    expect(res.success).toBe(false);
+  });
+});
+
 describe('setStatusSchema / cancelSchema', () => {
   it('accepts settable statuses and kinds', () => {
     expect(setStatusSchema.safeParse({ status: 'Found – Awaiting Reunion', expectedVersion: 0, kind: 'answer' }).success).toBe(true);

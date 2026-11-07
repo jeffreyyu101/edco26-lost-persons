@@ -2,7 +2,8 @@
 
 A phone-first web app for Ground Control / Headliner Experience (GC/HX) staff at EDC Orlando, Nov 6–8 2026.
 Front-of-house staff at FA 3 and FA 4 log a missing person and the friend looking for them. The medical
-liaison at Main Med checks the charts and answers **In medical** or **Not in medical**. When the answer is
+liaison at Main Med checks the charts and answers **In medical** or **Not found** (the request then reads "Not
+found in medical"). When the answer is
 In medical, the friend is walked to Main Med, and medical taps **Reunited**.
 
 The app stores identifying and contact details only. Never enter medical records, diagnoses, medications or
@@ -75,6 +76,12 @@ Photos live in a **private** Storage bucket named `patient-photos` (JPEG, PNG or
 full image of up to 1600 px and a 320 px thumbnail. Pages load them through `/api/photos/:id`, which checks
 the session and redirects to a signed URL that lasts 120 s. Never make the bucket public.
 
+Every photo is prepared **on the phone** before it is saved or sent (`lib/client/image.ts`): an optional
+quick crop, an area-averaged downscale, and a conservative cleanup for photos of a phone screen (auto levels
+and light sharpening, each only when the photo measures as needing it; `lib/client/image-enhance.ts`).
+Re-encoding strips EXIF and GPS. The cleanup adds no request and no server work, and the upload is never
+bigger than the app made it before the cleanup existed (design/DECISIONS.md v2.2 #10).
+
 ## Run it locally
 
 ```bash
@@ -98,9 +105,9 @@ npm run start:test                       # http://127.0.0.1:3100
 | `npm run lint` | ESLint, with no warnings allowed |
 | `npm test` | Unit tests (vitest, no network or database) |
 | `npm run test:int` | Integration tests: every route, the SQL functions, concurrency, login limits, the migration and `docs/export.sql` (run read-only), against the local stack through a production build on `PORT` (default 3100). If nothing listens there, the harness starts `next start` itself. Run `npm run build:test` first. |
-| `npm run test:e2e` | Playwright on the production build: sign-in, lists, the two-phone flow (log → Pending → In medical → alert), profile, edit and conflicts, dashboard, offline and lie-fi queueing, the service-worker update, the first-load JS budget, and accessibility (axe-core WCAG 2.1 A/AA in light and dark, plus 44 px tap targets). Run `npm run build:test` first. |
+| `npm run test:e2e` | Playwright on the production build: sign-in, lists, the two-phone flow (log → Pending → In medical → alert), system notifications on a desktop (hidden page notifies, visible page toasts), profile, edit and conflicts, dashboard, offline and lie-fi queueing, the service-worker update, the first-load JS budget, and accessibility (axe-core WCAG 2.1 A/AA in light and dark, plus 44 px tap targets). Run `npm run build:test` first. |
 | `node scripts/smoke-csp.mjs` | The production CSP and nonce in Chromium and WebKit: `/signin` hydrates with no violations, `/` redirects without a session, and with one the list, a profile and Back work. Needs the production build running on `PORT`. `npm run test:e2e` runs it too (`tests/e2e/smoke.spec.ts`). |
-| `npm run db:verify-migration` | Applies the rework migration twice to the local database and to an upgrade fixture built from Jeffrey's original schema, then smoke-tests the functions. |
+| `npm run db:verify-migration` | Applies the rework migration twice to the local database (`SUPABASE_DB_URL` when set, else the stack `supabase status` reports) and to an upgrade fixture built from Jeffrey's original schema, then smoke-tests the functions. |
 | `node scripts/load-test.mjs` | 30 simulated phones polling for 2 minutes against a running local production build (see the file header). |
 
 End-to-end runs take a lock (`/tmp/lp-e2e.lock`), so two suites never share the local stack at once. Every
@@ -117,7 +124,7 @@ Pending.
   (with a progress line), Search, New request, the profile, Edit and the dashboard. Views are URL parameters
   on `/`, so Back and shared links work. The view menu is the large page title ("All requests 13 ⌄").
 - **All requests.** Open requests (Waiting for check, In medical) come first, newest first; every closed one
-  (Not in medical, Reunited, Discharged, Cancelled) folds into one "Archived N" row. Each row shows the LP
+  (Not found in medical, Reunited, Discharged, Cancelled) folds into one "Archived N" row. Each row shows the LP
   number, the name, the status, when it was logged ("11:02 PM", or "Thu 11:02 PM" for an earlier day) and
   when it last changed ("now", "2m", "1h", "3d", or "—").
 - **Live.** The list syncs every 6 s while the app is open (60 s in the background). A line under the title
@@ -125,12 +132,26 @@ Pending.
   Problems show as a banner, "Reconnecting…" (amber) or "Offline · N waiting to send" (gray), while the line
   shows the last good time ("Last updated 3:42 PM").
 - **Brand row.** All requests opens with one compact row (logos, "Is my friend in medical?", the dates). Its X
-  hides it on that phone; "Show header" in the avatar menu brings it back.
-- **Answers.** Not in medical, In medical, Reunited and Change answer each offer Undo for 10 s. Change answer
+  hides it on that device; "Show header" in the avatar menu brings it back.
+- **Desk and tablet (from 768 px).** A sidebar (or an icon rail under 1280 px), a top bar with the view's
+  title, its live line and Refresh now, search and New request, and the list as a table; a request opens
+  beside it (docked from 1024 px) and New request as a side sheet or a centred dialog. Pending is two
+  columns, To check and Friend coming. All requests opens with the same compact brand row, its X and Show
+  header.
+- **Answers.** Not found, In medical, Reunited and Change answer each offer Undo for 10 s. Change answer
   is a menu: the other answer, or Back to Waiting for check. Two people giving the same answer is harmless.
   A change made by someone else shows as "Updated by someone else".
 - **Alerts** appear only while the app is open: changes to your requests by someone else, and new requests
-  when alerts are on (the bell, in the avatar menu). There are no lock-screen notifications.
+  when alerts are on (the bell, in the avatar menu). With the app in front, an alert is a toast with a
+  chime. In the background (another tab, a minimised window) it is a system notification instead, where the
+  device allows one and it was allowed (desktop Chrome, Edge, Firefox and Safari, Android Chrome, the iPhone
+  Home Screen app; "Allow notifications" in the avatar menu). It shows the LP number, the status, initials
+  and the post, never contact details, and a click opens the request. One alert is never both a toast and a
+  notification, even with the app in two windows. A Safari tab on iPhone keeps the toast only. There is no
+  push: a closed app gets nothing.
+- **Photos.** After a photo is taken or picked, a crop step shows it with the whole photo selected: **Use
+  photo** keeps it as it is, dragging a corner cuts away a phone's bezel, **Retake** opens the camera again.
+  Photos of a phone screen are cleaned up on the phone (levels, light sharpening) before upload.
 - **Offline.** A new request (with its photos) is saved on the phone first and sent when the signal is back.
   Answers, edits and adding photos to an existing request need a connection.
 - **Dashboard.** Status count tiles first, then Open by post, Recently updated, and Performance last (longest

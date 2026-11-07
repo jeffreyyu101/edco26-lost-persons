@@ -1,18 +1,21 @@
 'use client';
-// Pending and My requests cards (requests.html QCard, ComingCard, MCard + Stepper). Each card opens the
-// profile through a transparent button stretched over it; the action buttons sit above that button.
+// Pending and My requests cards. Pending is design/screens/pending-v8.html (2026-11-06 afternoon, Brian +
+// Dani): To check (CheckCard) and Friend coming (ComingCard). My requests is requests.html MCard + Stepper.
+// Each card opens the profile through a transparent button stretched over it; the action buttons and the
+// location chip sit above that button. A photo shows only when the request has one: no empty placeholders.
 import { Badge, Button, Card, Text, VisuallyHidden } from '@radix-ui/themes';
-import { ArrowRight, Check, CircleAlert, Clock, UserRound, X } from 'lucide-react';
-import { memo, useEffect, useId, useRef, useState, type CSSProperties } from 'react';
+import { ArrowRight, Check, CircleAlert, Clock, MapPin, Plus, UserRound, X } from 'lucide-react';
+import { memo, useEffect, useId, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { photoPath } from '@/lib/client/api-paths';
 import { navigate } from '@/lib/client/nav';
-import { STATUS, ageGender, statusMeta, waitTone } from '@/lib/domain';
+import { ANSWER_LABEL, STATUS, ageGender, statusMeta, waitTone } from '@/lib/domain';
 import { formatCaseNumber, formatDuration, minutesSince } from '@/lib/format';
 import {
   cardDescription,
   displayName,
+  friendComingLine,
   isClosed,
   isFresh,
   labelColor,
@@ -34,32 +37,25 @@ export function photoThumbUrl(photoId: string): string {
   return photoPath(photoId, 'thumb');
 }
 
-/** The request's first photo (thumbnail size), or the "no photo" placeholder (requests.html .thumb). */
-export function Thumb({ photoId, small }: { photoId: string | null; small?: boolean }) {
+/** The request's first photo (thumbnail size, 40 px, My requests). Nothing when it has none. */
+export function Thumb({ photoId }: { photoId: string | null }) {
   const [failed, setFailed] = useState<string | null>(null);
-  const size = small ? `${s.thumb} ${s.thumbSmall}` : s.thumb;
-  if (!photoId) {
-    return (
-      <div className={`${size} ${s.thumbNone}`}>
-        <UserRound size={18} strokeWidth={1.75} aria-hidden />
-      </div>
-    );
-  }
+  if (!photoId) return null;
   if (failed === photoId) {
     // Offline or expired: keep the "has a photo" look without the image.
     return (
-      <div className={`${size} ${s.thumbPhoto}`}>
-        <UserRound size={small ? 20 : 22} strokeWidth={1.75} aria-hidden />
+      <div className={`${s.thumb} ${s.thumbPhoto}`}>
+        <UserRound size={22} strokeWidth={1.75} aria-hidden />
       </div>
     );
   }
   return (
-    <div className={`${size} ${s.thumbPhoto}`}>
+    <div className={`${s.thumb} ${s.thumbPhoto}`}>
       <img
         src={photoThumbUrl(photoId)}
         alt=""
-        width={small ? 36 : 40}
-        height={small ? 36 : 40}
+        width={40}
+        height={40}
         loading="lazy"
         decoding="async"
         draggable={false}
@@ -69,7 +65,31 @@ export function Thumb({ photoId, small }: { photoId: string | null; small?: bool
   );
 }
 
-/** A queued request's first photo, straight from the blob saved on this phone. */
+/** Pending's portrait photo (pending-v8.html .photo): 60 × 72, or 52 × 62 on a Friend coming card. */
+function Portrait({ photoId, small }: { photoId: string; small?: boolean }) {
+  const [failed, setFailed] = useState<string | null>(null);
+  return (
+    <div className={small ? `${s.pphoto} ${s.pphotoSm}` : s.pphoto} data-testid="card-photo">
+      {failed === photoId ? (
+        // Offline or expired: keep the "has a photo" look without the image.
+        <UserRound size={small ? 24 : 28} strokeWidth={1.75} aria-hidden />
+      ) : (
+        <img
+          src={photoThumbUrl(photoId)}
+          alt=""
+          width={small ? 52 : 60}
+          height={small ? 62 : 72}
+          loading="lazy"
+          decoding="async"
+          draggable={false}
+          onError={() => setFailed(photoId)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** A queued request's first photo, straight from the blob saved on this phone. Nothing when it has none. */
 function OutboxThumb({ item }: { item: OutboxItem }) {
   const blob = item.photos[0]?.thumbBlob ?? null;
   const img = useRef<HTMLImageElement>(null);
@@ -84,7 +104,7 @@ function OutboxThumb({ item }: { item: OutboxItem }) {
       URL.revokeObjectURL(url);
     };
   }, [blob]);
-  if (!blob) return <Thumb photoId={null} />;
+  if (!blob) return null;
   return (
     <div className={`${s.thumb} ${s.thumbPhoto}`}>
       <img ref={img} alt="" width={40} height={40} decoding="async" draggable={false} />
@@ -97,8 +117,8 @@ function OutboxThumb({ item }: { item: OutboxItem }) {
 // ---------------------------------------------------------------------------------------------------
 
 /**
- * Wait badge: grey under 10 min, amber 10–19, red at 20 or more (requests.html Wait). Amber and red use
- * the scale's step 12 for the text: step 11 on its own tint is under 4.5:1 (spec §7).
+ * Wait badge (My requests): grey under 10 min, amber 10–19, red at 20 or more (requests.html Wait). Amber
+ * and red use the scale's step 12 for the text: step 11 on its own tint is under 4.5:1 (spec §7).
  */
 export function WaitBadge({ minutes }: { minutes: number }) {
   const tone = waitTone(minutes);
@@ -107,6 +127,20 @@ export function WaitBadge({ minutes }: { minutes: number }) {
       <Clock size={12} strokeWidth={1.75} aria-hidden className={s.badgeIcon} />
       {formatDuration(minutes)}
     </Badge>
+  );
+}
+
+/**
+ * Pending's minutes beside the name (pending-v8.html .wait): grey, amber from 10, red from 20, as plain
+ * step-11 text on the card's solid panel (4.5:1 in both themes). To check adds the clock glyph (how long it
+ * has waited); Friend coming shows the minutes since the In medical answer.
+ */
+function Minutes({ minutes, clock }: { minutes: number; clock?: boolean }) {
+  return (
+    <span className={s.pwait} data-tone={waitTone(minutes)} data-testid="card-minutes">
+      {clock ? <Clock size={13} strokeWidth={2} aria-hidden /> : null}
+      {formatDuration(minutes)}
+    </span>
   );
 }
 
@@ -136,7 +170,9 @@ function Who({ name, ag, sub, nameId, subId }: { name: string; ag: string; sub: 
 
 export function Stepper({ model }: { model: StepperModel }) {
   return (
-    <div className={s.stepper} style={{ gridTemplateColumns: `repeat(${model.steps.length}, 1fr)` }}>
+    // Equal columns, except that no label is ever cut: a column is at least as wide as its label ("Not found in
+    // medical" on a 375 px phone).
+    <div className={s.stepper} style={{ gridTemplateColumns: `repeat(${model.steps.length}, minmax(max-content, 1fr))` }}>
       {model.steps.map((label, i) => {
         const step = i < model.current ? 'done' : i === model.current ? model.mode : 'todo';
         return (
@@ -168,119 +204,159 @@ function offlineProps(offline: boolean) {
   return offline ? { 'aria-disabled': true, 'data-disabled': '' } : {};
 }
 
+/** The card a control sits on (where the desk's location popover first points). */
+const cardOf = (e: MouseEvent<HTMLElement>): HTMLElement | null => e.currentTarget.closest<HTMLElement>('[data-pending-card]');
+
 // ---------------------------------------------------------------------------------------------------
-// Pending: Friend coming (ComingCard) and Waiting for check (QCard)
+// Pending: To check (CheckCard) and Friend coming (ComingCard), pending-v8.html
 // ---------------------------------------------------------------------------------------------------
 
-interface ActionCardProps {
+export interface CheckCardProps {
   row: RequestSummary;
   now: number;
   offline: boolean;
-  onTap: (id: string, to: typeof STATUS.notInMedical | typeof STATUS.inMedical | typeof STATUS.reunited, kind: 'answer' | 'reunite') => void;
+  onNotInMedical: (row: RequestSummary) => void;
+  /** `card` is the tapped card (where the desk's location popover first points). */
+  onInMedical: (row: RequestSummary, card: HTMLElement | null) => void;
 }
 
-export const ComingCard = memo(function ComingCard({ row, now, offline, onTap }: ActionCardProps) {
+/**
+ * To check: the photo when there is one, the name or initials (18/600) and age/sex, how long it has waited
+ * (clock; amber from 10, red from 20), what they're wearing (2 lines), one quiet "FA 4 · LP-0010" line,
+ * then Not found / In medical (44 px).
+ */
+export const CheckCard = memo(function CheckCard({ row, now, offline, onNotInMedical, onInMedical }: CheckCardProps) {
   const reasonId = useId();
   const nameId = useId();
-  const minutes = minutesSince(statusSince(row), now);
-  const friend = (row.contactName ?? '').trim();
-  const ag = ageGender(row.age, row.gender);
-  const from = `from ${row.postShort}`;
-  const line = [friend, from, formatDuration(minutes)].filter(Boolean).join(' · ');
-  const label = `${whoPhrase(row)}. In medical. ${friend ? `${friend} is` : 'The friend is'} coming ${from}, set off ${minutesPhrase(minutes)} ago. ${formatCaseNumber(row.caseNumber)}.`;
-  return (
-    <Card size="1" className={s.card} data-testid="friend-coming-card">
-      <OpenButton id={row.id} label={label} />
-      <div className={s.cc}>
-        <Thumb photoId={row.firstPhotoId} small />
-        <div className={s.qn} aria-hidden>
-          <div className={s.l1}>
-            <Text size="2" weight="medium" id={nameId}>
-              {displayName(row.name)}
-            </Text>
-            {ag ? (
-              <Text size="2" color="gray" className={s.nowrap}>
-                {ag}
-              </Text>
-            ) : null}
-          </div>
-          <span className={s.who}>
-            <ArrowRight size={12} strokeWidth={1.75} aria-hidden />
-            <span>{line}</span>
-          </span>
-        </div>
-        <Button
-          size="2"
-          variant="soft"
-          color="gray"
-          highContrast
-          className={`${s.actions} ${s.answer} lp-hit`}
-          {...offlineProps(offline)}
-          aria-describedby={offline ? `${nameId} ${reasonId}` : nameId}
-          onClick={() => onTap(row.id, STATUS.reunited, 'reunite')}
-        >
-          <Check size={14} strokeWidth={1.75} aria-hidden />
-          Reunited
-        </Button>
-      </div>
-      {offline ? <VisuallyHidden id={reasonId}>Needs a connection</VisuallyHidden> : null}
-    </Card>
-  );
-});
-
-export const CheckCard = memo(function CheckCard({ row, now, offline, onTap }: ActionCardProps) {
-  const reasonId = useId();
-  const nameId = useId();
-  const subId = useId();
+  const metaId = useId();
   const minutes = minutesSince(row.createdAt, now);
   const desc = cardDescription(row);
   const ag = ageGender(row.age, row.gender);
-  const sub = `${formatCaseNumber(row.caseNumber)} · ${row.postShort}`;
-  const label = `${whoPhrase(row)}. ${sub}. Waiting ${minutesPhrase(minutes)}.${desc ? ` ${desc}` : ''}`;
+  const meta = `${row.postShort} · ${formatCaseNumber(row.caseNumber)}`;
+  const label = `${whoPhrase(row)}. ${meta}. Waiting ${minutesPhrase(minutes)}.${desc ? ` ${desc}` : ''}`;
   const fresh = isFresh(row.createdAt, now);
-  const describedBy = offline ? `${nameId} ${subId} ${reasonId}` : `${nameId} ${subId}`;
+  const describedBy = offline ? `${nameId} ${metaId} ${reasonId}` : `${nameId} ${metaId}`;
   return (
-    <Card size="2" className={`${s.card} ${fresh ? s.fresh : ''}`} data-testid="check-card">
+    <div className={`${s.pcard} ${fresh ? s.fresh : ''}`} data-testid="check-card" data-pending-card={row.id}>
       <OpenButton id={row.id} label={label} />
-      <div aria-hidden>
-        <div className={s.qh}>
-          <Thumb photoId={row.firstPhotoId} />
-          <Who name={displayName(row.name)} ag={ag} sub={sub} nameId={nameId} subId={subId} />
-          <WaitBadge minutes={minutes} />
+      <div className={s.pwho} aria-hidden>
+        {row.firstPhotoId ? <Portrait photoId={row.firstPhotoId} /> : null}
+        <div className={s.pwt}>
+          <div className={s.pl1}>
+            <span className={s.pnm} id={nameId}>
+              {displayName(row.name)}
+            </span>
+            {ag ? <span className={s.pas}>{ag}</span> : null}
+            <Minutes minutes={minutes} clock />
+          </div>
+          {desc ? <p className={s.pdesc}>{desc}</p> : null}
+          <span className={s.pmeta} id={metaId}>
+            {meta}
+          </span>
         </div>
-        {desc ? (
-          <Text as="p" size="2" className={s.qd}>
-            {desc}
-          </Text>
-        ) : null}
       </div>
-      <div className={`${s.qa} ${s.actions} ${desc ? '' : s.qaGap}`}>
+      <div className={`${s.pacts} ${s.actions}`}>
         <Button
-          size="2"
+          size="3"
           variant="soft"
           color="gray"
-          className={`${s.answer} lp-hit`}
+          className={`${s.pbtn} ${s.pbtnSoft}`}
           {...offlineProps(offline)}
           aria-describedby={describedBy}
-          onClick={() => onTap(row.id, STATUS.notInMedical, 'answer')}
+          onClick={() => onNotInMedical(row)}
         >
-          <X size={15} strokeWidth={1.75} aria-hidden />
-          Not in medical
+          <X size={16} strokeWidth={1.75} aria-hidden />
+          {ANSWER_LABEL.notFound}
         </Button>
         <Button
-          size="2"
+          size="3"
           color="green"
-          className={`${s.answer} lp-hit lp-solid-accent`}
+          className={`${s.pbtn} lp-solid-accent`}
           {...offlineProps(offline)}
           aria-describedby={describedBy}
-          onClick={() => onTap(row.id, STATUS.inMedical, 'answer')}
+          onClick={(e) => onInMedical(row, cardOf(e))}
         >
-          <Check size={15} strokeWidth={1.75} aria-hidden />
-          In medical
+          <Check size={16} strokeWidth={2.25} aria-hidden />
+          {ANSWER_LABEL.inMedical}
         </Button>
       </div>
       {offline ? <VisuallyHidden id={reasonId}>Needs a connection</VisuallyHidden> : null}
-    </Card>
+    </div>
+  );
+});
+
+export interface ComingCardProps {
+  row: RequestSummary;
+  now: number;
+  offline: boolean;
+  onReunited: (row: RequestSummary) => void;
+  /** The location chip: add or edit where medical has them. `card` is the card it sits on. */
+  onLocate: (row: RequestSummary, card: HTMLElement | null) => void;
+}
+
+/**
+ * Friend coming: the photo when there is one, the name and age/sex, the minutes since the In medical answer,
+ * where medical has them (a green chip with a pin, or a quiet "+ Location" chip; either one edits it), who is
+ * coming ("Chris P. · boyfriend, on the way"), then a full-width Reunited.
+ */
+export const ComingCard = memo(function ComingCard({ row, now, offline, onReunited, onLocate }: ComingCardProps) {
+  const reasonId = useId();
+  const nameId = useId();
+  const minutes = minutesSince(statusSince(row), now);
+  const ag = ageGender(row.age, row.gender);
+  const location = (row.medicalLocation ?? '').trim();
+  const coming = friendComingLine(row);
+  const label = `${whoPhrase(row)}. In medical${location ? `, ${location}` : ''}, ${minutesPhrase(minutes)} ago. ${coming.friend} · ${coming.rest}. ${row.postShort} · ${formatCaseNumber(row.caseNumber)}.`;
+  const describedBy = offline ? `${nameId} ${reasonId}` : nameId;
+  return (
+    <div className={s.pcard} data-testid="friend-coming-card" data-pending-card={row.id}>
+      <OpenButton id={row.id} label={label} />
+      <div className={s.pwho}>
+        {row.firstPhotoId ? <Portrait photoId={row.firstPhotoId} small /> : null}
+        <div className={s.pwt}>
+          <div className={s.pl1} aria-hidden>
+            <span className={s.pnm} id={nameId}>
+              {displayName(row.name)}
+            </span>
+            {ag ? <span className={s.pas}>{ag}</span> : null}
+            <Minutes minutes={minutes} />
+          </div>
+          <div className={s.plocRow}>
+            <button
+              type="button"
+              className={location ? s.loc : `${s.loc} ${s.locAdd}`}
+              data-location-anchor={row.id}
+              data-testid="location-chip"
+              aria-label={location ? `${location}, edit location` : 'Add location'}
+              aria-describedby={describedBy}
+              {...offlineProps(offline)}
+              onClick={(e) => onLocate(row, cardOf(e))}
+            >
+              {location ? <MapPin size={14} strokeWidth={2} aria-hidden /> : <Plus size={14} strokeWidth={2} aria-hidden />}
+              <span className={s.locText}>{location || 'Location'}</span>
+            </button>
+          </div>
+          <div className={s.pcoming} aria-hidden>
+            <ArrowRight size={14} strokeWidth={2} aria-hidden />
+            <span>
+              <b>{coming.friend}</b> · {coming.rest}
+            </span>
+          </div>
+        </div>
+      </div>
+      <Button
+        size="3"
+        highContrast
+        className={`${s.pbtn} ${s.actions}`}
+        {...offlineProps(offline)}
+        aria-describedby={describedBy}
+        onClick={() => onReunited(row)}
+      >
+        <Check size={16} strokeWidth={2.25} aria-hidden />
+        Reunited
+      </Button>
+      {offline ? <VisuallyHidden id={reasonId}>Needs a connection</VisuallyHidden> : null}
+    </div>
   );
 });
 

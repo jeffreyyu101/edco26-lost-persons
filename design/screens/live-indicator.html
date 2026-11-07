@@ -1,0 +1,85 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Live indicator</title>
+<!-- 2026-11-06. Brian: plain solid dot, no halo ring ("reads AI written"). A minimal last-refreshed indicator so people know the list is live and never pull to refresh.
+     One quiet line under the view title; the dot carries the state. Also shows the approved compact brand row (A). -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@radix-ui/themes@3.3.0/styles.css">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+body{margin:0;background:#0c0c0d}
+.radix-themes{--default-font-family:InterVariable,Inter,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;font-feature-settings:"cv11";-webkit-font-smoothing:antialiased}
+.radix-themes[data-is-root-theme]{min-height:0!important;height:100%;position:relative}
+.board{display:flex;flex-wrap:wrap;justify-content:center;gap:28px 20px;padding:24px;max-width:1320px}
+.board figure{margin:0}.frame{width:390px;height:430px;border-radius:30px;overflow:hidden;border:1px solid #2b2b30}
+.frame.desk{width:1240px;height:260px;border-radius:12px}
+figcaption{margin-top:10px;text-align:center;font:500 15px/1.3 system-ui;color:#e4e4e7}
+figcaption span{display:block;font-weight:400;font-size:13px;color:#8e8e96;margin-top:2px}
+.app{height:100%;display:flex;flex-direction:column;background:var(--color-background)}
+.sp{flex:1}
+.grad{position:relative;overflow:hidden;color:#fff;background:radial-gradient(ellipse at 12% 140%,#e83f91 0,transparent 45%),radial-gradient(ellipse at 88% -40%,#25c7d7 0,transparent 42%),linear-gradient(112deg,#181329 4%,#36205a 55%,#211835 100%)}
+.a{margin:12px 12px 2px;border-radius:14px;padding:10px 10px 10px 14px;display:flex;align-items:center;gap:10px}
+.edc{filter:invert(1);height:19px;width:auto;display:block}.gc{height:16px;width:auto;display:block}.div{width:1px;height:18px;background:rgba(255,255,255,.28)}
+.ttl{font-weight:700;letter-spacing:-.02em;font-size:16px;line-height:1.15}.ttl em{font-style:normal;color:#8ef0e7;font-weight:500}
+.kick{font-size:10px;letter-spacing:.14em;font-weight:700;color:#cdb9f0}
+.x{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.12);color:#fff;flex:none}
+.lt{display:flex;align-items:center;gap:6px;padding:14px 12px 0 16px}
+.lt .tx{font-size:28px;font-weight:700;letter-spacing:-.022em;color:var(--gray-12)}.lt .tc{font-size:28px;color:var(--gray-9)}
+.ib{width:36px;height:36px;display:grid;place-items:center;color:var(--gray-11)}
+.av{width:32px;height:32px;border-radius:50%;background:var(--gray-12);color:var(--gray-1);display:grid;place-items:center;font-size:12px;font-weight:600}
+.live{display:flex;align-items:center;gap:7px;padding:2px 16px 10px;font-size:12.5px;color:var(--gray-10);font-variant-numeric:tabular-nums}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+.dot.on{background:var(--green-9)}
+.dot.warn{background:var(--amber-9)}
+.dot.off{background:var(--gray-8)}
+.live .w{color:var(--amber-11)}
+.banner{display:flex;align-items:center;gap:10px;margin:0 12px 8px;padding:10px 12px;border-radius:10px;background:var(--gray-a3);font-size:14px;color:var(--gray-12)}
+.colh{display:grid;grid-template-columns:36px 1fr 120px 60px;padding:0 16px;font-size:11px;color:var(--gray-9);height:24px;align-items:center}
+.row{display:grid;grid-template-columns:36px 1fr 120px 60px;padding:0 16px;height:48px;align-items:center;border-bottom:1px solid var(--gray-a3);font-size:15px;color:var(--gray-12)}
+.row .n{font-size:13px;color:var(--gray-10)}.row .s{font-size:12.5px}.row .t{text-align:right;font-size:13px;color:var(--gray-11)}
+.dwin{height:100%;display:grid;grid-template-columns:232px 1fr;background:var(--color-background)}
+.side{background:var(--gray-2);border-right:1px solid var(--gray-a4)}
+.dtop{display:flex;align-items:center;gap:10px;height:56px;padding:0 20px 0 24px;border-bottom:1px solid var(--gray-a4)}
+.dtop .h{font-size:17px;font-weight:600;color:var(--gray-12)}.dtop .c{font-size:17px;color:var(--gray-9)}
+.search{display:flex;align-items:center;gap:8px;width:240px;height:32px;padding:0 10px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--gray-a5);color:var(--gray-10);font-size:13.5px}
+.newb{height:32px;padding:0 12px;border-radius:8px;background:var(--gray-12);color:var(--gray-1);font-size:13.5px;font-weight:600;display:flex;align-items:center}
+.d{margin:14px 20px 0 24px;border-radius:14px;padding:10px 12px 10px 18px;display:flex;align-items:center;gap:14px}
+.d .ttl{font-size:19px}
+</style>
+<script type="importmap">{"imports":{
+"react":"https://esm.sh/react@18.3.1","react-dom":"https://esm.sh/react-dom@18.3.1","react-dom/client":"https://esm.sh/react-dom@18.3.1/client",
+"@radix-ui/themes":"https://esm.sh/@radix-ui/themes@3.3.0?deps=react@18.3.1,react-dom@18.3.1","htm":"https://esm.sh/htm@3.1.1"}}</script>
+</head><body>
+<img id="edc" src="../edc-logo.png" hidden alt=""><img id="gc" src="../gc-logo.png" hidden alt="">
+<div id="b"></div>
+<script type="module">
+import React from 'react';
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
+import htm from 'htm';
+import { Theme } from '@radix-ui/themes';
+const h = htm.bind(React.createElement);
+const EDC = document.getElementById('edc').src, GC = document.getElementById('gc').src;
+const svg = (p, s = 16, w = 1.75) => h`<svg width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth=${w} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style=${{ flex: 'none' }} dangerouslySetInnerHTML=${{ __html: p }} />`;
+const P = { x: '<path d="M18 6 6 18M6 6l12 12"/>', search: '<circle cx="11" cy="11" r="7.5"/><path d="m20.5 20.5-4.2-4.2"/>', chev: '<path d="m6 9 6 6 6-6"/>',
+  off: '<path d="m2 2 20 20"/><path d="M5.782 5.782A7 7 0 0 0 9 19h8.5a4.5 4.5 0 0 0 1.307-.193"/><path d="M21.532 16.5A4.5 4.5 0 0 0 17.5 10h-1.79A7.008 7.008 0 0 0 10 5.07"/>' };
+const Brand = () => h`<div className="grad a"><img className="edc" src=${EDC} alt="EDC Orlando"/><span className="div"></span><img className="gc" src=${GC} alt="Ground Control"/>
+  <div style=${{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}><div className="ttl">Is my friend <em>in medical?</em></div><span className="kick">NOV 6–8</span></div><span className="sp"></span><span className="x">${svg(P.x, 15, 2.25)}</span></div>`;
+const Title = () => h`<div className="lt"><span className="tx">All requests</span><span className="tc">12</span><span style=${{ color: 'var(--gray-10)', display: 'flex' }}>${svg(P.chev, 18, 2.25)}</span><span className="sp"></span><span className="ib">${svg(P.search, 20)}</span><span className="av">DK</span></div>`;
+const Rows = () => h`<div className="colh"><span>#</span><span>Friend</span><span>Status</span><span style=${{ textAlign: 'right' }}>Created</span></div>
+  ${[['0012', 'J.D.', 'Waiting for check', 'var(--blue-11)', '2:10 PM'], ['0011', 'Kayla Martinez', 'Waiting for check', 'var(--blue-11)', '2:06 PM'], ['0010', 'B.W.', 'In medical', 'var(--green-11)', '2:01 PM']].map(([a, b, c, col, d]) => h`<div key=${a} className="row"><span className="n">${a}</span><span>${b}</span><span className="s" style=${{ color: col }}>${c}</span><span className="t">${d}</span></div>`)}`;
+const Live = ({ state }) => state === 'on' ? h`<div className="live"><span className="dot on"></span>Updated 6s ago</div>`
+  : state === 'warn' ? h`<div className="live"><span className="dot warn"></span><span className="w">Reconnecting</span> · updated 2m ago</div>`
+  : h`<div className="live"><span className="dot off"></span>Offline · updated 5m ago</div>`;
+const Phone = ({ state }) => h`<${Theme} appearance="dark" accentColor="gray" grayColor="gray" radius="medium"><div className="app"><${Brand}/><${Title}/><${Live} state=${state}/>
+  ${state === 'off' ? h`<div className="banner">${svg(P.off, 16)}Offline · new requests save on this phone</div>` : null}<${Rows}/></div><//>`;
+const Desk = () => h`<${Theme} appearance="dark" accentColor="gray" grayColor="gray" radius="medium"><div className="dwin"><aside className="side"></aside><div>
+  <div className="grad d"><img className="edc" src=${EDC} style=${{ height: 22 }} alt=""/><span className="div"></span><img className="gc" src=${GC} style=${{ height: 19 }} alt=""/><span className="div"></span><div className="ttl">Is my friend <em>in medical?</em></div><span className="kick">NOVEMBER 6–8, 2026</span><span className="sp"></span><span className="x">${svg(P.x, 15, 2.25)}</span></div>
+  <div className="dtop"><span className="h">All requests</span><span className="c">12</span><span className="live" style=${{ padding: '0 0 0 10px' }}><span className="dot on"></span>Updated 6s ago</span><span className="sp"></span><div className="search">${svg(P.search, 15)}Search</div><div className="newb">New request</div></div></div></div><//>`;
+const Fig = ({ cap, sub, desk, children }) => h`<figure><div className=${'frame' + (desk ? ' desk' : '')}>${children}</div><figcaption>${cap}<span>${sub}</span></figcaption></figure>`;
+const Board = () => h`<div className="board">
+  <${Fig} cap="Live" sub="Green dot, ticks every sync"><${Phone} state="on"/><//>
+  <${Fig} cap="Reconnecting" sub="No sync for 30 s: amber, last good time"><${Phone} state="warn"/><//>
+  <${Fig} cap="Offline" sub="Grey dot plus the existing banner"><${Phone} state="off"/><//>
+  <${Fig} desk cap="Desktop" sub="In the top bar next to the title"><${Desk}/><//>
+</div>`;
+flushSync(() => createRoot(document.getElementById('b')).render(h`<${Board}/>`));
+</script></body></html>

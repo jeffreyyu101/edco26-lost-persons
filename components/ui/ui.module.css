@@ -395,6 +395,11 @@
   width: 100%;
 }
 
+/* "Allow notifications" / its state in the "Alerts are on" sheets (v2.5 A52). */
+.notifyRow {
+  margin-top: 12px;
+}
+
 .dialogButtons {
   display: grid;
   grid-template-columns: 1fr 1fr;

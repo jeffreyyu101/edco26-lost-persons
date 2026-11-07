@@ -10,7 +10,9 @@
 //                Change answer only, never Reopen (domain primaryActions / menuActions go by status).
 //   header       portrait + photo count, name, age · gender, post · who logged it
 //   status block status colour (grey for every closed status, Not in medical included); wait badge while
-//                Waiting; "Rae Chen · 11:10 · Maya R. heading to Main Med" while In medical; who and when for
+//                Waiting; while In medical only "Rae Chen · 11:10 AM" (who answered, when), then where medical
+//                has them: a pin, "Chair 14" and a pencil, or "+ Location" (Pending v8, 2026-11-06 afternoon;
+//                the location editor is a sheet on the phone, a popover in the desk pane); who and when for
 //                the other answers
 //   details      Missing person / Friend or family, filled fields only, each with Edit; Phone has Call
 //   photos       tiles → full-screen viewer; Add tile (needs a connection) until there are 3
@@ -18,11 +20,15 @@
 //   actions      sticky, by status; disabled offline with "Needs a connection". Change answer (In medical,
 //                Not in medical) opens a menu: the other answer and Back to Waiting for check
 //                (change-answer.ts). Every answer, change and Reunited offers Undo (the store's snackbar).
+//                In the desk pane (presentation="panel", design/screens/desktop-log.html) they sit right under
+//                the status block, two equal buttons, and the menu opens downwards.
 //   cancel       red, creator-only (canonical created_by match, A18), while Waiting, confirm Keep / Cancel
 //   conflict     "Updated by someone else" when another person's change arrives while it is open
 import { AlertDialog, Badge, Button, DropdownMenu, Heading, IconButton, Skeleton, Text, VisuallyHidden } from '@radix-ui/themes';
-import { Camera, Check, ChevronDown, Clock, CloudOff, Ellipsis, Pencil, Phone, RotateCcw, Trash2, Undo2, X } from 'lucide-react';
+import { Camera, Check, ChevronDown, Clock, CloudOff, Ellipsis, MapPin, Pencil, Phone, Plus, RotateCcw, Trash2, Undo2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { CropSheet } from '@/components/photo/CropSheet';
+import { useCropQueue, type CropPick } from '@/components/photo/use-crop-queue';
 import { Banner, ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ProfileSkeleton } from '@/components/ui/Skeleton';
@@ -66,14 +72,23 @@ import { AddPhotosSheet, type PhotoPick } from './AddPhotos';
 import { AuditTrail, AuditTrailSkeleton } from './AuditTrail';
 import { buildAuditTrail, statusOrigin, type StatusOrigin } from './audit-trail';
 import { Bust } from './Bust';
+import { primeKeyboard } from '@/components/list/hooks';
 import { changeAnswerChoices } from './change-answer';
+import { LocationEditor } from './LocationEditor';
 import { PhotoViewer, photoUrl } from './PhotoViewer';
 import s from './profile.module.css';
 
 export interface ProfileViewProps {
   /** Request id from ?r=. */
   id: string;
+  /**
+   * "panel": inside the desk detail pane (components/desk), which supplies the top bar (LP number, ⋯,
+   * close) and scrolls itself, so the profile hides its own top bar and leaves the window scroll alone.
+   */
+  presentation?: 'page' | 'panel';
 }
+
+const HIDDEN = { display: 'none' } as const;
 
 /** How long the "Updated by someone else" banner stays up. */
 const CONFLICT_BANNER_MS = 8_000;
@@ -81,8 +96,10 @@ const NEEDS_CONNECTION = 'Needs a connection';
 const NO_NAME = 'Name not provided';
 
 const close = () => goBack({});
+const nameOf = (row: RequestSummary) => row.name.trim() || NO_NAME;
 
-export function ProfileView({ id }: ProfileViewProps) {
+export function ProfileView({ id, presentation = 'page' }: ProfileViewProps) {
+  const panel = presentation === 'panel';
   const storeRow = useRequest(id);
   const { detail, loading: detailLoading, error: detailError, refresh } = useDetail(id);
   const storeLoading = useIsLoading();
@@ -91,27 +108,27 @@ export function ProfileView({ id }: ProfileViewProps) {
 
   // Views share one document: start a profile at the top, not at the list's scroll position.
   useEffect(() => {
-    window.scrollTo(0, 0);
-  }, [id]);
+    if (!panel) window.scrollTo(0, 0);
+  }, [id, panel]);
 
   if (!row) {
     const settled = !storeLoading && !detailLoading;
     if (settled && detailError === 'not_found') {
       return (
-        <Frame>
+        <Frame panel={panel}>
           <EmptyState icon="search" title="Request not found" action={{ label: 'Back', onClick: close }} />
         </Frame>
       );
     }
     if (settled && detailError && detailError !== 'unauthorized') {
       return (
-        <Frame>
+        <Frame panel={panel}>
           <EmptyState icon="plug" title="Can't reach the log" action={{ label: 'Try again', onClick: refresh, icon: 'refresh' }} />
         </Frame>
       );
     }
     return (
-      <Frame>
+      <Frame panel={panel}>
         <ProfileSkeleton chrome={false} />
       </Frame>
     );
@@ -124,15 +141,16 @@ export function ProfileView({ id }: ProfileViewProps) {
       detailLoading={detailLoading}
       detailFailed={!detail && !detailLoading && detailError !== null}
       refresh={refresh}
+      panel={panel}
     />
   );
 }
 
 /** The bare top bar (× only) around the loading / not-found states. */
-function Frame({ children }: { children: ReactNode }) {
+function Frame({ children, panel }: { children: ReactNode; panel: boolean }) {
   return (
-    <div className={s.app} data-testid="profile">
-      <div className={s.nav}>
+    <div className={s.app} data-testid="profile" data-presentation={panel ? 'panel' : undefined}>
+      <div className={s.nav} style={panel ? HIDDEN : undefined}>
         <CloseButton />
         <span />
         <span />
@@ -156,12 +174,13 @@ interface ProfileProps {
   detailLoading: boolean;
   detailFailed: boolean;
   refresh: () => void;
+  panel: boolean;
 }
 
 type AddState = { picks: PhotoPick[]; unreadable: number; phase: 'preparing' | 'ready' | 'uploading'; error: string | null };
 type CancelState = { busy: boolean; error: string | null };
 
-function Profile({ row, detail, detailLoading, detailFailed, refresh }: ProfileProps) {
+function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: ProfileProps) {
   const actions = useActions();
   const session = useSession();
   const { connection } = useConnection();
@@ -198,7 +217,14 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh }: ProfileP
   const [viewerAt, setViewerAt] = useState<number | null>(null);
   const [add, setAdd] = useState<AddState | null>(null);
   const addRun = useRef(0);
+  // The open add run (the Add sheet): its prepared picks, its unreadable count, how many files were handed
+  // to it (prepared, still preparing or unreadable), and how many preparations are in flight. Refs, so a
+  // second hand-over while the first is still preparing appends to it.
   const livePicks = useRef<PhotoPick[]>([]);
+  const runOpen = useRef(false);
+  const runFiles = useRef(0);
+  const runUnreadable = useRef(0);
+  const runPreparing = useRef(0);
   useEffect(() => {
     const picks = livePicks;
     return () => revoke(picks.current);
@@ -208,34 +234,50 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh }: ProfileP
     addRun.current += 1;
     revoke(livePicks.current);
     livePicks.current = [];
+    runOpen.current = false;
+    runFiles.current = 0;
+    runUnreadable.current = 0;
+    runPreparing.current = 0;
     setAdd(null);
   }, []);
 
-  const onFiles = async (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.currentTarget.files ?? []);
-    event.currentTarget.value = '';
-    const room = MAX_PHOTOS - photoCount;
-    if (files.length === 0 || room <= 0) return;
-    const run = (addRun.current += 1);
-    revoke(livePicks.current);
-    livePicks.current = [];
-    setAdd({ picks: [], unreadable: 0, phase: 'preparing', error: null });
-    const picks: PhotoPick[] = [];
-    let unreadable = 0;
+  // Each picked photo goes through the quick-crop step first (CropSheet, v2.2 #10), then is prepared. Photos
+  // handed over while an add run is open (a Retake's photo that came in after the others were handed over)
+  // join that run: nothing it already holds is revoked or replaced (F2 review).
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const prepareCropped = async (cropped: CropPick[]) => {
+    if (!runOpen.current) {
+      addRun.current += 1;
+      runOpen.current = true;
+    }
+    const run = addRun.current;
+    runFiles.current += cropped.length;
+    runPreparing.current += 1;
+    setAdd({ picks: livePicks.current, unreadable: runUnreadable.current, phase: 'preparing', error: null });
     // One at a time: decoding several camera photos at once can exhaust iOS memory.
-    for (const file of files.slice(0, room)) {
+    for (const { file, crop: cropRect } of cropped) {
       try {
-        const photo = await actions.preparePhoto(file);
+        const photo = await actions.preparePhoto(file, { crop: cropRect });
         if (addRun.current !== run) return;
-        const pick = { photo, url: URL.createObjectURL(photo.thumbBlob) };
-        picks.push(pick);
-        livePicks.current = [...picks];
+        livePicks.current = [...livePicks.current, { photo, url: URL.createObjectURL(photo.thumbBlob) }];
       } catch {
-        unreadable += 1;
+        if (addRun.current !== run) return;
+        runUnreadable.current += 1;
       }
     }
     if (addRun.current !== run) return;
-    setAdd({ picks, unreadable, phase: 'ready', error: null });
+    runPreparing.current -= 1;
+    setAdd({ picks: livePicks.current, unreadable: runUnreadable.current, phase: runPreparing.current > 0 ? 'preparing' : 'ready', error: null });
+  };
+  const crop = useCropQueue((picks) => void prepareCropped(picks), fileInput);
+
+  const onFiles = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.currentTarget.files ?? []);
+    event.currentTarget.value = '';
+    const inRun = runOpen.current ? runFiles.current - runUnreadable.current : 0;
+    const room = MAX_PHOTOS - photoCount - crop.pending() - inRun;
+    if (files.length === 0 || room <= 0) return;
+    crop.enqueue(files.slice(0, room));
   };
 
   const onAdd = async (timing: PhotoTiming) => {
@@ -291,10 +333,35 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh }: ProfileP
   const setStatus = (a: StatusAction) => move(a.to, a.kind);
   const menu = menuActions(row.status, isCreator);
   const footer = primaryActions(row.status);
+  // The phone's sticky bar at the foot of the screen; the desk pane's row under the status block.
+  const actionBar =
+    footer.length > 0 ? (
+      <div
+        className={panel ? s.acts : s.foot}
+        data-layout={footer.length === 1 ? 'one' : panel ? 'two' : isInMedical(row.status) ? 'one-two' : 'two'}
+        data-testid="profile-actions"
+      >
+        {offline ? (
+          <span className={s.offline}>
+            <CloudOff size={13} aria-hidden />
+            {NEEDS_CONNECTION}
+          </span>
+        ) : null}
+        {footer.map((a) =>
+          a.kind === 'change' ? (
+            // Keyed by status: an open menu closes when the status moves under it (someone else's answer),
+            // so a tap never lands on a choice that changed meaning.
+            <ChangeAnswerMenu key={`${a.id}:${row.status}`} status={row.status} disabled={offline} side={panel ? 'bottom' : 'top'} onChoose={move} />
+          ) : (
+            <ActionButton key={a.id} action={a} disabled={offline} onClick={() => setStatus(a)} />
+          ),
+        )}
+      </div>
+    ) : null;
 
   return (
-    <div className={s.app} data-testid="profile" data-status={row.status}>
-      <div className={s.nav}>
+    <div className={s.app} data-testid="profile" data-status={row.status} data-presentation={panel ? 'panel' : undefined}>
+      <div className={s.nav} style={panel ? HIDDEN : undefined}>
         <CloseButton />
         <Text size="2" weight="medium" color="gray" data-testid="profile-case">
           {label}
@@ -355,7 +422,18 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh }: ProfileP
           </div>
         </div>
 
-        <StatusBlock row={row} origin={origin} originLoading={!detail && detailLoading} now={now} timeZone={timeZone} />
+        <StatusBlock
+          row={row}
+          origin={origin}
+          originLoading={!detail && detailLoading}
+          now={now}
+          timeZone={timeZone}
+          offline={offline}
+          panel={panel}
+          onNeedsConnection={() => actions.showToast({ tone: 'amber', icon: 'cloud-off', title: NEEDS_CONNECTION, durationMs: 3_000 })}
+        />
+
+        {panel ? actionBar : null}
 
         <Details row={row} />
 
@@ -387,12 +465,15 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh }: ProfileP
               <span>Add</span>
               <VisuallyHidden>
                 <input
+                  ref={fileInput}
                   type="file"
                   accept="image/*"
                   multiple
-                  disabled={offline || add !== null}
+                  // Never while a Retake's picker is open (its photo must arrive); else not offline or while
+                  // the add run uploads (a photo picked then joins the open run).
+                  disabled={!crop.retaking && (offline || add?.phase === 'uploading')}
                   aria-label={offline ? `Add photo (${NEEDS_CONNECTION.toLowerCase()})` : 'Add photo'}
-                  onChange={(e) => void onFiles(e)}
+                  onChange={onFiles}
                 />
               </VisuallyHidden>
             </label>
@@ -414,25 +495,7 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh }: ProfileP
         ) : null}
       </main>
 
-      {footer.length > 0 ? (
-        <div className={s.foot} data-layout={footer.length === 1 ? 'one' : isInMedical(row.status) ? 'one-two' : 'two'} data-testid="profile-actions">
-          {offline ? (
-            <span className={s.offline}>
-              <CloudOff size={13} aria-hidden />
-              {NEEDS_CONNECTION}
-            </span>
-          ) : null}
-          {footer.map((a) =>
-            a.kind === 'change' ? (
-              // Keyed by status: an open menu closes when the status moves under it (someone else's answer),
-              // so a tap never lands on a choice that changed meaning.
-              <ChangeAnswerMenu key={`${a.id}:${row.status}`} status={row.status} disabled={offline} onChoose={move} />
-            ) : (
-              <ActionButton key={a.id} action={a} disabled={offline} onClick={() => setStatus(a)} />
-            ),
-          )}
-        </div>
-      ) : null}
+      {panel ? null : actionBar}
 
       <AlertDialog.Root
         open={confirmOpen}
@@ -475,6 +538,8 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh }: ProfileP
           onClose={() => setViewerAt(null)}
         />
       ) : null}
+
+      <CropSheet item={crop.current} position={crop.position} onUse={crop.use} onRetake={crop.retake} />
 
       {add ? (
         <AddPhotosSheet
@@ -575,15 +640,22 @@ function StatusBlock({
   originLoading,
   now,
   timeZone,
+  offline,
+  panel,
+  onNeedsConnection,
 }: {
   row: RequestSummary;
   origin: StatusOrigin | null;
   originLoading: boolean;
   now: number;
   timeZone: string;
+  offline: boolean;
+  panel: boolean;
+  onNeedsConnection: () => void;
 }) {
   const meta = statusMeta(row.status);
   const waiting = row.status === STATUS.waiting;
+  const inMedical = isInMedical(row.status);
   let sub: ReactNode = null;
   let badge: ReactNode = null;
   if (waiting) {
@@ -599,28 +671,83 @@ function StatusBlock({
       </Badge>
     );
   } else if (isStatus(row.status)) {
+    // Who answered and when, nothing else (Brian, 2026-11-06 afternoon: the "heading to Main Med" line went).
     const o = origin ?? fallbackOrigin(row);
     const parts = o ? [o.staffName, formatListTime(o.at, now, timeZone)].filter(Boolean) : [];
-    if (isInMedical(row.status)) parts.push(`${row.contactName?.trim() || 'Friend'} heading to Main Med`);
     if (parts.length > 0) sub = parts.join(' · ');
     else if (originLoading) sub = <Skeleton height="12px" width="45%" style={{ marginTop: 2 }} />;
   }
   return (
-    <div className={s.status} data-tone={meta.tone} data-testid="status-block">
-      <StatusGlyph status={row.status} size={18} />
-      <div className={s.sx}>
-        {/* Step 12 of the status colour on its step-3 tint: step 11 is ~4.3:1 there (spec §7). */}
-        <Text size="3" weight="medium" color={meta.tone} highContrast={meta.tone !== 'gray'}>
-          {meta.label}
-        </Text>
-        {sub ? (
-          <Text as="div" size="1" color="gray">
-            {sub}
+    <div className={s.statusBox} data-tone={meta.tone} data-testid="status-block">
+      <div className={s.status}>
+        <StatusGlyph status={row.status} size={18} />
+        <div className={s.sx}>
+          {/* Step 12 of the status colour on its step-3 tint: step 11 is ~4.3:1 there (spec §7). */}
+          <Text size="3" weight="medium" color={meta.tone} highContrast={meta.tone !== 'gray'}>
+            {meta.label}
           </Text>
-        ) : null}
+          {sub ? (
+            <Text as="div" size="1" color="gray">
+              {sub}
+            </Text>
+          ) : null}
+        </div>
+        {badge}
       </div>
-      {badge}
+      {inMedical ? <LocationRow row={row} offline={offline} panel={panel} onNeedsConnection={onNeedsConnection} /> : null}
     </div>
+  );
+}
+
+/**
+ * Where medical has them, under the In medical status (pending-v8.html "The request"): a pin, the location
+ * (18/650) and a pencil, or a quiet "+ Location". The whole row is the button that edits it.
+ */
+function LocationRow({ row, offline, panel, onNeedsConnection }: { row: RequestSummary; offline: boolean; panel: boolean; onNeedsConnection: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const button = useRef<HTMLButtonElement>(null);
+  const location = (row.medicalLocation ?? '').trim();
+  return (
+    <>
+      <button
+        ref={button}
+        type="button"
+        className={location ? s.locRow : `${s.locRow} ${s.locEmpty}`}
+        aria-label={location ? `${location}, edit location` : 'Add location'}
+        aria-disabled={offline || undefined}
+        data-disabled={offline ? '' : undefined}
+        data-testid="location-row"
+        onClick={() => {
+          if (offline) {
+            onNeedsConnection();
+            return;
+          }
+          // iOS opens the keyboard only for a focus made during the tap: the sheet's field takes it over.
+          if (!panel) primeKeyboard();
+          setEditing(true);
+        }}
+      >
+        {location ? (
+          <>
+            <MapPin size={16} aria-hidden className={s.locPin} />
+            <span className={s.locValue}>{location}</span>
+            <Pencil size={15} aria-hidden className={s.locEdit} />
+          </>
+        ) : (
+          <>
+            <Plus size={16} aria-hidden className={s.locPin} />
+            <span className={s.locAdd}>Location</span>
+          </>
+        )}
+      </button>
+      <LocationEditor
+        target={editing ? { id: row.id, name: nameOf(row), mode: 'edit', initial: location } : null}
+        desk={panel}
+        anchor={button}
+        returnFocus={() => button.current}
+        onClose={() => setEditing(false)}
+      />
+    </>
   );
 }
 
@@ -754,7 +881,18 @@ function ActionButton({ action, disabled, onClick }: { action: StatusAction; dis
  * Change answer: a menu with the other answer and Back to Waiting for check, each marked with the glyph of
  * the status it moves to. A choice saves on tap (kind 'change'); the store shows the overlay and the Undo bar.
  */
-function ChangeAnswerMenu({ status, disabled, onChoose }: { status: string; disabled: boolean; onChoose: (to: SettableStatus, kind: StatusKind) => void }) {
+function ChangeAnswerMenu({
+  status,
+  disabled,
+  side,
+  onChoose,
+}: {
+  status: string;
+  disabled: boolean;
+  /** Up from the phone's bar at the foot of the screen, down from the desk pane's row under the status. */
+  side: 'top' | 'bottom';
+  onChoose: (to: SettableStatus, kind: StatusKind) => void;
+}) {
   const choices = changeAnswerChoices(status);
   const [answer, ...rest] = choices;
   return (
@@ -766,7 +904,7 @@ function ChangeAnswerMenu({ status, disabled, onChoose }: { status: string; disa
           <ChevronDown size={14} aria-hidden className={s.chev} />
         </Button>
       </DropdownMenu.Trigger>
-      <DropdownMenu.Content side="top" align="start" variant="soft" className={s.pmenu} data-testid="change-answer-menu">
+      <DropdownMenu.Content side={side} align="start" variant="soft" className={s.pmenu} data-testid="change-answer-menu">
         {answer ? <ChangeChoiceItem to={answer.to} label={answer.label} disabled={disabled} onSelect={() => onChoose(answer.to, answer.kind)} /> : null}
         {rest.length > 0 ? <DropdownMenu.Separator /> : null}
         {rest.map((c) => (

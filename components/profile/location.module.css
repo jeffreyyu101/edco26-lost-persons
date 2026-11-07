@@ -1,0 +1,135 @@
+/* The location editor (design/screens/pending-v8.html "Answering In medical": .sheet .done .field .acts .btn).
+   Shared by the phone's bottom sheet and the desk popover. Every control is 44 px tall. */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* "B.W. is in medical": the green glyph and line (the dialog's title). Doubled: it overrides the Radix
+   Heading the sheet title renders as. */
+.done.done {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  min-width: 0;
+  font-size: 17px;
+  line-height: 22px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--green-11);
+}
+
+.doneText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 17 px text: iOS does not zoom the page into a field of 16 px or more. */
+.field {
+  box-sizing: border-box;
+  width: 100%;
+  height: 50px;
+  margin: 0;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--color-background);
+  box-shadow: inset 0 0 0 1.5px var(--gray-a7);
+  color: var(--gray-12);
+  font: inherit;
+  font-size: 17px;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.field::placeholder {
+  color: var(--gray-a10);
+}
+
+.field:focus {
+  box-shadow: inset 0 0 0 1.5px var(--focus-8);
+}
+
+.offline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: -4px;
+  font-size: 13px;
+  color: var(--gray-11);
+}
+
+.acts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.btn {
+  height: 44px;
+  margin: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+
+.ghost {
+  background: none;
+  color: var(--gray-11);
+  font-weight: 500;
+}
+
+.ghost:hover {
+  background: var(--gray-a3);
+}
+
+.solid {
+  background: var(--gray-12);
+  color: var(--gray-1);
+}
+
+.solid[data-disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The phone sheet: above the Undo bar (z-index 60), which waits behind the scrim until the sheet closes (its
+   countdown held meanwhile: LocationEditor, store holdUndo). */
+:global(.rt-BaseDialogOverlay):has([data-location-sheet]) {
+  z-index: 61;
+}
+
+.sheetBody {
+  touch-action: pan-x;
+}
+
+/* The desk popover: Radix copies this z-index to its positioned wrapper (above the Undo bar too). */
+.pop {
+  z-index: 61;
+}
+
+.pop .done.done {
+  font-size: 15px;
+}
+
+/* 16 px: iPad Safari zooms into smaller fields too. */
+.pop .field {
+  height: 44px;
+  font-size: 16px;
+}

@@ -128,22 +128,82 @@ button.portrait {
   overflow-wrap: anywhere;
 }
 
+/* The status block: the status row, and while In medical the location row under it (pending-v8.html
+   .status .top / .lr). The tint is on the box, so both rows share it. */
+.statusBox {
+  border-radius: var(--radius-4);
+  background: var(--gray-a3);
+  overflow: hidden;
+}
+.statusBox[data-tone='blue'] {
+  background: var(--blue-a3);
+}
+.statusBox[data-tone='green'] {
+  background: var(--green-a3);
+}
+.statusBox[data-tone='amber'] {
+  background: var(--amber-a3);
+}
 .status {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 12px 14px;
-  border-radius: var(--radius-4);
-  background: var(--gray-a3);
 }
-.status[data-tone='blue'] {
-  background: var(--blue-a3);
+
+/* "📍 Chair 14 ✎", or "+ Location": one 46 px button across the block. */
+.locRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 46px;
+  margin: 0;
+  padding: 10px 14px;
+  border: 0;
+  border-top: 1px solid var(--green-a4);
+  background: none;
+  color: var(--gray-12);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
-.status[data-tone='green'] {
+.locRow:active {
   background: var(--green-a3);
 }
-.status[data-tone='amber'] {
-  background: var(--amber-a3);
+.locRow:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -2px;
+}
+.locRow[data-disabled] {
+  cursor: default;
+}
+.locPin {
+  flex: none;
+  color: var(--gray-12);
+}
+.locValue {
+  flex: 1;
+  min-width: 0;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.locEdit {
+  flex: none;
+  margin-left: auto;
+  color: var(--gray-11);
+}
+.locEmpty .locPin {
+  color: var(--gray-11);
+}
+.locAdd {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--gray-11);
 }
 .sx {
   flex: 1;
@@ -366,6 +426,25 @@ button.portrait {
 }
 .foot[data-layout='one-two'] {
   grid-template-columns: auto 1fr;
+}
+/* The desk pane (presentation="panel", design/screens/desktop-log.html .acts): the actions sit right under
+   the status block, two equal buttons, scrolling with the profile. */
+.acts {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.acts :global(.rt-Button) {
+  white-space: nowrap;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.acts :global(.rt-Button) svg {
+  flex: none;
+}
+/* Equal halves; "Change answer" keeps its whole label in the 420 px pane (iPad landscape, small laptops). */
+.acts[data-layout='two'] {
+  grid-template-columns: repeat(2, minmax(max-content, 1fr));
 }
 /* Change answer opens a menu: a small chevron after the label. */
 .chev {

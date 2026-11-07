@@ -38,7 +38,7 @@ select
   regexp_replace(p.contact_notes, s.guard, '''') as "Contact notes",
   case p.status
     when 'Added' then 'Waiting for check'
-    when 'Checked – Not Found' then 'Not in medical'
+    when 'Checked – Not Found' then 'Not found in medical'
     when 'Found – Awaiting Reunion' then 'In medical · friend coming'
     when 'Bring friend to medical' then 'In medical · friend coming'
     when 'Reunited – Closed' then 'Reunited'

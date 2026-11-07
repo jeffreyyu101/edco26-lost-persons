@@ -77,7 +77,7 @@ const changeAnswer = (page: Page) => page.getByTestId('profile-actions').getByRo
 const undoButton = (page: Page) => page.getByRole('button', { name: 'Undo', exact: true });
 /** Let the menu's open animation (a slight scale-in) finish before measuring it. */
 const settle = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
-/** Change answer → one of its menu choices ("Not in medical", "In medical", "Back to Waiting for check"). */
+/** Change answer → one of its menu choices ("Not found", "In medical", "Back to Waiting for check"). */
 async function chooseChange(page: Page, choice: string) {
   await changeAnswer(page).click();
   const menu = page.getByRole('menu');
@@ -139,13 +139,15 @@ test('renders from the request, answers, changes the answer, reunites, reopens a
   await page.getByRole('button', { name: 'In medical', exact: true }).click();
   await expect(profileStatus(page, 'Found – Awaiting Reunion')).toBeVisible();
   await expect(statusBlock(page)).toContainText('In medical · friend coming');
-  await expect(statusBlock(page)).toContainText('Maya R. heading to Main Med');
+  // Who answered and when, then where medical has them (Pending v8): no "heading to Main Med" line.
+  await expect(statusBlock(page)).not.toContainText('heading');
+  await expect(statusBlock(page).getByTestId('location-row')).toHaveAccessibleName('Add location');
   await expect(auditItems(page).first()).toContainText('Waiting for check');
   await expect(auditItems(page).first()).toContainText('In medical');
   await expect(auditItems(page).first()).toContainText(`${FRONT.staffName} · Dispatch`);
 
-  // Change answer → Not in medical → Change answer → In medical.
-  await chooseChange(page, 'Not in medical');
+  // Change answer → Not found → Change answer → In medical.
+  await chooseChange(page, 'Not found');
   await expect(profileStatus(page, 'Checked – Not Found')).toBeVisible();
   await expect(statusBlock(page)).toContainText(FRONT.staffName);
   await chooseChange(page, 'In medical');
@@ -166,26 +168,26 @@ test('renders from the request, answers, changes the answer, reunites, reopens a
   await expect(statusBlock(page)).toContainText('Discharged');
 });
 
-test('Not in medical is closed and grey, and keeps exactly its actions: Change answer only', async ({ browser, page, baseURL }) => {
-  // v2.2 (Jeffrey, 2026-11-06): Not in medical counts as closed and is greyed out like Reunited, but it is
+test('Not found in medical is closed and grey, and keeps exactly its actions: Change answer only', async ({ browser, page, baseURL }) => {
+  // v2.2 (Jeffrey, 2026-11-06): Not found in medical counts as closed and is greyed out like Reunited, but it is
   // still answerable — no Reopen, no Mark discharged, no Cancel request (not even for the person who logged it).
   const origin = baseURL as string;
   const row = await createRequest(page, origin);
   await page.goto(`/?r=${row.id}`);
-  await page.getByRole('button', { name: 'Not in medical', exact: true }).click();
+  await page.getByRole('button', { name: 'Not found', exact: true }).click();
   await expect(profileStatus(page, 'Checked – Not Found')).toBeVisible();
 
   // Grey like the other closed states: grey tint, grey label, grey × glyph.
   await expect(statusBlock(page)).toHaveAttribute('data-tone', 'gray');
-  await expect(statusBlock(page).locator('[data-accent-color="gray"]', { hasText: 'Not in medical' })).toBeVisible();
+  await expect(statusBlock(page).locator('[data-accent-color="gray"]', { hasText: 'Not found in medical' })).toBeVisible();
   await expect(statusBlock(page).locator('svg[data-glyph="notInMedical"] circle')).toHaveAttribute('fill', 'var(--gray-9)');
   const tint = await statusBlock(page).evaluate((el) => getComputedStyle(el).backgroundColor);
-  // The audit trail's newest entry: the grey glyph on the timeline and in "Waiting for check → Not in medical".
+  // The audit trail's newest entry: the grey glyph on the timeline and in "Waiting for check → Not found in medical".
   const latest = auditItems(page).first();
-  await expect(latest).toContainText('Not in medical');
+  await expect(latest).toContainText('Not found in medical');
   await expect(latest.locator('svg[data-glyph="notInMedical"] circle')).toHaveCount(2);
   for (const circle of await latest.locator('svg[data-glyph="notInMedical"] circle').all()) await expect(circle).toHaveAttribute('fill', 'var(--gray-9)');
-  await expect(latest.locator('[data-accent-color="gray"]', { hasText: 'Not in medical' })).toBeVisible();
+  await expect(latest.locator('[data-accent-color="gray"]', { hasText: 'Not found in medical' })).toBeVisible();
 
   // Exactly one action: Change answer (its menu: In medical, Back to Waiting for check).
   const bar = page.getByTestId('profile-actions');
@@ -243,8 +245,8 @@ test('Change answer opens a menu: the other answer or Back to Waiting for check,
   await expect(menu).toBeVisible();
   // (The open menu is modal: the page behind it, the button included, is aria-hidden until it closes.)
   await expect(page.getByTestId('change-answer')).toHaveAttribute('aria-expanded', 'true');
-  await expect(menu.getByRole('menuitem')).toHaveText(['Not in medical', 'Back to Waiting for check']);
-  await expect(menu.getByRole('menuitem', { name: 'Not in medical' }).locator('svg[data-glyph="notInMedical"]')).toHaveCount(1);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Not found', 'Back to Waiting for check']);
+  await expect(menu.getByRole('menuitem', { name: 'Not found' }).locator('svg[data-glyph="notInMedical"]')).toHaveCount(1);
   await expect(menu.getByRole('menuitem', { name: 'Back to Waiting for check' }).locator('svg[data-glyph="waiting"]')).toHaveCount(1);
   // 44 px rows (axe on the open menu: the describe block below).
   await settle(page);
@@ -256,7 +258,7 @@ test('Change answer opens a menu: the other answer or Back to Waiting for check,
   await expect(profileStatus(page, 'Added')).toBeVisible();
   await expect(statusBlock(page)).toContainText('Waiting for check');
   await expect(page.getByTestId('wait-badge')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Not in medical', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Not found', exact: true })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'In medical', exact: true })).toBeEnabled();
   await expect(auditItems(page).first()).toContainText('In medical');
   await expect(auditItems(page).first()).toContainText('Waiting for check');
@@ -271,24 +273,24 @@ test('Change answer opens a menu: the other answer or Back to Waiting for check,
   await expect(auditItems(page).first()).toContainText('Undo');
   await expect(undoButton(page)).toHaveCount(0);
 
-  // In medical → Not in medical through the menu: Undo offered.
-  await chooseChange(page, 'Not in medical');
+  // In medical → Not found through the menu: Undo offered.
+  await chooseChange(page, 'Not found');
   await expect(profileStatus(page, 'Checked – Not Found')).toBeVisible();
-  await expect(page.getByText(`${lp} · Not in medical`)).toBeVisible();
+  await expect(page.getByText(`${lp} · Not found in medical`)).toBeVisible();
   await expect(undoButton(page)).toBeVisible();
 
-  // Not in medical (closed, grey) → its menu: In medical, then Back to Waiting for check.
+  // Not found in medical (closed, grey) → its menu: In medical, then Back to Waiting for check.
   await changeAnswer(page).click();
   await expect(page.getByRole('menu').getByRole('menuitem')).toHaveText(['In medical', 'Back to Waiting for check']);
   await page.getByRole('menuitem', { name: 'Back to Waiting for check' }).click();
   await expect(profileStatus(page, 'Added')).toBeVisible();
   await expect(page.getByText(`${lp} · Waiting for check`)).toBeVisible();
-  await expect(auditItems(page).first()).toContainText('Not in medical');
+  await expect(auditItems(page).first()).toContainText('Not found in medical');
   await expect(auditItems(page).first()).toContainText('Waiting for check');
   await undoButton(page).click();
   await expect(profileStatus(page, 'Checked – Not Found')).toBeVisible();
 
-  // Not in medical → In medical through the menu, then Reunited: both offer Undo.
+  // Not found in medical → In medical through the menu, then Reunited: both offer Undo.
   await chooseChange(page, 'In medical');
   await expect(profileStatus(page, 'Found – Awaiting Reunion')).toBeVisible();
   await expect(undoButton(page)).toBeVisible();
@@ -339,8 +341,9 @@ test.describe('the Change answer menu passes axe', () => {
       await settle(page);
       // A modal Radix menu marks the page behind it aria-hidden and keeps focus inside itself (the ⋯ menu
       // has done the same since Phase 2): axe's aria-hidden-focus on that page root is the only finding it may
-      // make, and Tab never takes focus out of the menu, so nothing aria-hidden can be reached.
-      const findings = (await axeViolations(page)).filter((v) => !(v.rule === 'aria-hidden-focus' && /_app$/.test(v.target)));
+      // make, and Tab never takes focus out of the menu, so nothing aria-hidden can be reached. The page root
+      // is the profile's, or the desk frame's that wraps every view (a plain block on the phone).
+      const findings = (await axeViolations(page)).filter((v) => !(v.rule === 'aria-hidden-focus' && /_(app|frame)$/.test(v.target)));
       expect(findings).toEqual([]);
       for (let i = 0; i < 3; i += 1) {
         await page.keyboard.press('Tab');
@@ -351,14 +354,14 @@ test.describe('the Change answer menu passes axe', () => {
   }
 });
 
-test('the Not in medical button on the profile offers Undo too', async ({ page, baseURL }) => {
+test('the Not found button on the profile offers Undo too', async ({ page, baseURL }) => {
   const origin = baseURL as string;
   const row = await createRequest(page, origin);
   await page.goto(`/?r=${row.id}`);
   const lp = await page.getByTestId('profile-case').innerText();
-  await page.getByRole('button', { name: 'Not in medical', exact: true }).click();
+  await page.getByRole('button', { name: 'Not found', exact: true }).click();
   await expect(profileStatus(page, 'Checked – Not Found')).toBeVisible();
-  await expect(page.getByText(`${lp} · Not in medical`)).toBeVisible();
+  await expect(page.getByText(`${lp} · Not found in medical`)).toBeVisible();
   await undoButton(page).click();
   await expect(profileStatus(page, 'Added')).toBeVisible();
   await expect(auditItems(page).first()).toContainText('Undo');
@@ -457,14 +460,85 @@ test('photos open the full-screen viewer, and Add uploads another', async ({ pag
   await expect(viewer).toBeHidden();
   await expect(auditItems(page).first()).toContainText('Photo added');
 
-  // Add from the profile: pick, choose Not today, upload.
+  // Add from the profile: pick, skip the crop with Escape (the whole photo), choose Not today, upload.
   await page.getByLabel('Add photo').setInputFiles({ name: 'second.jpg', mimeType: 'image/jpeg', buffer: JPEG });
+  const crop = page.getByRole('dialog', { name: 'Crop photo' });
+  await expect(crop.getByRole('button', { name: 'Use photo' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(crop).toBeHidden();
   const sheet = page.getByRole('dialog', { name: 'Add photo' });
   await expect(sheet).toBeVisible();
   await sheet.getByRole('radio', { name: 'Not today' }).click();
   await sheet.getByRole('button', { name: 'Add photo' }).click();
   await expect(sheet).toBeHidden({ timeout: 20_000 });
   await expect(page.getByRole('button', { name: 'Photo 2 of 2, Not today' })).toBeVisible({ timeout: 15_000 });
+});
+
+// F2 review (a): Retake on a later photo of a multi-photo pick must not lose the photos already kept. Before
+// the fix the kept one was prepared and shown at once, the input went disabled, and the retaken photo then
+// replaced it in the Add sheet.
+test('Add with two photos: Use on the first, Retake on the second, a new photo: both are in the Add sheet and upload', async ({ page, baseURL }) => {
+  const origin = baseURL as string;
+  const row = await createRequest(page, origin);
+  await page.goto(`/?r=${row.id}`);
+  await expect(page.getByTestId('add-photo')).toBeVisible({ timeout: 15_000 });
+
+  await page.getByLabel('Add photo').setInputFiles([
+    { name: 'one.jpg', mimeType: 'image/jpeg', buffer: JPEG },
+    { name: 'two.jpg', mimeType: 'image/jpeg', buffer: JPEG },
+  ]);
+  const crop = page.getByRole('dialog', { name: 'Crop photo' });
+  await expect(crop.getByText('1 of 2', { exact: true })).toBeVisible();
+  await crop.getByRole('button', { name: 'Use photo' }).click();
+  await expect(crop.getByText('2 of 2', { exact: true })).toBeVisible();
+  // Past the next photo's guard (a tap this soon is ignored, CropSheet FRESH_MS).
+  await page.waitForTimeout(500);
+  // Nothing is prepared or shown while the retake is open: no Add sheet yet.
+  const chooser = page.waitForEvent('filechooser');
+  await crop.getByRole('button', { name: 'Retake' }).click();
+  const picker = await chooser;
+  await expect(crop).toBeHidden();
+  await expect(page.getByRole('dialog', { name: /^Add/ })).toHaveCount(0);
+  await expect(page.getByLabel('Add photo')).toBeEnabled();
+  await picker.setFiles({ name: 'three.jpg', mimeType: 'image/jpeg', buffer: JPEG });
+  // The new photo joins the run: the second of two.
+  await expect(crop.getByText('2 of 2', { exact: true })).toBeVisible();
+  await page.waitForTimeout(500);
+  await crop.getByRole('button', { name: 'Use photo' }).click();
+  await expect(crop).toBeHidden();
+
+  const sheet = page.getByRole('dialog', { name: 'Add 2 photos' });
+  await expect(sheet).toBeVisible({ timeout: 15_000 });
+  await expect(sheet.getByRole('img')).toHaveCount(2);
+  await expect(sheet.getByRole('img', { name: 'New photo 1' })).toBeVisible();
+  await expect(sheet.getByRole('img', { name: 'New photo 2' })).toBeVisible();
+  await sheet.getByRole('button', { name: 'Add 2 photos' }).click();
+  await expect(sheet).toBeHidden({ timeout: 20_000 });
+  await expect(page.getByRole('button', { name: 'Photo 2 of 2, Today' })).toBeVisible({ timeout: 15_000 });
+});
+
+test('Retake on a later photo, then the picker closed with no photo: the kept photo still reaches the Add sheet', async ({ page, baseURL }) => {
+  const origin = baseURL as string;
+  const row = await createRequest(page, origin);
+  await page.goto(`/?r=${row.id}`);
+  await expect(page.getByTestId('add-photo')).toBeVisible({ timeout: 15_000 });
+  await page.getByLabel('Add photo').setInputFiles([
+    { name: 'one.jpg', mimeType: 'image/jpeg', buffer: JPEG },
+    { name: 'two.jpg', mimeType: 'image/jpeg', buffer: JPEG },
+  ]);
+  const crop = page.getByRole('dialog', { name: 'Crop photo' });
+  await crop.getByRole('button', { name: 'Use photo' }).click();
+  await expect(crop.getByText('2 of 2', { exact: true })).toBeVisible();
+  await page.waitForTimeout(500);
+  const chooser = page.waitForEvent('filechooser');
+  await crop.getByRole('button', { name: 'Retake' }).click();
+  await chooser;
+  await expect(crop).toBeHidden();
+  // The picker is dismissed: the browser fires `cancel` on the input.
+  await page.getByLabel('Add photo').dispatchEvent('cancel');
+  const sheet = page.getByRole('dialog', { name: 'Add photo' });
+  await expect(sheet).toBeVisible({ timeout: 15_000 });
+  await expect(sheet.getByRole('img')).toHaveCount(1);
 });
 
 test("another person's answer shows the conflict banner and the new status within a poll", async ({ browser, page, baseURL }) => {
@@ -492,7 +566,7 @@ test('offline disables the answer buttons with "Needs a connection"', async ({ c
   await context.setOffline(true);
   await expect(page.getByTestId('profile-actions')).toContainText('Needs a connection');
   await expect(answer).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Not in medical', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Not found', exact: true })).toBeDisabled();
   await context.setOffline(false);
   await expect(answer).toBeEnabled({ timeout: 15_000 });
 });

@@ -234,3 +234,39 @@
     display: block;
   }
 }
+
+/* The desk (from 768 px): the same row opens All requests' main column, above the top bar (the brand slot in
+   components/desk/DeskFrame.tsx, an inline-size container; the list's own row is phone only), lined up with
+   the top bar's title (24 px in) as in the Desktop frame of design/screens/live-indicator.html. */
+@media (min-width: 768px) {
+  .brand {
+    margin: 14px 20px 0 24px;
+  }
+}
+
+/* A narrow main column on the desk (a request docked beside the list at 1024-1279 px): the dates go back
+   under the title, short, so the title keeps its one line. */
+@container desk-brand (max-width: 619.98px) {
+  .wideOnly {
+    display: none;
+  }
+
+  .words {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+  }
+
+  .title {
+    font-size: 17px;
+    line-height: 20px;
+  }
+
+  .datesShort {
+    display: block;
+  }
+
+  .datesLong {
+    display: none;
+  }
+}

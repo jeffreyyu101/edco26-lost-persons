@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Production-build smoke check (spec §9.6 "the CSP and nonce work in a production build"): /signin serves
 // the CSP, hydrates with no CSP violations, and `/` with a valid session renders the shell and a lazily
-// loaded view under the nonce CSP, in Chromium and WebKit.
+// loaded view under the nonce CSP, in Chromium and WebKit: on a phone, then on a desk (from 768 px the
+// desk chunk, components/desk, loads too and a request opens beside the list).
 // Run against a server started with: PORT=3100 node scripts/with-test-env.mjs next start
 //   node scripts/smoke-csp.mjs            (PORT from the environment or .env.test)
 // tests/e2e/smoke.spec.ts runs this script as part of `npm run test:e2e`, so its selectors can't go stale.
@@ -27,14 +28,18 @@ async function check(browserType) {
   const browser = await browserType.launch();
   const failures = [];
   try {
-    const context = await browser.newContext();
-    const page = await context.newPage();
+    // A phone first (the layout every check below was written for); the desk pass is at the end.
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const violations = [];
-    page.on('console', (msg) => {
-      const text = msg.text();
-      if (msg.type() === 'error' || /Content Security Policy|Refused to/i.test(text)) violations.push(text);
-    });
-    page.on('pageerror', (err) => violations.push(`pageerror: ${err.message}`));
+    const watch = (p) => {
+      p.on('console', (msg) => {
+        const text = msg.text();
+        if (msg.type() === 'error' || /Content Security Policy|Refused to/i.test(text)) violations.push(text);
+      });
+      p.on('pageerror', (err) => violations.push(`pageerror: ${err.message}`));
+      return p;
+    };
+    const page = watch(await context.newPage());
 
     // 1. /signin: CSP header, nonce on scripts, hydration.
     const res = await page.goto(`${base}/signin`, { waitUntil: 'networkidle' });
@@ -74,6 +79,19 @@ async function check(browserType) {
     const back = await page.goto(`${base}/signin`);
     if (new URL(back?.url() ?? base).pathname !== '/') failures.push('/signin with a session did not redirect to /');
 
+    // 4. The desk, in its own page (navigating the first one again would abort its in-flight fetches): the
+    //    sidebar, top bar and pane chunk load under the same CSP, and a row opens beside the list.
+    const desk = watch(await context.newPage());
+    await desk.setViewportSize({ width: 1280, height: 800 });
+    await desk.goto(`${base}/`, { waitUntil: 'networkidle' });
+    await desk.getByTestId('desk-sidebar').waitFor({ timeout: 15_000 });
+    const title = (await desk.getByTestId('desk-topbar').getByRole('heading', { level: 1 }).textContent()) ?? '';
+    if (!/^All requests\b/.test(title)) failures.push(`desk: top bar does not title All requests (${title})`);
+    await desk.locator('[data-desk-main] [data-request-id]').first().click();
+    await desk.getByTestId('desk-pane').waitFor({ timeout: 15_000 });
+    if (!desk.url().includes('?r=')) failures.push('desk: row click did not pushState ?r=');
+    if ((await desk.locator('[data-desk-main] [data-request-id]').count()) < 1) failures.push('desk: the list left when a request opened');
+
     if (violations.length) failures.push(...violations.map((v) => `console: ${v}`));
     await context.close();
   } finally {
@@ -92,7 +110,7 @@ for (const [name, type] of [
     failed = true;
     console.error(`${name}: FAIL\n  ${failures.join('\n  ')}`);
   } else {
-    console.log(`${name}: ok (CSP header + nonce, hydrated, redirects, shell + lazy view + pushState)`);
+    console.log(`${name}: ok (CSP header + nonce, hydrated, redirects, shell + lazy view + pushState, desk)`);
   }
 }
 process.exit(failed ? 1 : 0);

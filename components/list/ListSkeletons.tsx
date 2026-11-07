@@ -44,36 +44,33 @@ export function AllSkeleton() {
   );
 }
 
+/** A To check card (pending-v8.html): name and minutes, two lines of what they wear, the quiet line, two 44 px answers. */
 function PendingCardSkeleton() {
   return (
     <div className={s.skCard}>
-      <div className={s.skL} style={{ alignItems: 'flex-start', gap: 12 }}>
-        <Sk w="40px" h={40} r="8px" />
-        <div className={s.skRm}>
-          <Sk w="55%" h={14} />
-          <Sk w="35%" h={10} />
-        </div>
-        <Sk w="44px" h={20} r="6px" />
+      <div className={s.skL} style={{ justifyContent: 'space-between' }}>
+        <Sk w="38%" h={16} />
+        <Sk w="36px" h={12} />
       </div>
       <div className={s.skRm}>
-        <Sk w="92%" h={11} />
-        <Sk w="64%" h={11} />
+        <Sk w="92%" h={12} />
+        <Sk w="64%" h={12} />
+        <Sk w="30%" h={10} />
       </div>
-      <div className={s.qa}>
-        <Sk w="100%" h={32} r="8px" />
-        <Sk w="100%" h={32} r="8px" />
+      <div className={s.pacts}>
+        <Sk w="100%" h={44} r="10px" />
+        <Sk w="100%" h={44} r="10px" />
       </div>
     </div>
   );
 }
 
+/** Pending: the segmented control is already there; only the cards are placeholders. */
 export function PendingSkeleton() {
   return (
     <div className={s.skScroll} aria-busy="true" aria-label="Loading requests" data-testid="list-skeleton">
-      <Sk w="80px" />
       <PendingCardSkeleton />
       <PendingCardSkeleton />
-      <Sk w="64px" />
       <PendingCardSkeleton />
     </div>
   );

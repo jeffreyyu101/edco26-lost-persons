@@ -5,17 +5,24 @@
 //   title    ‹ Dashboard, large, with the line under it (v2.2 afternoon): "Updated just now" / "Updated 5 min
 //            ago" from the last stats fetch and Refresh now (fetches the stats at once); while fetches fail or
 //            the phone is offline, the Reconnecting / Offline banner under the header and "Last updated 3:42 PM".
-//   tiles    Open (blue/green split bar) and Closed, big; Waiting for check, In medical, Not in medical, Reunited
+//   tiles    Open (blue/green split bar) and Closed, big; Waiting for check, In medical, Not found in medical, Reunited
 //            (+ discharged · cancelled when either is non-zero). Status tiles open All filtered (A22); Open opens
 //            Pending, which lists exactly the open requests.
 //   posts    Open by post, busiest first: label over a 6 px bar, count in a fixed column. Opens ?post=&open=1 (A42).
 //   recent   "Recently updated ›" opens All. Rows: number, name, status, updated; a row opens the profile.
 //   perf     Longest wait (opens that request), Time to answer, Time to reunite, Logged. "—" when a value is null
 //            or missing (avgReuniteMinutes / loggedLastHour come from the v2.2 lp_stats).
-// ≥ 768 px: six tiles in one row, posts and recent side by side, performance rows in two columns.
+// ≥ 768 px (inside the desk shell, components/desk): the shell's top bar is the title and holds the line and
+//            Refresh now beside it (the dashboard publishes their inputs through connection-signal.ts), so
+//            there is no title row here; the Reconnecting / Offline banner stays at the top of the column.
+//            Tiles are 3 × 2 (open statuses over closed ones), six in one row from 1024 px when the column
+//            has room (not with a request docked beside it); values share one line across a row. Open by
+//            post and Recently updated sit side by side and Performance rows in two columns when the column
+//            has room, stacked when a request is docked. Sized by the main column (container queries).
 import { Skeleton, VisuallyHidden } from '@radix-ui/themes';
 import { ChevronLeft, ChevronRight, Clock, Inbox, Timer, Users, type LucideIcon } from 'lucide-react';
 import { Fragment, useEffect, useState, type ReactNode } from 'react';
+import { useInDesk } from '@/components/desk/desk-context';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LiveIndicator } from '@/components/ui/LiveIndicator';
@@ -39,6 +46,7 @@ import {
   postsBusiestFirst,
   type ValuePart,
 } from './dashboard-model';
+import { setDashboardLive } from './connection-signal';
 import s from './dashboard.module.css';
 
 export type DashboardViewProps = Record<string, never>;
@@ -54,19 +62,29 @@ export function DashboardView(_props: DashboardViewProps) {
 
 function Dashboard({ onRetry }: { onRetry: () => void }) {
   const { stats, error, failing, updatedAt, refresh } = useStats(true);
+  const inDesk = useInDesk();
   // The line, the banner and its live region share one status: the last stats fetch (the numbers on this page),
   // by the lists' rules (one failed poll shows nothing; 2 network failures or 3 server errors in a row do).
   const live = useLiveStatus({ syncedAt: updatedAt, failing, subject: 'Dashboard' });
 
+  // On the desk the top bar draws the line and Refresh now from the same inputs; it drops them when the
+  // dashboard closes.
+  useEffect(() => {
+    if (inDesk) setDashboardLive({ syncedAt: updatedAt, failing, refresh });
+  }, [inDesk, updatedAt, failing, refresh]);
+  useEffect(() => () => setDashboardLive(null), []);
+
   return (
     <div className={s.app} data-testid="dashboard">
-      <header className={s.nav}>
-        <button type="button" className={s.back} aria-label="Back to requests" onClick={() => goBack({})}>
-          <ChevronLeft size={24} strokeWidth={2} aria-hidden />
-        </button>
-        <h1 className={s.title}>Dashboard</h1>
-        <LiveIndicator className={s.live} line={live} onRefresh={refresh} />
-      </header>
+      {inDesk ? null : (
+        <header className={s.nav}>
+          <button type="button" className={s.back} aria-label="Back to requests" onClick={() => goBack({})}>
+            <ChevronLeft size={24} strokeWidth={2} aria-hidden />
+          </button>
+          <h1 className={s.title}>Dashboard</h1>
+          <LiveIndicator className={s.live} line={live} onRefresh={refresh} />
+        </header>
+      )}
       <div className={s.banner}>
         <ConnectionBanner status={live} />
       </div>
@@ -134,14 +152,14 @@ function Tiles({ stats }: { stats: Stats }) {
       <Tile
         testId="tile-waiting"
         glyph={<StatusGlyph status={STATUS.waiting} />}
-        label="Waiting for check"
+        label={statusMeta(STATUS.waiting).shortLabel}
         value={waiting}
         onClick={() => show({ status: STATUS.waiting })}
       />
       <Tile
         testId="tile-in-medical"
         glyph={<StatusGlyph status={STATUS.inMedical} />}
-        label="In medical"
+        label={statusMeta(STATUS.inMedical).shortLabel}
         value={inMedical}
         onClick={() => show({ status: STATUS.inMedical })}
       />
@@ -150,7 +168,7 @@ function Tiles({ stats }: { stats: Stats }) {
         className={s.tileLate}
         testId="tile-not-in-medical"
         glyph={<StatusGlyph status={STATUS.notInMedical} />}
-        label="Not in medical"
+        label={statusMeta(STATUS.notInMedical).shortLabel}
         value={stats.notInMedical}
         // Same height as the Reunited tile beside it when that one has its second line.
         sub={sub ? <span className={`${s.sub} ${s.ghost}`} aria-hidden>{sub}</span> : null}
@@ -161,7 +179,7 @@ function Tiles({ stats }: { stats: Stats }) {
         className={s.tileLate}
         testId="tile-reunited"
         glyph={<StatusGlyph status={STATUS.reunited} />}
-        label="Reunited"
+        label={statusMeta(STATUS.reunited).shortLabel}
         value={stats.reunited}
         sub={
           sub ? (
@@ -454,11 +472,16 @@ function PerfRow({ testId, icon: Icon, label, context, parts, phrase, onClick }:
 // Loading
 // ---------------------------------------------------------------------------------------------------
 
+/** Tile placeholders: the phone's two big and four small, or the desk's six alike. */
+const LOADING_TILES = [104, 104, 74, 74, 74, 74];
+const LOADING_TILES_DESK = [92, 92, 92, 92, 92, 92];
+
 function Loading() {
+  const inDesk = useInDesk();
   return (
     <div aria-busy="true" aria-label="Loading dashboard" className={s.loading}>
       <div className={s.tiles}>
-        {[104, 104, 74, 74, 74, 74].map((h, i) => (
+        {(inDesk ? LOADING_TILES_DESK : LOADING_TILES).map((h, i) => (
           <Skeleton key={i} height={`${h}px`} style={{ borderRadius: 12 }} />
         ))}
       </div>
