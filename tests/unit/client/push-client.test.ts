@@ -421,7 +421,7 @@ describe('covers: the page stands down only for what the push carries', () => {
     expect(pushCovers(on, 'combined')).toBe(false);
     expect(pushCovers({ ...on, subscribed: false }, 'in_medical')).toBe(false);
   });
-  it('F3 + F4 release: Not found in medical is pushed (F5 stage-notify), so the page stands down (never both)', () => {
+  it('F3 + F4 release: Not located is pushed (F5 stage-notify), so the page stands down (never both)', () => {
     expect(pushCovers(on, 'not_in_medical')).toBe(true);
     expect(pushCovers({ ...on, prefs: { newRequests: true, myUpdates: false } }, 'not_in_medical')).toBe(false);
   });

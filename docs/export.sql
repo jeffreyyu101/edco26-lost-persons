@@ -40,9 +40,9 @@ select
   regexp_replace(p.contact_notes, s.guard, '''') as "Contact notes",
   case p.status
     when 'Added' then 'Waiting for check'
-    when 'Checked – Not Found' then 'Not found in medical'
-    when 'Found – Awaiting Reunion' then 'In medical · friend coming'
-    when 'Bring friend to medical' then 'In medical · friend coming'
+    when 'Checked – Not Found' then 'Not located'
+    when 'Found – Awaiting Reunion' then 'Located · friend coming'
+    when 'Bring friend to medical' then 'Located · friend coming'
     when 'Reunited – Closed' then 'Reunited'
     when 'Found – Discharged' then 'Discharged'
     when 'Cancelled' then 'Cancelled'

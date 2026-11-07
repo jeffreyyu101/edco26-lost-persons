@@ -36,7 +36,7 @@ describe('setStatus', () => {
     expect(res).toMatchObject({ ok: true, changed: true });
     expect(s().pending.size).toBe(0);
     expect(s().confirmed.get(R1.id)).toMatchObject({ status: STATUS.inMedical, rowVersion: 2 });
-    expect(s().snackbar?.message).toBe('LP-1001 · In medical');
+    expect(s().snackbar?.message).toBe('LP-1001 · Located');
     await advance(UNDO_MS);
     expect(s().snackbar).toBeNull();
   });
@@ -169,7 +169,7 @@ describe('setStatus', () => {
     server.override = (req) => (req.path.endsWith('/status') ? g.wait().then(() => json(200, { changed: true, request: { ...R1, status: STATUS.inMedical, rowVersion: 2 } })) : undefined);
     const p = a.setStatus(R1.id, STATUS.inMedical, 'answer');
     await advance(0);
-    // Meanwhile a sync delivers version 3 (someone answered Not found in medical after us).
+    // Meanwhile a sync delivers version 3 (someone answered Not located after us).
     server.override = null;
     server.change(R1.id, { status: STATUS.inMedical });
     server.change(R1.id, { status: STATUS.notInMedical });
@@ -283,7 +283,7 @@ describe('Undo after this phone changes the same request again (regression)', ()
     await ready();
     await finish(a.setStatus(R1.id, STATUS.inMedical, 'answer'));
     const snack = s().snackbar;
-    expect(snack?.message).toBe('LP-1001 · In medical');
+    expect(snack?.message).toBe('LP-1001 · Located');
     await finish(a.setStatus(R1.id, STATUS.discharged, 'discharge'));
     expect(s().confirmed.get(R1.id)?.status).toBe(STATUS.discharged);
     expect(s().snackbar).toBeNull();
@@ -305,7 +305,7 @@ describe('Undo after this phone changes the same request again (regression)', ()
     expect(s().snackbar).toBeNull();
 
     await finish(a.setStatus(R1.id, STATUS.inMedical, 'change'));
-    expect(s().snackbar?.message).toBe('LP-1001 · In medical');
+    expect(s().snackbar?.message).toBe('LP-1001 · Located');
     const photos = await finish(a.addPhotos(R1.id, [photo('e0000000-0000-4000-8000-0000000000b1')], 'today'));
     expect(photos).toEqual({ added: 1, failed: 0 });
     expect(s().snackbar).toBeNull();

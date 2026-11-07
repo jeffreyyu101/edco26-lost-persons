@@ -78,7 +78,7 @@ describe('notifyStaff', () => {
     const dana = newStaff();
     const rae = newStaff('Medical');
     const r = await createRequest(dana, { name: 'Ana TEST-S Lima' });
-    await notifyStaff([staffOf(dana), staffOf(dana).toUpperCase(), staffOf(rae)], { requestId: r.id, kind: 'in_medical', actor: staffOf(rae), detail: 'In medical' });
+    await notifyStaff([staffOf(dana), staffOf(dana).toUpperCase(), staffOf(rae)], { requestId: r.id, kind: 'in_medical', actor: staffOf(rae), detail: 'Located' });
     await notifyStaff([staffOf(dana), staffOf(rae)], { requestId: r.id, kind: 'moved', actor: staffOf(rae), detail: 'Chair 9 → Bed 3' });
     const got = await rows(r.id, [dana, rae]);
     expect(got).toHaveLength(1);
@@ -90,8 +90,8 @@ describe('notifyStaff', () => {
     const r1 = await createRequest(dana);
     const r2 = await createRequest(dana);
     const actor = staffOf(newStaff('Medical'));
-    await notifyStaff([staffOf(dana)], { requestId: r1.id, kind: 'in_medical', actor, detail: 'In medical' });
-    await notifyStaff([staffOf(dana)], { requestId: r2.id, kind: 'in_medical', actor, detail: 'In medical' });
+    await notifyStaff([staffOf(dana)], { requestId: r1.id, kind: 'in_medical', actor, detail: 'Located' });
+    await notifyStaff([staffOf(dana)], { requestId: r2.id, kind: 'in_medical', actor, detail: 'Located' });
     await api('/api/activity/read', { json: { all: true }, cookie: await cookieFor(dana) });
     await notifyStaff([staffOf(dana)], { requestId: r1.id, kind: 'reunited', actor, detail: 'Reunited' });
     const list = (await api('/api/activity', { cookie: await cookieFor(dana) })).body.rows as Array<{ requestId: string; read: boolean; kind: string }>;
@@ -196,7 +196,7 @@ describe('the edit event (PATCH, built after the response)', () => {
     const edited = await api(`/api/requests/${r.id}`, { method: 'PATCH', json: { patch: { clothing: 'Blue TEST-S hoodie' }, expectedVersion: v2 }, cookie: await cookieFor(dana) });
     expect(edited.status).toBe(200);
     const status = (edited.body as { request: RequestSummary }).request.status;
-    expect(await editEventFor(r.id, staffOf(rae), status)).toMatchObject({ kind: 'in_medical', detail: 'In medical · Chair 9', actor: staffOf(rae) });
+    expect(await editEventFor(r.id, staffOf(rae), status)).toMatchObject({ kind: 'in_medical', detail: 'Located · Chair 9', actor: staffOf(rae) });
     expect(await editEventFor(r.id, staffOf(dana), status)).toMatchObject({ kind: 'edited', detail: 'Details changed', actor: staffOf(dana) });
   });
 });

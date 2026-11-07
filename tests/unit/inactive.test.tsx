@@ -208,7 +208,7 @@ describe('the glyph', () => {
 describe('lists', () => {
   it('My requests: Logged → Checked → In medical → Closed · inactive, grey', () => {
     expect(stepperModel(STATUS.inactive)).toEqual({
-      steps: ['Logged', 'Checked', 'In medical', 'Closed · inactive'],
+      steps: ['Logged', 'Checked', 'Located', 'Closed · inactive'],
       current: 3,
       mode: 'cur',
       color: 'var(--gray-9)',

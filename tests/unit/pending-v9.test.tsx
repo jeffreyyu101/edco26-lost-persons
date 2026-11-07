@@ -129,13 +129,13 @@ describe('status groups (All and My requests sorted by status)', () => {
 });
 
 describe('the left answer, by hold state', () => {
-  it('"⧗ Not found yet" (the hold) until the request has a Not found; then "× Not found" (closes it)', () => {
+  it('"⧗ Not located yet" (the hold) until the request has a Not found; then "× Not located" (closes it)', () => {
     expect(notFoundHolds(BW)).toBe(true);
-    expect(notFoundAnswer(BW)).toEqual({ kind: 'hold', label: NOT_FOUND_YET_LABEL, said: 'Not found yet. Keeps this request open and schedules a recheck' });
-    const closes = { kind: 'close', label: NOT_FOUND_FINAL_LABEL, said: `Not found. Closes this request as ${STATUS_META[STATUS.notInMedical].label.toLowerCase()}` };
+    expect(notFoundAnswer(BW)).toEqual({ kind: 'hold', label: NOT_FOUND_YET_LABEL, said: 'Not located yet. Keeps this request open and schedules a recheck' });
+    const closes = { kind: 'close', label: NOT_FOUND_FINAL_LABEL, said: `Not located. Closes this request as ${STATUS_META[STATUS.notInMedical].label.toLowerCase()}` };
     expect(notFoundAnswer(PV)).toEqual(closes);
     expect(notFoundAnswer(MR)).toEqual(closes);
-    expect(NOT_FOUND_FINAL_LABEL).toBe('Not found');
+    expect(NOT_FOUND_FINAL_LABEL).toBe('Not located');
     // The card's indicator: held, then due 20 minutes after the hold.
     expect([BW, PV, MR].map((r) => holdState(r, NOW))).toEqual(['none', 'held', 'due']);
     expect(displayStage(MR, { now: NOW }).label).toBe('Recheck due');
@@ -154,18 +154,20 @@ describe('the left answer, by hold state', () => {
   it('the card: the same button in both states, the chip only when held or due, the wait the only time', () => {
     const fresh = render(<CheckCard row={BW} now={NOW} offline={false} onNotInMedical={noop} onInMedical={noop} />);
     expect(fresh).toContain('data-answer="hold"');
-    expect(fresh).toContain('>Not found yet</button>');
+    // (2026-11-07) The label reserves the longer label's width, so the button is as wide in both states.
+    expect(fresh).toMatch(/data-size-as="Not located yet">Not located yet<\/span><\/button>/);
     expect(fresh).not.toContain('data-testid="hold-chip"');
     const heldCard = render(<CheckCard row={PV} now={NOW} offline={false} onNotInMedical={noop} onInMedical={noop} />);
     expect(heldCard).toContain('data-answer="close"');
-    expect(heldCard).toContain('aria-label="Not found. Closes this request as');
-    expect(heldCard).toMatch(/data-testid="hold-chip"[^>]*>.*Not found yet<\/span>/);
+    expect(heldCard).toMatch(/data-size-as="Not located yet">Not located<\/span><\/button>/);
+    expect(heldCard).toContain('aria-label="Not located. Closes this request as');
+    expect(heldCard).toMatch(/data-testid="hold-chip"[^>]*>.*Not located yet<\/span>/);
     expect(heldCard).toContain('data-hold="held"');
     const due = render(<CheckCard row={MR} now={NOW} offline={false} onNotInMedical={noop} onInMedical={noop} />);
     expect(due).toMatch(/data-due=""[^>]*data-testid="hold-chip"/);
     expect(due).toContain('Recheck due');
-    expect(due).toMatch(/aria-label="M\.R\., [^."]+\. FA 4 · LP-\d{4}\. Not found yet, recheck due\./);
-    expect(due).toMatch(/Not found yet, recheck due\. Waiting 40 minutes\./);
+    expect(due).toMatch(/aria-label="M\.R\., [^."]+\. FA 4 · LP-\d{4}\. Not located yet, recheck due\./);
+    expect(due).toMatch(/Not located yet, recheck due\. Waiting 40 minutes\./);
     for (const html of [heldCard, due]) expect(html.replace(/aria-label="[^"]*"/g, '')).not.toMatch(/\d:\d\d/);
   });
 
@@ -176,8 +178,8 @@ describe('the left answer, by hold state', () => {
     expect(html).toContain('data-tone="gray" data-testid="card-minutes"');
   });
 
-  it('the Undo bar: "Not found yet · recheck in 20 min", then "<initials> closed · not found in medical"', () => {
-    expect(notFoundSnack(PV, STATUS.notInMedical)).toEqual({ message: 'Not found yet · recheck in 20 min', said: 'Not found yet, recheck in 20 minutes.' });
+  it('the Undo bar: "Not located yet · recheck in 20 min", then "<initials> closed · not located"', () => {
+    expect(notFoundSnack(PV, STATUS.notInMedical)).toEqual({ message: 'Not located yet · recheck in 20 min', said: 'Not located yet, recheck in 20 minutes.' });
     const words = STATUS_META[STATUS.notInMedical].label.toLowerCase();
     expect(notFoundSnack({ ...BW, name: 'Bea Walsh', status: STATUS.notInMedical }, STATUS.notInMedical)).toEqual({ message: `B.W. closed · ${words}`, said: `B.W. closed, ${words}.` });
     expect(notFoundSnack({ ...BW, name: '', status: STATUS.notInMedical }, STATUS.notInMedical)?.message).toMatch(/^LP-\d{4} closed · /);

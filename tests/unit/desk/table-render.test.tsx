@@ -138,7 +138,7 @@ describe('All requests table', () => {
     expect(cell(html, 1012, 'updated')).toBe('9m');
     expect(cell(html, 1012, 'by')).toBe('Dana K. · Dispatch');
     expect(cell(html, 1013, 'updated')).toBe('—');
-    expect(cell(html, 1004, 'status')).toMatch(/^In medical( · .+)?$/);
+    expect(cell(html, 1004, 'status')).toMatch(/^Located( · .+)?$/);
     expect(rowTag(html, 1012)).toContain('type="button"');
     // Every visible cell is hidden from screen readers; the sentence is the row's name.
     const row = rowHtml(html, 1012);
@@ -165,7 +165,7 @@ describe('All requests table', () => {
     for (let i = 1; i < closed.length; i++) expect(closed[i]).toBeGreaterThan(closed[i - 1]!);
     expect(rowTag(html, 1009)).toContain('data-closed');
     expect(rowTag(html, 1013)).not.toContain('data-closed');
-    expect(cell(html, 1009, 'status')).toBe('Not found in medical');
+    expect(cell(html, 1009, 'status')).toBe('Not located');
   });
 
   it('highlights the request open in the pane', () => {
@@ -183,7 +183,7 @@ describe('All requests table', () => {
     expect(html).not.toContain('Waiting to send');
     expect(at(html, 1009)).toBeGreaterThan(0);
     expect(at(html, 1013)).toBe(-1);
-    expect(html).toMatch(/aria-label="Not found in medical 2 shown\. Clear this filter"[^>]*data-testid="status-chip"/);
+    expect(html).toMatch(/aria-label="Not located 2 shown\. Clear this filter"[^>]*data-testid="status-chip"/);
 
     const post = postFilterKey('FA 4 – Oasis', null);
     const byPost = render(store, <DeskAllTable status={null} post={post} open />);

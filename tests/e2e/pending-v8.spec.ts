@@ -113,7 +113,7 @@ test.describe('phone', () => {
     const card = checkCard(page, waiting.id);
     await expect(card.getByTestId('card-photo')).toHaveCount(0);
     await expect(card).toContainText(`FA 3 · LP-${String(waiting.caseNumber).padStart(4, '0')}`);
-    for (const answer of [card.getByTestId('not-found-answer'), card.getByRole('button', { name: 'In medical', exact: true })]) {
+    for (const answer of [card.getByTestId('not-found-answer'), card.getByRole('button', { name: 'Located', exact: true })]) {
       expect((await answer.boundingBox())!.height).toBeCloseTo(44, 0);
     }
 
@@ -128,9 +128,9 @@ test.describe('phone', () => {
     const r = await createRequest(page);
     await page.goto('/?view=pending');
     await expect(checkCard(page, r.id)).toBeVisible({ timeout: 15_000 });
-    await checkCard(page, r.id).getByRole('button', { name: 'In medical', exact: true }).click();
+    await checkCard(page, r.id).getByRole('button', { name: 'Located', exact: true }).click();
 
-    const sheet = page.getByRole('dialog', { name: `${nameOf(r)} is in medical` });
+    const sheet = page.getByRole('dialog', { name: `${nameOf(r)} located` });
     await expect(sheet).toBeVisible();
     const field = sheet.getByRole('textbox', { name: 'Location' });
     await expect(field).toBeFocused();
@@ -158,8 +158,8 @@ test.describe('phone', () => {
     const r = await createRequest(page);
     await page.goto('/?view=pending');
     await expect(checkCard(page, r.id)).toBeVisible({ timeout: 15_000 });
-    await checkCard(page, r.id).getByRole('button', { name: 'In medical', exact: true }).click();
-    const sheet = page.getByRole('dialog', { name: `${nameOf(r)} is in medical` });
+    await checkCard(page, r.id).getByRole('button', { name: 'Located', exact: true }).click();
+    const sheet = page.getByRole('dialog', { name: `${nameOf(r)} located` });
     await expect(sheet).toBeVisible();
     await expect.poll(async () => (await detail(page, r.id)).status).toBe('Found – Awaiting Reunion');
     // Longer than the 10 s Undo before the location is typed and saved.
@@ -182,8 +182,8 @@ test.describe('phone', () => {
     await page.goto('/?view=pending');
     await expect(checkCard(page, rows[2]!.id)).toBeVisible({ timeout: 15_000 });
     const answer = async (r: RequestSummary) => {
-      await checkCard(page, r.id).getByRole('button', { name: 'In medical', exact: true }).click();
-      const sheet = page.getByRole('dialog', { name: `${nameOf(r)} is in medical` });
+      await checkCard(page, r.id).getByRole('button', { name: 'Located', exact: true }).click();
+      const sheet = page.getByRole('dialog', { name: `${nameOf(r)} located` });
       await expect(sheet).toBeVisible();
       await sheet.getByRole('textbox', { name: 'Location' }).fill('Not saved');
       return sheet;
@@ -217,7 +217,7 @@ test.describe('phone', () => {
     await expect(chip).toHaveAccessibleName('Chair 3, edit location', { timeout: 15_000 });
 
     await chip.click();
-    const sheet = page.getByRole('dialog', { name: `${nameOf(r)} is in medical` });
+    const sheet = page.getByRole('dialog', { name: `${nameOf(r)} located` });
     const field = sheet.getByRole('textbox', { name: 'Location' });
     await expect(field).toHaveValue('Chair 3');
     await expect(sheet.getByRole('button', { name: 'Cancel' })).toBeVisible();
@@ -254,14 +254,14 @@ test.describe('phone', () => {
     const r = await inMedical(page, await createRequest(page));
     await page.goto(`/?r=${r.id}`);
     const block = page.getByTestId('status-block');
-    await expect(block).toContainText('In medical · friend coming');
+    await expect(block).toContainText('Located · friend coming');
     await expect(block).toContainText(STAFF.staffName);
     await expect(block).not.toContainText('heading');
     await expect(block).not.toContainText(`${TAG} Friend`);
     const rowButton = block.getByTestId('location-row');
     await expect(rowButton).toHaveAccessibleName('Add location');
     await rowButton.click();
-    const sheet = page.getByRole('dialog', { name: `${nameOf(r)} is in medical` });
+    const sheet = page.getByRole('dialog', { name: `${nameOf(r)} located` });
     await sheet.getByRole('textbox', { name: 'Location' }).fill('Bed 4');
     await sheet.getByRole('button', { name: 'Save' }).click();
     await expect(rowButton).toHaveAccessibleName('Bed 4, edit location');
@@ -302,8 +302,8 @@ test.describe('phone', () => {
     const ref = page.locator('[data-testid="check-card"]').first();
     const refTop = async () => (await ref.boundingBox())!.y;
 
-    await card.getByRole('button', { name: 'In medical', exact: true }).click();
-    const sheet = page.getByRole('dialog', { name: `${nameOf(r)} is in medical` });
+    await card.getByRole('button', { name: 'Located', exact: true }).click();
+    const sheet = page.getByRole('dialog', { name: `${nameOf(r)} located` });
     const field = sheet.getByRole('textbox', { name: 'Location' });
     await expect(field).toBeFocused();
     const height = page.viewportSize()!.height;
@@ -410,8 +410,8 @@ test.describe('desk 1440 × 900', () => {
     // the end of Friend coming), under it, in the Waiting for check column.
     await checkCard(page, waiting.id).evaluate((el) => el.scrollIntoView({ block: 'center' }));
     const tapped = (await checkCard(page, waiting.id).boundingBox())!;
-    await checkCard(page, waiting.id).getByRole('button', { name: 'In medical', exact: true }).click();
-    const pop = page.getByRole('dialog', { name: `${nameOf(waiting)} is in medical` });
+    await checkCard(page, waiting.id).getByRole('button', { name: 'Located', exact: true }).click();
+    const pop = page.getByRole('dialog', { name: `${nameOf(waiting)} located` });
     await expect(pop).toBeVisible();
     await expect(comingCard(page, waiting.id)).toHaveCount(1);
     await expect(pop.getByRole('textbox', { name: 'Location' })).toBeFocused();
@@ -439,9 +439,9 @@ test.describe('desk 1440 × 900', () => {
     const openButton = (r: RequestSummary) => checkCard(page, r.id).locator('[data-request-id]');
     const answer = async (r: RequestSummary) => {
       await openButton(r).focus();
-      await checkCard(page, r.id).getByRole('button', { name: 'In medical', exact: true }).focus();
+      await checkCard(page, r.id).getByRole('button', { name: 'Located', exact: true }).focus();
       await page.keyboard.press('Enter');
-      const pop = page.getByRole('dialog', { name: `${nameOf(r)} is in medical` });
+      const pop = page.getByRole('dialog', { name: `${nameOf(r)} located` });
       await expect(pop.getByRole('textbox', { name: 'Location' })).toBeFocused();
       return pop;
     };
@@ -500,7 +500,7 @@ test.describe('desk 1440 × 900', () => {
     await expect(comingCard(page, coming.id)).toBeInViewport();
 
     await pane.getByTestId('location-row').click();
-    const pop = page.getByRole('dialog', { name: `${nameOf(coming)} is in medical` });
+    const pop = page.getByRole('dialog', { name: `${nameOf(coming)} located` });
     await expect(pop).toBeVisible();
     await pop.getByRole('textbox', { name: 'Location' }).fill('Chair 30');
     // Esc closes the popover only (the request stays open), and saves nothing.

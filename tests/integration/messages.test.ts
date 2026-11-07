@@ -304,7 +304,7 @@ describe('en route', () => {
 
   it.each([
     ['Reunited', STATUS.reunited, 'reunite'],
-    ['Not in medical', STATUS.notInMedical, 'change'],
+    ['Not located', STATUS.notInMedical, 'change'],
     ['Back to Waiting for check', STATUS.waiting, 'change'],
     ['Discharged', STATUS.discharged, 'discharge'],
   ])('%s clears every en route in the same transaction (one audit row, no names)', async (_label, status, kind) => {
@@ -336,7 +336,7 @@ describe('en route', () => {
 
   it.each([
     ['Reunited', STATUS.reunited, 'reunite'],
-    ['Not in medical', STATUS.notInMedical, 'change'],
+    ['Not located', STATUS.notInMedical, 'change'],
     ['Discharged', STATUS.discharged, 'discharge'],
   ])('Undo of %s puts every en route back as it was', async (_label, status, kind) => {
     const p = await people();

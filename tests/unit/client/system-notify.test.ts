@@ -127,7 +127,7 @@ describe('what a notification shows', () => {
   it('In medical: initials and status (no LP number, F4), the post, the next step; sticky until dismissed', () => {
     const n = systemNotice(statusAlert(sofia), rowOf);
     expect(n).toEqual({
-      title: 'S.L. · In medical',
+      title: 'S.L. · Located',
       body: 'FA 3\nBring the friend to Main Med',
       tag: `lp-${sofia.id}`,
       url: `/?r=${sofia.id}`,
@@ -332,9 +332,9 @@ describe('the notifier', () => {
     expect(await system.showNotice(notice)).toBe(true);
     expect(f.shows).toHaveLength(1);
     // A newer change of the request replaces it (same tag).
-    expect(await system.showNotice({ ...notice, title: 'T.R. · Not found in medical', key: `${notice.tag}:3` })).toBe(true);
+    expect(await system.showNotice({ ...notice, title: 'T.R. · Not located', key: `${notice.tag}:3` })).toBe(true);
     expect(f.shows).toHaveLength(2);
-    expect(f.open.map((n) => n.title)).toEqual(['T.R. · Not found in medical']);
+    expect(f.open.map((n) => n.title)).toEqual(['T.R. · Not located']);
   });
 
   it('show(alert) builds the notification from the rows at call time (the store’s entry point)', async () => {
@@ -347,7 +347,7 @@ describe('the notifier', () => {
     const shown = system.show(alert, () => row, [alert]);
     row = undefined; // the store moves on; the notification was already built
     expect(await shown).toBe(true);
-    expect(f.shows[0]).toMatchObject({ title: 'S.L. · In medical', options: { body: 'FA 4\nBring the friend to Main Med', data: { key: `${alert.requestId}:2` } } });
+    expect(f.shows[0]).toMatchObject({ title: 'S.L. · Located', options: { body: 'FA 4\nBring the friend to Main Med', data: { key: `${alert.requestId}:2` } } });
   });
 
   it('reports failure so the store can toast instead: no permission, no worker, or showNotification throws', async () => {

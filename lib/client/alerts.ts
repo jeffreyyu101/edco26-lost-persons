@@ -44,11 +44,11 @@ function subject(row: RequestSummary): string {
 }
 
 export function statusAlert(row: RequestSummary, timeZone?: string): AlertEvent {
-  // (F5) An Undo of the final Not found, or of In medical, can put the hold back: it reads "Not found yet".
+  // (F5) An Undo of the final Not found, or of In medical, can put the hold back: it reads "Not located yet".
   if (isHeld(row)) return holdAlert(row, timeZone);
   const s = subject(row);
   if (isInMedical(row.status)) {
-    return { kind: 'in_medical', requestId: row.id, title: `${s} is in medical`, subtitle: 'Bring the friend to Main Med', count: 1 };
+    return { kind: 'in_medical', requestId: row.id, title: `${s} ${statusMeta(STATUS.inMedical).shortLabel.toLowerCase()}`, subtitle: 'Bring the friend to Main Med', count: 1 };
   }
   if (row.status === STATUS.notInMedical) {
     return { kind: 'not_in_medical', requestId: row.id, title: `${s} — ${statusMeta(STATUS.notInMedical).shortLabel.toLowerCase()}`, count: 1 };

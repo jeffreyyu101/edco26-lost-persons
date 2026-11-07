@@ -4,7 +4,7 @@
 //   * Requests In medical (Friend coming, en route, arrived; the legacy Bring friend) close after 60 idle minutes,
 //     measured from the latest audit row (backdated here with psql), else created_at; at 59 they stay.
 //   * Every write is activity (it writes an audit row and resets the clock); reading never is.
-//   * Waiting for check never closes (Needs info, the Not found yet hold, Recheck due), nor anything closed.
+//   * Waiting for check never closes (Needs info, the Not located yet hold, Recheck due), nor anything closed.
 //   * Idempotent: a second run closes nothing; the migration pasted twice leaves exactly one cron job.
 //   * Reopen (any staff) → In medical, no way back to Closed · inactive through the API.
 //   * The dashboard never counts it as a reunion; the export shows the status.
@@ -245,7 +245,7 @@ describe('lp_close_inactive', () => {
     expect(closeInactive([r.id])).toBe(1);
   });
 
-  it('never closes Waiting for check (plain, Needs info, Not found yet, Recheck due) or anything closed', async () => {
+  it('never closes Waiting for check (plain, Needs info, Not located yet, Recheck due) or anything closed', async () => {
     const plain = await createRequest(FOH);
     const needsInfo = await createRequest(FOH);
     await postMessage(needsInfo.id, 'TEST-S do you have a photo?', MEDIC);

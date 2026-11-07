@@ -80,7 +80,7 @@ describe('sides and names', () => {
 describe('quick lines (status × side)', () => {
   const row = (status: string, extra: Record<string, unknown> = {}) => ({ status, ...extra });
 
-  it('stages: waiting (incl. the Not found yet hold), in medical, closed', () => {
+  it('stages: waiting (incl. the Not located yet hold), in medical, closed', () => {
     expect(quickStage(row(STATUS.waiting))).toBe('waiting');
     expect(quickStage(row(STATUS.notInMedical, { recheckAt: at(20) }))).toBe('waiting');
     expect(quickStage(row(STATUS.notInMedical))).toBe('closed');
@@ -354,7 +354,7 @@ describe('rows: carried activity and sameRow', () => {
     expect(activityOf(makeRow(2))).toMatchObject({ messageCount: 0, unread: 0, lastMessage: null, enroute: null });
   });
 
-  it('regression: medical\'s "Not found yet" on a Needs info request ends Needs info (status unchanged, the hold set), and so does its Undo', () => {
+  it('regression: medical\'s "Not located yet" on a Needs info request ends Needs info (status unchanged, the hold set), and so does its Undo', () => {
     const before = withActivity({ recheckAt: null, notFoundChecks: 0 });
     const held = makeRow(1, { rowVersion: 2, status: STATUS.waiting, recheckAt: '2026-11-07T03:20:00.000000+00:00', notFoundChecks: 1 });
     expect(carryActivity(before, held)).toMatchObject({ needsInfo: false, messageCount: 2, unread: 1 });
@@ -427,7 +427,6 @@ describe('labels come from STATUS_META', () => {
     const src = readFileSync(new URL('../../lib/messaging.ts', import.meta.url), 'utf8');
     for (const meta of Object.values(STATUS_META)) {
       for (const label of [meta.label, meta.shortLabel]) {
-        if (label === 'In medical') continue; // a word in comments, never displayed from here
         expect(src.includes(`'${label}'`), label).toBe(false);
       }
     }

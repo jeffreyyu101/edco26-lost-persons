@@ -25,11 +25,11 @@ const answer = ev('status', '04:10', RAE, { previous: { status: STATUS.waiting }
 describe('buildAuditTrail', () => {
   it('lists every event newest first with who (short team) and when (event timezone)', () => {
     const items = buildAuditTrail([created, photo1, photo2, hair, answer], TZ);
-    expect(items.map((i) => i.status?.toLabel ?? i.title)).toEqual(['In medical', 'Edited Hair', 'Photo added', 'Request logged']);
+    expect(items.map((i) => i.status?.toLabel ?? i.title)).toEqual(['Located', 'Edited Hair', 'Photo added', 'Request logged']);
     expect(items[0]).toMatchObject({
       who: 'Rae Chen · GCHX Med Transpo',
       when: 'Nov 6, 11:10 PM',
-      status: { from: STATUS.waiting, fromLabel: 'Waiting for check', to: STATUS.inMedical, toLabel: 'In medical' },
+      status: { from: STATUS.waiting, fromLabel: 'Waiting for check', to: STATUS.inMedical, toLabel: 'Located' },
       note: null,
     });
     expect(items[3]).toMatchObject({ title: 'Request logged', note: 'FA 3 – Kinetic', who: 'Dana Kim · Dispatch', when: 'Nov 6, 10:58 PM' });
@@ -95,9 +95,9 @@ describe('buildAuditTrail', () => {
     );
     expect(items.map((i) => (i.status ? `${i.status.fromLabel ?? ''}→${i.status.toLabel}` : i.title))).toEqual([
       'Check in completed',
-      'Not found in medical→Not found in medical (rechecked)',
-      '→In medical',
-      '→Not found in medical',
+      'Not located→Not located (rechecked)',
+      '→Located',
+      '→Not located',
     ]);
     expect(items[0]?.who).toBe('Sam Ortiz');
     expect(items[1]?.who).toBe('Sam Ortiz · Prevent');
@@ -116,8 +116,8 @@ describe('buildAuditTrail', () => {
     );
     expect(items.map((i) => [i.status?.fromLabel ?? null, i.status?.toLabel, i.note])).toEqual([
       [null, 'Found – Transported', null],
-      ['Not found in medical', 'Waiting for check', 'Undo'],
-      ['Waiting for check', 'Not found in medical', null],
+      ['Not located', 'Waiting for check', 'Undo'],
+      ['Waiting for check', 'Not located', null],
       ['Cancelled', 'Waiting for check', 'Reopened'],
       ['Waiting for check', 'Cancelled', null],
     ]);

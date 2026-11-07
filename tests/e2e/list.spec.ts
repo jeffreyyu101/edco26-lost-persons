@@ -56,7 +56,7 @@ async function setStatus(page: Page, r: RequestSummary, status: string, kind: st
   return ((await res.json()) as { request: RequestSummary }).request;
 }
 
-/** (F5) Not in medical, final: the first Not found only puts it on a "Not found yet" hold; the second closes it. */
+/** (F5) Not in medical, final: the first Not found only puts it on a "Not located yet" hold; the second closes it. */
 async function notFound(page: Page, r: RequestSummary): Promise<RequestSummary> {
   const held = await setStatus(page, r, 'Checked – Not Found', 'answer');
   return setStatus(page, held, 'Checked – Not Found', 'answer');
@@ -583,10 +583,10 @@ test('All rows: Created with AM/PM in the event timezone, Updated "—" until it
   // Someone answers In medical: the row turns green and Updated reads "now" on the next poll.
   await setStatus(page, r, 'Found – Awaiting Reunion', 'answer');
   await expect(cell(page, r.id, 'updated')).toHaveText(/^(now|1m)$/, { timeout: 10_000 });
-  await expect(cell(page, r.id, 'status')).toHaveText('In medical');
+  await expect(cell(page, r.id, 'status')).toHaveText('Located');
   await expect(cell(page, r.id, 'status')).toHaveAttribute('data-tone', 'green');
   await expect(row(page, r.id)).toHaveAccessibleName(
-    new RegExp(`^${lp(r)}, ${r.name}, In medical, friend coming, created ${createdText}, updated (just now|1 minute ago)$`),
+    new RegExp(`^${lp(r)}, ${r.name}, Located, friend coming, created ${createdText}, updated (just now|1 minute ago)$`),
   );
 });
 
@@ -596,7 +596,7 @@ test('All (option B): closed requests fold into "Archived N"; the fold opens in 
   await page.goto('/');
   await expect(row(page, openRow.id)).toBeVisible({ timeout: 10_000 });
 
-  // Folded: the Not found in medical request is not listed; the fold sits after every open request.
+  // Folded: the Not located request is not listed; the fold sits after every open request.
   await expect(fold(page)).toBeVisible();
   await expect(fold(page)).toHaveAttribute('aria-expanded', 'false');
   await expect(fold(page)).toHaveAccessibleName(/^Archived \d+ requests?$/);
@@ -628,12 +628,12 @@ test('All (option B): closed requests fold into "Archived N"; the fold opens in 
     .toBe(true);
   await expect(page.getByTestId('closed-rows').locator(`[data-request-id="${notIn.id}"]`)).toBeVisible();
   await expect(row(page, notIn.id)).toHaveAttribute('data-closed', '');
-  // iPhone 14 is under 430 px: "Not found in medical" reads "Not found" (the grey × says the rest, the row's
+  // iPhone 14 is under 430 px: "Not located" reads "Not located" (the grey × says the rest, the row's
   // sentence says it in full), like "Waiting"; from 430 px the full label, on one line.
-  await expect(cell(page, notIn.id, 'status')).toHaveText('Not found', { useInnerText: true });
-  await expect(row(page, notIn.id)).toContainText(', Not found in medical, ');
+  await expect(cell(page, notIn.id, 'status')).toHaveText('Not located', { useInnerText: true });
+  await expect(row(page, notIn.id)).toContainText(', Not located, ');
   await page.setViewportSize({ width: 430, height: 932 });
-  await expect(cell(page, notIn.id, 'status')).toHaveText('Not found in medical', { useInnerText: true });
+  await expect(cell(page, notIn.id, 'status')).toHaveText('Not located', { useInnerText: true });
   expect(await cell(page, notIn.id, 'status').evaluate((el) => el.getBoundingClientRect().height)).toBeLessThan(24);
   await page.setViewportSize({ width: 390, height: 664 });
   await expect(row(page, notIn.id)).toHaveCSS('opacity', '1');
@@ -725,23 +725,23 @@ test('at 375 px after midnight the name keeps at least 80 px; numbers and times 
   expect(layout.cutCells).toEqual([]);
   for (const label of layout.cutLabels) expect(label.name, `"${label.text}" cut`).toBeLessThanOrEqual(80.5);
   expect(layout.pageScrolls).toBe(false);
-  // Under 430 px the longest status reads "Not found" in the log (F2), whole.
-  await expect(cell(page, notIn.id, 'status')).toHaveText('Not found', { useInnerText: true });
+  // Under 430 px the longest status reads "Not located" in the log (F2), whole.
+  await expect(cell(page, notIn.id, 'status')).toHaveText('Not located', { useInnerText: true });
 
-  // My requests: the progress line ends at "Not found in medical", on one line and never cut (F2).
+  // My requests: the progress line ends at "Not located", on one line and never cut (F2).
   await page.goto('/?view=mine');
   const card = page.locator(`[data-testid="mine-card"]:has([data-request-id="${notIn.id}"])`);
   await expect(card).toBeVisible({ timeout: 10_000 });
   // (The card's status line says it too; this is the progress line's last step.)
-  const last = card.locator('[data-step="cur"]').getByText('Not found in medical', { exact: true });
+  const last = card.locator('[data-step="cur"]').getByText('Not located', { exact: true });
   await expect(last).toBeVisible();
   expect(await last.evaluate((el) => el.scrollWidth <= el.clientWidth + 0.5)).toBe(true);
   expect((await last.boundingBox())!.height).toBeLessThan(16);
 });
 
 // The deferred F2 fix (F3 + F4 release): on phones 400–429 px wide (Pixel 7a 412, iPhone 16 Pro 402, Plus 414 /
-// 428) the full "Not found in medical" beside an earlier day's created time ("Fri 11:02 PM") was cut, so the
-// short labels ("Waiting", "Not found") apply under 430 px, not 400. From 430 px the full labels, whole.
+// 428) the full "Not located" beside an earlier day's created time ("Fri 11:02 PM") was cut, so the
+// short labels ("Waiting", "Not located") apply under 430 px, not 400. From 430 px the full labels, whole.
 test('under 430 px the log uses the short labels beside an earlier day\'s time; from 430 px the full ones, never cut', async ({ page }) => {
   const later = Date.now() + 86_400_000;
   await page.clock.setFixedTime(later);
@@ -756,17 +756,17 @@ test('under 430 px the log uses the short labels beside an earlier day\'s time; 
   await expect(row(page, notIn.id)).toBeVisible();
   const label = (id: string) => cell(page, id, 'status').locator(':scope > span').filter({ visible: true }).first();
   for (const [width, waiting, closed] of [
-    [400, 'Waiting', 'Not found'],
-    [412, 'Waiting', 'Not found'],
-    [414, 'Waiting', 'Not found'],
-    [429, 'Waiting', 'Not found'],
-    [430, 'Waiting for check', 'Not found in medical'],
+    [400, 'Waiting', 'Not located'],
+    [412, 'Waiting', 'Not located'],
+    [414, 'Waiting', 'Not located'],
+    [429, 'Waiting', 'Not located'],
+    [430, 'Waiting for check', 'Not located'],
   ] as const) {
     await page.setViewportSize({ width, height: 860 });
     await expect(cell(page, r.id, 'status'), `${width} px`).toHaveText(waiting, { useInnerText: true });
     await expect(cell(page, notIn.id, 'status'), `${width} px`).toHaveText(closed, { useInnerText: true });
     // The row's sentence always says the whole status.
-    await expect(row(page, notIn.id)).toContainText(', Not found in medical, ');
+    await expect(row(page, notIn.id)).toContainText(', Not located, ');
     for (const id of [r.id, notIn.id]) {
       expect(await label(id).evaluate((el) => el.scrollWidth <= el.clientWidth + 0.5), `${width} px: ${id} label cut`).toBe(true);
       expect((await cell(page, id, 'status').boundingBox())!.height, `${width} px: one line`).toBeLessThan(24);
@@ -846,9 +846,9 @@ test('Pending: In medical → Friend coming, Undo, then Reunited closes it (grey
   await expect(checkCard(page, r.id)).toBeVisible({ timeout: 10_000 });
 
   // In medical saves at once, then asks where they are (Skip saves nothing more).
-  await checkCard(page, r.id).getByRole('button', { name: 'In medical', exact: true }).click();
+  await checkCard(page, r.id).getByRole('button', { name: 'Located', exact: true }).click();
   await expect(checkCard(page, r.id)).toHaveCount(0);
-  const sheet = page.getByRole('dialog', { name: `${TAG} P${seq} is in medical` });
+  const sheet = page.getByRole('dialog', { name: `${TAG} P${seq} located` });
   await expect(sheet).toBeVisible();
   await sheet.getByRole('button', { name: 'Skip' }).click();
   await expect(sheet).toHaveCount(0);
@@ -857,12 +857,12 @@ test('Pending: In medical → Friend coming, Undo, then Reunited closes it (grey
   await expect(comingCard(page, r.id)).not.toContainText(`${TAG} Friend`);
   await expect(comingCard(page, r.id)).not.toContainText('from FA 3');
 
-  await expect(page.getByText(`${lp(r)} · In medical`)).toBeVisible();
+  await expect(page.getByText(`${lp(r)} · Located`)).toBeVisible();
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect(comingCard(page, r.id)).toHaveCount(0);
   await expect(checkCard(page, r.id)).toBeVisible();
 
-  await checkCard(page, r.id).getByRole('button', { name: 'In medical', exact: true }).click();
+  await checkCard(page, r.id).getByRole('button', { name: 'Located', exact: true }).click();
   await sheet.getByRole('button', { name: 'Skip' }).click();
   await expect(comingCard(page, r.id)).toBeVisible();
   await comingCard(page, r.id).getByRole('button', { name: 'Reunited' }).click();
@@ -883,9 +883,9 @@ test('Not found leaves Pending; ?status= shows a filter chip that clears to All'
   const r = await createRequest(page);
   await page.goto('/?view=pending');
   await expect(checkCard(page, r.id)).toBeVisible({ timeout: 10_000 });
-  // (v9.1) The first Not found holds it, in place with a "Not found yet" chip; the second closes it.
+  // (v9.1) The first Not found holds it, in place with a "Not located yet" chip; the second closes it.
   await checkCard(page, r.id).getByTestId('not-found-answer').click();
-  await expect(checkCard(page, r.id).getByTestId('hold-chip')).toHaveText('Not found yet');
+  await expect(checkCard(page, r.id).getByTestId('hold-chip')).toHaveText('Not located yet');
   await checkCard(page, r.id).getByTestId('not-found-answer').click();
   await expect(checkCard(page, r.id)).toHaveCount(0);
   await expect.poll(async () => ((await (await page.request.get(`/api/requests/${r.id}`)).json()) as RequestSummary).status).toBe('Checked – Not Found');
@@ -893,20 +893,20 @@ test('Not found leaves Pending; ?status= shows a filter chip that clears to All'
   await page.goto(`/?status=${encodeURIComponent('Checked – Not Found')}`);
   const chip = page.getByTestId('status-chip');
   await expect(chip).toBeVisible();
-  await expect(chip).toContainText('Not found in medical');
+  await expect(chip).toContainText('Not located');
   await expect(row(page, r.id)).toBeVisible({ timeout: 10_000 });
-  await expect(row(page, r.id)).toContainText('Not found in medical');
+  await expect(row(page, r.id)).toContainText('Not located');
   // A filter shows its rows in one list: closed rows greyed in place, no fold.
   await expect(row(page, r.id)).toHaveAttribute('data-closed', '');
   await expect(fold(page)).toHaveCount(0);
-  // Only Not found in medical rows are listed.
+  // Only Not located rows are listed.
   const labels = await page.locator('[data-testid="request-list"] [data-request-id]').allTextContents();
-  expect(labels.every((t) => t.includes('Not found in medical'))).toBe(true);
+  expect(labels.every((t) => t.includes('Not located'))).toBe(true);
 
   await chip.click();
   await expect(page).toHaveURL(/\/$/);
   await expect(chip).toHaveCount(0);
-  // Back on the unfiltered log, Not found in medical is folded under Archived.
+  // Back on the unfiltered log, Not located is folded under Archived.
   await expect(fold(page)).toBeVisible();
   await expect(row(page, r.id)).toHaveCount(0);
 });
@@ -982,7 +982,7 @@ test('front of house logs a request with a photo; the liaison sees it in Pending
     // B sees it in Pending within 8 s of the save (one poll), and answers In medical.
     await expect(checkCard(page, id!)).toBeVisible({ timeout: Math.max(1_000, 8_000 - (Date.now() - savedAt)) });
     await expect(checkCard(page, id!)).toContainText(`FA 4 · ${lpText}`);
-    await checkCard(page, id!).getByRole('button', { name: 'In medical', exact: true }).click();
+    await checkCard(page, id!).getByRole('button', { name: 'Located', exact: true }).click();
     // Where medical has them: saved from the sheet, shown on the Friend coming card.
     const locationForm = page.getByTestId('location-form');
     await expect(locationForm).toBeVisible();
@@ -992,13 +992,14 @@ test('front of house logs a request with a photo; the liaison sees it in Pending
     await expect(comingCard(page, id!).getByTestId('location-chip')).toHaveAccessibleName('Chair 7, edit location');
 
     // A, back on the list, is alerted on its next poll: their own request moved to In medical.
-    const toast = a.locator('.lp-toast').filter({ hasText: new RegExp(`${lpText} · .+ is in medical`) });
+    // "LP-1016 · T.R. located" (not the later "LP-1016 · T.R. — not located", which also ends in "located").
+    const toast = a.locator('.lp-toast').filter({ hasText: new RegExp(`${lpText} · [^—]+ located`) });
     await expect(toast).toBeVisible({ timeout: 15_000 });
-    await expect(toast).toContainText(/LP-\d+ · .+ is in medical/);
+    await expect(toast).toContainText(/LP-\d+ · .+ located/);
     await expect(toast).toContainText('Bring the friend to Main Med');
     await expect.poll(async () => ((await (await a.request.get(`/api/requests/${id}`)).json()) as RequestDetail).photos.length).toBe(1);
 
-    // Regression: B changes the answer (past the Undo window). A's sticky "is in medical" must not outlive
+    // Regression: B changes the answer (past the Undo window). A's sticky "located" must not outlive
     // it: on A's next poll the new answer replaces it, so nobody walks the friend to Main Med for nothing.
     await page.waitForTimeout(6_500);
     const inMedical = (await (await page.request.get(`/api/requests/${id}`)).json()) as RequestDetail;
@@ -1007,7 +1008,7 @@ test('front of house logs a request with a photo; the liaison sees it in Pending
       data: { status: 'Checked – Not Found', expectedVersion: inMedical.rowVersion, kind: 'change' },
     });
     expect(changed.ok(), `change answer → ${changed.status()}`).toBe(true);
-    const notInMedical = a.locator('.lp-toast').filter({ hasText: new RegExp(`${lpText} · .+ — not found in medical`) });
+    const notInMedical = a.locator('.lp-toast').filter({ hasText: new RegExp(`${lpText} · .+ — not located`) });
     await expect(notInMedical).toBeVisible({ timeout: 15_000 });
     await expect(toast).toHaveCount(0);
     await expect(a.locator('.lp-toast').filter({ hasText: 'Bring the friend to Main Med' })).toHaveCount(0);
@@ -1074,7 +1075,7 @@ test('offline: a badge on the avatar, the banner under the header, answers need 
     expect(bannerBox!.y).toBeGreaterThan(title!.y + title!.height - 1);
     expect(list!.y).toBeGreaterThan(bannerBox!.y);
 
-    const answer = checkCard(page, r.id).getByRole('button', { name: 'In medical', exact: true });
+    const answer = checkCard(page, r.id).getByRole('button', { name: 'Located', exact: true });
     await expect(answer).toHaveAttribute('aria-disabled', 'true');
     // Each disabled answer is described by a hidden "Needs a connection"; the tap adds the visible toast.
     const reasons = page.getByText('Needs a connection', { exact: true });

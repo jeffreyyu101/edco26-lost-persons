@@ -50,8 +50,8 @@ function sqlBlock(marker: string): string {
 describe('statuses', () => {
   it('labels, tones and glyphs match the spec table', () => {
     expect(STATUS_META[STATUS.waiting]).toMatchObject({ label: 'Waiting for check', tone: 'blue', glyph: 'waiting', bucket: 'open' });
-    expect(STATUS_META[STATUS.notInMedical]).toMatchObject({ label: 'Not found in medical', tone: 'gray', glyph: 'notInMedical', bucket: 'closed' });
-    expect(STATUS_META[STATUS.inMedical]).toMatchObject({ label: 'In medical · friend coming', shortLabel: 'In medical', tone: 'green', glyph: 'inMedical', bucket: 'open' });
+    expect(STATUS_META[STATUS.notInMedical]).toMatchObject({ label: 'Not located', tone: 'gray', glyph: 'notInMedical', bucket: 'closed' });
+    expect(STATUS_META[STATUS.inMedical]).toMatchObject({ label: 'Located · friend coming', shortLabel: 'Located', tone: 'green', glyph: 'inMedical', bucket: 'open' });
     expect(STATUS_META[STATUS.reunited]).toMatchObject({ label: 'Reunited', tone: 'gray', glyph: 'closed', bucket: 'closed' });
     expect(STATUS_META[STATUS.discharged]).toMatchObject({ label: 'Discharged', tone: 'gray', glyph: 'closed', bucket: 'closed' });
     expect(STATUS_META[STATUS.cancelled]).toMatchObject({ label: 'Cancelled', tone: 'gray', glyph: 'closed', bucket: 'closed' });
@@ -137,8 +137,8 @@ describe('transitions', () => {
 
   it('offers the sticky actions per status', () => {
     expect(primaryActions('Added').map((a) => [a.label, a.to, a.kind])).toEqual([
-      ['Not found', 'Checked – Not Found', 'answer'],
-      ['In medical', 'Found – Awaiting Reunion', 'answer'],
+      ['Not located', 'Checked – Not Found', 'answer'],
+      ['Located', 'Found – Awaiting Reunion', 'answer'],
     ]);
     expect(primaryActions('Found – Awaiting Reunion').map((a) => [a.label, a.to, a.kind])).toEqual([
       ['Change answer', 'Checked – Not Found', 'change'],

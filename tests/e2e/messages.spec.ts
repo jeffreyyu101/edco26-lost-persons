@@ -110,7 +110,7 @@ test('medical asks from To check; front of house replies; read; en route, change
     await expect(card).toBeVisible(SYNC);
     const acts = card.getByTestId('message-button');
     await expect(acts).toHaveAttribute('aria-label', /^Message about/);
-    const [msgBox, answerBox] = await Promise.all([acts.boundingBox(), card.getByRole('button', { name: 'In medical', exact: true }).boundingBox()]);
+    const [msgBox, answerBox] = await Promise.all([acts.boundingBox(), card.getByRole('button', { name: 'Located', exact: true }).boundingBox()]);
     expect(!!msgBox && !!answerBox && msgBox.x < answerBox.x).toBe(true);
     expect(Math.round(msgBox?.height ?? 0)).toBeGreaterThanOrEqual(44);
     await acts.click();

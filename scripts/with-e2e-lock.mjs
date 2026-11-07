@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Runs a command while holding the shared local-stack lock (/tmp/lp-e2e.lock), the one Playwright's global
+// Runs a command while holding the shared local-stack lock (/tmp/lp-e2e.lock, or LP_E2E_LOCK_DIR), the one Playwright's global
 // setup takes. Several agents on several branches share ONE local Supabase stack and each re-applies its own
 // version of the rework migration, so integration and end-to-end runs must hold the lock, and re-apply THIS
 // branch's migration right after taking it (--migrate applies it twice, which also proves it is idempotent).
@@ -14,7 +14,8 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { ROOT, assertLocalUrl, pauseInactiveJob } from './test-env.mjs';
 
-const LOCK_DIR = '/tmp/lp-e2e.lock';
+// LP_E2E_LOCK_DIR: a run on its own isolated stack takes a lock of its own (tests/e2e/global-setup.ts lockDirFrom).
+const LOCK_DIR = process.env.LP_E2E_LOCK_DIR?.trim() || '/tmp/lp-e2e.lock';
 const WAIT_MS = 30 * 60_000;
 const NO_PID_GRACE_MS = 10_000;
 const MIGRATION = join(ROOT, 'supabase/migrations/20261106000000_rework.sql');
