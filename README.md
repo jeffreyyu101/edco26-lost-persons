@@ -138,7 +138,8 @@ Pending.
   settings path when blocked). Avatar menu → Alerts opens the Alerts sheet: this device's state, "Send a test
   alert", and the "New requests" and "Updates on my requests" switches (saved on the server for every device
   of yours). One alert is never both a toast and a notification. Without push on a device, a page in the
-  background still shows a system notification where allowed ("Allow notifications"), as before.
+  background still shows a system notification where allowed ("Allow notifications"), as before, now
+  without the LP number ("S.L. · In medical" / "FA 3").
 - **Activity.** The bell next to search (and in the desk top bar and sidebar) counts requests with something
   new for you. One row per request, newest first; opening the request (from anywhere) marks it read; Mark all
   read has Undo. The app icon badge shows the same count.

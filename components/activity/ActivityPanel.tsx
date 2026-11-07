@@ -7,7 +7,7 @@
 import { IconButton } from '@radix-ui/themes';
 import { CheckCheck } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { activityAriaLabel, activityGlyph, activityTime, groupByDay, type ActivityRow } from '@/lib/activity';
+import { activityAriaLabel, activityGlyph, activityLine2, activityTime, groupByDay, type ActivityRow } from '@/lib/activity';
 import { activityClient, useActivity } from '@/lib/client/activity-client';
 import { navigate } from '@/lib/client/nav';
 import { useEventTimezone, useNow } from '@/lib/client/store-contract';
@@ -43,7 +43,7 @@ function Row({ row, now, timeZone, onOpen }: { row: ActivityRow; now: number; ti
       </span>
       <span className={s.text} aria-hidden>
         <span className={s.line1}>{row.title}</span>
-        <span className={s.line2}>{row.detail}</span>
+        <span className={s.line2}>{activityLine2(row)}</span>
       </span>
       <span className={s.when} aria-hidden>
         {activityTime(row.at, now, timeZone)}

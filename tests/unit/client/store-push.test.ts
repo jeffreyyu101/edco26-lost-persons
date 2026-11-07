@@ -81,7 +81,7 @@ describe('Web Push covers the page notification', () => {
     await ready();
     server.change(mine.id, { status: STATUS.inMedical });
     await advance(6_000);
-    expect(shown.map((n) => n.title)).toEqual(['LP-1004 · In medical']);
+    expect(shown.map((n) => n.title)).toEqual(['T.R. · In medical']);
   });
 });
 

@@ -118,12 +118,13 @@ export async function startPushService(): Promise<PushService> {
   };
 }
 
-/** Polls `check` until it returns a value (not undefined / false) or the time runs out. */
-export async function eventually<T>(check: () => Promise<T | undefined | false> | T | undefined | false, timeoutMs = 8_000): Promise<T> {
+/** Polls `check` until it returns a value (not undefined / null / false) or the time runs out. */
+export async function eventually<T>(check: () => Promise<T | undefined | null | false> | T | undefined | null | false, timeoutMs = 8_000): Promise<T> {
   const started = Date.now();
   for (;;) {
     const v = await check();
-    if (v !== undefined && v !== false) return v as T;
+    // null is "not there yet" too: a row lookup answers null until the after-response work has written it.
+    if (v !== undefined && v !== null && v !== false) return v as T;
     if (Date.now() - started > timeoutMs) throw new Error('timed out waiting');
     await new Promise((r) => setTimeout(r, 100));
   }

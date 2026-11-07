@@ -379,6 +379,28 @@ export function groupByDay<T extends { at: string }>(rows: readonly T[], now: nu
   }));
 }
 
+/**
+ * A new request's detail after its initials: "T.R. · 24 M · FA 4" → "24 M · FA 4" (contract B starts it with the
+ * initials because the push's title is "New request"). Other kinds: the detail as it is.
+ */
+function detailAfterTitle(row: Pick<ActivityRow, 'kind' | 'title' | 'detail'>): string {
+  if (row.kind !== 'new_request') return row.detail;
+  if (row.detail === row.title) return '';
+  const prefix = `${row.title} · `;
+  return row.detail.startsWith(prefix) ? row.detail.slice(prefix.length) : row.detail;
+}
+
+/**
+ * Line 2 as the row shows it: the detail (contract B), except a new request, whose line 1 already is its
+ * initials: "New request · 24 M · FA 4" (f34-v2-2), not "T.R. · 24 M · FA 4" again. The stored detail and the
+ * push body are unchanged.
+ */
+export function activityLine2(row: Pick<ActivityRow, 'kind' | 'title' | 'detail'>): string {
+  if (row.kind !== 'new_request') return row.detail;
+  const rest = detailAfterTitle(row);
+  return rest ? `${NEW_REQUEST_TITLE} · ${rest}` : NEW_REQUEST_TITLE;
+}
+
 /** What a screen reader hears for the kind, before the detail. */
 const SPOKEN_KIND: Readonly<Record<ActivityKind, string>> = {
   message: 'new message',
@@ -404,7 +426,8 @@ function spokenTitle(title: string): string {
 
 /** The row's full sentence: "Request J D, answer: In medical · Chair 9. 5 minutes ago. Unread." */
 export function activityAriaLabel(row: Pick<ActivityRow, 'kind' | 'title' | 'detail' | 'at' | 'read'>, now: number): string {
-  const detail = row.detail.replace(/ · /g, ', ').replace(/ → /g, ' to ');
+  const detail = detailAfterTitle(row).replace(/ · /g, ', ').replace(/ → /g, ' to ');
   const ago = agoPhrase(minutesSince(row.at, now));
-  return `${spokenTitle(row.title)}, ${SPOKEN_KIND[row.kind]}: ${detail}. ${ago.charAt(0).toUpperCase()}${ago.slice(1)}.${row.read ? '' : ' Unread.'}`;
+  const what = detail ? `${SPOKEN_KIND[row.kind]}: ${detail}` : SPOKEN_KIND[row.kind];
+  return `${spokenTitle(row.title)}, ${what}. ${ago.charAt(0).toUpperCase()}${ago.slice(1)}.${row.read ? '' : ' Unread.'}`;
 }

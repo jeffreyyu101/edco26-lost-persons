@@ -16,11 +16,13 @@
 //     one tab or across the tabs and windows of the browser (createPeerBoard): a background tab shows
 //     nothing while another app tab is in front (that tab toasts it from its own sync), and an alert
 //     another tab already delivered is not delivered again the other way.
-//   * One notification per request (tag = request id): a later alert for it replaces the earlier one, and
+//   * One notification per request (tag "lp-<request id>", the same as Web Push, F4): a later alert for it
+//     replaces the earlier one, and
 //     the store closes one whose alert is out of date (alerts.ts alertStillCurrent). 3+ at once are one
 //     notification ("3 new requests"), like the toast.
-//   * Content: the LP number, "New request" or the status, initials and the post. Never a phone number or
-//     any other contact detail: it lands on the lock screen and in the notification centre.
+//   * Content: the initials and the status, or "New request"; the post. Never a request id (LP-####, F4:
+//     like the Web Push), a phone number or any other contact detail: it lands on the lock screen and in
+//     the notification centre.
 //   * Click: public/sw.js focuses an app window and posts {type: 'lp-open', url}; this page opens that view
 //     in place (no reload, so an open form or sheet is not lost) and answers {ok}. A page that does not
 //     answer (a sign-in page, an older build) is navigated by the worker instead.
@@ -30,7 +32,6 @@
 import { useSyncExternalStore } from 'react';
 import type { RequestSummary } from '../api-types';
 import { initials, statusMeta } from '../domain';
-import { formatCaseNumber } from '../format';
 import { alertKey } from './alerts';
 import { hrefFor, navigate, parseView, viewToParams } from './nav';
 import type { AlertEvent } from './store-contract';
@@ -57,6 +58,8 @@ export const COMBINED_TAG = 'lp-alerts';
 const ICON = '/icons/icon-192.png';
 /** LP numbers listed in a combined notification before "+N". */
 const MAX_LISTED = 4;
+/** A request without a name (photo only); lib/activity.ts NO_NAME, kept here so this chunk stays small. */
+const NO_NAME = 'No name';
 
 // ---------------------------------------------------------------------------------------------------
 // Decisions (pure)
@@ -150,11 +153,12 @@ export function systemNotice(
 ): SystemNotice {
   if (alert.kind === 'combined' || !alert.requestId) {
     const allNew = sources.length > 0 && sources.every((a) => a.kind === 'new_request');
-    const lps = sources.flatMap((a) => {
+    // The requests' initials, never their LP numbers (F4: no request ids in notifications).
+    const names = sources.flatMap((a) => {
       const row = a.requestId ? rowOf(a.requestId) : undefined;
-      return row ? [formatCaseNumber(row.caseNumber)] : [];
+      return row ? [initials(row.name) || NO_NAME] : [];
     });
-    const listed = lps.length > MAX_LISTED ? [...lps.slice(0, MAX_LISTED), `+${lps.length - MAX_LISTED}`] : lps;
+    const listed = names.length > MAX_LISTED ? [...names.slice(0, MAX_LISTED), `+${names.length - MAX_LISTED}`] : names;
     return {
       title: `${alert.count} ${allNew ? 'new requests' : 'updates'}`,
       body: listed.join(', '),
@@ -169,10 +173,12 @@ export function systemNotice(
   const url = hrefFor({ r: id });
   const requireInteraction = alert.kind === 'in_medical';
   const tag = requestTag(id);
-  if (!row) return { title: alert.title, body: '', tag, url, key: null, requireInteraction };
-  const lp = formatCaseNumber(row.caseNumber);
-  const title = alert.kind === 'new_request' ? `New request · ${lp}` : `${lp} · ${statusMeta(row.status).shortLabel}`;
-  const body = alert.kind === 'in_medical' ? [who(row), 'Bring the friend to Main Med'].filter(Boolean).join('\n') : who(row);
+  if (!row) return { title: alert.kind === 'new_request' ? 'New request' : alert.title, body: '', tag, url, key: null, requireInteraction };
+  // F4: no LP number (the Web Push for the same request reads the same way: initials, then the news).
+  const name = initials(row.name) || NO_NAME;
+  const title = alert.kind === 'new_request' ? 'New request' : `${name} · ${statusMeta(row.status).shortLabel}`;
+  const where = alert.kind === 'new_request' ? who(row) : row.postShort;
+  const body = alert.kind === 'in_medical' ? [where, 'Bring the friend to Main Med'].filter(Boolean).join('\n') : where;
   return { title, body, tag, url, key: alertKey(row), requireInteraction };
 }
 

@@ -211,13 +211,14 @@ test.describe('desktop (Chromium)', () => {
       await expect.poll(() => shownFor(page, hidden.id), { timeout: 15_000 }).toHaveLength(1);
       const [n] = await shownFor(page, hidden.id);
       expect(n).toMatchObject({
-        title: `New request · ${lp(hidden)}`,
+        title: 'New request',
         body: 'T.N. · FA 3',
         tag: `lp-${hidden.id}`,
         renotify: true,
         data: { url: `/?r=${hidden.id}`, key: `${hidden.id}:${hidden.rowVersion}` },
       });
-      // Lock screen / notification centre: never the phone number, the contact or the name.
+      // Lock screen / notification centre: never the request id (F4), the phone number, the contact or the name.
+      expect(JSON.stringify(n)).not.toContain(lp(hidden));
       expect(JSON.stringify(n)).not.toContain('555');
       expect(JSON.stringify(n)).not.toContain(`${TAG} Friend`);
       expect(JSON.stringify(n)).not.toContain(`${TAG} N`);

@@ -8,6 +8,7 @@ import {
   NO_NAME,
   PUSH_PAYLOAD_MAX_BYTES,
   activityAriaLabel,
+  activityLine2,
   activityGlyph,
   activityTime,
   backToWaitingDetail,
@@ -192,6 +193,16 @@ describe('the inbox', () => {
     expect(activityAriaLabel({ kind: 'moved', title: 'R.P.', detail: 'Chair 9 → Bed 3', at, read: true }, NOW)).toBe(
       'Request R P, location changed: Chair 9 to Bed 3. 5 minutes ago.',
     );
+    expect(activityAriaLabel({ kind: 'new_request', title: 'T.R.', detail: 'T.R. · 24 M · FA 4', at, read: false }, NOW)).toBe(
+      'Request T R, new request: 24 M, FA 4. 5 minutes ago. Unread.',
+    );
+  });
+
+  it("a new request's line 2 does not repeat line 1's initials (f34-v2-2); every other kind shows the detail", () => {
+    expect(activityLine2({ kind: 'new_request', title: 'T.R.', detail: 'T.R. · 24 M · FA 4' })).toBe('New request · 24 M · FA 4');
+    expect(activityLine2({ kind: 'new_request', title: NO_NAME, detail: '24 M · FA 4' })).toBe('New request · 24 M · FA 4');
+    expect(activityLine2({ kind: 'new_request', title: 'T.R.', detail: 'T.R.' })).toBe('New request');
+    expect(activityLine2({ kind: 'in_medical', title: 'J.D.', detail: 'In medical · Chair 9' })).toBe('In medical · Chair 9');
   });
 
   it('maps lp_activity_list rows (unknown kinds dropped, detail scrubbed)', () => {

@@ -13,7 +13,8 @@ test.skip(process.env.LP_F4_SCREENS !== '1', 'Screenshots only on request (LP_F4
 test.skip(({ browserName }) => browserName !== 'chromium', 'Screenshots are taken in Chromium.');
 
 const BASE = testBaseUrl();
-const SCREENS = { staffName: 'TEST-F4 Screens', team: 'GC/HX - Dispatch' };
+// A fresh staff member per run: earlier runs' Activity rows (their cleanup closes requests) stay out of the shots.
+const SCREENS = { staffName: `TEST-F4 Screens ${Date.now().toString(36)}`, team: 'GC/HX - Dispatch' };
 const LIAISON = { staffName: 'TEST-F4 Screens Medic', team: 'Medical' };
 const EMPTY = { staffName: `TEST-F4 Screens Empty ${Date.now().toString(36)}`, team: 'GC/HX - Base' };
 const OUT = 'design/screens';
@@ -125,7 +126,8 @@ test('banners, the Alerts sheet, the bell and Activity, light and dark, phone an
       }
       // Alerts on: the sheet; the bell; Activity unread, all read (Undo), empty; the desk popover.
       for (const kind of ['phone', 'desk'] as const) {
-        const ctx = await ctxFor(browser, kind, theme, { permission: 'granted', subscribed: true });
+        // The phone is the Home Screen app (a Safari tab gets the install steps instead).
+        const ctx = await ctxFor(browser, kind, theme, { permission: 'granted', subscribed: true, standalone: kind === 'phone' });
         const page = await ctx.newPage();
         await open(page);
         const bell = page.getByTestId('activity-bell').filter({ visible: true });
@@ -151,7 +153,8 @@ test('banners, the Alerts sheet, the bell and Activity, light and dark, phone an
         await expect(panel.getByTestId('activity-undo')).toBeVisible();
         await shot(page, 'activity-all-read', kind, theme);
         await panel.getByTestId('activity-undo').getByRole('button', { name: 'Undo' }).click();
-        await expect(bell).toHaveAccessibleName(/Activity, \d+ unread/);
+        // The open sheet hides the page from the accessibility tree: read the label itself.
+        await expect(bell).toHaveAttribute('aria-label', /Activity, \d+ unread/);
         await ctx.close();
       }
       for (const kind of ['phone', 'desk'] as const) {
@@ -163,7 +166,7 @@ test('banners, the Alerts sheet, the bell and Activity, light and dark, phone an
             : { baseURL: BASE, viewport: { width: 1440, height: 900 }, isMobile: false, hasTouch: false, colorScheme: theme },
         );
         await fresh.addInitScript((t: Theme) => localStorage.setItem('lp-theme', t), theme);
-        await fakePush(fresh, { permission: 'granted', subscribed: true });
+        await fakePush(fresh, { permission: 'granted', subscribed: true, standalone: kind === 'phone' });
         const page = await fresh.newPage();
         await open(page);
         await page.getByTestId('activity-bell').filter({ visible: true }).click();

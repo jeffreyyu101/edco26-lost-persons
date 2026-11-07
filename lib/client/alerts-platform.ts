@@ -20,8 +20,9 @@
 //   * Desktop Chrome: View site information (left of the address) → Notifications on (Google, desktop).
 //     Edge: View site information → Permissions for this site → Notifications → Allow. Safari on a Mac:
 //     Safari → Settings → Websites → Notifications → Allow; a web app in the Dock: System Settings →
-//     Notifications → the app → Allow Notifications (Apple). Firefox: the lock left of the address →
-//     Permissions → Send Notifications → Allow (Mozilla, "Web Push notifications in Firefox").
+//     Notifications → the app → Allow Notifications (Apple). Firefox: the permissions icon in the address bar
+//     (the site permissions panel) → Send Notifications → × (clear the block, so the page can ask again from
+//     Turn on; Mozilla, "Web Push notifications in Firefox").
 import { APP_NAME } from '../activity';
 
 export type Os = 'ios' | 'android' | 'macos' | 'windows' | 'linux' | 'chromeos' | 'other';
@@ -88,7 +89,7 @@ export function detectPlatform(device: DeviceSignals): Platform {
 }
 
 /** One tap in a path: a glyph (mapped to a lucide icon by the banner) and its label. */
-export type StepIcon = 'more-h' | 'more-v' | 'page-menu' | 'share' | 'square-plus' | 'settings' | 'sliders' | 'lock' | 'bell';
+export type StepIcon = 'more-h' | 'more-v' | 'page-menu' | 'share' | 'square-plus' | 'settings' | 'sliders' | 'lock' | 'bell' | 'bell-off' | 'x';
 
 export interface Step {
   icon?: StepIcon;
@@ -127,7 +128,8 @@ export function blockedSteps(p: Platform): Step[] {
     return [{ label: 'Safari' }, { label: 'Settings' }, { label: 'Websites' }, { label: 'Notifications' }, { label: 'Allow' }];
   }
   if (p.browser === 'edge') return [{ icon: 'lock', label: 'View site information' }, { label: 'Permissions for this site' }, { label: 'Notifications' }, { label: 'Allow' }];
-  if (p.browser === 'firefox') return [{ icon: 'lock', label: 'Lock left of the address' }, { label: 'Permissions' }, { label: 'Send Notifications' }, { label: 'Allow' }];
+  // Firefox clears a block (×) rather than switching it to Allow; the page then asks again from Turn on.
+  if (p.browser === 'firefox') return [{ icon: 'bell-off', label: 'Permissions icon' }, { label: 'Send Notifications' }, { icon: 'x', label: 'Clear' }];
   if (p.browser === 'chrome') return [{ icon: 'sliders', label: 'Icon left of the address' }, { label: 'Notifications' }, { label: 'On' }];
   return [{ icon: 'lock', label: 'Icon left of the address' }, { label: 'Notifications' }, { label: 'Allow' }];
 }

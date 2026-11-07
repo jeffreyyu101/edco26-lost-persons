@@ -54,7 +54,8 @@ screenshots.
   Cancelled and edits reach everyone involved in the request; new requests reach staff with "New requests"
   on. The notification shows the request's initials and one line ("In medical · Chair 9"), never a name, LP
   number or phone number. One per request on the lock screen. With the app in front there is no
-  notification (the toast shows); a phone with push never also gets the page's own notification.
+  notification (the toast shows); a phone with push never also gets the page's own notification. The page's
+  own notification (devices without push) no longer shows the LP number either: "S.L. · In medical" / "FA 3".
 - **Alerts sheet** (avatar menu → Alerts; the desk sidebar and rail): this device On / Off / Blocked, "Send a
   test alert", and the two switches "New requests" and "Updates on my requests", saved on the server for every
   device of the staff member. "New requests" is the old in-app Alerts bell.
@@ -88,16 +89,16 @@ screenshots.
 
 | What | How it was checked |
 |---|---|
-| iPhone Safari, iOS 27: Menu → Share → Add to Home Screen → Open as Web App | Researched: Apple, "Turn a website into an app in Safari on iPhone" (iOS 27 page; the button is "the Page Menu button"). Not seen on a device: no iOS Simulator is installed on this machine (T3 device tools found none). |
+| iPhone Safari, iOS 27: Menu → Share → Add to Home Screen → Open as Web App | Researched: Apple, "Turn a website into an app in Safari on iPhone" (iOS 27 page; the button is "the Page Menu button"). Re-read 2026-11-06 20:30 (iOS 27 page: "the Page Menu button"; iOS 26 page: "the More button"). Not seen on a device: this Mac has Xcode but no iOS Simulator runtime (`xcrun simctl list runtimes` is empty; the T3 device tools list no devices; checked again 2026-11-07 01:10, unchanged). |
 | iPhone Safari, iOS 26: More (⋯) → Share → … | Researched: the same Apple article, iOS 26 version ("the More button"). |
 | iPhone Safari, iOS 17 / 18: Share → Add to Home Screen | Researched: Apple, "Bookmark a website in Safari on iPhone", iOS 17 and 18. |
 | iPad Safari 27 / 26 / 18 | Researched: Apple, "Turn a website into an app in Safari on iPad" (27: View More; 26: the More button). |
 | iOS 26+ Safari's frozen user agent (iPhone OS 18_6 + Version/26.x) | Researched: WebKit, "WebKit Features in Safari 26.0". Unit-tested with those strings. |
-| Home Screen app blocked: Settings → Notifications → the app → Allow Notifications | Researched: Apple, "Change notification settings on iPhone", iOS 17, 18, 26 and 27 pages (all give this path). |
-| Android Chrome: More → Site controls → Permissions → Notifications → Allow | Researched: Google, "Use notifications to get alerts" (Android). No Android emulator on this machine. |
+| Home Screen app blocked: Settings → Notifications → the app → Allow Notifications | Researched: Apple, "Change notification settings on iPhone", iOS 17, 18, 26 and 27 pages (all give "Settings → Notifications, then tap an app below Notification Style … Allow Notifications"; re-read 2026-11-06 20:30 for 26 and 27, and 2026-11-07 for 26: "Go to the Settings app … Tap Notifications, then tap an app below Notification Style"). The brief's "Settings → Apps → the app → Notifications" (18+) is not on Apple's page; WebKit, "Web Push for Web Apps on iOS and iPadOS": a web app's permission is managed "in Notifications Settings — just like any other app". |
+| Android Chrome: More → Site controls → Permissions → Notifications → Allow | Researched: Google, "Use notifications to get alerts" (Android; re-read 2026-11-06 20:30: "Tap More → Site controls → Permissions"). No Android emulator on this machine (no Android SDK). |
 | Android installed app: Settings → Notifications → App notifications → the app | Researched: Google, "Control notifications on Android". |
-| Desktop Chrome: View site information → Notifications | Researched: Google, "Use notifications to get alerts" (computer). Verified in Playwright Chromium (headless): the banner states, Turn on, revoke → blocked, re-check, overflow at 820 / 1180 / 1440 px. |
-| Edge, Firefox, Safari on a Mac | Researched: Microsoft help (via search), Mozilla "Web Push notifications in Firefox", Apple "Customize website notifications in Safari on Mac". Not run. |
+| Desktop Chrome: View site information → Notifications | Researched: Google, "Use notifications to get alerts" (computer; re-read 2026-11-06 20:30: "Click View site information. To allow notifications, turn on Notifications"). Verified in Playwright Chromium (headless): the banner states, Turn on, revoke → blocked, re-check, overflow at 820 / 1180 / 1440 px. |
+| Edge, Firefox, Safari on a Mac | Researched: Microsoft, "Manage website notifications in Microsoft Edge" (View site information → Permissions for this site → Notifications); Mozilla, "Web Push notifications in Firefox" (the Permissions icon in the address bar opens the site's permissions; a block is cleared with ×, then the page asks again); Apple, "Customize website notifications in Safari on Mac". Not run. |
 | WebKit revokes push after silent pushes | Researched: Apple docs / WebKit blog quoted in WebKit and Firebase issues (3 silent pushes). The worker never leaves a push silent on WebKit (unit-tested). |
 | A push while the app is in front shows nothing; the page syncs | Verified in Playwright Chromium: a push event dispatched inside this build's real service worker (`worker.evaluate`; the DevTools protocol's push delivery, and `setAppBadge` in a worker, crash the headless Chromium shell). The background path (shown, tag, badge, silent-and-closed on WebKit) is unit-tested against `public/sw.js`. |
 | Encryption and delivery to a push service | Verified in the integration tests: `web-push` 3.6.7 sends to a fake HTTPS push service on 127.0.0.1 that decrypts every payload (aes128gcm) and answers 201, 410, 500 or never (deletion, failure counting and the timeout). |

@@ -6,8 +6,12 @@
 .bell.bell {
   position: relative;
   flex: none;
+  /* 36 × 36 like search beside it: Radix's size-3 padding would otherwise make the box 52 px and push the
+     header's icons past their row (the title then truncates sooner). The hit area stays 44 px (lp-hit). */
+  box-sizing: border-box;
   width: 36px;
   height: 36px;
+  padding: 0;
   margin: 0;
 }
 .bell svg {

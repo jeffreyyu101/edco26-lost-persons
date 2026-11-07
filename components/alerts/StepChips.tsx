@@ -2,9 +2,9 @@
 // The exact taps of a path, as chips with › between them (design/screens/alerts-banner.html Steps). The
 // chips are decoration for sight; a screen reader hears the same path as one sentence.
 import { VisuallyHidden } from '@radix-ui/themes';
-import { ChevronRight, EllipsisVertical, Lock, Settings, Share, SlidersHorizontal, SquarePlus, TextAlignStart } from 'lucide-react';
+import { BellOff, ChevronRight, EllipsisVertical, Lock, Settings, Share, SlidersHorizontal, SquarePlus, TextAlignStart } from 'lucide-react';
 import type { ComponentType } from 'react';
-import { BellIcon, EllipsisIcon, type IconProps } from '@/components/activity/icons';
+import { BellIcon, EllipsisIcon, XIcon, type IconProps } from '@/components/activity/icons';
 import { stepsSentence, type Step, type StepIcon } from '@/lib/client/alerts-platform';
 import s from './alerts.module.css';
 
@@ -18,6 +18,8 @@ const ICONS: Readonly<Record<StepIcon, ComponentType<IconProps>>> = {
   sliders: SlidersHorizontal,
   lock: Lock,
   bell: BellIcon,
+  'bell-off': BellOff,
+  x: XIcon,
 };
 
 export function StepChips({ steps, lead, testId }: { steps: readonly Step[]; lead: string; testId?: string }) {

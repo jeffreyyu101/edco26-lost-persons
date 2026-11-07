@@ -138,8 +138,9 @@ describe('blockedSteps (the exact path to allow alerts again)', () => {
   it('Edge: View site information → Permissions for this site → Notifications → Allow', () => {
     expect(labels(blockedSteps(detectPlatform(dev(UA.winEdge))))).toEqual(['View site information', 'Permissions for this site', 'Notifications', 'Allow']);
   });
-  it('Firefox: the lock → Permissions → Send Notifications → Allow', () => {
-    expect(labels(blockedSteps(detectPlatform(dev(UA.winFirefox))))).toEqual(['Lock left of the address', 'Permissions', 'Send Notifications', 'Allow']);
+  it('Firefox: the permissions icon → Send Notifications → Clear (the page asks again from Turn on)', () => {
+    expect(labels(blockedSteps(detectPlatform(dev(UA.winFirefox))))).toEqual(['Permissions icon', 'Send Notifications', 'Clear']);
+    expect(blockedSteps(detectPlatform(dev(UA.winFirefox))).map((st) => st.icon ?? null)).toEqual(['bell-off', null, 'x']);
   });
   it('Safari on a Mac: Safari → Settings → Websites → Notifications → Allow; a Dock web app: System Settings', () => {
     expect(labels(blockedSteps(detectPlatform(dev(UA.macSafari))))).toEqual(['Safari', 'Settings', 'Websites', 'Notifications', 'Allow']);
