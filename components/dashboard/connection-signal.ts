@@ -11,7 +11,7 @@ import { useSyncExternalStore } from 'react';
 export interface DashboardLive {
   /** When the last stats fetch landed (epoch ms on this device), or null before the first. */
   syncedAt: number | null;
-  /** The stats fetch is failing: Reconnecting. */
+  /** The stats fetches failed past the lists' thresholds (useStats().failing): Reconnecting. */
   failing: boolean;
   /** Fetch the stats at once (Refresh now). */
   refresh: () => Promise<void>;

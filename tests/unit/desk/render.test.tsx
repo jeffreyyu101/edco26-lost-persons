@@ -207,9 +207,16 @@ describe('DeskTop', () => {
       setDashboardLive({ syncedAt: Date.now() - 20_000, failing: false, refresh });
       expect(dash()).toMatch(/data-state="healthy" data-testid="live-indicator">.*data-testid="live-text">Updated just now<\/span>/);
       expect(dash()).toContain('>Dashboard updated just now.</span>');
-      // Stats older than 30 s (it polls every 15 s), or a failing fetch: Reconnecting, with the clock time.
+      // Stats older than 30 s while the lists still sync: the lists' syncs count as landing for the 30 s rule
+      // (the dashboard thresholds review fix), so the line stays healthy and its words come from the stats.
       setDashboardLive({ syncedAt: Date.now() - 90_000, failing: false, refresh });
-      expect(dash()).toMatch(/data-state="reconnecting" data-testid="live-indicator">.*data-testid="live-text">Last updated /);
+      expect(dash()).toMatch(/data-state="healthy" data-testid="live-indicator">.*data-testid="live-text">Updated 1 min ago<\/span>/);
+      // Nothing landed for more than 30 s (stats and lists), or fetches failing past the thresholds:
+      // Reconnecting, with the clock time.
+      const stale = storeWith((s) => ({ ...s, lastSyncLocalAt: Date.now() - 90_000 }));
+      expect(render(<DeskTop main={main('dashboard=1')} />, stale)).toMatch(
+        /data-state="reconnecting" data-testid="live-indicator">.*data-testid="live-text">Last updated /,
+      );
       setDashboardLive({ syncedAt: Date.now() - 20_000, failing: true, refresh });
       expect(dash()).toMatch(/data-state="reconnecting" data-testid="live-indicator">.*data-testid="live-text">Last updated /);
     } finally {

@@ -61,16 +61,17 @@ export function DashboardView(_props: DashboardViewProps) {
 }
 
 function Dashboard({ onRetry }: { onRetry: () => void }) {
-  const { stats, error, updatedAt, refresh } = useStats(true);
+  const { stats, error, failing, updatedAt, refresh } = useStats(true);
   const inDesk = useInDesk();
-  // The line, the banner and its live region share one status: the last stats fetch (the numbers on this page).
-  const live = useLiveStatus({ syncedAt: updatedAt, failing: error, subject: 'Dashboard' });
+  // The line, the banner and its live region share one status: the last stats fetch (the numbers on this page),
+  // by the lists' rules (one failed poll shows nothing; 2 network failures or 3 server errors in a row do).
+  const live = useLiveStatus({ syncedAt: updatedAt, failing, subject: 'Dashboard' });
 
   // On the desk the top bar draws the line and Refresh now from the same inputs; it drops them when the
   // dashboard closes.
   useEffect(() => {
-    if (inDesk) setDashboardLive({ syncedAt: updatedAt, failing: error, refresh });
-  }, [inDesk, updatedAt, error, refresh]);
+    if (inDesk) setDashboardLive({ syncedAt: updatedAt, failing, refresh });
+  }, [inDesk, updatedAt, failing, refresh]);
   useEffect(() => () => setDashboardLive(null), []);
 
   return (

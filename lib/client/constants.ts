@@ -20,6 +20,11 @@ export const MUTATION_TIMEOUT_MS = 10_000;
 /** How long the Undo bar stays after an answer tap (10 s since v2.2, Brian + Jeffrey 2026-11-06; was 6 s). */
 export const UNDO_MS = 10_000;
 export const STATS_POLL_MS = 15_000;
+/**
+ * Failures in a row before a connection reads as down: network errors or timeouts (the store: 'offline'), and
+ * HTTP 5xx (the store: 'error'). The dashboard's stats poller counts its own failures the same way.
+ */
+export const CONNECTION_FAILURES = { network: 2, http: 3 } as const;
 export const OUTBOX_BACKOFF_MS = [5_000, 15_000, 60_000, 120_000] as const;
 export const DRAFT_DEBOUNCE_MS = 300;
 

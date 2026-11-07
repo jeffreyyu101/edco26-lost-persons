@@ -343,7 +343,7 @@ test.describe('with /api/stats mocked', () => {
     await expect(value(page, 'tile-closed')).toHaveText('4');
   });
 
-  test('the line under the title follows the list rules: "Updated just now", the Offline / Reconnecting banner with "Last updated <time>", Refresh now fetches the stats', async ({ page, context }) => {
+  test('the line under the title follows the list rules: "Updated just now", the Offline / Reconnecting banner with "Last updated <time>" (back online recovers without a tap; one failed fetch shows nothing), Refresh now fetches the stats', async ({ page, context }) => {
     test.slow();
     await page.goto('/?dashboard=1');
     await expect(page.getByTestId('open-count')).toBeVisible();
@@ -385,7 +385,10 @@ test.describe('with /api/stats mocked', () => {
     expect(await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload)).toBe(true);
 
     // Offline: the gray banner under the header, and the fixed clock time on the line.
+    await page.unroute('**/api/stats');
+    const isStats = (r: { url(): string }) => new URL(r.url()).pathname === '/api/stats';
     await context.setOffline(true);
+    let backOnline = false;
     try {
       await expect(line).toHaveAttribute('data-state', 'offline', { timeout: 15_000 });
       await expect(banner).toHaveText(/^Offline · \d+ waiting to send$/);
@@ -395,22 +398,40 @@ test.describe('with /api/stats mocked', () => {
       // The banner sits under the header, above the numbers, which stay on screen.
       expect((await banner.boundingBox())!.y).toBeGreaterThan(box.y);
       expect((await page.getByTestId('tile-open').boundingBox())!.y).toBeGreaterThan((await banner.boundingBox())!.y);
-    } finally {
+      // Stats fetches that fail while offline (two, past the network threshold): still just Offline.
+      for (let i = 0; i < 2; i += 1) {
+        await refresh.click();
+        await expect(refresh).not.toHaveAttribute('data-refreshing', { timeout: 15_000 });
+      }
+      await expect(line).toHaveAttribute('data-state', 'offline');
+      await expect(banner).toHaveText(/^Offline · \d+ waiting to send$/);
+      // Back online, no tap: the stats go out at once (the next poll is 15 s away), and the banner goes with the
+      // lists', not a poll later.
+      const statsBack = page.waitForRequest(isStats, { timeout: 8_000 });
       await context.setOffline(false);
+      backOnline = true;
+      await statsBack;
+    } finally {
+      if (!backOnline) await context.setOffline(false);
     }
-    // Back online, Refresh now: healthy at once (no waiting for the 15 s poll).
-    await refresh.click();
-    await expect(line).toHaveAttribute('data-state', 'healthy', { timeout: 15_000 });
-    await expect(banner).toHaveCount(0);
-    // (A tap while the glyph still turns is ignored: wait for it to settle.)
-    await expect(refresh).not.toHaveAttribute('data-refreshing', { timeout: 10_000 });
+    await expect(banner).toHaveCount(0, { timeout: 8_000 });
+    await expect(line).toHaveAttribute('data-state', 'healthy');
+    await expect(text).toHaveText('Updated just now');
+    await expect(page.getByTestId('live-announcement')).toHaveText('Back online');
 
-    // Stats that fail: the amber Reconnecting banner and "Last updated <time>"; a refresh that fails changes
-    // nothing else (no toast).
-    await page.unroute('**/api/stats');
+    // Stats that fail with a server error: one shows nothing (the lists' thresholds: 3 in a row); the 3rd is
+    // the amber Reconnecting banner and "Last updated <time>". A refresh that fails changes nothing else (no toast).
     await page.route('**/api/stats', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":{"code":"unavailable","message":"Try again"}}' }));
     await refresh.click();
-    await expect(banner).toHaveText('Reconnecting…', { timeout: 15_000 });
+    await expect(refresh).not.toHaveAttribute('data-refreshing', { timeout: 10_000 });
+    await expect(banner).toHaveCount(0);
+    await expect(line).toHaveAttribute('data-state', 'healthy');
+    await expect(text).toHaveText('Updated just now');
+    for (let i = 0; i < 2; i += 1) {
+      await refresh.click();
+      await expect(refresh).not.toHaveAttribute('data-refreshing', { timeout: 10_000 });
+    }
+    await expect(banner).toHaveText('Reconnecting…');
     await expect(banner).toHaveAttribute('data-tone', 'amber');
     await expect(line).toHaveAttribute('data-state', 'reconnecting');
     await expect(text).toHaveText(/^Last updated \d{1,2}:\d{2} (AM|PM)$/);
@@ -418,7 +439,6 @@ test.describe('with /api/stats mocked', () => {
     await expect(page.getByTestId('open-count')).toBeVisible();
     await expect(page.locator('.lp-toast')).toHaveCount(0);
     await page.unroute('**/api/stats');
-    await expect(refresh).not.toHaveAttribute('data-refreshing', { timeout: 10_000 });
     await refresh.click();
     await expect(line).toHaveAttribute('data-state', 'healthy', { timeout: 15_000 });
     await expect(text).toHaveText('Updated just now');
@@ -648,6 +668,39 @@ test.describe('with /api/stats mocked', () => {
       await context.setOffline(false);
     }
     await expect(line).toHaveAttribute('data-state', 'healthy', { timeout: 20_000 });
+    await expect(page.getByTestId('connection-banner')).toHaveCount(0);
+  });
+
+  test('desk: the top bar\'s line follows the lists\' thresholds with the banner (one failed stats fetch shows nothing; the 3rd server error is Reconnecting)', async ({ page }) => {
+    await routeStats(page, mockStats());
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/?dashboard=1');
+    await expect(page.getByTestId('open-count')).toHaveText('7');
+    const line = page.getByTestId('desk-topbar').getByTestId('live-indicator');
+    const refresh = line.getByRole('button', { name: 'Refresh now', exact: true });
+    const banner = page.getByTestId('dashboard').getByTestId('connection-banner');
+    await expect(line).toHaveAttribute('data-state', 'healthy');
+    await page.unroute('**/api/stats');
+    await page.route('**/api/stats', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":{"code":"unavailable","message":"Try again"}}' }));
+    // One failed fetch: the line and the banner both stay as they were (they read the same `failing`).
+    await refresh.click();
+    await expect(refresh).not.toHaveAttribute('data-refreshing', { timeout: 10_000 });
+    await expect(line).toHaveAttribute('data-state', 'healthy');
+    await expect(line.getByTestId('live-text')).toHaveText('Updated just now');
+    await expect(page.getByTestId('connection-banner')).toHaveCount(0);
+    // The 3rd server error in a row: Reconnecting in the top bar and the amber banner together.
+    for (let i = 0; i < 2; i += 1) {
+      await refresh.click();
+      await expect(refresh).not.toHaveAttribute('data-refreshing', { timeout: 10_000 });
+    }
+    await expect(line).toHaveAttribute('data-state', 'reconnecting');
+    await expect(line.getByTestId('live-text')).toHaveText(/^Last updated \d{1,2}:\d{2} (AM|PM)$/);
+    await expect(banner).toHaveText('Reconnecting…');
+    // Stats back: one Refresh now clears both.
+    await page.unroute('**/api/stats');
+    await routeStats(page, mockStats());
+    await refresh.click();
+    await expect(line).toHaveAttribute('data-state', 'healthy', { timeout: 15_000 });
     await expect(page.getByTestId('connection-banner')).toHaveCount(0);
   });
 });
