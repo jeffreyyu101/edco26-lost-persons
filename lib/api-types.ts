@@ -192,6 +192,14 @@ export interface SyncResponse {
   next: { at: IsoDateTime; id: string } | null;
   /** With reconcile=1: [id, rowVersion] for every row. */
   versions?: Array<[string, number]>;
+  /**
+   * (F4, additive.) On the first page of a poll: how many requests have an unread Activity row for the
+   * signed-in staff member (never their own actions), and which (newest first, ≤ 100). Absent when it could
+   * not be read (the rows still sync) and from a server before F4. activityUnreadIds is left out when the
+   * count is 0 (the empty delta stays about 100 bytes).
+   */
+  activityUnread?: number;
+  activityUnreadIds?: string[];
 }
 
 // ---------------------------------------------------------------------------------------------------

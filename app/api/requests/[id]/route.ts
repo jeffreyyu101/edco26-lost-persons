@@ -1,7 +1,13 @@
 // GET /api/requests/:id (RequestDetail through lp_detail) and PATCH /api/requests/:id (lp_update_fields).
+// A real edit tells everyone involved (Activity + Web Push, F4 spec §18 A57), after the response: where
+// medical has them as "Chair 9 → Bed 3" (or the In medical answer completed with it, "In medical · Chair 9"),
+// anything else as "Details changed".
 import type { ChangeResponse, RequestDetail } from '@/lib/api-types';
+import { editEventFor } from '@/lib/server/activity-events';
 import { idParam, json, readJson } from '@/lib/server/http';
+import { involvedStaff } from '@/lib/server/involved';
 import { mapDetail, mapRow, patchPayload } from '@/lib/server/mappers';
+import { notifyLater } from '@/lib/server/notify';
 import { withReclassify } from '@/lib/server/reclassify';
 import { authedRoute } from '@/lib/server/route';
 import { rpc } from '@/lib/server/supabase';
@@ -30,5 +36,9 @@ export const PATCH = authedRoute<P>('PATCH /api/requests/[id]', {}, async ({ req
     }),
   );
   const out: ChangeResponse = { changed: data.changed === true, request: mapRow(data.row) };
+  if (out.changed) {
+    const status = out.request.status;
+    await notifyLater(() => involvedStaff(id), () => editEventFor(id, session.staff, status));
+  }
   return json(out);
 });
