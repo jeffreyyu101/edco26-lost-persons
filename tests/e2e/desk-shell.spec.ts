@@ -465,17 +465,16 @@ test.describe('desktop 1440 × 900', () => {
     await expect(page.locator('html')).toHaveAttribute('data-brand-hidden', '');
 
     // After a reload the server still draws the row (it can't know), but it never shows: the pre-paint script
-    // keeps it display: none until the shell drops it.
+    // keeps it display: none until the shell drops it. Checked before every frame is painted (a rAF callback
+    // runs only once the page can render, so its stylesheets are in).
     await page.addInitScript(() => {
-      const w = window as unknown as { __brandShown?: boolean };
+      const w = window as unknown as { __brandShown?: boolean; __frames?: number };
       w.__brandShown = false;
-      const check = () => {
+      w.__frames = 0;
+      const tick = () => {
         const el = document.querySelector<HTMLElement>('[data-testid="desk-brand"]');
         if (el && el.getBoundingClientRect().height > 0) w.__brandShown = true;
-      };
-      new MutationObserver(check).observe(document, { childList: true, subtree: true, attributes: true });
-      const tick = () => {
-        check();
+        w.__frames = (w.__frames ?? 0) + 1;
         requestAnimationFrame(tick);
       };
       requestAnimationFrame(tick);
@@ -483,6 +482,7 @@ test.describe('desktop 1440 × 900', () => {
     await page.reload();
     await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
     await page.waitForTimeout(500);
+    expect(await page.evaluate(() => (window as unknown as { __frames?: number }).__frames)).toBeGreaterThan(5);
     expect(await page.evaluate(() => (window as unknown as { __brandShown?: boolean }).__brandShown)).toBe(false);
     await expect(page.getByTestId('brand-card')).toHaveCount(0);
     expect((await bar.boundingBox())!.y).toBeCloseTo(0, 0);
