@@ -313,7 +313,8 @@ export function AllView({ status, post, open = false }: AllViewProps) {
 }
 
 // ---------------------------------------------------------------------------------------------------
-// Pending: Friend coming (oldest first), then Waiting for check (oldest first)
+// Pending: Waiting for check (oldest first), then Friend coming (oldest first). Brian, 2026-11-06 19:40:
+// waiting for check is the priority, so it comes first.
 // ---------------------------------------------------------------------------------------------------
 
 function SectionHeader({ kind, label, count }: { kind: GlyphKind; label: string; count: number }) {
@@ -343,19 +344,19 @@ export function PendingView() {
         <EmptyState icon="inbox" title="Nothing pending" />
       ) : (
         <div className={s.scroll} data-testid="request-list">
-          {friendComing.length > 0 ? (
-            <section className={s.scroll} style={{ padding: 0 }} aria-label={`Friend coming, ${friendComing.length}`}>
-              <SectionHeader kind="inMedical" label="Friend coming" count={friendComing.length} />
-              {friendComing.map((row) => (
-                <ComingCard key={row.id} row={row} now={now} offline={offline} onTap={tap} />
-              ))}
-            </section>
-          ) : null}
           {waiting.length > 0 ? (
             <section className={s.scroll} style={{ padding: 0 }} aria-label={`Waiting for check, ${waiting.length}`}>
               <SectionHeader kind="waiting" label="Waiting for check" count={waiting.length} />
               {waiting.map((row) => (
                 <CheckCard key={row.id} row={row} now={now} offline={offline} onTap={tap} />
+              ))}
+            </section>
+          ) : null}
+          {friendComing.length > 0 ? (
+            <section className={s.scroll} style={{ padding: 0 }} aria-label={`Friend coming, ${friendComing.length}`}>
+              <SectionHeader kind="inMedical" label="Friend coming" count={friendComing.length} />
+              {friendComing.map((row) => (
+                <ComingCard key={row.id} row={row} now={now} offline={offline} onTap={tap} />
               ))}
             </section>
           ) : null}
