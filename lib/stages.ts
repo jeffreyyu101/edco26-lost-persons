@@ -15,7 +15,7 @@ import {
   type Status,
   type StatusBucket,
 } from './domain';
-import { DEFAULT_EVENT_TIMEZONE, formatClockAmPm, formatDuration, minutesSince } from './format';
+import { DEFAULT_EVENT_TIMEZONE, formatClock, formatClockAmPm, formatDuration, minutesSince } from './format';
 
 export { RECHECK_MINUTES, isHeld, isRecheckDue } from './domain';
 
@@ -23,6 +23,7 @@ export { RECHECK_MINUTES, isHeld, isRecheckDue } from './domain';
 // their transitions are unchanged; a stage is derived for display only:
 //   Waiting for check   + needsInfo (F3, medical asked)    → Needs info      amber  ring with "?"
 //   Waiting for check   + recheckAt (the hold, below)     → Not found yet   violet hourglass
+//   (Needs info on hold keeps its label and carries the hold's recheck time: recheckAt, due, recheck)
 //   In medical          + enroute.state 'enroute' (F3)    → Friend en route teal   walking figure
 //   In medical          + enroute.state 'arrived' (F3)    → Friend arrived  green  check (not filled)
 // Needs info beats Not found yet. Every other status is its own stage, with its label from STATUS_META, so a
@@ -109,13 +110,28 @@ export interface DisplayStage extends StageMeta {
   fullLabel: string;
   /** One quiet line under the label: "9m", "Recheck 4:40 PM", "Bed 3", "~4 min", "Rae C. asked · 4:20 PM", "2 checks". */
   sub?: string;
-  /** What follows the label in a desk status cell: "· 9m", "· 4:40 PM", "· Bed 3", "· ~4 min", "· 2 checks". */
+  /**
+   * What follows the label in a desk status cell: "· 9m", "· 4:40 PM", "· Bed 3", "· ~4 min", "· 2 checks"; for
+   * Needs info on hold, "4:40 PM" after the recheck glyph (`extraGlyph`).
+   */
   extra?: string;
+  /**
+   * The desk cell's narrow form of `extra`, when its status column is short of room (a request open beside
+   * the list on a small window): "· 4:40" for "· 4:40 PM"; '' drops the extra ("· 2 checks"). Absent: `extra`
+   * is already short.
+   */
+  extraShort?: string;
+  /** The desk cell draws this glyph before `extra` (Needs info on hold: "⟳ 4:40 PM"). */
+  extraGlyph?: 'recheck';
   /** The stage as a screen reader says it, in words: "Not found yet, recheck at 4:40 PM". */
   said: string;
-  /** Not found yet only: when the recheck is due, and whether it is due at `now`. */
+  /**
+   * A request on hold (Not found yet, or Needs info while held): when the recheck is due, whether it is due at
+   * `now`, and its row / chip words, "Recheck 4:40 PM".
+   */
   recheckAt?: string;
   due?: boolean;
+  recheck?: string;
 }
 
 export interface StageOptions {
@@ -159,6 +175,12 @@ export function etaText(eta: string | null | undefined, now: number): string | n
 
 const withExtra = (sub: string | undefined): Pick<DisplayStage, 'sub' | 'extra'> => (sub ? { sub, extra: `· ${sub}` } : {});
 
+/** A hold's times: "4:40 PM", "4:40", "Recheck 4:40 PM", and whether it is due at `now`. */
+function holdOf(recheckAt: string, timeZone: string, now: number) {
+  const clock = formatClockAmPm(recheckAt, timeZone);
+  return { recheckAt, clock, short: formatClock(recheckAt, timeZone), recheck: `Recheck ${clock}`, due: epoch(recheckAt) <= now };
+}
+
 /**
  * The stage a request shows (list status cells, the desk status cell, the detail status block, the My
  * requests chip). Pure: pass `now` from useNow().
@@ -186,6 +208,7 @@ export function stagePhrase(row: StageSource, timeZone: string = DEFAULT_EVENT_T
     case 'notFoundYet':
       return words(stage.said);
     case 'needsInfo':
+      return stage.recheckAt ? `${stage.label}, recheck at ${formatClockAmPm(stage.recheckAt, timeZone)}` : stage.label;
     case 'enroute':
     case 'arrived':
       return stage.label;
@@ -203,22 +226,28 @@ function stageOf(row: StageSource, opts: StageOptions): DisplayStage {
   };
 
   if (status === STATUS.waiting) {
+    // The hold, whichever stage shows: Needs info wins the label, but the recheck time stays on every surface.
+    const hold = isHeld(row) ? holdOf(row.recheckAt as string, tz, opts.now) : null;
     if (row.needsInfo) {
       const by = row.lastMessage ? (row.lastMessage.mine ? 'You' : shortStaffName(row.lastMessage.by)) : '';
       const at = Number.isFinite(epoch(row.lastMessageAt)) ? formatClockAmPm(row.lastMessageAt as string, tz) : '';
       const sub = by ? [`${by} asked`, at].filter(Boolean).join(' · ') : undefined;
-      const said = sub ? `${STAGE_META.needsInfo.label}, ${by} asked${at ? ` at ${at}` : ''}` : STAGE_META.needsInfo.label;
-      return of('needsInfo', sub ? { sub, said } : { said });
+      const asked = sub ? `${STAGE_META.needsInfo.label}, ${by} asked${at ? ` at ${at}` : ''}` : STAGE_META.needsInfo.label;
+      const said = hold ? `${asked}, recheck at ${hold.clock}` : asked;
+      const held: Partial<DisplayStage> = hold
+        ? { extra: hold.clock, extraShort: hold.short, extraGlyph: 'recheck', recheckAt: hold.recheckAt, due: hold.due, recheck: hold.recheck }
+        : {};
+      return of('needsInfo', { ...(sub ? { sub } : {}), said, ...held });
     }
-    if (isHeld(row)) {
-      const recheckAt = row.recheckAt as string;
-      const at = formatClockAmPm(recheckAt, tz);
+    if (hold) {
       return of('notFoundYet', {
-        sub: `Recheck ${at}`,
-        extra: `· ${at}`,
-        said: `${STAGE_META.notFoundYet.label}, recheck at ${at}`,
-        recheckAt,
-        due: epoch(recheckAt) <= opts.now,
+        sub: hold.recheck,
+        extra: `· ${hold.clock}`,
+        extraShort: `· ${hold.short}`,
+        said: `${STAGE_META.notFoundYet.label}, recheck at ${hold.clock}`,
+        recheckAt: hold.recheckAt,
+        due: hold.due,
+        recheck: hold.recheck,
       });
     }
     const waited = formatDuration(minutesSince(row.createdAt, opts.now));
@@ -238,7 +267,7 @@ function stageOf(row: StageSource, opts: StageOptions): DisplayStage {
   if (status === STATUS.notInMedical) {
     const checks = row.notFoundChecks ?? 0;
     const label = STAGE_META.notInMedical.label;
-    return of('notInMedical', checks >= 2 ? { ...withExtra(`${checks} checks`), said: `${label}, ${checks} checks` } : {});
+    return of('notInMedical', checks >= 2 ? { ...withExtra(`${checks} checks`), extraShort: '', said: `${label}, ${checks} checks` } : {});
   }
   if (status === STATUS.reunited) return of('reunited');
   if (status === STATUS.discharged) return of('discharged');

@@ -266,6 +266,8 @@ interface AlertToastMeta {
   kind: AlertEvent['kind'];
   /** The row's status when the alert was raised. */
   status: string | null;
+  /** (F5) Whether the row was on a "Not found yet" hold then (undefined: not tracked, e.g. combined). */
+  held?: boolean;
 }
 
 class FetchError extends Error {
@@ -541,6 +543,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     ownKeys,
     bell: state.prefs.bell,
     seen,
+    timeZone: state.eventTimezone,
   });
 
   /** Closes the alert toasts of one request (a newer alert for it replaces them). */
@@ -573,17 +576,17 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         alertToasts.delete(toastId);
         continue;
       }
-      if (!alertStillCurrent(meta.kind, meta.status, state.confirmed.get(meta.requestId))) dismissToast(toastId);
+      if (!alertStillCurrent(meta.kind, meta.status, state.confirmed.get(meta.requestId), meta.held)) dismissToast(toastId);
     }
     for (const [requestId, meta] of [...systemAlerts]) {
-      if (!alertStillCurrent(meta.kind, meta.status, state.confirmed.get(requestId))) closeSystemAlert(requestId);
+      if (!alertStillCurrent(meta.kind, meta.status, state.confirmed.get(requestId), meta.held)) closeSystemAlert(requestId);
     }
   };
 
   /** The in-app alert: its toast, and the listeners' chime and vibration. */
-  const showAlertToast = (alert: AlertEvent, status: string | null) => {
+  const showAlertToast = (alert: AlertEvent, status: string | null, held?: boolean) => {
     const toastId = showToast(alertToast(alert, (id) => navigate({ r: id })));
-    if (alert.requestId) alertToasts.set(toastId, { requestId: alert.requestId, kind: alert.kind, status });
+    if (alert.requestId) alertToasts.set(toastId, { requestId: alert.requestId, kind: alert.kind, status, held });
     for (const l of [...alertListeners]) {
       try {
         l(alert);
@@ -597,27 +600,27 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
    * The app is in the background (v2.5 A52): the alert is a system notification instead of the toast,
    * never both. If it can't be shown after all (permission withdrawn), the toast carries it.
    */
-  const showSystemAlert = (n: AlertNotifier, alert: AlertEvent, status: string | null, sources: readonly AlertEvent[]) => {
+  const showSystemAlert = (n: AlertNotifier, alert: AlertEvent, status: string | null, held: boolean | undefined, sources: readonly AlertEvent[]) => {
     // The rows as they are now: the notifier builds the notification from them before it awaits anything.
     const rows = state.confirmed;
     const row = alert.requestId ? rows.get(alert.requestId) : undefined;
     // The (id, rowVersion) the notification carries (systemNotice), so only this change is ever closed.
     const key = row ? alertKey(row) : null;
     const tracked = alert.requestId && alert.kind !== 'new_request' ? alert.requestId : null;
-    if (tracked) systemAlerts.set(tracked, { requestId: tracked, kind: alert.kind, status, key });
+    if (tracked) systemAlerts.set(tracked, { requestId: tracked, kind: alert.kind, status, held, key });
     const gen = state.generation;
     void n.show(alert, (id) => rows.get(id), sources).then((shown) => {
       if (shown || !running || gen !== state.generation) return;
       if (tracked && systemAlerts.get(tracked)?.key === key) systemAlerts.delete(tracked);
-      if (alert.requestId && !alertStillCurrent(alert.kind, status, state.confirmed.get(alert.requestId))) return;
-      showAlertToast(alert, status);
+      if (alert.requestId && !alertStillCurrent(alert.kind, status, state.confirmed.get(alert.requestId), held)) return;
+      showAlertToast(alert, status, held);
     });
   };
 
   const emitAlerts = (raised: readonly RaisedAlert[]) => {
     // One alert per request (the latest change wins), and only alerts still true for the synced row.
     const current = latestPerRequest(raised).filter((r) =>
-      r.alert.requestId ? alertStillCurrent(r.alert.kind, r.status, state.confirmed.get(r.alert.requestId)) : true,
+      r.alert.requestId ? alertStillCurrent(r.alert.kind, r.status, state.confirmed.get(r.alert.requestId), r.held) : true,
     );
     // Decided once per batch: a system notification while the app is in the background, else the toast;
     // nothing while another app tab of this browser is in front (it toasts these alerts from its own sync),
@@ -636,12 +639,13 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     }
     // Combined ("3 new requests") only counts what this tab shows.
     const shown = route === 'none' ? [] : current.filter((r) => !plan.skip.has(r.key));
-    const statusOf = new Map(shown.map((r) => [r.alert, r.status]));
+    const raisedBy = new Map(shown.map((r) => [r.alert, r]));
     const sources = shown.map((r) => r.alert);
     for (const alert of coalesceAlerts(sources)) {
-      const status = statusOf.get(alert) ?? null;
-      if (route === 'system' && n) showSystemAlert(n, alert, status, alert.kind === 'combined' ? sources : [alert]);
-      else showAlertToast(alert, status);
+      const status = raisedBy.get(alert)?.status ?? null;
+      const held = raisedBy.get(alert)?.held;
+      if (route === 'system' && n) showSystemAlert(n, alert, status, held, alert.kind === 'combined' ? sources : [alert]);
+      else showAlertToast(alert, status, held);
     }
     pruneAlertToasts();
   };

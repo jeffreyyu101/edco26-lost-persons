@@ -17,14 +17,15 @@ import { logRowLabel } from '@/components/list/list-helpers';
 import { ProfileView } from '@/components/profile/ProfileView';
 import { buildAuditTrail, holdOrigin } from '@/components/profile/audit-trail';
 import type { AuditEvent, RequestSummary } from '@/lib/api-types';
-import { diffAlerts, holdAlert, type AlertContext } from '@/lib/client/alerts';
+import { HOLD_ALERT_UNNAMED, alertStillCurrent, diffAlerts, diffRaisedAlerts, holdAlert, statusAlert, type AlertContext } from '@/lib/client/alerts';
+import { systemNotice } from '@/lib/client/system-notify';
 import { holdChanged, holdSnackMessage, holdsOnNotFound, statusOverlayFields } from '@/lib/client/hold';
 import { nextRecheckAt, toCheckLanes } from '@/lib/client/lanes';
 import { pendingGroups, viewCounts } from '@/lib/client/selectors';
 import { StoreContext, type AppStore, type StoreState } from '@/lib/client/store-contract';
 import { createStubStore } from '@/lib/client/store-stub';
 import { STUB_SESSION, stubRows } from '@/lib/client/stub-data';
-import { RECHECK_MINUTES, STATUS, STATUS_META, actionLabel, isHeld, isRecheckDue, primaryActions } from '@/lib/domain';
+import { RECHECK_MINUTES, STATUS, STATUS_META, actionLabel, holdDetail, initials, isHeld, isRecheckDue, primaryActions } from '@/lib/domain';
 import { STAGE_META, displayStage, etaText, holdAnsweredAt, isMedicalTeam, shortStaffName, stageLook, stagePhrase, type StageKey, type StageSource } from '@/lib/stages';
 import { formatClock, formatClockAmPm } from '@/lib/format';
 import { mapAudit, mapRow } from '@/lib/server/mappers';
@@ -122,12 +123,34 @@ describe('displayStage', () => {
         break;
       case 'needsInfo':
         expect(stage.sub).toBe('Rae C. asked · 4:20 PM');
-        expect(stage.extra).toBeUndefined();
-        expect(stage.said).toBe('Needs info, Rae C. asked at 4:20 PM');
+        if (hold === 'none') {
+          expect(stage.extra).toBeUndefined();
+          expect(stage.said).toBe('Needs info, Rae C. asked at 4:20 PM');
+        } else {
+          // Needs info wins the label, and the hold goes on: its time stays on every surface.
+          const time = formatClockAmPm(HOLDS[hold] as string, TZ);
+          expect({
+            extra: stage.extra,
+            extraShort: stage.extraShort,
+            extraGlyph: stage.extraGlyph,
+            recheck: stage.recheck,
+            recheckAt: stage.recheckAt,
+            due: stage.due,
+          }).toEqual({
+            extra: time,
+            extraShort: formatClock(HOLDS[hold] as string, TZ),
+            extraGlyph: 'recheck',
+            recheck: `Recheck ${time}`,
+            recheckAt: HOLDS[hold],
+            due: hold === 'due',
+          });
+          expect(stage.said).toBe(`Needs info, Rae C. asked at 4:20 PM, recheck at ${time}`);
+        }
         break;
       case 'notFoundYet': {
         const time = formatClockAmPm(HOLDS[hold] as string, TZ);
-        expect([stage.sub, stage.extra]).toEqual([`Recheck ${time}`, `· ${time}`]);
+        expect([stage.sub, stage.extra, stage.extraShort]).toEqual([`Recheck ${time}`, `· ${time}`, `· ${formatClock(HOLDS[hold] as string, TZ)}`]);
+        expect(stage.recheck).toBe(`Recheck ${time}`);
         expect(stage.due).toBe(hold === 'due');
         expect(stage.said).toBe(`Not found yet, recheck at ${time}`);
         break;
@@ -143,6 +166,10 @@ describe('displayStage', () => {
       default:
         expect(stage.extra).toBeUndefined();
     }
+    // Only a request on hold carries a recheck time.
+    const held = status === STATUS.waiting && hold !== 'none';
+    expect(stage.recheck !== undefined).toBe(held);
+    expect(stage.recheckAt !== undefined).toBe(held);
     expect(stage.said).not.toContain('·');
   });
 
@@ -150,6 +177,8 @@ describe('displayStage', () => {
     const final = displayStage({ status: STATUS.notInMedical, createdAt: at(-60), notFoundChecks: 2 }, { now: NOW, timeZone: TZ });
     expect(final.label).toBe(STATUS_META[STATUS.notInMedical].shortLabel);
     expect([final.sub, final.extra]).toEqual(['2 checks', '· 2 checks']);
+    // A desk cell short of room drops it rather than cutting it.
+    expect(final.extraShort).toBe('');
     // One check (Change answer from In medical) adds nothing.
     expect(displayStage({ status: STATUS.notInMedical, createdAt: at(-60), notFoundChecks: 1 }, { now: NOW }).extra).toBeUndefined();
   });
@@ -182,6 +211,8 @@ describe('displayStage', () => {
     expect(stagePhrase({ status: STATUS.inMedical, createdAt: at(-5) })).toBe('In medical, friend coming');
     expect(stagePhrase({ status: STATUS.waiting, createdAt: at(-5), recheckAt: at(10) }, TZ)).toBe(`Not found yet, recheck at ${formatClockAmPm(at(10), TZ)}`);
     expect(logRowLabel(row({ recheckAt: at(10), notFoundChecks: 1 }), '4:11 PM', 'updated now', TZ)).toContain('Not found yet, recheck at');
+    // Needs info on hold says both.
+    expect(stagePhrase({ status: STATUS.waiting, createdAt: at(-5), recheckAt: at(10), needsInfo: true }, TZ)).toBe(`Needs info, recheck at ${formatClockAmPm(at(10), TZ)}`);
   });
 });
 
@@ -232,6 +263,8 @@ describe('labels', () => {
     expect(notFoundDetail(row({ recheckAt: '2026-11-06T21:40:00Z', notFoundChecks: 1 }), TZ)).toBe('Not found yet · recheck 4:40 PM');
     expect(notFoundDetail(row({ status: STATUS.notInMedical, notFoundChecks: 2 }), TZ)).toBe(STATUS_META[STATUS.notInMedical].label);
     expect(notFoundDetail(row(), TZ)).toBeNull();
+    // One builder for the server's detail and the client's alert.
+    expect(notFoundDetail(row({ recheckAt: '2026-11-06T21:40:00Z', notFoundChecks: 1 }), TZ)).toBe(holdDetail('2026-11-06T21:40:00Z', TZ));
   });
 });
 
@@ -385,19 +418,62 @@ describe('optimistic hold', () => {
 // ---------------------------------------------------------------------------------------------------
 
 describe('alerts', () => {
-  const ctx = (): AlertContext => ({ sessionStaff: STUB_SESSION.staff, myIds: new Set(), ownMutationIds: new Set(), ownKeys: new Set(), bell: false, seen: new Set() });
+  const ctx = (): AlertContext => ({ sessionStaff: STUB_SESSION.staff, myIds: new Set(), ownMutationIds: new Set(), ownKeys: new Set(), bell: false, seen: new Set(), timeZone: TZ });
+  const RAE = 'Rae Chen · Medical';
 
-  it('my request going on hold (someone else, status unchanged) alerts once: "— not found yet"', () => {
+  it('my request going on hold (someone else, status unchanged) alerts once: the initials, "Not found yet · recheck 4:50 PM"', () => {
     const before = row({ createdBy: STUB_SESSION.staff, rowVersion: 3 });
-    const after = row({ createdBy: STUB_SESSION.staff, rowVersion: 4, updatedBy: 'Rae Chen · Medical', recheckAt: at(20), notFoundChecks: 1 });
+    const after = row({ createdBy: STUB_SESSION.staff, rowVersion: 4, updatedBy: RAE, recheckAt: at(20), notFoundChecks: 1 });
     const c = ctx();
     const alerts = diffAlerts(new Map([[before.id, before]]), [after], c);
-    expect(alerts).toEqual([holdAlert(after)]);
-    expect(alerts[0]?.title).toMatch(/ — not found yet$/);
+    expect(alerts).toEqual([holdAlert(after, TZ)]);
+    expect(alerts[0]).toMatchObject({ kind: 'status_changed', requestId: after.id, title: initials(after.name), subtitle: 'Not found yet · recheck 4:50 PM' });
     expect(diffAlerts(new Map([[before.id, before]]), [after], c)).toEqual([]);
     // Not mine, or by me: nothing.
     expect(diffAlerts(new Map([[before.id, before]]), [{ ...after, createdBy: 'Lee Park · GC/HX - Base' }], ctx())).toEqual([]);
     expect(diffAlerts(new Map([[before.id, before]]), [{ ...after, updatedBy: STUB_SESSION.staff }], ctx())).toEqual([]);
+  });
+
+  it('no LP number in the hold alert or its system notification (contract B, recheck-6.png)', () => {
+    const held = row({ createdBy: STUB_SESSION.staff, rowVersion: 4, updatedBy: RAE, recheckAt: at(20), notFoundChecks: 1 });
+    const alert = holdAlert(held, TZ);
+    const notice = systemNotice(alert, () => held);
+    expect({ title: notice.title, body: notice.body, tag: notice.tag, url: notice.url }).toEqual({
+      title: initials(held.name),
+      body: 'Not found yet · recheck 4:50 PM',
+      tag: held.id,
+      url: `/?r=${held.id}`,
+    });
+    for (const text of [alert.title, alert.subtitle, notice.title, notice.body]) expect(text).not.toMatch(/LP-?\d/);
+    // No name: no initials, never the number.
+    expect(holdAlert({ ...held, name: '' }, TZ).title).toBe(HOLD_ALERT_UNNAMED);
+  });
+
+  it('the hold alert closes when its Undo takes the hold away (status unchanged), and an Undo that puts it back reads "Not found yet"', () => {
+    const before = row({ createdBy: STUB_SESSION.staff, rowVersion: 3 });
+    const heldRow = row({ createdBy: STUB_SESSION.staff, rowVersion: 4, updatedBy: RAE, recheckAt: at(20), notFoundChecks: 1 });
+    const undone = row({ createdBy: STUB_SESSION.staff, rowVersion: 5, updatedBy: RAE, recheckAt: null, notFoundChecks: 0 });
+    const [raised] = diffRaisedAlerts(new Map([[before.id, before]]), [heldRow], ctx());
+    expect(raised).toMatchObject({ status: STATUS.waiting, held: true });
+    expect(alertStillCurrent(raised!.alert.kind, raised!.status, heldRow, raised!.held)).toBe(true);
+    // Still held once due: still current.
+    expect(alertStillCurrent(raised!.alert.kind, raised!.status, { ...heldRow, recheckAt: at(-1) }, raised!.held)).toBe(true);
+    // The Undo: the same status, the hold gone. The alert (toast and system notification) is out of date.
+    expect(alertStillCurrent(raised!.alert.kind, raised!.status, undone, raised!.held)).toBe(false);
+    // Undoing that Undo raises nothing new for the status (unchanged) but the hold alert again.
+    expect(diffAlerts(new Map([[undone.id, undone]]), [{ ...heldRow, rowVersion: 6 }], ctx())).toEqual([holdAlert(heldRow, TZ)]);
+    // An Undo of the final Not found (or of In medical) puts the hold back: "Not found yet", not "waiting for check".
+    const final = row({ createdBy: STUB_SESSION.staff, status: STATUS.notInMedical, rowVersion: 6, recheckAt: null, notFoundChecks: 2 });
+    const back = { ...heldRow, rowVersion: 7 };
+    const [again] = diffRaisedAlerts(new Map([[final.id, final]]), [back], ctx());
+    expect(again).toMatchObject({ alert: holdAlert(back, TZ), status: STATUS.waiting, held: true });
+    expect(statusAlert(back, TZ)).toEqual(holdAlert(back, TZ));
+    // A plain "waiting for check" alert goes out of date when the request then goes on hold.
+    const [plain] = diffRaisedAlerts(new Map([[final.id, final]]), [{ ...undone, rowVersion: 7 }], ctx());
+    expect(plain).toMatchObject({ status: STATUS.waiting, held: false });
+    expect(alertStillCurrent(plain!.alert.kind, plain!.status, heldRow, plain!.held)).toBe(false);
+    // Callers that do not track the hold keep the status-only rule.
+    expect(alertStillCurrent('status_changed', STATUS.waiting, undone)).toBe(true);
   });
 });
 
@@ -584,6 +660,45 @@ describe('renders', () => {
     expect(html).not.toContain('data-testid="block-answers"');
     expect(html).toContain('data-testid="recheck-row"');
     expect(html).toContain('data-testid="profile-actions"');
+  });
+
+  it('Needs info on hold keeps the recheck time: the request\'s recheck row, the My requests chip, the desk cell', () => {
+    const store = storeWith((all) => {
+      const mineId = all.find((r) => r.createdBy === STUB_SESSION.staff && r.status !== STATUS.cancelled)!.id;
+      return all.map((r) =>
+        r.id === mineId
+          ? {
+              ...r,
+              status: STATUS.waiting,
+              closedAt: null,
+              recheckAt: soon(12),
+              notFoundChecks: 1,
+              needsInfo: true,
+              lastMessage: { by: 'Rae Chen · Medical', mine: false, text: 'Any tattoos?' },
+              lastMessageAt: soon(-1),
+            }
+          : r,
+      );
+    });
+    const held = [...store.getState().confirmed.values()].find((r) => isHeld(r))!;
+    const recheck = `Recheck ${formatClockAmPm(held.recheckAt!, TZ)}`;
+    const profile = render(store, <ProfileView id={held.id} />);
+    expect(profile).toContain('data-stage="needsInfo"');
+    expect(profile).toMatch(new RegExp(`data-testid="recheck-row"[\\s\\S]*?${recheck}`));
+    const mine = render(store, <MineView />);
+    const i = mine.indexOf(`data-request-id="${held.id}"`);
+    const card = mine.slice(mine.lastIndexOf('data-testid="mine-card"', i));
+    expect(card).toMatch(/data-testid="stage-chip"[^>]*>.*Needs info/);
+    expect(card).toContain('data-testid="recheck-time-chip"');
+    expect(card).toContain(recheck);
+    expect(card).toMatch(/aria-label="[^"]*Needs info, Rae C\. asked at [^"]*, recheck at /);
+    const desk = render(store, <DeskAllTable status={null} post={null} />, true);
+    const j = desk.indexOf(`data-request-id="${held.id}"`);
+    const cell = desk.slice(desk.indexOf('data-col="status"', j), desk.indexOf('data-col="post"', j));
+    expect(cell).toContain('lucide-refresh-cw');
+    expect(cell).toContain(`>Needs info<`);
+    expect(cell).toMatch(new RegExp(`stxWide[^>]*>${formatClockAmPm(held.recheckAt!, TZ)}<`));
+    expect(cell).toMatch(new RegExp(`stxNarrow[^>]*>${formatClock(held.recheckAt!, TZ)}<`));
   });
 
   it('My requests: the violet "Not found yet" chip in the corner and the outline "Recheck 4:40 PM"', () => {

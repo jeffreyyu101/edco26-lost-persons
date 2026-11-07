@@ -42,7 +42,7 @@ import { filterAll, mineRows, pendingGroups, searchRequests, sortNewestFirst } f
 import { StoreContext, createServerState, type AppStore, type StoreState } from '@/lib/client/store-contract';
 import { createStubStore } from '@/lib/client/store-stub';
 import { STUB_SESSION, stubRows } from '@/lib/client/stub-data';
-import { STATUS, postFilterKey, statusMeta } from '@/lib/domain';
+import { STATUS, actionLabel, postFilterKey, statusMeta } from '@/lib/domain';
 
 const NOW = Date.parse('2026-11-07T03:10:00Z');
 const rows = stubRows(NOW);
@@ -231,9 +231,11 @@ describe('list helpers', () => {
     expect(logNumberRanges(998, [[0, 2]])).toEqual([]);
     expect(archivedFoldLabel(1)).toBe('Archived 1 request');
     expect(archivedFoldLabel(6)).toBe('Archived 6 requests');
-    // On a narrow phone only the long open label gets shorter, so the name keeps its room (review fix).
+    // On a narrow phone only the long labels get shorter, so the name keeps its room (review fix): Waiting, and
+    // (F5) Not in medical takes its answer's label ("Not found" once the rename makes it "Not found in medical").
     expect(narrowStatusLabel(STATUS.waiting)).toBe('Waiting');
-    for (const st of [STATUS.inMedical, STATUS.legacyBringFriend, STATUS.notInMedical, STATUS.reunited, STATUS.discharged, STATUS.cancelled, 'Some legacy value']) {
+    expect(narrowStatusLabel(STATUS.notInMedical)).toBe(actionLabel('notInMedical'));
+    for (const st of [STATUS.inMedical, STATUS.legacyBringFriend, STATUS.reunited, STATUS.discharged, STATUS.cancelled, 'Some legacy value']) {
       expect(narrowStatusLabel(st)).toBeNull();
     }
     // Not in medical is closed and grey everywhere, the stepper included.
@@ -406,12 +408,12 @@ describe('list views render', () => {
   const shown = (html: string, n: number, col: string) => {
     const cell = cellHtml(html, n, col);
     if (cell === null) return null;
-    return text(cell.replace(/<span class="[^"]*vh[^"]*">[^<]*<\/span>/g, '').replace(/<span class="[^"]*stNarrow[^"]*">[^<]*<\/span>/g, ''));
+    return text(cell.replace(/<span class="[^"]*vh[^"]*">[^<]*<\/span>/g, '').replace(/<span class="[^"]*stNarrow[^"]*"[^>]*>[^<]*<\/span>/g, ''));
   };
   /** The status label LP-n's row shows under 400 px instead ("Waiting"), or null when it keeps its label. */
   const narrow = (html: string, n: number) => {
     const cell = cellHtml(html, n, 'status') ?? '';
-    const m = /<span class="[^"]*stNarrow[^"]*">([^<]*)<\/span>/.exec(cell);
+    const m = /<span class="[^"]*stNarrow[^"]*"[^>]*>([^<]*)<\/span>/.exec(cell);
     if (!m) return null;
     // Narrow and wide labels come as a pair, so CSS can show exactly one of them.
     expect(cell).toMatch(/<span class="[^"]*stWide[^"]*">[^<]+<\/span>/);

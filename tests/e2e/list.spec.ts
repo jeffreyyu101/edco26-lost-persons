@@ -384,7 +384,7 @@ test('All (option B): closed requests fold into "Archived N"; the fold opens in 
     .toBe(true);
   await expect(page.getByTestId('closed-rows').locator(`[data-request-id="${notIn.id}"]`)).toBeVisible();
   await expect(row(page, notIn.id)).toHaveAttribute('data-closed', '');
-  await expect(cell(page, notIn.id, 'status')).toHaveText('Not in medical');
+  await expect(cell(page, notIn.id, 'status')).toHaveText('Not in medical', { useInnerText: true });
   await expect(row(page, notIn.id)).toHaveCSS('opacity', '1');
   await expect(row(page, notIn.id).locator('svg[data-glyph="notInMedical"]')).toHaveCSS('opacity', '0.55');
   await expect(row(page, openRow.id)).not.toHaveAttribute('data-closed', '');

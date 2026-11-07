@@ -7,6 +7,9 @@
      768+, or a request open      #  Friend  Status  Created  Updated            (.withPanel .tbl)
      1024–1279 with a request     the same, tighter (the main column is 544–799 px)
      1280+ with nothing open      #  Friend  Status  Post  Created  Updated  Logged by   (.tbl)
+   With a request open the Status column is minmax(184px, 232px): it takes its full width before the Friend
+   column (kept at 96 px or more) gets anything, so it is whole from 1072 px (1024–1279) and from 1304 px
+   (1280+); only on the narrower windows does what follows the label take its short form (.stxWide / .stxNarrow).
    The frame marks an open request with [data-pane] (components/desk/DeskFrame.tsx). */
 
 .root {
@@ -19,10 +22,11 @@
 }
 
 /* (F5) The status column fits the longest stage with what follows it ("Not found in medical · 2 checks",
-   "Friend en route · ~4 min", design/screens/colors-6.png) where there is room; with a request open beside
-   the list only what follows the label gives way (table.module.css .stx). */
+   "Not found yet · 11:40 PM", "Friend en route · ~4 min", design/screens/colors-6.png): 232 px, 240 px from
+   1280 px. With a request open beside the list it keeps that width whenever the window has room, ahead of the
+   Friend column; on the narrowest windows what follows the label turns short ("· 11:40") instead of being cut. */
 .table {
-  --tbl-cols: 56px minmax(0, 1fr) 220px 96px 72px;
+  --tbl-cols: 56px minmax(0, 1fr) 232px 96px 72px;
   --tbl-gap: 12px;
   --tbl-pad-l: 24px;
   --tbl-pad-r: calc(20px + env(safe-area-inset-right));
@@ -38,7 +42,7 @@
 
 @media (min-width: 1024px) and (max-width: 1279.98px) {
   [data-pane] .table {
-    --tbl-cols: 48px minmax(0, 1fr) 172px 88px 56px;
+    --tbl-cols: 44px minmax(96px, 1fr) minmax(184px, 232px) 88px 56px;
     --tbl-gap: 10px;
     --tbl-pad-l: 20px;
     --tbl-pad-r: 16px;
@@ -54,7 +58,7 @@
     display: block;
   }
   [data-pane] .table {
-    --tbl-cols: 56px minmax(0, 1fr) 180px 96px 72px;
+    --tbl-cols: 48px minmax(96px, 1fr) minmax(184px, 232px) 96px 56px;
   }
   [data-pane] .cPost,
   [data-pane] .cBy {
@@ -192,7 +196,7 @@ button.row:focus-visible {
 }
 
 .ag {
-  flex: 0 4 auto;
+  flex: 0 1000 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -210,7 +214,8 @@ button.row:focus-visible {
   color: var(--gray-11);
 }
 
-/* Status: glyph and label. Only the open states have colour (blue Waiting, green In medical). */
+/* Status: glyph and label. Only the open states have colour (blue Waiting, green In medical). The cell is a
+   size container: what follows the label picks its form from the cell's width (.stxWide / .stxNarrow). */
 .st {
   display: flex;
   align-items: center;
@@ -218,6 +223,7 @@ button.row:focus-visible {
   font-size: 13px;
   white-space: nowrap;
   color: var(--gray-11);
+  container-type: inline-size;
 }
 
 .st[data-tone='blue'] {
@@ -259,6 +265,27 @@ button.row:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
+}
+
+/* Needs info on a hold: "⟳ 4:40 PM" after the label (the recheck glyph says what the time is). */
+.stxGlyph {
+  flex: none;
+  margin-right: -3px;
+}
+
+/* (F5) What follows the label, whole or short: "· 11:40 PM" / "· 11:40", "· 2 checks" / nothing. The whole form
+   needs at most 221 px with its label ("Not found in medical · 2 checks"); under 228 px the short one shows. */
+.stxNarrow {
+  display: none;
+}
+
+@container (max-width: 227.98px) {
+  .stxWide {
+    display: none;
+  }
+  .stxNarrow {
+    display: block;
+  }
 }
 
 .glyph {

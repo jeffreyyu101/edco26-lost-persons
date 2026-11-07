@@ -142,11 +142,13 @@ describe('GET /api/stats', () => {
     for (const b of s.byPost.slice(4)) expect(b.count).toBeGreaterThan(0);
     expect(s.byPost.reduce((n, b) => n + b.count, 0)).toBe(waiting + inMedical);
 
-    // longestWait: the oldest Waiting row.
+    // longestWait: the oldest Waiting row, leaving out holds that are not due (F5: this test's own request is
+    // on one, and may be the only Waiting row on an empty database).
     const { data: oldest } = await admin()
       .from('patients')
       .select('id, case_number, created_at')
       .eq('status', STATUS.waiting)
+      .or(`recheck_at.is.null,recheck_at.lte.${new Date(Date.parse(s.serverTime)).toISOString()}`)
       .order('created_at', { ascending: true })
       .order('case_number', { ascending: true })
       .limit(1);

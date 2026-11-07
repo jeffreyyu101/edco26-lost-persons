@@ -62,6 +62,53 @@ function bootWith(server: FakeServer, route: AlertRoute = 'system') {
 
 const alertTitles = (s: () => { toasts: readonly { title: string }[] }) => s().toasts.map((t) => t.title);
 
+describe('(F5) my request going on the "Not found yet" hold', () => {
+  const RECHECK = '2026-11-07T04:40:00Z'; // 11:40 PM in New York
+  const hold = { recheckAt: RECHECK, notFoundChecks: 1 };
+  const undo = { recheckAt: null, notFoundChecks: 0 };
+
+  it('in the background: one notification in the contract\'s words (no LP number), closed when the hold is undone', async () => {
+    const mine = makeRow(4, { firstName: 'Sofia', lastName: 'Lopez', createdBy: STAFF.dana.staff });
+    const server = new FakeServer([mine]);
+    const { s, n } = bootWith(server);
+    await ready();
+    server.change(mine.id, hold);
+    await advance(6_000);
+    expect(n.shown).toEqual([
+      { title: 'S.L.', body: 'Not found yet · recheck 11:40 PM', tag: mine.id, url: `/?r=${mine.id}`, key: `${mine.id}:2`, requireInteraction: false },
+    ]);
+    expect(s().toasts).toEqual([]);
+    // The 10 s Undo lands after the alert: the request is plain Waiting for check again, status unchanged.
+    server.change(mine.id, undo);
+    await advance(6_000);
+    expect(n.closed).toEqual([{ tag: mine.id, key: `${mine.id}:2` }]);
+    expect(n.shown).toHaveLength(1);
+  });
+
+  it('in front: the toast "S.L." / "Not found yet · recheck 11:40 PM" goes when the hold is undone; an Undo that puts it back says "Not found yet" again', async () => {
+    const mine = makeRow(4, { firstName: 'Sofia', lastName: 'Lopez', createdBy: STAFF.dana.staff });
+    const server = new FakeServer([mine]);
+    const { s, heard } = bootWith(server, 'toast');
+    await ready();
+    server.change(mine.id, hold);
+    await advance(6_000);
+    expect(s().toasts.map((t) => [t.title, t.subtitle])).toEqual([['S.L.', 'Not found yet · recheck 11:40 PM']]);
+    expect(heard.map((e) => e.title)).toEqual(['S.L.']);
+    server.change(mine.id, undo);
+    await advance(6_000);
+    expect(s().toasts).toEqual([]);
+    // Held again, closed by the second Not found, and that undone: the hold is back, and so is its alert.
+    server.change(mine.id, hold);
+    await advance(6_000);
+    server.change(mine.id, { status: STATUS.notInMedical, recheckAt: null, notFoundChecks: 2 });
+    await advance(6_000);
+    expect(alertTitles(s)).toEqual(['LP-1004 · S.L. — not in medical']);
+    server.change(mine.id, { status: STATUS.waiting, ...hold });
+    await advance(6_000);
+    expect(s().toasts.map((t) => [t.title, t.subtitle])).toEqual([['S.L.', 'Not found yet · recheck 11:40 PM']]);
+  });
+});
+
 describe('alerts in the background are system notifications', () => {
   it('my request answered: one notification, no toast and no chime; the overlap re-delivery adds nothing', async () => {
     const mine = makeRow(4, { firstName: 'Sofia', lastName: 'Lopez', reportingLocation: 'FA 3 – Kinetic', contactPhone: '4075550100', createdBy: STAFF.dana.staff });

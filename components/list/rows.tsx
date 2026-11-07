@@ -12,7 +12,7 @@ import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { navigate } from '@/lib/client/nav';
 import type { SearchHit } from '@/lib/client/selectors';
-import { stageLook } from '@/lib/stages';
+import { stageLook, type StageKey } from '@/lib/stages';
 import { NOT_UPDATED } from '@/lib/format';
 import {
   archivedFoldLabel,
@@ -113,7 +113,9 @@ function LogCells({ number, name, glyph, tone, statusLabel, statusNarrow, create
           {statusNarrow ? (
             <>
               <span className={s.stWide}>{statusLabel}</span>
-              <span className={s.stNarrow}>{statusNarrow}</span>
+              <span className={s.stNarrow} data-narrow="">
+                {statusNarrow}
+              </span>
             </>
           ) : (
             statusLabel
@@ -129,6 +131,9 @@ function LogCells({ number, name, glyph, tone, statusLabel, statusNarrow, create
     </>
   );
 }
+
+/** (F5) The narrow label of a status stage (Waiting for check, Not in medical); the other stages are short already. */
+const narrowStageLabel = (key: StageKey, status: string) => (key === 'waiting' || key === 'notInMedical' ? narrowStatusLabel(status) : null);
 
 export interface LogRowProps {
   row: RequestSummary;
@@ -162,7 +167,7 @@ export const LogRow = memo(function LogRow({ row, created, updated, updatedSaid,
         glyph={<StageGlyph glyph={look.glyph} className={s.lg} />}
         tone={look.tone}
         statusLabel={look.label}
-        statusNarrow={look.key === 'waiting' ? narrowStatusLabel(row.status) : null}
+        statusNarrow={narrowStageLabel(look.key, row.status)}
         created={created}
         updated={updated}
       />
@@ -200,7 +205,7 @@ export const SearchLogRow = memo(function SearchLogRow({ hit, created, updated, 
         glyph={<StageGlyph glyph={look.glyph} className={s.lg} />}
         tone={look.tone}
         statusLabel={look.label}
-        statusNarrow={look.key === 'waiting' ? narrowStatusLabel(row.status) : null}
+        statusNarrow={narrowStageLabel(look.key, row.status)}
         created={created}
         updated={updated}
       />

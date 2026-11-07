@@ -242,11 +242,20 @@ test.describe('desk', () => {
 
     await page.goto('/');
     const cell = (id: string) => page.locator(`[data-desk-table] [data-request-id="${id}"] [data-col="status"]`);
-    await expect(cell(waiting.id)).toHaveText(/^Waiting for check· (now|\d+m)$/, { timeout: 20_000 });
-    await expect(cell(held.id)).toHaveText(`Not found yet· ${formatClockAmPm(held.recheckAt as string, TZ)}`);
-    await expect(cell(located.id)).toHaveText(`${STATUS_META[STATUS.inMedical].shortLabel}· Bed 3`);
+    // The words shown (a cell also holds the short form of what follows the label, hidden while there is room).
+    const shown = (id: string) =>
+      cell(id).evaluate((el) =>
+        [...el.querySelectorAll('span')]
+          .filter((x) => x.getBoundingClientRect().width > 0)
+          .map((x) => x.textContent?.trim())
+          .join(' '),
+      );
+    await expect(cell(waiting.id)).toBeVisible({ timeout: 20_000 });
+    await expect.poll(() => shown(waiting.id)).toMatch(/^Waiting for check · (now|\d+m)$/);
+    await expect.poll(() => shown(held.id)).toBe(`Not found yet · ${formatClockAmPm(held.recheckAt as string, TZ)}`);
+    await expect.poll(() => shown(located.id)).toBe(`${STATUS_META[STATUS.inMedical].shortLabel} · Bed 3`);
     await page.getByTestId('closed-fold').first().click();
-    await expect(cell(final.id)).toHaveText(`${NOT_IN_MEDICAL}· 2 checks`);
+    await expect.poll(() => shown(final.id)).toBe(`${NOT_IN_MEDICAL} · 2 checks`);
     // The violet tone, the hourglass; and no separate en route column.
     await expect(cell(held.id)).toHaveAttribute('data-tone', 'violet');
     await expect(cell(held.id).locator('[data-glyph="hourglass"]')).toHaveCount(1);
@@ -421,8 +430,38 @@ const FIXTURE: RequestSummary[] = [
     rowVersion: 2,
   }),
 ];
-const byId = new Map(FIXTURE.map((r) => [r.id, r]));
 const ROW = (n: number) => FIXTURE.find((r) => r.caseNumber === n) as RequestSummary;
+
+/** A set of synced rows served at a moment (serveFixture). */
+interface FixtureSet {
+  t0: number;
+  rows: readonly RequestSummary[];
+}
+const AFTERNOON: FixtureSet = { t0: T0, rows: FIXTURE };
+
+const TIME_FIELDS = ['createdAt', 'updatedAt', 'foundAt', 'reunionStartedAt', 'closedAt', 'recheckAt', 'lastMessageAt'] as const;
+const shifted = (value: unknown, minutes: number) =>
+  typeof value === 'string' ? new Date(Date.parse(value) + minutes * 60_000).toISOString() : value;
+
+/**
+ * The evening: the same rows seven hours later (rechecks at 11:18, 11:40 and 11:51 PM: two-digit hours), with
+ * E.N. waiting 59m (the widest wait: "1h" after it) and J.D.'s Needs info on hold (recheck 11:35 PM). The widest
+ * values a desk status cell shows tonight.
+ */
+const EVENING_SHIFT = 7 * 60;
+const EVENING: FixtureSet = {
+  t0: T0 + EVENING_SHIFT * 60_000,
+  rows: FIXTURE.map((r) => {
+    const out: Record<string, unknown> = { ...r };
+    for (const f of TIME_FIELDS) out[f] = shifted(out[f], EVENING_SHIFT);
+    const enroute = out.enroute as { earliestEta?: string | null } | null | undefined;
+    if (enroute) out.enroute = { ...enroute, earliestEta: shifted(enroute.earliestEta, EVENING_SHIFT) };
+    if (r.caseNumber === 15) out.createdAt = new Date(T0 + (EVENING_SHIFT - 59) * 60_000).toISOString();
+    // Medical asked while it was on hold: Needs info, with the recheck time after it.
+    if (r.caseNumber === 14) Object.assign(out, { recheckAt: new Date(T0 + (EVENING_SHIFT + 15) * 60_000).toISOString(), notFoundChecks: 1 });
+    return out as unknown as RequestSummary;
+  }),
+};
 
 function fixtureDetail(row: RequestSummary): RequestDetail {
   const audit: AuditEvent[] = [
@@ -455,9 +494,11 @@ function fixtureDetail(row: RequestSummary): RequestDetail {
   return { ...row, photos: [], audit };
 }
 
-/** Serves the fixture as the synced rows and their details, at the mockups' 4:20 PM. */
-async function serveFixture(page: Page, theme: 'light' | 'dark' = 'light') {
-  await page.clock.install({ time: T0 });
+/** Serves the fixture as the synced rows and their details, at the mockups' 4:20 PM (or another set's moment). */
+async function serveFixture(page: Page, theme: 'light' | 'dark' = 'light', set: FixtureSet = AFTERNOON) {
+  const { t0, rows: FIXTURE } = set;
+  const byId = new Map(FIXTURE.map((r) => [r.id, r]));
+  await page.clock.install({ time: t0 });
   await page.addInitScript((t) => {
     try {
       localStorage.setItem('lp-theme', t);
@@ -476,7 +517,7 @@ async function serveFixture(page: Page, theme: 'light' | 'dark' = 'light') {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        serverTime: new Date(T0).toISOString(),
+        serverTime: new Date(t0).toISOString(),
         rows,
         hasMore: false,
         next: null,
@@ -565,13 +606,53 @@ async function layoutProblems(page: Page): Promise<string[]> {
   });
 }
 
-/** Puts the post-rename label (Not found in medical) on every Not in medical status cell, as the rename will. */
+/**
+ * Puts the post-rename words on every Not in medical status cell, as the rename will: the status label "Not found
+ * in medical", and the answer's label "Not found" where a narrow phone shows that instead ([data-narrow]).
+ */
 async function applyLongLabel(page: Page) {
-  await page.evaluate((from) => {
-    for (const el of document.querySelectorAll<HTMLElement>('[data-col="status"] span, [data-testid="mine-card"] span')) {
-      if (el.children.length === 0 && el.textContent === from) el.textContent = 'Not found in medical';
+  await page.evaluate(
+    ([from, answer]) => {
+      for (const el of document.querySelectorAll<HTMLElement>('[data-col="status"] span, [data-testid="mine-card"] span')) {
+        if (el.children.length > 0) continue;
+        if (el.hasAttribute('data-narrow') && el.textContent === answer) el.textContent = 'Not found';
+        else if (el.textContent === from) el.textContent = 'Not found in medical';
+      }
+    },
+    [NOT_IN_MEDICAL, NOT_FOUND] as const,
+  );
+}
+
+/**
+ * Status cells whose words are cut: a label or what follows it ("· 11:40 PM", "· 2 checks") narrower than its own
+ * text (an ellipsis counts as cut: layoutProblems accepts one, a status label must never need it), or text
+ * running into the next column. The text's width is its Range's, which an ellipsis does not shorten.
+ */
+async function statusCuts(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const out: string[] = [];
+    const shown = (el: Element) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0.5 && r.height > 0.5 && getComputedStyle(el).visibility !== 'hidden';
+    };
+    for (const cell of document.querySelectorAll<HTMLElement>('[data-col="status"]')) {
+      if (!shown(cell)) continue;
+      let next = cell.nextElementSibling;
+      while (next && !shown(next)) next = next.nextElementSibling;
+      const limit = next ? next.getBoundingClientRect().left : cell.getBoundingClientRect().right;
+      for (const el of cell.querySelectorAll<HTMLElement>('span')) {
+        if (el.children.length > 0 || !el.textContent?.trim() || !shown(el)) continue;
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const text = range.getBoundingClientRect();
+        const box = el.getBoundingClientRect();
+        const row = cell.closest('[data-request-id]')?.getAttribute('data-request-id')?.slice(-2) ?? 'header';
+        if (text.width > box.width + 0.5) out.push(`cut (#${row}): "${el.textContent}" needs ${Math.ceil(text.width)} px, has ${Math.floor(box.width)}`);
+        else if (box.left + text.width > limit + 0.5) out.push(`into the next column (#${row}): "${el.textContent}"`);
+      }
     }
-  }, NOT_IN_MEDICAL);
+    return out;
+  });
 }
 
 const WIDTHS = [375, 390, 820, 1180, 1440] as const;
@@ -638,8 +719,10 @@ test.describe('fixture', () => {
             await expect(page.locator(`[data-request-id="${ROW(7).id}"]`).first()).toBeVisible();
           }
           expect(await layoutProblems(page), `${view.name} at ${width}`).toEqual([]);
+          expect(await statusCuts(page), `${view.name} at ${width}: status words cut`).toEqual([]);
           await applyLongLabel(page);
           expect(await layoutProblems(page), `${view.name} at ${width}, long label`).toEqual([]);
+          expect(await statusCuts(page), `${view.name} at ${width}, long label: status words cut`).toEqual([]);
           if (view.name === 'all' && width >= 1280) {
             // The desk status column fits the longest stage whole, clear of the next column (colors-6.png).
             const fit = await page.locator(`[data-desk-table] [data-request-id="${ROW(7).id}"] [data-col="status"]`).evaluate((cell) => {
@@ -658,6 +741,66 @@ test.describe('fixture', () => {
             });
           }
         }
+      } finally {
+        await ctx.close();
+      }
+    });
+  }
+
+  // A request open beside the list is the desk's usual state. Tonight's values are the widest: rechecks with two-
+  // digit hours ("· 11:40 PM"), a long wait ("· 59m") and, after the rename, "Not found in medical · 2 checks".
+  // Every one fits whole in its status cell, clear of the next column, at both pane breakpoints' narrowest and at
+  // the usual widths.
+  for (const width of [1024, 1180, 1280, 1440] as const) {
+    test(`a request open beside the list at ${width} px: every status cell fits whole, evening times and the long label`, async ({ browser }) => {
+      test.setTimeout(60_000);
+      const ctx = await newSignedInContext(
+        browser,
+        { staffName: 'Rae Chen', team: 'Medical' },
+        { viewport: { width, height: 900 }, hasTouch: width < 1280, deviceScaleFactor: 1, serviceWorkers: 'block' },
+      );
+      const page = await ctx.newPage();
+      try {
+        await serveFixture(page, 'light', EVENING);
+        await page.goto(`/?r=${ROW(13).id}`);
+        await expect(page.getByTestId('recheck-row')).toBeVisible({ timeout: 20_000 });
+        const table = page.locator('[data-desk-table]').first();
+        await expect(table.locator(`[data-request-id="${ROW(13).id}"]`)).toBeVisible();
+        const fold = page.getByTestId('closed-fold').first();
+        if ((await fold.getAttribute('aria-expanded')) === 'false') await fold.click();
+        await expect(table.locator(`[data-request-id="${ROW(7).id}"]`)).toBeVisible();
+        await applyLongLabel(page);
+        const cells = Object.fromEntries(
+          await Promise.all(
+            ([15, 14, 13, 17, 7] as const).map(
+              async (n) =>
+                [
+                  n,
+                  await table
+                    .locator(`[data-request-id="${ROW(n).id}"] [data-col="status"]`)
+                    .evaluate((cell) =>
+                      [...cell.querySelectorAll('span')]
+                        .filter((x) => x.getBoundingClientRect().width > 0)
+                        .map((x) => x.textContent?.trim())
+                        .join(' '),
+                    ),
+                ] as const,
+            ),
+          ),
+        );
+        // Whole from 1072 px (1024–1279) and from 1304 px (1280+); short just above each breakpoint.
+        const whole = width === 1180 || width === 1440;
+        expect(cells).toEqual({
+          15: `${STATUS_META[STATUS.waiting].shortLabel} · 59m`,
+          14: whole ? 'Needs info 11:35 PM' : 'Needs info 11:35',
+          13: whole ? 'Not found yet · 11:40 PM' : 'Not found yet · 11:40',
+          17: whole ? 'Not found yet · 11:51 PM' : 'Not found yet · 11:51',
+          7: whole ? 'Not found in medical · 2 checks' : 'Not found in medical',
+        });
+        // Needs info on hold draws the recheck glyph before its time.
+        await expect(table.locator(`[data-request-id="${ROW(14).id}"] [data-col="status"] svg`)).toHaveCount(2);
+        expect(await statusCuts(page), `pane open at ${width}`).toEqual([]);
+        expect(await layoutProblems(page), `pane open at ${width}`).toEqual([]);
       } finally {
         await ctx.close();
       }

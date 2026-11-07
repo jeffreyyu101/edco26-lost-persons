@@ -672,10 +672,11 @@ function StatusBlock({
         </div>
         {waiting ? badge : null}
       </div>
-      {stage.key === 'notFoundYet' && stage.sub ? (
+      {/* (F5) While on hold, Needs info included: the hold goes on while medical asks. */}
+      {stage.recheck ? (
         <div className={s.recheckRow} data-due={stage.due ? '' : undefined} data-testid="recheck-row">
           <RefreshCw size={16} strokeWidth={2} aria-hidden className={s.recheckGlyph} />
-          <span>{stage.sub}</span>
+          <span>{stage.recheck}</span>
         </div>
       ) : null}
       {inMedical ? <LocationRow row={row} offline={offline} panel={panel} onNeedsConnection={onNeedsConnection} /> : null}

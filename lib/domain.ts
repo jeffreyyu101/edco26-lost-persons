@@ -5,6 +5,8 @@
 // compare them): TRANSITIONS (lp_set_status), TEAM_ALIASES + canonStaff (lp_canon_staff), postShort
 // (lp_stats), the field limits (lp_clean_fields), RECHECK_MINUTES (lp_stages_recheck_minutes).
 
+import { formatClockAmPm } from './format';
+
 /** RFC 9562 UUID (versions 1–8, variant 10xx), like Jeffrey's isUuid. */
 export function isUuid(value: unknown): value is string {
   return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -745,6 +747,14 @@ const holdEpoch = (iso: string | null | undefined): number => {
 /** True while a request Waiting for check is on a "Not found yet" hold (due or not). */
 export function isHeld(row: { status: string; recheckAt?: string | null }): boolean {
   return row.status === STATUS.waiting && Number.isFinite(holdEpoch(row.recheckAt));
+}
+
+/**
+ * (F5, contract B) The first Not found's words, nouns only: "Not found yet · recheck 4:40 PM". Line 2 of the
+ * Activity row, the push body, and the in-app alert's subtitle / system notification body.
+ */
+export function holdDetail(recheckAt: string | null | undefined, timeZone?: string): string {
+  return Number.isFinite(holdEpoch(recheckAt)) ? `${NOT_FOUND_YET_LABEL} · recheck ${formatClockAmPm(recheckAt as string, timeZone)}` : NOT_FOUND_YET_LABEL;
 }
 
 /** A held request whose recheck time has come (it never closes by itself). */

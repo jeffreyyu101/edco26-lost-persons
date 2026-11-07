@@ -2,7 +2,7 @@
 // everything here is unit-tested in tests/unit/list-helpers.test.ts.
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import type { SearchHit } from '@/lib/client/selectors';
-import { STATUS, ageGender, isInMedical, postShort, sameStaff, statusMeta, type StatusTone } from '@/lib/domain';
+import { STATUS, actionLabel, ageGender, isInMedical, postShort, sameStaff, statusMeta, type StatusTone } from '@/lib/domain';
 import { stagePhrase, type StageSource } from '@/lib/stages';
 import { formatCaseNumber } from '@/lib/format';
 
@@ -270,12 +270,16 @@ export function updatedSince(
 }
 
 /**
- * The status label the log shows on a narrow phone (under 400 px wide), where "Waiting for check" would take
- * the name's room: "Waiting" (the blue ring says the rest). Null when the label is already short. The row's
- * sentence always says the full status.
+ * The status label the log shows on a narrow phone (under 400 px wide), where a long label would take the
+ * name's room: "Waiting" for "Waiting for check" (the blue ring says the rest), and for Not in medical the
+ * label of the answer that gave it (domain actionLabel): the same words today, "Not found" once the rename
+ * makes the status "Not found in medical" (F5). Null when the label is already short. The row's sentence
+ * always says the full status.
  */
 export function narrowStatusLabel(status: string): string | null {
-  return status === STATUS.waiting ? 'Waiting' : null;
+  if (status === STATUS.waiting) return 'Waiting';
+  if (status === STATUS.notInMedical) return actionLabel('notInMedical');
+  return null;
 }
 
 /** The status as a screen reader says it: "Waiting for check", "In medical, friend coming". */
