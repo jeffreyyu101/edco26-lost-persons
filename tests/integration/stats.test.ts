@@ -35,11 +35,11 @@ function expectedAvgAnswerMinutes(): number | null {
   const raw = psql(`
     select coalesce(json_agg(json_build_object(
       'pid', e.patient_id, 'type', e.action_type, 'prev', e.previous_value ->> 'status',
-      'next', e.new_value ->> 'status', 'outcome', e.new_value ->> 'outcome',
+      'next', e.new_value ->> 'status', 'outcome', e.new_value ->> 'outcome', 'held', e.new_value ->> 'held',
       'at', extract(epoch from e.occurred_at), 'created', extract(epoch from p.created_at),
       'now', extract(epoch from clock_timestamp()))), '[]')
     from public.audit_events e join public.patients p on p.id = e.patient_id`);
-  const events = JSON.parse(raw) as Array<{ pid: string; type: string; prev: string | null; next: string | null; outcome: string | null; at: number; created: number; now: number }>;
+  const events = JSON.parse(raw) as Array<{ pid: string; type: string; prev: string | null; next: string | null; outcome: string | null; held: string | null; at: number; created: number; now: number }>;
   const answers = new Set([STATUS.notInMedical, STATUS.inMedical, STATUS.legacyBringFriend] as string[]);
   const first = new Map<string, { at: number; created: number }>();
   let now = Date.now() / 1000;
@@ -48,7 +48,9 @@ function expectedAvgAnswerMinutes(): number | null {
     const isAnswer =
       ((e.type === 'status_changed' || e.type === 'check_completed') && e.prev === STATUS.waiting && answers.has(e.next ?? '')) ||
       (e.type === 'medical_search' && e.outcome === 'not_found') ||
-      e.type === 'medical_search_found';
+      e.type === 'medical_search_found' ||
+      // (F5) The first Not found, which put the request on a "Not found yet" hold (status stays Waiting).
+      (e.type === 'status_changed' && e.held === 'true');
     if (!isAnswer) continue;
     const prev = first.get(e.pid);
     if (!prev || e.at < prev.at) first.set(e.pid, { at: e.at, created: e.created });
@@ -140,11 +142,13 @@ describe('GET /api/stats', () => {
     for (const b of s.byPost.slice(4)) expect(b.count).toBeGreaterThan(0);
     expect(s.byPost.reduce((n, b) => n + b.count, 0)).toBe(waiting + inMedical);
 
-    // longestWait: the oldest Waiting row.
+    // longestWait: the oldest Waiting row, leaving out holds that are not due (F5: this test's own request is
+    // on one, and may be the only Waiting row on an empty database).
     const { data: oldest } = await admin()
       .from('patients')
       .select('id, case_number, created_at')
       .eq('status', STATUS.waiting)
+      .or(`recheck_at.is.null,recheck_at.lte.${new Date(Date.parse(s.serverTime)).toISOString()}`)
       .order('created_at', { ascending: true })
       .order('case_number', { ascending: true })
       .limit(1);
@@ -165,7 +169,8 @@ describe('GET /api/stats', () => {
       .order('case_number', { ascending: false })
       .limit(5);
     expect(s.recent.map((x) => x.id)).toEqual((recent ?? []).map((x) => x.id));
-    expect(s.recent[0]).toMatchObject({ id: r.id, status: STATUS.notInMedical, postShort: 'TEST-S Gate', name: r.name });
+    // (F5) The first Not found puts it on hold: still Waiting for check, so it counts as open.waiting.
+    expect(s.recent[0]).toMatchObject({ id: r.id, status: STATUS.waiting, postShort: 'TEST-S Gate', name: r.name });
 
     expect(s.avgAnswerMinutes).not.toBeNull();
     expect(s.avgAnswerMinutes).toBeCloseTo(expectedAvgAnswerMinutes() as number, 1);

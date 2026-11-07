@@ -26,7 +26,24 @@ import type {
   Stats,
   SyncResponse,
 } from '../api-types';
-import { SETTABLE_STATUSES, STATUS, canonStaff, isUuid, sameStaff, statusMeta, staffString, undoTarget, type SettableStatus, type StatusKind } from '../domain';
+import {
+  NOT_FOUND_YET_LABEL,
+  RECHECK_MINUTES,
+  SETTABLE_STATUSES,
+  STATUS,
+  STATUS_META,
+  canonStaff,
+  initials,
+  isHeld,
+  isUuid,
+  notFoundHolds,
+  sameStaff,
+  statusMeta,
+  staffString,
+  undoTarget,
+  type SettableStatus,
+  type StatusKind,
+} from '../domain';
 import { formatCaseNumber } from '../format';
 import { syncPath } from './api-paths';
 import {
@@ -88,6 +105,7 @@ import {
   type ToastItem,
 } from './store-contract';
 import { chunk, isRow, mergeRows, overlayForPatch, replaceAll, staleIds, summaryOf } from './sync-merge';
+import type { HoldFields, HoldRules } from './hold-rules';
 import { uuid } from './uuid';
 
 // ---------------------------------------------------------------------------------------------------
@@ -190,6 +208,25 @@ function lazyNotifier(): AlertNotifier {
 /** Every alert a toast (no notifier, or system-notify not loaded yet). Kept here: a type import costs nothing on the first load. */
 const TOAST_PLAN: AlertPlan = { route: 'toast', skip: new Set<string>() };
 
+/**
+ * (F5) The "Not found yet" hold on the client (lib/client/hold-rules.ts: what a status tap shows before the server
+ * answers, the Undo bar's words, the 409 resend check) is stage-only code, loaded with import() so the first load
+ * (A25) does not carry it, and bound here to the same domain values as lib/client/hold.ts (which the store must not
+ * import: it would bring the rules back into the first load). The store starts loading it when it starts; a status
+ * tap waits for it (it is in long before). A failed load is forgotten, so the next tap tries again.
+ */
+let holdModule: Promise<HoldRules> | null = null;
+function loadHold(): Promise<HoldRules> {
+  holdModule ??= import('./hold-rules').then(
+    (m) => m.holdRules({ STATUS, STATUS_META, NOT_FOUND_YET_LABEL, RECHECK_MINUTES, initials, isHeld, notFoundHolds, formatCaseNumber }),
+    (error: unknown) => {
+      holdModule = null;
+      throw error;
+    },
+  );
+  return holdModule;
+}
+
 export interface CreateAppStoreOptions {
   eventTimezone: string;
   /** Tests inject a fake environment; the browser one is used otherwise. */
@@ -257,6 +294,8 @@ interface UndoRecord {
   id: string;
   to: SettableStatus;
   version: number;
+  /** (Pending v9.1) The hold fields before the undone change: lp_set_status's Undo puts them back. */
+  restore: HoldFields;
 }
 
 /** What an alert toast on screen is about (one per request; see alerts.ts alertStillCurrent). */
@@ -265,6 +304,8 @@ interface AlertToastMeta {
   kind: AlertEvent['kind'];
   /** The row's status when the alert was raised. */
   status: string | null;
+  /** (F5) Whether the row was on a "Not found yet" hold then (undefined: not tracked, e.g. combined). */
+  held?: boolean;
 }
 
 class FetchError extends Error {
@@ -542,6 +583,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     ownKeys,
     bell: state.prefs.bell,
     seen,
+    timeZone: state.eventTimezone,
   });
 
   /** Closes the alert toasts of one request (a newer alert for it replaces them). */
@@ -574,17 +616,17 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         alertToasts.delete(toastId);
         continue;
       }
-      if (!alertStillCurrent(meta.kind, meta.status, state.confirmed.get(meta.requestId))) dismissToast(toastId);
+      if (!alertStillCurrent(meta.kind, meta.status, state.confirmed.get(meta.requestId), meta.held)) dismissToast(toastId);
     }
     for (const [requestId, meta] of [...systemAlerts]) {
-      if (!alertStillCurrent(meta.kind, meta.status, state.confirmed.get(requestId))) closeSystemAlert(requestId);
+      if (!alertStillCurrent(meta.kind, meta.status, state.confirmed.get(requestId), meta.held)) closeSystemAlert(requestId);
     }
   };
 
   /** The in-app alert: its toast, and the listeners' chime and vibration. */
-  const showAlertToast = (alert: AlertEvent, status: string | null) => {
+  const showAlertToast = (alert: AlertEvent, status: string | null, held?: boolean) => {
     const toastId = showToast(alertToast(alert, (id) => navigate({ r: id })));
-    if (alert.requestId) alertToasts.set(toastId, { requestId: alert.requestId, kind: alert.kind, status });
+    if (alert.requestId) alertToasts.set(toastId, { requestId: alert.requestId, kind: alert.kind, status, held });
     for (const l of [...alertListeners]) {
       try {
         l(alert);
@@ -598,27 +640,27 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
    * The app is in the background (v2.5 A52): the alert is a system notification instead of the toast,
    * never both. If it can't be shown after all (permission withdrawn), the toast carries it.
    */
-  const showSystemAlert = (n: AlertNotifier, alert: AlertEvent, status: string | null, sources: readonly AlertEvent[]) => {
+  const showSystemAlert = (n: AlertNotifier, alert: AlertEvent, status: string | null, held: boolean | undefined, sources: readonly AlertEvent[]) => {
     // The rows as they are now: the notifier builds the notification from them before it awaits anything.
     const rows = state.confirmed;
     const row = alert.requestId ? rows.get(alert.requestId) : undefined;
     // The (id, rowVersion) the notification carries (systemNotice), so only this change is ever closed.
     const key = row ? alertKey(row) : null;
     const tracked = alert.requestId && alert.kind !== 'new_request' ? alert.requestId : null;
-    if (tracked) systemAlerts.set(tracked, { requestId: tracked, kind: alert.kind, status, key });
+    if (tracked) systemAlerts.set(tracked, { requestId: tracked, kind: alert.kind, status, held, key });
     const gen = state.generation;
     void n.show(alert, (id) => rows.get(id), sources).then((shown) => {
       if (shown || !running || gen !== state.generation) return;
       if (tracked && systemAlerts.get(tracked)?.key === key) systemAlerts.delete(tracked);
-      if (alert.requestId && !alertStillCurrent(alert.kind, status, state.confirmed.get(alert.requestId))) return;
-      showAlertToast(alert, status);
+      if (alert.requestId && !alertStillCurrent(alert.kind, status, state.confirmed.get(alert.requestId), held)) return;
+      showAlertToast(alert, status, held);
     });
   };
 
   const emitAlerts = (raised: readonly RaisedAlert[]) => {
     // One alert per request (the latest change wins), and only alerts still true for the synced row.
     const current = latestPerRequest(raised).filter((r) =>
-      r.alert.requestId ? alertStillCurrent(r.alert.kind, r.status, state.confirmed.get(r.alert.requestId)) : true,
+      r.alert.requestId ? alertStillCurrent(r.alert.kind, r.status, state.confirmed.get(r.alert.requestId), r.held) : true,
     );
     // Decided once per batch: a system notification while the app is in the background, else the toast;
     // nothing while another app tab of this browser is in front (it toasts these alerts from its own sync),
@@ -637,12 +679,13 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     }
     // Combined ("3 new requests") only counts what this tab shows.
     const shown = route === 'none' ? [] : current.filter((r) => !plan.skip.has(r.key));
-    const statusOf = new Map(shown.map((r) => [r.alert, r.status]));
+    const raisedBy = new Map(shown.map((r) => [r.alert, r]));
     const sources = shown.map((r) => r.alert);
     for (const alert of coalesceAlerts(sources)) {
-      const status = statusOf.get(alert) ?? null;
-      if (route === 'system' && n) showSystemAlert(n, alert, status, alert.kind === 'combined' ? sources : [alert]);
-      else showAlertToast(alert, status);
+      const status = raisedBy.get(alert)?.status ?? null;
+      const held = raisedBy.get(alert)?.held;
+      if (route === 'system' && n) showSystemAlert(n, alert, status, held, alert.kind === 'combined' ? sources : [alert]);
+      else showAlertToast(alert, status, held);
     }
     pruneAlertToasts();
   };
@@ -1197,13 +1240,18 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   /** The row's latest version came from this phone, or from the same staff member on another phone. */
   const changedByThisStaff = (row: RequestSummary) => ownKeys.has(alertKey(row)) || sameStaff(row.updatedBy, state.session.staff);
 
-  const showUndo = (row: RequestSummary, from: string, to: SettableStatus) => {
-    const back = undoTarget(from);
+  /** `hold` is the loaded hold rules (loadHold): the Undo bar's words and the hold fields the Undo restores. */
+  const showUndo = (row: RequestSummary, before: RequestSummary, to: SettableStatus, hold: HoldRules) => {
+    const back = undoTarget(before.status);
     if (!back || !isSettable(back) || back === to) return;
     clearSnackbar();
     const snackId = uuid();
-    undoRecords.set(snackId, { id: row.id, to: back, version: row.rowVersion });
-    set({ snackbar: { id: snackId, message: `${formatCaseNumber(row.caseNumber)} · ${statusMeta(to).shortLabel}`, expiresAt: now() + UNDO_MS } });
+    undoRecords.set(snackId, { id: row.id, to: back, version: row.rowVersion, restore: hold.holdFieldsOf(before) });
+    // (Pending v9.1) A Not found says what it did: "Not found yet · recheck in 20 min" (the hold) or "B.W. closed ·
+    // not found in medical" (the final answer).
+    const words = hold.notFoundSnack(row, to);
+    const message = words?.message ?? `${formatCaseNumber(row.caseNumber)} · ${statusMeta(to).shortLabel}`;
+    set({ snackbar: { id: snackId, message, ...(words ? { said: words.said } : {}), expiresAt: now() + UNDO_MS } });
     // Held (the location sheet covers the bar): the countdown starts when the hold is released.
     if (undoHolds === 0) armUndo(snackId);
   };
@@ -1236,21 +1284,49 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     };
   };
 
-  const runStatus = async (id: string, to: SettableStatus, kind: StatusKind, undoVersion: number | null): Promise<MutationResult> => {
+  /**
+   * (Pending v9.1) Requests with an Undo on its way, and the row it brings back: a tap on that card reads it (see
+   * setStatus), not the confirmed row it replaces.
+   */
+  const undoing = new Map<string, Pick<RequestSummary, 'status' | 'recheckAt'>>();
+
+  const runStatus = async (
+    id: string,
+    to: SettableStatus,
+    kind: StatusKind,
+    undoVersion: number | null,
+    tapHeld?: boolean,
+    restore?: HoldFields,
+  ): Promise<MutationResult> => {
+    // (F5) The hold's client side (loadHold). Nothing is on screen yet, so a failed load is only the toast.
+    const hold = await loadHold().catch(() => null);
+    if (!hold) {
+      toastFailure(COPY.failed);
+      return fail('failed', COPY.failed);
+    }
     const gen = ownerGen();
     const row = state.confirmed.get(id);
     if (!row) return fail('not_found', COPY.notFound);
     const from = row.status;
     // A queued second tap that the first one already satisfied.
     if (undoVersion === null && from === to) return { ok: true, changed: false, request: row };
-    setOverlay(id, { mutationId: uuid(), kind: 'status', fields: { status: to }, startedAt: now() });
+    // (F5) A Not found tapped on a request that was not on hold, queued behind one that has put it on hold (a
+    // double tap): already satisfied. Sent, it would be the final answer.
+    if (undoVersion === null && to === STATUS.notInMedical && kind === 'answer' && tapHeld === false && isHeld(row)) {
+      return { ok: true, changed: false, request: row };
+    }
+    // (F5) A first Not found keeps the status and goes on hold (lib/client/hold-rules.ts predicts it); (Pending v9.1)
+    // an Undo comes back with the hold fields it restores.
+    setOverlay(id, { mutationId: uuid(), kind: 'status', fields: hold.statusOverlayFields(row, to, kind, now(), restore), startedAt: now() });
     let res: HttpResult<ChangeResponse> = await postStatus(id, to, undoVersion ?? row.rowVersion, kind);
     if (gen !== state.generation) return fail('failed', COPY.failed);
     if (!res.ok && res.kind === 'http' && res.status === 409 && kind !== 'undo') {
       // A12: only fields or photos changed (same status as the tap started from) → resend once.
       const latest = await fetchRow(id);
       if (gen !== state.generation) return fail('failed', COPY.failed);
-      if (latest && latest.status === from) {
+      // (F5) Not a Not found when the hold moved: a request someone else just put on hold must not be closed by
+      // the resend (the same tap, meant as the first Not found, would be the final one now).
+      if (latest && latest.status === from && !(to === STATUS.notInMedical && hold.holdChanged(row, latest))) {
         res = await postStatus(id, to, latest.rowVersion, kind);
         if (gen !== state.generation) return fail('failed', COPY.failed);
       } else {
@@ -1272,7 +1348,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       const request = res.data.request;
       commitOwn(request, id);
       markLive();
-      if (res.data.changed && UNDOABLE_KINDS.has(kind)) showUndo(request, from, to);
+      if (res.data.changed && UNDOABLE_KINDS.has(kind)) showUndo(request, row, to, hold);
       return { ok: true, changed: !!res.data.changed, request: state.confirmed.get(id) ?? request };
     }
     if (res.ok) return mutationFailed(id, { ok: false, kind: 'network' }, { conflictToast: true });
@@ -2120,7 +2196,13 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 
     async setStatus(id, status, kind) {
       if (offlineNow()) return refuseOffline();
-      return serialize(id, async () => (await writeGate(false)) ?? runStatus(id, status, kind, null));
+      // (F5) Whether the request was on hold, as the server last said, when tapped (see runStatus). Not the
+      // overlay: a double tap lands while the first tap's predicted hold is on screen, and must stay a repeat.
+      // (Pending v9.1) While an Undo is on its way the card on screen is the one it brings back (its overlay, held
+      // again after the final Not found's Undo): a "× Not found" tapped there is meant as the final answer.
+      const confirmedRow = undoing.get(id) ?? state.confirmed.get(id);
+      const tapHeld = confirmedRow ? isHeld(confirmedRow) : false;
+      return serialize(id, async () => (await writeGate(false)) ?? runStatus(id, status, kind, null, tapHeld));
     },
 
     async undo(snackbarId) {
@@ -2138,7 +2220,12 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
           showToast({ tone: 'amber', icon: 'alert', title: COPY.undoStale, durationMs: 6_000 });
           return fail('conflict', COPY.undoStale, current);
         }
-        return runStatus(record.id, record.to, 'undo', record.version);
+        undoing.set(record.id, { status: record.to, recheckAt: record.restore.recheckAt });
+        try {
+          return await runStatus(record.id, record.to, 'undo', record.version, undefined, record.restore);
+        } finally {
+          undoing.delete(record.id);
+        }
       });
     },
 
@@ -2496,6 +2583,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     channel?.addEventListener('message', onChannelMessage);
     notifier = e.notifier?.() ?? null;
     if (armed) notifier?.setActive(true);
+    // (F5) In before anyone can tap a status (see loadHold).
+    void loadHold().catch(() => undefined);
     sw = e.serviceWorker({
       onUpdateReady: () => {
         if (!state.updateReady) set({ updateReady: true });

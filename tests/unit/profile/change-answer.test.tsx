@@ -15,7 +15,7 @@ import { UNDO_MS } from '@/lib/client/constants';
 import { StoreContext, type AppStore } from '@/lib/client/store-contract';
 import { createStubStore } from '@/lib/client/store-stub';
 import { stubRows } from '@/lib/client/stub-data';
-import { STATUS, STATUSES, canTransition, primaryActions, undoTarget, type SettableStatus, type StatusKind } from '@/lib/domain';
+import { STATUS, STATUSES, STATUS_META, canTransition, primaryActions, undoTarget, type SettableStatus, type StatusKind } from '@/lib/domain';
 import { advance } from '../client/helpers/env';
 import { boot, finish, installStoreHooks, ready } from '../client/helpers/boot';
 import { FakeServer, makeRow } from '../client/helpers/fake-server';
@@ -71,14 +71,16 @@ describe('Undo on every answer path (the real store)', () => {
   });
 
   // [from, to, kind, snackbar text]: the profile buttons and Pending cards (answer, reunite) and the menu (change).
+  // (Pending v9.1) A Not found that closes the request says so: "T.R. closed · not in medical" (the status label).
+  const closed = `T.R. closed · ${STATUS_META[STATUS.notInMedical].label.toLowerCase()}`;
   const paths: Array<[string, SettableStatus, StatusKind, string]> = [
-    [STATUS.waiting, STATUS.notInMedical, 'answer', 'Not found in medical'],
-    [STATUS.waiting, STATUS.inMedical, 'answer', 'In medical'],
-    [STATUS.inMedical, STATUS.reunited, 'reunite', 'Reunited'],
-    [STATUS.inMedical, STATUS.notInMedical, 'change', 'Not found in medical'],
-    [STATUS.inMedical, STATUS.waiting, 'change', 'Waiting for check'],
-    [STATUS.notInMedical, STATUS.inMedical, 'change', 'In medical'],
-    [STATUS.notInMedical, STATUS.waiting, 'change', 'Waiting for check'],
+    [STATUS.waiting, STATUS.notInMedical, 'answer', closed],
+    [STATUS.waiting, STATUS.inMedical, 'answer', 'LP-1001 · In medical'],
+    [STATUS.inMedical, STATUS.reunited, 'reunite', 'LP-1001 · Reunited'],
+    [STATUS.inMedical, STATUS.notInMedical, 'change', closed],
+    [STATUS.inMedical, STATUS.waiting, 'change', 'LP-1001 · Waiting for check'],
+    [STATUS.notInMedical, STATUS.inMedical, 'change', 'LP-1001 · In medical'],
+    [STATUS.notInMedical, STATUS.waiting, 'change', 'LP-1001 · Waiting for check'],
   ];
 
   for (const [from, to, kind, label] of paths) {
@@ -91,12 +93,12 @@ describe('Undo on every answer path (the real store)', () => {
       expect(res).toMatchObject({ ok: true, changed: true });
       expect(statusPosts(server).at(-1)).toEqual({ status: to, expectedVersion: 3, kind });
       expect(s().confirmed.get(row.id)?.status).toBe(to);
-      expect(s().snackbar?.message).toBe(`LP-1001 · ${label}`);
+      expect(s().snackbar?.message).toBe(label);
 
       // Still there just before 10 s (the old 6 s has long passed).
       await advance(UNDO_MS - 100);
       const snack = s().snackbar;
-      expect(snack?.message).toBe(`LP-1001 · ${label}`);
+      expect(snack?.message).toBe(label);
 
       const undone = await finish(a.undo(snack?.id ?? ''));
       expect(undone).toMatchObject({ ok: true, changed: true });
@@ -180,7 +182,9 @@ describe('the profile footer', () => {
     expect(bar).toContain('data-layout="two"');
     expect(buttons(bar)).toHaveLength(2);
     expect(bar).not.toContain('aria-haspopup');
-    expect(bar).toContain('>Not found<');
+    // (Pending v9.1) The left answer of a request never held: the first Not found, which holds it.
+    expect(bar).toContain('>Not found yet<');
+    expect(bar).toContain('aria-label="Not found yet. Keeps this request open and schedules a recheck"');
     expect(bar).toContain('>In medical<');
     // The answer button is the short verb; the status it sets reads "Not found in medical".
     expect(bar).not.toContain('Not found in medical');

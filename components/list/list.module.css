@@ -162,7 +162,8 @@
 }
 
 /* The offline / reconnecting button, search and the avatar. Every one has a 44 px tap area that never
-   reaches into its neighbour's box. */
+   reaches into its neighbour's box. Like the title's, it grows up and sideways, never down: on All requests and
+   My requests the "⇅" toggle sits right under them at the live line's right end (Pending v9.1). */
 .icons {
   flex: none;
   display: flex;
@@ -188,7 +189,13 @@
 .ib::before {
   content: '';
   position: absolute;
-  inset: min(0px, calc((100% - 44px) / 2));
+  inset: min(0px, calc(100% - 44px)) min(0px, calc((100% - 44px) / 2)) 0;
+}
+
+/* The avatar (components/account, a 32 px trigger) grows its 44 px hit area the same way here: 12 px up, 6 px to
+   each side, none down. (Its own -6 px all round stays in the desk's sidebar.) */
+.icons [data-testid='account-trigger']::after {
+  inset: -12px -6px 0;
 }
 
 .ib:active {
@@ -533,6 +540,20 @@ button.lr:focus-visible {
   color: var(--red-11);
 }
 
+/* (F5) The stages (lib/stages STAGE_META, design/screens/colors-1.png): amber Needs info (front of house's turn),
+   violet Not found yet (on hold), teal Friend en route (on the move); Friend arrived is green. */
+.stc[data-tone='amber'] {
+  color: var(--amber-11);
+}
+
+.stc[data-tone='violet'] {
+  color: var(--violet-11);
+}
+
+.stc[data-tone='teal'] {
+  color: var(--teal-11);
+}
+
 .lg {
   flex: none;
 }
@@ -562,7 +583,8 @@ button.lr:focus-visible {
 }
 
 /* Under 400 px "Waiting for check" reads "Waiting" (list-helpers.narrowStatusLabel): with a created time
-   from an earlier day ("Fri 11:02 PM") the full label would leave the name two letters. */
+   from an earlier day ("Fri 11:02 PM") the full label would leave the name two letters. (F5) Not in medical
+   reads its answer's label there: the same today, "Not found" for "Not found in medical" after the rename. */
 .stNarrow {
   display: none;
 }
@@ -628,9 +650,12 @@ button.lr:focus-visible {
   padding: 0 1px;
 }
 
-/* "Closed  6  ⌄": a plain row, not a card (polish-v7.html .fold). */
+/* "Closed  6  ›": a plain row, not a card (polish-v7.html .fold, pending-v9.html .arch). Full width in the log grid
+   and in a plain block (My requests' Closed by status), so the chevron and the hairlines reach the right edge. */
 .fold {
   grid-column: 1 / -1;
+  box-sizing: border-box;
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -678,12 +703,7 @@ button.lr:focus-visible {
 
 .foldChev {
   display: flex;
-  color: var(--gray-10);
-  transition: transform 0.15s;
-}
-
-.foldChev[data-open] {
-  transform: rotate(180deg);
+  color: var(--gray-11);
 }
 
 /* The closed rows under the fold: a subgrid, so they share the log's columns. */
@@ -917,80 +937,9 @@ button.lr:focus-visible {
   font-weight: 500;
 }
 
-/* ---- Pending v8 (design/screens/pending-v8.html, 2026-11-06 afternoon) --------------------------------
-   One list at a time under a segmented control on the phone (To check | Friend coming), the two side by side
-   on the desk (components/desk/PendingBoard.tsx). Cards answer one question each; a photo only when there is
-   one. The card is the solid panel colour (white in light, gray-2 in dark: the mockup's gray-a2 over the
-   page), so the amber and red minutes keep 4.5:1. */
-
-/* "To check 4 | Friend coming 3": a 40 px track, 34 px segments with a 44 px tap area. */
-.seg {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  margin: 2px 16px 12px;
-  padding: 3px;
-  border-radius: 10px;
-  background: var(--gray-a3);
-}
-
-.segb {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-width: 0;
-  height: 34px;
-  margin: 0;
-  padding: 0 6px;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  color: var(--gray-11);
-  font: inherit;
-  font-size: 14px;
-  font-weight: 500;
-  white-space: nowrap;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.segb::before {
-  content: '';
-  position: absolute;
-  inset: -5px 0;
-}
-
-.segb[aria-selected='true'] {
-  background: var(--color-panel-solid);
-  color: var(--gray-12);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-}
-
-.segb:focus-visible {
-  outline: 2px solid var(--focus-8);
-  outline-offset: 1px;
-}
-
-.segl {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.segn {
-  flex: none;
-  font-weight: 400;
-  color: var(--gray-11);
-  font-variant-numeric: tabular-nums;
-}
-
-/* A tab with nothing in it: its empty state fills the page like the view's own. */
-.tabBody {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
+/* ---- Pending cards (design/screens/pending-v8.html, 2026-11-06 afternoon; Pending v9.1 below) ---------------
+   Cards answer one question each; a photo only when there is one. The card is the solid panel colour (white in
+   light, gray-2 in dark: the mockup's gray-a2 over the page), so the amber and red minutes keep 4.5:1. */
 
 .pcard {
   position: relative;
@@ -1125,12 +1074,13 @@ button.lr:focus-visible {
   gap: 8px;
 }
 
-/* 44 px answers and Reunited (doubled: over the Radix Button size). */
+/* 44 px answers and Reunited (doubled: over the Radix Button size). Side padding 8 px: "⧗ Not found yet" keeps
+   its one line in a narrow board column too. */
 .pbtn.pbtn {
   --base-button-height: 44px;
   height: 44px;
   gap: 8px;
-  padding: 0 10px;
+  padding: 0 8px;
   border-radius: 10px;
   font-size: 15px;
   font-weight: 600;
@@ -1139,6 +1089,79 @@ button.lr:focus-visible {
 
 .pbtnSoft.pbtnSoft {
   font-weight: 500;
+}
+
+/* On the desk board each column is a size container (components/desk/pending-board.module.css .col; nothing above
+   a phone's cards is one, so none of this applies there). A column under 340 px (a 768 px iPad, a request docked
+   beside the board) tightens the card so "⧗ Not found yet" keeps its one line; under 290 px (a request docked
+   on a 1024–1279 px screen) the two answers stack, full width, Not found first. */
+@container (max-width: 339.98px) {
+  .pcard {
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .pwho {
+    gap: 10px;
+  }
+
+  .pbtn.pbtn {
+    gap: 6px;
+    padding: 0 6px;
+    font-size: 14px;
+  }
+}
+
+@container (max-width: 289.98px) {
+  .pacts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* My requests: the stage chip in a card's corner (Needs info). Text is step 12 on the tint in light (step 11 is
+   under 4.5:1 there for amber), step 11 in dark. */
+.stageChip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.stageChip > svg {
+  flex: none;
+}
+
+.stageChip[data-tone='amber'] {
+  background: var(--amber-a4);
+  color: var(--amber-12);
+}
+
+.stageChip[data-tone='violet'] {
+  background: var(--violet-a4);
+  color: var(--violet-12);
+}
+
+:global(.dark) .stageChip[data-tone='amber'] {
+  color: var(--amber-11);
+}
+
+:global(.dark) .stageChip[data-tone='violet'] {
+  color: var(--violet-11);
+}
+
+.stageRow {
+  display: flex;
+  min-width: 0;
+  margin: 12px 0 14px;
 }
 
 /* The location chip: green with a pin, or a quiet outlined "+ Location". 28 px, with a 44 px tap area. */
@@ -1203,32 +1226,345 @@ button.lr:focus-visible {
   text-overflow: ellipsis;
 }
 
-/* "→ Chris P. · boyfriend, on the way". */
-.pcoming {
+/* ---- Pending v9.1 (design/screens/pending-v9.html, Brian 2026-11-06 19:35–20:40) ----------------------------
+   One page on the phone: Waiting for check, then Friend coming, each under a 44 px header row that folds it
+   (components/list/PendingQueues.tsx). The headers pin under the title while their section scrolls; on the desk
+   they pin to the top of their column (--qh-top, components/desk/pending-board.module.css). */
+
+.queues {
+  display: flex;
+  flex-direction: column;
+  padding: 0 12px;
+}
+
+.qsec {
+  display: flex;
+  flex-direction: column;
+}
+
+.qhead {
+  position: sticky;
+  top: var(--qh-top, var(--lp-sticky-h, 0px));
+  z-index: 3;
+  margin: 0 -12px;
+  font: inherit;
+  background: var(--color-background);
+}
+
+/* glyph · label · count ··· [oldest wait] · chevron: one 44 px row, the whole row folds the section. */
+.qheadBtn {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 0;
-  margin-top: 4px;
-  font-size: 14.5px;
-  line-height: 20px;
-  color: var(--gray-11);
+  width: 100%;
+  height: 44px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 14px 0 16px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.pcoming > svg {
+button.qheadBtn:active {
+  background: var(--gray-a2);
+}
+
+button.qheadBtn:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -2px;
+}
+
+.qheadGlyph {
+  display: flex;
   flex: none;
 }
 
-.pcoming > span {
+.qheadLabel {
   min-width: 0;
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--gray-12);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.pcoming b {
-  color: var(--gray-12);
+.qheadCount {
+  flex: none;
+  font-size: 15px;
+  line-height: 20px;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A folded Waiting header keeps its oldest wait on the right, heat-coloured (step 11: 4.5:1 on the page). */
+.qheadWait {
+  flex: none;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.qheadWait[data-tone='amber'] {
+  color: var(--amber-11);
+}
+
+.qheadWait[data-tone='red'] {
+  color: var(--red-11);
+}
+
+.qheadChev {
+  flex: none;
+  margin-left: auto;
+  display: flex;
+  color: var(--gray-11);
+}
+
+.qheadWait + .qheadChev {
+  margin-left: 8px;
+}
+
+/* Nothing in the section: the header stays, glyph dimmed, label quiet, "0", no chevron. */
+.qhead[data-zero] .qheadGlyph {
+  opacity: 0.38;
+}
+
+.qhead[data-zero] .qheadLabel {
+  color: var(--gray-11);
+}
+
+.qhead[data-zero] .qheadBtn {
+  cursor: default;
+}
+
+.qcards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px 0 14px;
+}
+
+.qcards > * {
+  flex-shrink: 0;
+}
+
+/* A card J / K moved to (or scrolled into view) stays clear of the pinned title and section header. */
+.qcards [data-request-id] {
+  scroll-margin-top: calc(var(--lp-sticky-h, 0px) + 52px);
+}
+
+/* The hold's indicator, in a chip row under the card's text (one line, never wrapped): an outlined violet
+   "⧗ Not found yet" while held, a filled violet "↺ Recheck due" once due. Text is violet step 11 on the panel
+   (4.5:1 in both themes); the filled chip is step 12 on its tint in light, step 11 in dark. */
+.chipRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-top: -2px;
+}
+
+.holdChip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border-radius: 7px;
+  box-shadow: inset 0 0 0 1px var(--violet-a7);
+  color: var(--violet-11);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.holdChip > svg {
+  flex: none;
+}
+
+.holdChip[data-due] {
+  box-shadow: none;
+  background: var(--violet-a4);
+  color: var(--violet-12);
+}
+
+:global(.dark) .holdChip[data-due] {
+  color: var(--violet-11);
+}
+
+/* The card a final Not found closed leaves Pending: it fades, slides a little and folds its height away. */
+.leaveWrap {
+  overflow: hidden;
+  animation: lp-leave 240ms ease-in forwards;
+}
+
+.leaving {
+  pointer-events: none;
+}
+
+@keyframes lp-leave {
+  from {
+    opacity: 1;
+    transform: none;
+    height: var(--leave-h, auto);
+    margin-bottom: 0;
+  }
+  to {
+    opacity: 0;
+    transform: translateX(24px);
+    height: 0;
+    margin-bottom: -10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .leaveWrap {
+    animation-duration: 1ms;
+  }
+}
+
+/* ---- The live line's right end: "⇅ Newest" / "⇅ Updated" ↔ "⇅ Status" (All, My requests) --------------------
+   One tap; outlined while it names the default order, filled gray-a4 when sorted by status. 32 px with a 44 px
+   tap area that, like Refresh now's, reaches 12 px down and never up (the header's search and avatar are right
+   above it). Under 360 px of width it drops to its own row, left-aligned. The row keeps F2's line spacing (.live):
+   F1.2's "● Updated just now ⟳" (.liveLead) at its left. */
+.liveRow {
+  container-type: inline-size;
+  margin-top: -14px;
+}
+
+.liveIn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  padding: 0 12px 12px 16px;
+}
+
+.liveLead {
+  flex: 0 1 auto;
+}
+
+.sort {
+  position: relative;
+  flex: none;
+  margin: 0 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  box-sizing: border-box;
+  padding: 0 11px 0 9px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--gray-a7);
+  color: var(--gray-11);
+  font: inherit;
+  font-size: 13.5px;
   font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sort::before {
+  content: '';
+  position: absolute;
+  inset: 0 -2px -12px;
+}
+
+.sort[aria-pressed='true'] {
+  box-shadow: none;
+  background: var(--gray-a4);
+  color: var(--gray-12);
+}
+
+.sort:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+
+@container (max-width: 360px) {
+  /* 12 px apart: Refresh now's tap area reaches 12 px down, to the toggle's top and no further. */
+  .liveIn {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 12px;
+  }
+
+  .liveLead {
+    align-self: stretch;
+  }
+
+  .sort {
+    margin: 0;
+  }
+}
+
+/* ---- Sorted by status: thin dividers over each group (pending-v9.html .gd) ---------------------------------
+   glyph · label · count, pinned under the log's column header (or under the title on My requests). */
+.gd {
+  grid-column: 1 / -1;
+  position: sticky;
+  top: calc(var(--lp-sticky-h, 0px) + 24px);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  box-sizing: border-box;
+  padding: 0 16px;
+  background: var(--gray-2);
+  border-bottom: 1px solid var(--gray-a3);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gray-12);
+  white-space: nowrap;
+}
+
+.gdCards {
+  top: var(--lp-sticky-h, 0px);
+  margin-bottom: 8px;
+}
+
+.gdn {
+  font-weight: 400;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
+}
+
+/* My requests by status: the groups, each with its own padded card column. */
+.groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.groups > section > .scroll {
+  padding-top: 0;
+}
+
+.foldCards {
+  margin-top: 0;
+  border-top: 1px solid var(--gray-a3);
+  border-bottom: 1px solid var(--gray-a3);
 }
 
 /* ---- Search (states.html .search / .sfield / .cnt) --------------------------------------------- */

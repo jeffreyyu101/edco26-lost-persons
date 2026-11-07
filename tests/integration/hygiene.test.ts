@@ -29,6 +29,11 @@ describe('integration test cleanup', () => {
     ] as const) {
       const res = await api(`/api/requests/${row.id}/status`, { json: { status, expectedVersion: row.rowVersion, kind: 'answer' }, cookie });
       expect(res.status, JSON.stringify(res.body)).toBe(200);
+      // (F5) The first Not found only puts it on hold; the second is the final, closed answer.
+      if (status === STATUS.notInMedical) {
+        const final = await api(`/api/requests/${row.id}/status`, { json: { status, expectedVersion: res.body.request.rowVersion, kind: 'answer' }, cookie });
+        expect(final.body.request.status).toBe(STATUS.notInMedical);
+      }
     }
     // A create through api() directly (not createRequest) is tracked too.
     const direct = await api('/api/requests', {

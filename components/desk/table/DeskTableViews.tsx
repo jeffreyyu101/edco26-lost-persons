@@ -13,6 +13,11 @@
 //   My requests  unsent on top, then open, then a "Closed N" group (never folded: the reporter tells the
 //                friend), each newest update first.
 //   Search       results by the top bar's query (?q=), newest first, the match highlighted.
+//
+// (Pending v9.1) All and My requests sort by status from their column header (Status ↓; Created ↓ / Updated ↓
+// goes back): group rows over Waiting for check (longest wait first) and Friend coming (arrived, en route,
+// nobody yet), then the closed ones folded last (Archived on All, Closed on My requests), newest closed first.
+// The choice is the phone toggle's, per view on this device (lib/client/view-prefs.ts).
 import { MapPin, X } from 'lucide-react';
 import { useDeferredValue, useId, useMemo, type ReactNode } from 'react';
 import { ConnectionBanner } from '@/components/ui/Banner';
@@ -23,6 +28,8 @@ import { resultCount, searchDisplay } from '@/components/list/list-helpers';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { navigate } from '@/lib/client/nav';
 import { splitOpenClosed } from '@/lib/client/selectors';
+import { statusGroups, type StatusGroups } from '@/lib/client/status-order';
+import { useMineClosedOpen, useSortOrder } from '@/lib/client/view-prefs';
 import {
   useActions,
   useAllRows,
@@ -38,8 +45,9 @@ import {
   type StoreState,
 } from '@/lib/client/store-contract';
 import { parsePostFilterKey, postFilterLabel, statusMeta } from '@/lib/domain';
+import { displayStage } from '@/lib/stages';
 import { formatCreatedTime } from '@/lib/format';
-import { ArchivedFold, ArchivedRows, DeskTable, GroupHeader, OutboxRow, SearchRow, TableRow, TableSkeleton } from './DeskTable';
+import { ArchivedFold, ArchivedRows, DeskTable, GroupHeader, GroupRow, OutboxRow, SearchRow, TableRow, TableSkeleton } from './DeskTable';
 import { rowTimes } from './table-model';
 import t from './table.module.css';
 
@@ -85,8 +93,36 @@ function Rows({ rows, now, tz, selected }: { rows: readonly RequestSummary[]; no
   return (
     <>
       {rows.map((row) => (
-        <TableRow key={row.id} row={row} times={rowTimes(row, now, tz)} selected={row.id === selected} />
+        <TableRow
+          key={row.id}
+          row={row}
+          times={rowTimes(row, now, tz)}
+          selected={row.id === selected}
+          stage={displayStage(row, { now, timeZone: tz })}
+          timeZone={tz}
+          now={now}
+        />
       ))}
+    </>
+  );
+}
+
+/** (Pending v9.1) Waiting for check and Friend coming under their group rows (an empty group is left out). */
+function OpenGroups({ groups, now, tz, selected }: { groups: StatusGroups; now: number; tz: string; selected: string | null }) {
+  return (
+    <>
+      {groups.waiting.length > 0 ? (
+        <>
+          <GroupRow group="check" count={groups.waiting.length} />
+          <Rows rows={groups.waiting} now={now} tz={tz} selected={selected} />
+        </>
+      ) : null}
+      {groups.coming.length > 0 ? (
+        <>
+          <GroupRow group="coming" count={groups.coming.length} />
+          <Rows rows={groups.coming} now={now} tz={tz} selected={selected} />
+        </>
+      ) : null}
     </>
   );
 }
@@ -180,36 +216,52 @@ export function DeskAllTable({ status, post, open = false, selected = null }: De
   const prefs = usePrefs();
   const actions = useActions();
   const archivedId = useId();
+  const [order, setOrder] = useSortOrder('all');
+  const byStatus = order === 'status';
   const filtered = !!(status || post);
   const queued = filtered ? [] : outbox;
-  const sections = useMemo(() => (filtered ? null : splitOpenClosed(rows)), [filtered, rows]);
+  const sections = useMemo(() => (filtered || byStatus ? null : splitOpenClosed(rows)), [filtered, byStatus, rows]);
+  const groups = useMemo(() => (byStatus ? statusGroups(rows) : null), [byStatus, rows]);
   // The phone's Archived state (prefs.closedExpanded, for this browser session).
   const expanded = prefs.closedExpanded;
-  useScrollMemory(`desk-all|${status ?? ''}|${post ?? ''}|${openOnly ? 'open' : ''}`, !loading);
+  useScrollMemory(`desk-all|${status ?? ''}|${post ?? ''}|${openOnly ? 'open' : ''}|${order}`, !loading);
+  const archived = (closedRows: readonly RequestSummary[]) =>
+    closedRows.length > 0 ? (
+      <>
+        <ArchivedFold count={closedRows.length} open={expanded} controls={archivedId} onToggle={() => actions.setPref('closedExpanded', !expanded)} />
+        {expanded ? (
+          <ArchivedRows id={archivedId}>
+            <Rows rows={closedRows} now={now} tz={tz} selected={selected} />
+          </ArchivedRows>
+        ) : null}
+      </>
+    ) : null;
 
   return (
     <Frame view="all" chips={filtered ? <FilterChips status={status} post={post} open={openOnly} count={rows.length} /> : null}>
       {rows.length + queued.length === 0 ? (
         <EmptyState icon="inbox" title={filtered ? 'No matching requests' : 'No requests yet'} />
       ) : (
-        <DeskTable>
+        <DeskTable sort={{ order, defaultColumn: 'created', onChange: setOrder }}>
           <Queued items={queued} now={now} tz={tz} />
-          {sections ? (
+          {groups ? (
+            <>
+              <OpenGroups groups={groups} now={now} tz={tz} selected={selected} />
+              {filtered ? (
+                groups.closed.length > 0 ? (
+                  <>
+                    <GroupHeader label="Archived" count={groups.closed.length} />
+                    <Rows rows={groups.closed} now={now} tz={tz} selected={selected} />
+                  </>
+                ) : null
+              ) : (
+                archived(groups.closed)
+              )}
+            </>
+          ) : sections ? (
             <>
               <Rows rows={sections.open} now={now} tz={tz} selected={selected} />
-              {sections.closed.length > 0 ? (
-                <ArchivedFold
-                  count={sections.closed.length}
-                  open={expanded}
-                  controls={archivedId}
-                  onToggle={() => actions.setPref('closedExpanded', !expanded)}
-                />
-              ) : null}
-              {expanded && sections.closed.length > 0 ? (
-                <ArchivedRows id={archivedId}>
-                  <Rows rows={sections.closed} now={now} tz={tz} selected={selected} />
-                </ArchivedRows>
-              ) : null}
+              {archived(sections.closed)}
             </>
           ) : (
             <Rows rows={rows} now={now} tz={tz} selected={selected} />
@@ -230,15 +282,35 @@ export function DeskMineTable({ selected = null }: { selected?: string | null })
   const loading = useIsLoading();
   const tz = useEventTimezone();
   const now = useNow();
+  const [order, setOrder] = useSortOrder('mine');
+  const byStatus = order === 'status';
   const { open, closed } = useMemo(() => splitOpenClosed(rows), [rows]);
-  useScrollMemory('desk-mine', !loading);
+  const groups = useMemo(() => (byStatus ? statusGroups(rows) : null), [byStatus, rows]);
+  const [closedOpen, setClosedOpen] = useMineClosedOpen();
+  const closedId = useId();
+  useScrollMemory(`desk-mine|${order}`, !loading);
 
   return (
     <Frame view="mine">
       {rows.length + outbox.length === 0 ? (
         <EmptyState icon="inbox" title="No requests yet" />
+      ) : groups ? (
+        <DeskTable sort={{ order, defaultColumn: 'updated', onChange: setOrder }}>
+          <Queued items={outbox} now={now} tz={tz} />
+          <OpenGroups groups={groups} now={now} tz={tz} selected={selected} />
+          {groups.closed.length > 0 ? (
+            <section data-testid="mine-closed">
+              <ArchivedFold label="Closed" count={groups.closed.length} open={closedOpen} controls={closedId} onToggle={() => setClosedOpen(!closedOpen)} />
+              {closedOpen ? (
+                <ArchivedRows id={closedId} label="Closed">
+                  <Rows rows={groups.closed} now={now} tz={tz} selected={selected} />
+                </ArchivedRows>
+              ) : null}
+            </section>
+          ) : null}
+        </DeskTable>
       ) : (
-        <DeskTable>
+        <DeskTable sort={{ order, defaultColumn: 'updated', onChange: setOrder }}>
           <Queued items={outbox} now={now} tz={tz} />
           <Rows rows={open} now={now} tz={tz} selected={selected} />
           {closed.length > 0 ? (
@@ -284,6 +356,9 @@ export function DeskSearchTable({ q, selected = null }: { q: string; selected?: 
                 hit={hit}
                 times={rowTimes(hit.row, now, tz)}
                 selected={hit.row.id === selected}
+                stage={displayStage(hit.row, { now, timeZone: tz })}
+                timeZone={tz}
+                now={now}
                 nameRanges={d.nameRanges}
                 caseRanges={d.caseRanges}
                 line={line}

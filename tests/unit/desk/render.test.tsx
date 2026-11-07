@@ -3,7 +3,7 @@
 import { Theme } from '@radix-ui/themes';
 import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { setDashboardLive } from '@/components/dashboard/connection-signal';
 import { DeskFrame } from '@/components/desk/DeskFrame';
 import { BrandCard } from '@/components/list/BrandCard';
@@ -17,6 +17,15 @@ import { createStubStore } from '@/lib/client/store-stub';
 import { stubRows } from '@/lib/client/stub-data';
 
 const NOW = Date.parse('2026-11-07T03:10:00Z');
+
+// The stub store's last sync is NOW, and the live line goes stale 30 s after it on the real clock: pin Date to
+// NOW so these renders do not turn "Reconnecting" once the wall clock passes 2026-11-07 03:10:30 UTC.
+beforeAll(() => {
+  vi.useFakeTimers({ now: NOW, toFake: ['Date'] });
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 // No getServerState: a server render then reads the stub's data (as tests/unit/list-views.test.tsx does).
 function storeWith(change: (s: StoreState) => StoreState = (s) => s): AppStore {

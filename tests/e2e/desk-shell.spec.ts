@@ -954,11 +954,13 @@ test.describe('iPad portrait 820 × 1180 (touch)', () => {
     await page.goto(`/?r=${one!.id}`);
     const pane = page.getByTestId('desk-pane');
     const actions = pane.getByTestId('profile-actions');
-    await expect(actions.getByRole('button', { name: 'Not found', exact: true })).toBeVisible({ timeout: 15_000 });
+    // (Pending v9.1) The left answer of a request never held: "Not found yet", the hold.
+    await expect(actions.getByTestId('not-found-answer')).toHaveText('Not found yet', { timeout: 15_000 });
     const status = (await pane.getByTestId('status-block').boundingBox())!;
     expect((await actions.boundingBox())!.y).toBeGreaterThanOrEqual(status.y + status.height);
-    await actions.getByRole('button', { name: 'Not found', exact: true }).click();
-    await expect(pane.getByTestId('status-block')).toContainText('Not found in medical');
+    await actions.getByTestId('not-found-answer').click();
+    // (F5) A first Not found puts the request on a "Not found yet" hold.
+    await expect(pane.getByTestId('status-block')).toContainText('Not found yet');
 
     // The list beside the sheet is too narrow for it: the bar sits at the foot of the sheet, inside it.
     const at = await snackPlacement(page);

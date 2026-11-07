@@ -57,7 +57,7 @@ and `.env.test`, which holds local-only values that work against `127.0.0.1` and
 | `20261101000000_baseline_local_only.sql` | A copy of `supabase/schema.sql`, the production baseline. | **Never paste.** Already applied. |
 | `20261105000001_add_last_seen.sql` | Jeffrey's `last_seen` column. | Already applied (verified 2026-11-05). |
 | `20261105000002_update_locations_and_statuses.sql` | Jeffrey's location and status CHECK update. | Not needed: the rework covers it whether or not it ran. |
-| `20261106000000_rework.sql` | Row versions, the touch trigger, thumbnails, login limits, free-text `age` (text since 2026-11-06) and every `lp_*` function the app calls. | **The one file production needs.** Applied 2026-11-06; apply it again (the v2.5 `lp_stats` change and `age` → text) **before** deploying this build. See [`HANDOFF.md`](HANDOFF.md). |
+| `20261106000000_rework.sql` | Row versions, the touch trigger, thumbnails, login limits, free-text `age` (text since 2026-11-06), the "Not found yet" hold (`recheck_at`, `not_found_checks`) and every `lp_*` function the app calls. | **The one file production needs.** Applied 2026-11-06; apply it again (the v2.5 `lp_stats` change and `age` → text) **before** deploying this build. See [`HANDOFF.md`](HANDOFF.md). |
 
 Without `20261106000000_rework.sql`, every API route fails, because each one calls an `lp_*` function. The
 file is one transaction, is safe to run twice (also on a database that already has every `lp_*` function),
@@ -120,7 +120,7 @@ Pending.
 - **Sign-in.** Step 1 is your name and team, and step 2 is the event password. The phone remembers step 1.
   Sessions last 12 hours from the last use, and 36 hours at most. Too many wrong passwords from one place
   pauses sign-in for a while.
-- **One page, several views.** All requests, Pending (Friend coming, then Waiting for check), My requests
+- **One page, several views.** All requests, Pending (Waiting for check, then Friend coming), My requests
   (with a progress line), Search, New request, the profile, Edit and the dashboard. Views are URL parameters
   on `/`, so Back and shared links work. The view menu is the large page title ("All requests 13 ⌄").
 - **All requests.** Open requests (Waiting for check, In medical) come first, newest first; every closed one
@@ -136,8 +136,19 @@ Pending.
 - **Desk and tablet (from 768 px).** A sidebar (or an icon rail under 1280 px), a top bar with the view's
   title, its live line and Refresh now, search and New request, and the list as a table; a request opens
   beside it (docked from 1024 px) and New request as a side sheet or a centred dialog. Pending is two
-  columns, To check and Friend coming. All requests opens with the same compact brand row, its X and Show
-  header.
+  columns, Waiting for check and Friend coming, each scrolling on its own. All requests opens with the same
+  compact brand row, its X and Show header.
+- **Pending** (Pending v9.1) is one page on a phone: Waiting for check (longest wait first), then Friend coming
+  (friend arrived, then en route, then nobody yet), each under a header that folds it; side by side from 768 px.
+- **Not found yet.** The first Not found ("⧗ Not found yet") on a waiting request holds it for a recheck in 20
+  minutes: still open, Waiting for check in the database, in its place in Pending with a violet "Not found yet"
+  chip, which turns into "Recheck due" after 20 minutes. Nothing moves and it never closes by itself. On a held
+  request the button reads "× Not found": the final answer, which closes it as Not found in medical. Lists show
+  each request's stage: Needs info, Not found yet, Recheck due, Friend en route and Friend arrived refine the
+  stored status (`design/DECISIONS.md`, spec §19).
+- **Sort by status.** All requests and My requests have a one-tap "⇅ Newest" / "⇅ Updated" ↔ "⇅ Status" toggle
+  at the right end of the line under the title (the column header on the desk table), remembered on the
+  device: Waiting for check, Friend coming, then the closed ones folded.
 - **Answers.** Not found, In medical, Reunited and Change answer each offer Undo for 10 s. Change answer
   is a menu: the other answer, or Back to Waiting for check. Two people giving the same answer is harmless.
   A change made by someone else shows as "Updated by someone else".

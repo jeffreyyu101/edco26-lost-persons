@@ -139,7 +139,9 @@ for (const theme of ['light', 'dark'] as const) {
         const waiting = await createRequest(page);
         const answerMe = await createRequest(page);
         const coming = await setStatus(page, await createRequest(page), 'Found – Awaiting Reunion', 'answer');
-        await setStatus(page, await createRequest(page), 'Checked – Not Found', 'answer');
+        // (F5) One request on a "Not found yet" hold, and one answered Not found twice (final, closed).
+        const held = await setStatus(page, await createRequest(page), 'Checked – Not Found', 'answer');
+        await setStatus(page, await setStatus(page, await createRequest(page), 'Checked – Not Found', 'answer'), 'Checked – Not Found', 'answer');
         await setStatus(page, await setStatus(page, await createRequest(page), 'Found – Awaiting Reunion', 'answer'), 'Reunited – Closed', 'reunite');
         const other = await createRequest(page, { reportingLocation: 'Other', otherLocation: 'Base' });
         // A photo, so the profile's portrait is a button (its name must start with the count it shows).
@@ -207,19 +209,19 @@ for (const theme of ['light', 'dark'] as const) {
         await page.getByRole('button', { name: 'Got it' }).click();
 
         await visit('/?view=pending', 'Pending', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
-        await page.locator(`[data-testid="check-card"]:has([data-request-id="${answerMe.id}"])`).getByRole('button', { name: 'Not found', exact: true }).click();
+        await page.locator(`[data-testid="check-card"]:has([data-request-id="${answerMe.id}"])`).getByTestId('not-found-answer').click();
         await expect(page.getByRole('button', { name: 'Undo' })).toBeVisible();
         results.push(await audit(page, 'Pending + Undo snackbar'));
-        // Pending v8: the Friend coming tab (location chips) and the location sheet.
-        await page.getByRole('tab', { name: /^Friend coming/ }).click();
+        // Pending v9.1: Friend coming (location chips) on the same page, its header folding it; the location sheet.
         await expect(row(coming.id)).toBeVisible();
+        await page.getByTestId('queue-toggle-check').click();
         results.push(await audit(page, 'Pending, Friend coming'));
         await page.locator(`[data-testid="friend-coming-card"]:has([data-request-id="${coming.id}"])`).getByTestId('location-chip').click();
         await expect(page.getByTestId('location-form')).toBeVisible();
         results.push(await audit(page, 'location sheet'));
         await page.keyboard.press('Escape');
         await expect(page.getByTestId('location-form')).toHaveCount(0);
-        await page.getByRole('tab', { name: /^To check/ }).click();
+        await page.getByTestId('queue-toggle-check').click();
 
         await visit('/?view=mine', 'My requests', () => expect(row(coming.id)).toBeVisible({ timeout: 15_000 }));
         await visit(`/?q=${encodeURIComponent(TAG)}`, 'Search', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
@@ -249,6 +251,7 @@ for (const theme of ['light', 'dark'] as const) {
         results.push(await audit(page, 'cancel confirm'));
         await page.getByRole('button', { name: 'Keep' }).click();
         await visit(`/?r=${coming.id}`, 'Profile (in medical)', () => expect(page.getByTestId('audit-item').first()).toBeVisible());
+        await visit(`/?r=${held.id}`, 'Profile (not found yet)', () => expect(page.getByTestId('recheck-row')).toBeVisible());
         await visit(`/?r=${waiting.id}&edit=all`, 'Edit', () => expect(page.getByTestId('request-form-submit')).toBeVisible());
         await visit('/?dashboard=1', 'Dashboard', () => expect(page.getByTestId('open-count')).toBeVisible());
 

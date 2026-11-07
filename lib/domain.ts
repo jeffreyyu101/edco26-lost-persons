@@ -3,7 +3,7 @@
 //
 // Things that must stay identical to SQL in supabase/migrations/20261106000000_rework.sql (unit tests
 // compare them): TRANSITIONS (lp_set_status), TEAM_ALIASES + canonStaff (lp_canon_staff), postShort
-// (lp_stats), the field limits (lp_clean_fields).
+// (lp_stats), the field limits (lp_clean_fields), RECHECK_MINUTES (lp_stages_recheck_minutes).
 
 /** RFC 9562 UUID (versions 1–8, variant 10xx), like Jeffrey's isUuid. */
 export function isUuid(value: unknown): value is string {
@@ -206,6 +206,11 @@ const ACTION: Readonly<Record<StatusActionId, Omit<StatusAction, 'creatorOnly'> 
 
 function action(id: StatusActionId, overrides: Partial<StatusAction> = {}): StatusAction {
   return { creatorOnly: false, ...ACTION[id], ...overrides };
+}
+
+/** (F5) An action's button label ("Not found", "In medical"), for surfaces that name it outside a button. */
+export function actionLabel(id: StatusActionId): string {
+  return ACTION[id].label;
 }
 
 /**
@@ -739,3 +744,45 @@ export const PHOTO_THUMB_QUALITY = 0.7;
 /** The whole multipart upload must stay under Vercel's 4.5 MB body cap. */
 export const PHOTO_UPLOAD_MAX_BYTES = 3_900_000;
 export const PHOTO_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+
+// ---------------------------------------------------------------------------------------------------
+// The "Not found yet" hold (F5, Brian 2026-11-06 evening; design/screens/updates.html #recheck)
+// ---------------------------------------------------------------------------------------------------
+// The first Not found on a request Waiting for check keeps it open (status 'Added') with recheckAt = answer +
+// RECHECK_MINUTES and notFoundChecks = 1 (rework SQL step 1d, lp_set_status); it is due once recheckAt has passed
+// and stays open until someone answers; the next Not found is final. The stage system that shows it (Needs info,
+// Not found yet, Friend en route, …: displayStage, STAGE_META) is lib/stages.ts, a module of its own so the
+// first load (A25) does not carry it. Only what the store and the alerts need on the first load is here.
+
+/** How long a "Not found yet" hold lasts. MUST equal lp_stages_recheck_minutes() in the rework SQL (unit-tested). */
+export const RECHECK_MINUTES = 20;
+
+/** The held stage's label (lib/stages.ts STAGE_META.notFoundYet; here for the alerts on the first load). */
+export const NOT_FOUND_YET_LABEL = 'Not found yet';
+
+const holdEpoch = (iso: string | null | undefined): number => {
+  const t = iso ? Date.parse(iso) : NaN;
+  return Number.isFinite(t) ? t : NaN;
+};
+
+/** True while a request Waiting for check is on a "Not found yet" hold (due or not). */
+export function isHeld(row: { status: string; recheckAt?: string | null }): boolean {
+  return row.status === STATUS.waiting && Number.isFinite(holdEpoch(row.recheckAt));
+}
+
+/** A held request whose recheck time has come (it never closes by itself). */
+export function isRecheckDue(row: { status: string; recheckAt?: string | null }, now: number): boolean {
+  return isHeld(row) && holdEpoch(row.recheckAt) <= now;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Pending v9.1 (Brian 2026-11-06 19:35–20:40, design/screens/pending-v9.html): what a Not found tap does, as
+// lp_set_status decides it: a request Waiting for check with no Not found in this round (notFoundChecks 0) goes on
+// hold; any other Not found is final. The two-state answer button that shows it (notFoundAnswer) and the "Recheck
+// due" label are lib/stages.ts's (the views' chunks), so the first load (A25) only carries this.
+// ---------------------------------------------------------------------------------------------------
+
+/** True when a Not found on this request puts it on hold (the first Not found) rather than closing it. */
+export function notFoundHolds(row: { status: string; notFoundChecks?: number }): boolean {
+  return row.status === STATUS.waiting && (row.notFoundChecks ?? 0) === 0;
+}

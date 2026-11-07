@@ -2,15 +2,8 @@
 // everything here is unit-tested in tests/unit/list-helpers.test.ts.
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import type { SearchHit } from '@/lib/client/selectors';
-import {
-  STATUS,
-  ageGender,
-  isInMedical,
-  postShort,
-  sameStaff,
-  statusMeta,
-  type StatusTone,
-} from '@/lib/domain';
+import { STATUS, ageGender, isInMedical, isRecheckDue, postShort, sameStaff, statusMeta, type StatusTone } from '@/lib/domain';
+import { stagePhrase, type StageSource } from '@/lib/stages';
 import { formatCaseNumber } from '@/lib/format';
 
 /** Shown where a request has no name (a photo or description alone is a valid request). */
@@ -53,16 +46,6 @@ export function cardDescription(row: Pick<RequestSummary, 'clothing' | 'physical
     if (v && !parts.some((p) => p.toLowerCase() === v.toLowerCase())) parts.push(v);
   }
   return parts.join(' · ');
-}
-
-/**
- * Who is on the way to Main Med, for a Friend coming card (pending-v8.html .coming): the friend's name in
- * bold, then "boyfriend, on the way". Without a name it reads "Friend", without a relation "on the way".
- */
-export function friendComingLine(row: Pick<RequestSummary, 'contactName' | 'contactRelationship'>): { friend: string; rest: string } {
-  const friend = clean(row.contactName).replace(/\s+/g, ' ') || 'Friend';
-  const relation = clean(row.contactRelationship).replace(/\s+/g, ' ');
-  return { friend, rest: relation ? `${relation}, on the way` : 'on the way' };
 }
 
 /** When the request entered its current status (Friend coming time, My requests "3m"). */
@@ -295,13 +278,38 @@ export function statusPhrase(status: string): string {
  * "LP-1013, T.R., Waiting for check, created 11:02 PM, updated 2 minutes ago".
  * `updated` is format.updatedPhrase(): "updated 2 minutes ago" or "not updated yet".
  */
-export function logRowLabel(row: Pick<RequestSummary, 'caseNumber' | 'name' | 'status'>, created: string, updated: string): string {
-  return `${formatCaseNumber(row.caseNumber)}, ${displayName(row.name)}, ${statusPhrase(row.status)}, created ${created}, ${updated}`;
+export function logRowLabel(
+  row: Pick<RequestSummary, 'caseNumber' | 'name' | 'status' | 'createdAt' | 'recheckAt'> & StageSource,
+  created: string,
+  updated: string,
+  timeZone?: string,
+  /** (Pending v9.1) The views' clock: a hold whose recheck time has passed says "Recheck due". */
+  now = 0,
+): string {
+  // (F5) The stage, not just the status: "Not found yet", "Recheck due", "Friend en route".
+  return `${formatCaseNumber(row.caseNumber)}, ${displayName(row.name)}, ${stagePhrase(row, timeZone, now)}, created ${created}, ${updated}`;
+}
+
+/**
+ * (Pending v9.1) The clock a log row hands its stage (LogRow / SearchLogRow `now`). Only a hold reads it, to tell
+ * Not found yet from Recheck due: every other row, and a hold not due yet, gets 0; a due hold gets its own recheck
+ * time (due at that instant, and it never changes). A memoized row's props then change when its stage does, not on
+ * every clock tick.
+ */
+export function stageClock(row: Pick<RequestSummary, 'status' | 'recheckAt'>, now: number): number {
+  return isRecheckDue(row, now) ? Date.parse(row.recheckAt as string) : 0;
 }
 
 /** A search result in the log grid: the row's sentence, then the matched text when it is not the name. */
-export function searchLogLabel(row: Pick<RequestSummary, 'caseNumber' | 'name' | 'status'>, created: string, updated: string, line: string): string {
-  return `${logRowLabel(row, created, updated)}.${line ? ` ${line}` : ''}`;
+export function searchLogLabel(
+  row: Pick<RequestSummary, 'caseNumber' | 'name' | 'status' | 'createdAt'> & StageSource,
+  created: string,
+  updated: string,
+  line: string,
+  timeZone?: string,
+  now = 0,
+): string {
+  return `${logRowLabel(row, created, updated, timeZone, now)}.${line ? ` ${line}` : ''}`;
 }
 
 /** The number column of the log: the LP number without its prefix or padding, "1013", "998". */
@@ -322,6 +330,6 @@ export function logNumberRanges(caseNumber: number, caseRanges: Ranges): Ranges 
 }
 
 /** The "Archived N" fold's accessible name ("Archived 6 requests"); aria-expanded carries open / folded. */
-export function archivedFoldLabel(count: number): string {
-  return `Archived ${count} ${count === 1 ? 'request' : 'requests'}`;
+export function archivedFoldLabel(count: number, label = 'Archived'): string {
+  return `${label} ${count} ${count === 1 ? 'request' : 'requests'}`;
 }

@@ -1,0 +1,282 @@
+Pending v9 + status sort: Mobbin references and rules (2026-11-06)
+Source: Mobbin MCP, two headless runs, 24 searches, iOS + web. Every URL was returned by Mobbin (utm tags removed).
+Not found on Mobbin: restaurant/dispatch order queues (DoorDash Merchant, Uber Eats Orders, Toast, Jobber returned only
+customer screens) and any table where a third header click clears the sort.
+
+REFERENCES
+
+Stacked queues, most urgent first
+R1  Linear (Web), All issues grouped by status
+    https://mobbin.com/screens/610d34b6-6ad8-45ab-80fb-2107b31ed01e
+    Each group header is one full-width row: collapse chevron, status glyph, name, then a grey count right after the name
+    ("In Progress 5", "Todo 7", "Backlog 4"), with "+" at the far right. The most active group comes first, and every row
+    repeats its own status glyph.
+R2  incident.io (Web), Home, all active incidents
+    https://mobbin.com/screens/ab1c49e8-df29-4704-94df-2b5ca30fd369
+    Header bands read "Investigating 2", then "Fixing 1", then "Monitoring 1". The held group comes last as "Paused 1",
+    with the same band but its own pause glyph in a different colour.
+R3  Graphite (Web), Inbox
+    https://mobbin.com/screens/b4996a23-98e4-4c42-9b4e-e06d24fbad59
+    Queues stack as cards ("Needs your review", "Waiting for reviewers"…). An empty queue stays in its place as one
+    collapsed line showing 0, so nothing below it moves up.
+R4  Asana (iOS), My tasks
+    https://mobbin.com/screens/d6028f74-c15c-4e8d-aa4b-6b10faa9abcc
+    Stacked phone sections, each with a ▾ caret on the left and a grey count on the right ("Do today 1", "Do later 0").
+    Empty sections keep their header and show 0, with no placeholder row.
+R5  Apple Reminders (iOS), Scheduled
+    https://mobbin.com/screens/4fcb0751-165a-429f-a395-defd9b2d9de3
+    Empty sections stay as light-grey headers with no rows and no "nothing here" text. Sections that have rows are dark.
+R6  ClickUp (Web), Inbox
+    https://mobbin.com/screens/bc1ba74d-c344-40c0-b43b-c2815a956764
+    When a snoozed item comes back, it goes back into the main list. The slot where its timestamp would be shows an amber
+    "Unsnoozed on Oct 24" instead. Held items live in a separate "Later" tab.
+R7  Microsoft Outlook (iOS), Snoozed
+    https://mobbin.com/screens/97ec5404-55ad-46a5-bcf1-703bc6a8c9a1
+    Each held row shows its wake time at the top right ("6:00 PM") with a small clock, so the held list doubles as a
+    countdown.
+
+Sorting by status
+R8  Linear (Web), Display popover
+    https://mobbin.com/screens/815793b1-5c75-43ac-94c7-93380781e337
+    "Grouping [Status]" and "Ordering [Priority]" are separate controls, and "Reset" in the corner restores the default.
+R9  Shopify (Web), Orders sort popover
+    https://mobbin.com/screens/909c6cdb-f0a1-4183-ab1c-b64f3f2c9aa2
+    "Sort by" lists fields, including Fulfillment status and Payment status, with ✓ on the current one, and "Group by" is
+    a separate row. The table header repeats the current order as "Date ↓", so the default is visible before anyone
+    touches anything.
+R10 Intercom (Web), inbox table view
+    https://mobbin.com/screens/be812d90-d079-4beb-aa46-dc5237d34da4
+    Inactive headers are plain grey with no glyph. "Last activity ↓" is the only header with an arrow and the only one in
+    colour. (Snowflake does the same with an accent "CREATED ↓":
+    https://mobbin.com/screens/af032fc2-505b-4d88-9b84-388ad62d9ae7)
+R11 Linktree (iOS), Earn activity list
+    https://mobbin.com/screens/2daf8149-73dd-4137-b894-68870f737510
+    The first chip under search reads "Sort By: Newest ⇅", so the current order is written on the chip itself. To get
+    back to the default, you pick Newest again.
+R12 Notion (Web), Team table
+    https://mobbin.com/screens/e57c782d-f578-4d24-ac76-4c5ef616f256
+    An active sort appears as a highlighted chip ("↑ Name ▾") at the left of the filter bar, and × on it clears the sort
+    back to the default order.
+
+RULES FOR PENDING v9 AND STATUS SORT
+
+1.  Stack the queues; don't switch between them (R1, R4). On phone and on tablet under 1024 px, Pending is one scroll:
+    Waiting for check first, Friend coming second. The To check | Friend coming SegmentedControl goes away. Rename
+    "To check" to "Waiting for check" so the section and the status use the same words. At 1024 px and up, keep the
+    two-column board, with Waiting for check as the left column.
+
+2.  Section headers are one row and carry their own count (R1, R2). The row is 44 px: status glyph (blue ring or green
+    pie), label (15 px, semibold), count in gray-10 tabular figures right after the label, and a chevron at the far
+    right. No caption under it. While its section scrolls, the header pins to the top. "Pending 7" stays as the total.
+    Screen reader: a heading that reads "Waiting for check, 4 requests".
+
+3.  Inside Waiting for check, the most urgent row is at the top (R6). Order: Recheck rows that are due (blue Recheck chip
+    in the timer slot, where ClickUp puts "Unsnoozed"), then everyone else with the longest wait first, so the red
+    timers sit on top. Needs info rows keep their place by wait time, with an amber "?" chip. They don't get a section of
+    their own.
+
+4.  Later moves to the very bottom and starts collapsed (R2, R7). The held Not found yet rows move out of Waiting for
+    check into the last group on the screen, below Friend coming. Collapsed, it is one row: violet hourglass, "Later",
+    count, then the next recheck time ("4:40 PM") at the right edge and a chevron. Opened, each row is compact (initials,
+    age/sex, ⟳ 4:40 PM) with no buttons. The group is hidden when it has no rows. On the desk board it sits at the bottom
+    of the Waiting column. (The approved recheck design put Later inside To check. That changes here so held rows don't
+    sit between the two live queues.)
+
+5.  Inside Friend coming, sort by who is waiting now, and let the glyph on each row show the stage, with no
+    sub-headers (R1). Order: Friend arrived (green ✓, someone is standing at the tent), then Friend en route (teal walking
+    figure, soonest ETA first), then In medical (green pie, longest first).
+
+6.  An empty section keeps its place (R3, R4, R5). The header stays with a gray-10 "0" and a dimmed glyph, and has no
+    rows and no "All caught up" line. Friend coming never jumps up into Waiting for check's spot, so muscle memory
+    holds.
+
+7.  Every header has a chevron (R1, R4). Waiting for check and Friend coming start open, and Later starts collapsed. A
+    collapsed section is its header row with the count. Open/closed state is remembered per device in localStorage,
+    wrapped in try/catch.
+
+8.  One status order everywhere, and Archived always comes last (R8, R9). Sort by status is offered on All requests and
+    My requests. Pending is already in status order and gets no sort control. The order is: Recheck due, Waiting for
+    check, Needs info, Friend arrived, Friend en route, In medical, Not found yet (held), and then "Archived N", still
+    folded and never sorted in with open rows. Within a status, the longest wait comes first. Sorting only reorders rows
+    and adds no group headers; the runs of coloured glyphs already show the blocks.
+
+9.  The phone sort control is one tap, and its label shows the current order (R11, R12). It is a single chip in its own
+    row under the title, left-aligned: "⇅ Newest" in outline gray by default. A tap switches to "⇅ Status" with a filled
+    gray-a4 background and gray-12 text, and the rows reorder at once. Another tap goes back to Newest. With only two
+    orders there's no menu. The chip is 32 px tall with a 44 px hit area. Screen reader: a toggle button
+    (aria-pressed) labelled "Sort by status, waiting for check first", and a polite live region that says "Sorted by
+    status" or "Sorted by newest".
+
+10. On desk and tablet tables, the header itself is the sort control, and only the active column has an arrow (R9,
+    R10). By default, "Created ↓" shows the arrow so the order is visible before anything is clicked. Click "Status" and
+    the arrow moves to it as "Status ↓" in gray-12, with rows in the rule 8 order. Click "Created" to get back to
+    newest. Clicking the active header again flips its direction. There is no third click to clear (no app on Mobbin
+    does that). Inactive headers stay gray-11 and show a faint ↕ only on hover or focus. Put a button inside the Radix
+    Table.ColumnHeaderCell, set aria-sort on the active one, and label it "Sort by status".
+
+---------------------------------------------------------------------------------------------------------------------
+APPENDIX: raw Mobbin output (run 1 then run 2) follows.
+---------------------------------------------------------------------------------------------------------------------
+
+=== RUN 1 ===
+I made 14 Mobbin searches across iOS and web and picked 18 screens. Every URL below is copied exactly from the tool output.
+
+TOPIC A: stacked queues, most urgent first
+
+1. Linear (Web), "All issues" (High Priority Tasks view)
+https://mobbin.com/screens/610d34b6-6ad8-45ab-80fb-2107b31ed01e?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+Each group has a full-width light-grey header: a ▾ collapse chevron at far left, then the status glyph (yellow half-filled circle, empty circle, dotted circle), the name, a small grey count right after it ("In Progress 5", "Todo 7", "Backlog 4"), and a "+" at the far right. Groups run In Progress → Todo → Backlog, and every row repeats its status glyph before the title.
+
+2. Linear (Web), project "Issues" tab (User Insight & Behavior Analytics Dashboard)
+https://mobbin.com/screens/212fda35-366e-4dc0-a1d1-3b679659d6ab?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+When a filter hides items, the header count turns into a fraction, "Todo 7 / 8". A centred grey line under the group reads "1 issue hidden by filters  Clear Filters ×".
+
+3. Graphite (Web), "Inbox"
+https://mobbin.com/screens/b4996a23-98e4-4c42-9b4e-e06d24fbad59?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+Each queue is its own rounded card, stacked top to bottom: chevron, then the count before the name ("0 Needs your review", "0 Returned to you", "4 Drafts", "1 Waiting for reviewers", "0 Waiting for author"), with a sort icon and a gear on the right of every card. Empty queues stay in place as one-line collapsed cards showing "0". Non-empty ones expand into a small table (Title, Changes, Updated), and the left rail repeats every queue with a right-aligned count.
+
+4. incident.io (Web), "Home" (All active incidents)
+https://mobbin.com/screens/ab1c49e8-df29-4704-94df-2b5ca30fd369?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+Grey header bands with chevron, red status glyph, name and a small count: "Investigating 2", "Fixing 1", "Monitoring 1". The held group comes last as "Paused 1", same band style but with a blue-purple pause glyph instead of the red one. Rows carry a solid red "Critical" chip or bar-glyph "Major"/"Minor" chips.
+
+5. Plain (Web), "All threads"
+https://mobbin.com/screens/af0c150c-c9b5-43a8-a59f-a5daace6ca7d?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+Snoozed is not a section in the list. It is a chip in a row above it, "Todo 4 | Snoozed 0 | All statuses", with Todo shown as a filled pill and each chip carrying a small glyph. Below that, rows are grouped by priority under "≡ Normal 4", and the left nav lists status queues with right-aligned counts, including "Waiting for customer 0" and "Paused 0".
+
+6. ClickUp (Web), "Inbox"
+https://mobbin.com/screens/bc1ba74d-c344-40c0-b43b-c2815a956764?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+This is the only "back from snooze" marker I found. The returned row sits in Primary with right-aligned amber text "Unsnoozed on Oct 24" where the timestamp would normally be. The top tabs read "Primary 1 unread", "Other 10 unread", "Later", "Cleared", so the held items are a separate tab with no count.
+
+7. Microsoft Outlook (iOS), "Snoozed"
+https://mobbin.com/screens/97ec5404-55ad-46a5-bcf1-703bc6a8c9a1?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+This shows the held state only, not the return. Snoozed mail lives in its own folder, and each row shows the wake time in red at top right ("6:00 PM") over a small yellow clock badge, with "Today at 6:00 PM" as the line under the subject.
+
+8. Asana (iOS), "My tasks"
+https://mobbin.com/screens/d6028f74-c15c-4e8d-aa4b-6b10faa9abcc?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+Sections run in time order, "Recently assigned 5", "Do today 1", "Do next week 0", "Do later 0", each with a ▾ caret on the left and a grey right-aligned count followed by a "…" menu. Empty sections stay as header-only rows showing 0, with no "None" placeholder. Rows have date chips (green "Today", grey "Mon"), and floating filter and ⇅ sort buttons sit bottom-left.
+
+9. Attio (iOS), "My tasks"
+https://mobbin.com/screens/c45cd1e7-9589-42fd-8408-b8a6fe179a4b?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+Each header is ⌄ chevron, icon, bold name, and the count in a rounded pill: blue-tinted for "Today 3", grey for "Upcoming 4" and "Completed 1". Overdue tasks get a red-tinted date chip ("6 days ago"), future ones a grey chip with a calendar glyph, and Completed sits last with a filled blue check.
+
+What Topic A shows:
+- Counts: usually a small grey number after the label (Linear, incident.io, Asana). Graphite puts it before the label, and Attio puts it in a pill.
+- Collapsing: every grouped list here has a chevron.
+- Empty sections: shown as a header with 0 (Asana, Graphite, Plain's "Snoozed 0"). None of these screens hides them. Linear makes this a user setting: "Show empty groups" is a toggle in its Display popover (Topic B #1).
+- Held groups: either placed last with a different glyph (incident.io "Paused"), or moved out of the list into a tab or folder (ClickUp "Later", Plain "Snoozed", Outlook "Snoozed").
+
+TOPIC B: sorting by status, mobile and desktop
+
+1. Linear (Web), Issues "Display" popover
+https://mobbin.com/screens/815793b1-5c75-43ac-94c7-93380781e337?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+A sliders icon opens it: a List | Board toggle, then separate rows for "Grouping [Status ▾]", "Sub-grouping [No grouping ▾]" and "Ordering [⇅ Priority ▾]", then toggles for "Order completed by recency" and "Show empty groups". The bottom row has a "Reset" link on the left and "Set default for everyone" on the right, so grouping and ordering are separate controls and Reset is the way back to default.
+
+2. Shopify (Web), "Orders"
+https://mobbin.com/screens/909c6cdb-f0a1-4183-ab1c-b64f3f2c9aa2?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+A ⇅ icon opens a popover with "Sort by [Date ⇕]" and a separate "Group by batch" row under it. The dropdown puts ✓ beside "Date" in a field list that includes Fulfillment status and Payment status, then after a divider "Oldest first" / "✓ Newest first". The table header also shows the current sort as "Date ↓", and the default is visibly the checked "Newest first".
+
+3. Notion (Web), "Team" table
+https://mobbin.com/screens/e57c782d-f578-4d24-ac76-4c5ef616f256?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+The active sort is a blue chip at the left of the filter bar, "↑ Name ▾". It opens a popover row with a ⋮⋮ drag handle, "Aa Name ▾", "Ascending ▾" and "×", then "+ Add sort" above a property list (Date Joined, Role, Status…). Clicking × removes the sort and drops back to the default order.
+
+4. GitHub (Web), Issues › Labels
+https://mobbin.com/screens/6d5ccc58-4527-4fab-a465-65a2335852c1?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+"Sort ▾" is a plain text link at the right of the list header ("9 labels" on the left), and the link itself never shows the current choice. Its menu is titled "Sort" with ✓ on "Alphabetically", then "Reverse alphabetically", "Most issues", "Fewest issues", so direction is built into the option names rather than a separate asc/desc control.
+
+5. WhatsApp (iOS), "Recents" document picker (system Files-style menu)
+https://mobbin.com/screens/5fb4478f-ba1b-456e-90a0-dd489447c34e?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+A pull-down menu from the grid icon has three groups: "✓ Icons / List", then "Name / Kind / ✓ Date ⌄ / Size / Tags", then "View Options". The current sort gets a leading checkmark plus a trailing chevron that shows direction.
+
+6. Google Drive (iOS), "Starred"
+https://mobbin.com/screens/0ce96445-b51d-46d6-a7fe-8d99ec44d4ab?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+The current sort shows above the list as muted "Name ↑". Tapping it opens a "Sort by" menu with two check groups split by a divider: "✓ Name / Date modified / Date modified by me / Date opened by me" and "✓ A to Z / Z to A".
+
+7. Obsidian (iOS), "Sort" sheet
+https://mobbin.com/screens/1f07c8c5-027f-4f5e-86ca-191721baade4?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+The sheet has a ✓ confirm button top right and a "Group by" row with a field picker "file size ⇕", a direction picker "1 → 0 ⇕" and a trash icon to remove the grouping. A separate "Sort by" section sits under it, which makes this the clearest group-by vs sort-by split I found on mobile.
+
+8. Attio (iOS), "Companies"
+https://mobbin.com/screens/e80e455a-1a15-4a3c-8f94-5845dd9e2f2f?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+Next to the "All Companies ▾" view picker, the filter and sort icons each sit in a rounded square with a small blue count badge ("2"), then a blue "Save ▾" button. That tells you sorts are active without any text label.
+
+9. LinkedIn (iOS), "Connections"
+https://mobbin.com/screens/0f5c350e-cbd8-4860-b9b1-b9f109f3dfd5?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+The sort icon at the right of "2 connections" opens a bottom sheet titled "Sort by" with a "Reset" link top right. The options are pill chips, with "Recently added" filled green (selected) and "First name" / "Last name" outlined, above a full-width "Show results" button.
+
+What Topic B shows:
+- Current sort: shown as a checkmark in a menu (GitHub, Shopify, WhatsApp, Drive), an arrow beside the field name in the list or header (Shopify "Date ↓", Drive "Name ↑"), a chip in the filter bar (Notion), or a count badge on the sort icon (Attio).
+- Group by vs sort by: separate controls in Linear, Shopify and Obsidian.
+- Back to default: a "Reset" link (Linear, LinkedIn), × on the sort chip (Notion), or simply re-checking the default option (Shopify "Newest first").
+
+What I didn't find:
+- No restaurant-side order queues (DoorDash Merchant, Uber Eats Orders, Toast, Square kitchen screens). That search only returned customer order tracking (Chipotle, Panera, Shopee) and Deliveroo's customer "Pending (1) / Completed (1)".
+- No dispatch or field-service apps (Jobber, ServiceTitan, Housecall Pro, Onfleet).
+- No Things 3, and only a weak Apple Reminders screen.
+- No screen showing a third tap on a column header to clear the sort.
+- ClickUp is the only screen that marks an item returning from snooze.
+
+---
+
+
+
+=== RUN 2 ===
+Below are 10 screens, all returned by Mobbin, with each URL copied exactly. Mobbin doesn't give screen titles, so the "title" here is the heading shown on the screen.
+
+Gap 1: operator order queue, urgent section first
+
+Mobbin returned no restaurant or dispatch order queue. Searches for Uber Eats and DoorDash brought back only customer screens, and Square only showed an empty "Active" tab. The closest matches are queues where a seller works through their own orders.
+
+1. Fiverr, iOS, "Manage orders"
+https://mobbin.com/screens/1d847dc9-7c59-4193-bfc1-07fd6d7885d8?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+Two underlined tabs, "Active (1)" and "New (1)", with the count in brackets after each label. Inside Active, a bold header "Due in the next 2-5 days" groups orders by due date. Each card shows a thumbnail, "$5" in bold, the title, the buyer's avatar and name, a small "IN PROGRESS" chip (navy on pale blue), the due date in bold at the bottom left and "•••" at the bottom right.
+
+2. Etsy, web, "Orders"
+https://mobbin.com/screens/eb39a816-183a-4897-bc68-9588feb674b1?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+Tabs read "New 0 / In Progress 0 / Completed", with a grey count right after each label and the active tab underlined. A "Sort by  Dispatch by date ▾" pill sits top right. A right-hand panel has "Dispatch by date" radio buttons: All, Overdue, Today, Tomorrow, Within a week, No estimate. The empty state is a box icon with "No orders here right now".
+
+3. Tiimo, iOS, "To-do" (a personal to-do app, not an operator tool; included because it is the clearest urgent-first stacked layout)
+https://mobbin.com/screens/6a638201-90d4-4373-817c-03aced9c0744?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+Each section header is a coloured pill with a glyph, an uppercase label and a count: red "▲ HIGH (1)", then amber "● MEDIUM (3)", then slate "▼ LOW (1)", then a neutral "TO-DO ⌄". Each header has a "+" at the right. A dashed "Add it to your list +" row is the empty slot, and a "3 / 8" progress chip sits top left.
+
+Gap 2: web table header showing the active sort
+
+4. Snowflake, web, "Evaluations"
+https://mobbin.com/screens/af032fc2-505b-4d88-9b84-388ad62d9ae7?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+Headers are uppercase. Every inactive header has a faint grey ↑ after its label (NAME ↑, DATABASE ↑, SCHEMA ↑) to show it can be sorted. The active column is the only coloured one: "CREATED ↓" in blue with a blue arrow. No header menu is shown.
+
+5. Intercom, web, inbox table view (heading "Alex Smith", label "5 Open")
+https://mobbin.com/screens/be812d90-d079-4beb-aa46-dc5237d34da4?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+Inactive headers are plain grey text with no glyph (User, Company, Subject / Title, Activity, Description, Priority, Waiting since, Next SLA). The sorted column, "Last activity ↓", is the only header in orange and the only one with an arrow. The count "5 Open" is a small label above the table.
+
+6. Plane, web, "Work items"
+https://mobbin.com/screens/e56718dc-dd76-4eef-8bf7-0b7e88faf9aa?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+Each header is a type icon, a label and a ⌄ chevron. Opening the State column's header (Plane's status column) shows a menu with just two items, "A → Z" and "Z → A", each with a sort glyph, and no Clear option. State cells pair a coloured glyph with a label: amber half-filled for In Progress, green check for Done, dashed circle for Backlog, open circle for Todo.
+
+None of the header menus Mobbin returned has a "Clear" option:
+- Attio's Companies table (not My tasks) has "Sort ascending / Sort descending / Move left / Move right / Formatting / Edit column label / Hide from view": https://mobbin.com/screens/dfadd374-c4b2-4ede-9384-eca1c79ca6b9?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+- The only "Clear All" seen is in AirOps' toolbar sort popup, not a column header: https://mobbin.com/screens/81a11484-e51d-4b36-9bf4-be4d2014ea00?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+- Mercury puts ⇅ on every header, including Status, and no column is sorted in that capture: https://mobbin.com/screens/36f606b5-2ee5-4b26-ba14-0204c5295576?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+
+Gap 3: mobile list with the current sort shown above it
+
+7. Linktree, iOS, "Earn" (Activity list)
+https://mobbin.com/screens/2daf8149-73dd-4137-b894-68870f737510?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+The first chip under the search bar reads "Sort By: Newest ⇅", so the current value is in the chip text. "Status ⌄" and "Type ⌄" filter chips follow it. Tapping the sort chip opens a "Sort by" sheet with a ✕, radio buttons (Newest / Oldest / Highest - lowest commission / Lowest - highest commission) and a purple "Done" button. In this capture the chip says Newest but the sheet has Oldest selected, so the change applies on Done. There is no reset button; you reset by picking Newest again.
+
+8. komoot, iOS, "Saved routes"
+https://mobbin.com/screens/537dd110-3762-4149-b3a6-cceb9a09767f?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+"5 routes" sits under the title. Tinted chips follow: "🏆 All sports" and a sort chip, "Saved Date (Newest first) ⌄", which states both the field and the direction. The "Sort by" sheet lists Name (A-Z/Z-A), Completed Date (Newest/Oldest first), Distance (Nearest first) and Duration (Shortest first). In this capture the sheet has "Completed Date (Newest first)" selected, which differs from the chip. The footer has "Clear Filter" (beige), which is the reset, and "Show 5 activities" (green), which puts the result count on the button.
+
+Gap 4: Reminders / Todoist
+
+9. Todoist, iOS, "Upcoming"
+https://mobbin.com/screens/4159b14b-0ff2-4130-8844-616b858a7e78?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+A week strip sits on top, with today as a filled red circle. The first section is "Overdue" in bold, with a red "Reschedule" action and a ⌄ on the right. Overdue rows show their due date in red with a calendar glyph ("Feb 2", "Yesterday 2:00 PM"). Dated sections follow: "Feb 4 · Today · Wednesday", then "Feb 5 · Tomorrow · Thursday". The Today view puts the count in grey right after the header ("Overdue 4", plus red "Reschedule"), but there it is the first column of a board, not a stacked section: https://mobbin.com/screens/7ff218cf-1ddd-47ee-9123-72535e5f9283?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+
+10. Reminders (Apple), iOS, "Scheduled"
+https://mobbin.com/screens/4fcb0751-165a-429f-a395-defd9b2d9de3?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp
+A large red title "Scheduled" sits above "Today" in bold black, which holds its reminder plus a dashed-circle row for adding one. Empty days stay in the list as light-grey headers with no rows and no placeholder text ("Tomorrow", "Sun Feb 15", "Mon Feb 16", "Tue Feb 17"). The next day with items, "Wed Feb 18", is dark again. Rows use a red "!!" priority prefix, an orange flag on the right, and a grey details line ("Work Reminders 10:00 PM ⟳ Weekdays").
+
+---
+
+

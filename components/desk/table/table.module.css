@@ -10,6 +10,10 @@
      nothing docked, 1040 px and up   #  Friend  Status  Post  Created  Updated  Logged by (1180 and wider)
      a request docked                 #  Friend  Status  Created  Updated                 (tighter at 1024–1279)
    At 768–1023 a request is a sheet over the table, not docked: the table keeps its columns behind it.
+   (F5) With a request docked the Status column is minmax(184px, 232px) (176 px at least at 1024–1279, where
+   F2's 96 px Created column leaves 8 px less): it takes its full width before the Friend column (kept at 96 px
+   or more) gets anything, so it is whole from 1080 px (1024–1279) and from 1304 px (1280+); only on the
+   narrower windows does what follows the label take its short form (.stxWide / .stxNarrow).
    The frame marks an open request with [data-pane] (components/desk/DeskFrame.tsx). */
 
 .root {
@@ -23,9 +27,13 @@
 }
 
 /* Nothing docked: Post shows (desktop-new-tablet.html .rail.wideT, iPad portrait 820 × 1180). Created is
-   96 px wherever it is narrow: the widest earlier-day time, "Mon 12:58 AM", is 92 px (88 cut it in WebKit). */
+   96 px wherever it is narrow: the widest earlier-day time, "Mon 12:58 AM", is 92 px (88 cut it in WebKit).
+   (F5) The status column fits the longest stage with what follows it ("Not found in medical · 2 checks",
+   "Not found yet · 11:40 PM", "Friend en route · ~4 min", design/screens/colors-6.png) from a 1040 px table
+   (240 px); beside Post under that (176 px, as docked at 1024–1279: with F2's 96 px Created the Friend column
+   keeps more than 100 px at 768) what follows the label takes its short form instead of being cut. */
 .table {
-  --tbl-cols: 56px minmax(0, 1fr) 160px 120px 96px 64px;
+  --tbl-cols: 56px minmax(0, 1fr) 176px 120px 96px 64px;
   --tbl-gap: 10px;
   --tbl-pad-l: 24px;
   --tbl-pad-r: calc(20px + env(safe-area-inset-right));
@@ -41,7 +49,7 @@
 /* A wide table: Logged by too (desktop-log.html .tbl). */
 @container (min-width: 1040px) {
   .table {
-    --tbl-cols: 64px minmax(0, 1fr) 170px 128px 104px 76px 150px;
+    --tbl-cols: 64px minmax(0, 1fr) 240px 128px 104px 76px 150px;
     --tbl-gap: 12px;
   }
   .cBy {
@@ -52,7 +60,7 @@
 /* A request docked beside the table: five columns (desktop-log.html .withPanel .tbl). */
 @media (min-width: 1024px) {
   [data-pane] .table {
-    --tbl-cols: 56px minmax(0, 1fr) 160px 96px 72px;
+    --tbl-cols: 48px minmax(96px, 1fr) minmax(184px, 232px) 96px 56px;
     --tbl-gap: 12px;
   }
   [data-pane] .cPost,
@@ -62,10 +70,12 @@
 }
 
 /* Docked at 1024–1279, the main column is 544–799 px: the same five, tighter. The status column still takes
-   "Not found in medical" on one line, uncut (the longest status, F2); the name gives way. */
+   "Not found in medical" on one line, uncut (the longest status, F2); what follows it takes its short form
+   (F5 .stxWide / .stxNarrow) before the Friend column goes under 96 px. 44 + 96 + 176 + 96 + 56 + 4 × 10 gaps
+   + 36 padding = 544 px, the main column at 1024. */
 @media (min-width: 1024px) and (max-width: 1279.98px) {
   [data-pane] .table {
-    --tbl-cols: 48px minmax(0, 1fr) 154px 96px 56px;
+    --tbl-cols: 44px minmax(96px, 1fr) minmax(176px, 232px) 96px 56px;
     --tbl-gap: 10px;
     --tbl-pad-l: 20px;
     --tbl-pad-r: 16px;
@@ -87,11 +97,15 @@
   min-width: 0;
 }
 
-/* "#  Friend  Status …": small and quiet, sticky right under the top bar. */
-.th {
+/* "#  Friend  Status …": small and quiet, sticky right under the top bar (with a sort, the header row sits in a
+   one-row table of its own: the sticky part is that wrapper). */
+.thSticky {
   position: sticky;
   top: var(--desk-top, 56px);
   z-index: 2;
+}
+
+.th {
   height: 34px;
   background: var(--color-background);
   border-bottom: 1px solid var(--gray-a4);
@@ -105,6 +119,90 @@
 .th > * {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* (Pending v9.1) A sortable header: the whole label is the button. Only the active one is gray-12 with an arrow;
+   the others show a faint ↕ on hover or focus. 28 px, with a 44 px target. */
+.th > [role='columnheader'] {
+  overflow: visible;
+}
+
+.thb {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  max-width: 100%;
+  margin: 0 -6px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.thb::after {
+  content: '';
+  position: absolute;
+  inset: -8px -2px;
+}
+
+.thbOn {
+  color: var(--gray-12);
+  font-weight: 600;
+}
+
+.thb:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 0;
+}
+
+.thHint {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.thb:focus-visible .thHint {
+  opacity: 0.7;
+}
+
+@media (hover: hover) {
+  .thb:hover {
+    background: var(--gray-a3);
+  }
+  .thb:hover .thHint {
+    opacity: 0.7;
+  }
+}
+
+/* (Pending v9.1) Sorted by status: a group header row over Waiting for check and Friend coming, sticky under the
+   column header (design/screens/pending-v9.html .dgh). */
+.gh {
+  position: sticky;
+  top: calc(var(--desk-top, 56px) + 34px);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  box-sizing: border-box;
+  padding: 0 var(--tbl-pad-r) 0 var(--tbl-pad-l);
+  background: var(--gray-2);
+  border-bottom: 1px solid var(--gray-a3);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gray-12);
+  white-space: nowrap;
+}
+
+.ghn {
+  font-weight: 400;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
 }
 
 .cCreated,
@@ -202,7 +300,7 @@ button.row:focus-visible {
 }
 
 .ag {
-  flex: 0 4 auto;
+  flex: 0 1000 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -220,7 +318,8 @@ button.row:focus-visible {
   color: var(--gray-11);
 }
 
-/* Status: glyph and label. Only the open states have colour (blue Waiting, green In medical). */
+/* Status: glyph and label. Only the open states have colour (blue Waiting, green In medical). The cell is a
+   size container: what follows the label picks its form from the cell's width (.stxWide / .stxNarrow). */
 .st {
   display: flex;
   align-items: center;
@@ -228,6 +327,7 @@ button.row:focus-visible {
   font-size: 13px;
   white-space: nowrap;
   color: var(--gray-11);
+  container-type: inline-size;
 }
 
 .st[data-tone='blue'] {
@@ -242,10 +342,58 @@ button.row:focus-visible {
   color: var(--red-11);
 }
 
+/* (F5) The stages: amber Needs info, violet Not found yet, teal Friend en route (lib/stages STAGE_META). */
+.st[data-tone='amber'] {
+  color: var(--amber-11);
+}
+
+.st[data-tone='violet'] {
+  color: var(--violet-11);
+}
+
+.st[data-tone='teal'] {
+  color: var(--teal-11);
+}
+
+/* The label keeps its words; what follows it ("· 4:40 PM", "· Bed 3", "· 2 checks") gives way first. */
 .stl {
   min-width: 0;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.stx {
+  min-width: 0;
+  flex: 0 1000 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+/* (Pending v9.1) A waiting row's wait after its label, heat-coloured: amber from 10 minutes, red from 20. */
+.stx[data-tone='amber'] {
+  color: var(--amber-11);
+}
+
+.stx[data-tone='red'] {
+  color: var(--red-11);
+}
+
+/* (F5) What follows the label, whole or short: a closed row's "· 2 checks" drops out when the column is narrow
+   (the waits, "· 47m", are short already). The whole form needs at most 221 px with its label ("Not found in
+   medical · 2 checks"); under 228 px the short one shows. */
+.stxNarrow {
+  display: none;
+}
+
+@container (max-width: 227.98px) {
+  .stxWide {
+    display: none;
+  }
+  .stxNarrow {
+    display: block;
+  }
 }
 
 .glyph {
@@ -372,11 +520,6 @@ button.fold:focus-visible {
 .chev {
   display: flex;
   color: var(--gray-11);
-  transition: transform 0.15s;
-}
-
-.chev[data-open] {
-  transform: rotate(180deg);
 }
 
 /* ---- Above the table: the connection banner and the filter chips ---------------------------------- */

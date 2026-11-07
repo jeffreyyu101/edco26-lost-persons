@@ -10,8 +10,9 @@
 //            Pending, which lists exactly the open requests.
 //   posts    Open by post, busiest first: label over a 6 px bar, count in a fixed column. Opens ?post=&open=1 (A42).
 //   recent   "Recently updated ›" opens All. Rows: number, name, status, updated; a row opens the profile.
-//   perf     Longest wait (opens that request), Time to answer, Time to reunite, Logged. "—" when a value is null
-//            or missing (avgReuniteMinutes / loggedLastHour come from the v2.2 lp_stats).
+//   perf     Longest wait (opens that request), Time to answer and Time to reunite ("last 2 hours"), Logged ("last
+//            hour"). A value with nothing to show reads "None" (Brian 2026-11-06 21:55); "—" only while the stats
+//            request is failing (Reconnecting), when an empty value is not known to be empty.
 // ≥ 768 px (inside the desk shell, components/desk): the shell's top bar is the title and holds the line and
 //            Refresh now beside it (the dashboard publishes their inputs through connection-signal.ts), so
 //            there is no title row here; the Reconnecting / Offline banner stays at the top of the column.
@@ -21,17 +22,19 @@
 //            has room, stacked when a request is docked. Sized by the main column (container queries).
 import { Skeleton, VisuallyHidden } from '@radix-ui/themes';
 import { ChevronLeft, ChevronRight, Clock, Inbox, Timer, Users, type LucideIcon } from 'lucide-react';
-import { Fragment, useEffect, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useInDesk } from '@/components/desk/desk-context';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LiveIndicator } from '@/components/ui/LiveIndicator';
+import { StageGlyph } from '@/components/ui/StageGlyph';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { Stats } from '@/lib/api-types';
 import { goBack, navigate } from '@/lib/client/nav';
-import { useNow, useStats } from '@/lib/client/store-contract';
+import { useNow, useRequests, useStats } from '@/lib/client/store-contract';
 import { useLiveStatus } from '@/lib/client/use-live-status';
 import { STATUS, postFilterKey, postFilterLabel, statusMeta, toneColorVar } from '@/lib/domain';
+import { stageLook, stagePhrase } from '@/lib/stages';
 import {
   NO_VALUE,
   agoPhrase,
@@ -90,7 +93,7 @@ function Dashboard({ onRetry }: { onRetry: () => void }) {
       </div>
       <main className={s.body}>
         {stats ? (
-          <DashboardContent stats={stats} />
+          <DashboardContent stats={stats} failed={failing} />
         ) : error ? (
           <EmptyState icon="plug" title="Can't reach the log" action={{ label: 'Try again', onClick: onRetry, icon: 'refresh' }} />
         ) : (
@@ -103,8 +106,11 @@ function Dashboard({ onRetry }: { onRetry: () => void }) {
 
 const show = (params: Parameters<typeof navigate>[0]) => navigate(params);
 
-/** Everything under the title, for a loaded Stats (exported for the server-render unit tests). */
-export function DashboardContent({ stats }: { stats: Stats }) {
+/**
+ * Everything under the title, for a loaded Stats (exported for the server-render unit tests). `failed`: the stats
+ * request is failing (useStats().failing), so Performance shows "—" instead of "None" for an empty value.
+ */
+export function DashboardContent({ stats, failed = false }: { stats: Stats; failed?: boolean }) {
   const now = useNow();
   return (
     <>
@@ -113,7 +119,7 @@ export function DashboardContent({ stats }: { stats: Stats }) {
         <Posts stats={stats} />
         <Recent stats={stats} now={now} />
       </div>
-      <Performance stats={stats} />
+      <Performance stats={stats} failed={failed} />
     </>
   );
 }
@@ -307,6 +313,9 @@ function Posts({ stats }: { stats: Stats }) {
 const NO_NAME = 'No name';
 
 function Recent({ stats, now }: { stats: Stats; now: number }) {
+  // (F5) A synced row knows its stage (Not found yet, …); lp_stats' recent rows only carry the status.
+  const rows = useRequests();
+  const byId = useMemo(() => new Map(rows.map((row) => [row.id, row])), [rows]);
   if (stats.recent.length === 0) return null;
   return (
     <section aria-label="Recently updated" className={s.recent}>
@@ -319,10 +328,12 @@ function Recent({ stats, now }: { stats: Stats; now: number }) {
       <div className={s.rlist}>
         {stats.recent.map((r) => {
           const meta = statusMeta(r.status);
+          const live = byId.get(r.id);
+          const look = live && live.status === r.status ? stageLook(live, now) : { ...meta, label: meta.shortLabel, glyph: meta.glyph };
           const closed = meta.bucket === 'closed';
           const name = r.name?.trim() || '';
           const ago = formatAgo(r.updatedAt, now);
-          const shown = `${r.caseNumber} ${name || NO_NAME} ${meta.shortLabel} ${ago}`;
+          const shown = `${r.caseNumber} ${name || NO_NAME} ${look.label} ${ago}`;
           return (
             <button
               key={r.id}
@@ -331,15 +342,15 @@ function Recent({ stats, now }: { stats: Stats; now: number }) {
               data-closed={closed ? '' : undefined}
               data-request-id={r.id}
               onClick={() => show({ r: r.id })}
-              aria-label={`${shown}. ${meta.label}, ${r.postShort}, updated ${agoPhrase(r.updatedAt, now)}.`}
+              aria-label={`${shown}. ${look.label !== meta.shortLabel && live ? stagePhrase(live, undefined, now) : meta.label}, ${r.postShort}, updated ${agoPhrase(r.updatedAt, now)}.`}
             >
               <span className={s.num}>{r.caseNumber}</span>{' '}
               <span className={s.nm} data-empty={name ? undefined : ''}>
                 {name || NO_NAME}
               </span>{' '}
-              <span className={s.st} data-tone={meta.tone}>
-                <StatusGlyph status={r.status} />
-                {meta.shortLabel}
+              <span className={s.st} data-tone={look.tone}>
+                <StageGlyph glyph={look.glyph} />
+                {look.label}
               </span>{' '}
               <span className={s.up}>{ago}</span>
             </button>
@@ -354,12 +365,21 @@ function Recent({ stats, now }: { stats: Stats; now: number }) {
 // Performance
 // ---------------------------------------------------------------------------------------------------
 
-function Performance({ stats }: { stats: Stats }) {
+/** The Performance rows' windows (lp_stats): answers and reunions over the last 2 hours, logged over the last hour. */
+export const PERF_CONTEXT = { answer: 'last 2 hours', reunite: 'last 2 hours', logged: 'last hour' } as const;
+
+/** A Performance value with nothing to show (Brian 2026-11-06 21:55); "—" (NO_VALUE) only when the stats request failed. */
+export const PERF_NONE = 'None';
+
+function Performance({ stats, failed }: { stats: Stats; failed: boolean }) {
   const longest = stats.longestWait;
   const longestContext = longest ? [String(longest.caseNumber), longest.postShort].filter(Boolean).join(' · ') : null;
   const answer = durationPhrase(stats.avgAnswerMinutes);
   const reunite = durationPhrase(stats.avgReuniteMinutes);
   const logged = countParts(stats.loggedLastHour);
+  const empty = failed ? NO_VALUE : PERF_NONE;
+  // An empty value's sentence: what it means, or, while the request fails, that it is not known.
+  const unknown = (what: string) => `${what}: not available.`;
   return (
     <section aria-labelledby="lp-dash-perf" className={s.perf}>
       <h2 className={s.sh} id="lp-dash-perf">
@@ -372,10 +392,13 @@ function Performance({ stats }: { stats: Stats }) {
           label="Longest wait"
           context={longestContext}
           parts={longest ? durationParts(longest.minutes) : null}
+          empty={empty}
           phrase={
             longest
               ? `Request ${longest.caseNumber} at ${longest.postShort} has been waiting ${durationPhrase(longest.minutes) ?? 'an unknown time'}. Opens the request.`
-              : 'Longest wait: nobody is waiting for a check.'
+              : failed
+                ? unknown('Longest wait')
+                : 'No one is waiting for a check.'
           }
           onClick={longest ? () => show({ r: longest.id }) : undefined}
         />
@@ -383,26 +406,45 @@ function Performance({ stats }: { stats: Stats }) {
           testId="perf-answer"
           icon={Timer}
           label="Time to answer"
-          context="avg, 2 h"
+          context={PERF_CONTEXT.answer}
           parts={durationParts(stats.avgAnswerMinutes)}
-          phrase={`Average time to answer over the last 2 hours: ${answer ?? 'no answers yet'}.`}
+          empty={empty}
+          phrase={
+            answer
+              ? `Average time to answer over the last 2 hours: ${answer}.`
+              : failed
+                ? unknown('Average time to answer over the last 2 hours')
+                : 'No answers in the last 2 hours.'
+          }
         />
         <PerfRow
           testId="perf-reunite"
           icon={Users}
           label="Time to reunite"
-          context="avg"
+          context={PERF_CONTEXT.reunite}
           parts={durationParts(stats.avgReuniteMinutes)}
-          phrase={`Average time to reunite: ${reunite ?? 'not available'}.`}
+          empty={empty}
+          phrase={
+            reunite
+              ? `Average time to reunite over the last 2 hours: ${reunite}.`
+              : failed
+                ? unknown('Average time to reunite over the last 2 hours')
+                : 'No reunions in the last 2 hours.'
+          }
         />
         <PerfRow
           testId="perf-logged"
           icon={Inbox}
           label="Logged"
-          context="last hour"
+          context={PERF_CONTEXT.logged}
           parts={logged}
+          empty={empty}
           phrase={
-            logged ? `Logged in the last hour: ${stats.loggedLastHour} ${stats.loggedLastHour === 1 ? 'request' : 'requests'}.` : 'Logged in the last hour: not available.'
+            logged
+              ? `Logged in the last hour: ${stats.loggedLastHour} ${stats.loggedLastHour === 1 ? 'request' : 'requests'}.`
+              : failed
+                ? unknown('Logged in the last hour')
+                : 'Nothing logged in the last hour.'
           }
         />
       </div>
@@ -416,14 +458,16 @@ interface PerfRowProps {
   label: string;
   context: string | null;
   parts: ValuePart[] | null;
+  /** What shows when `parts` is null: "None", or "—" while the stats request fails. */
+  empty: string;
   /** The row as a sentence, for screen readers (after the visible text when the row is a button). */
   phrase: string;
   onClick?: () => void;
 }
 
-function PerfRow({ testId, icon: Icon, label, context, parts, phrase, onClick }: PerfRowProps) {
+function PerfRow({ testId, icon: Icon, label, context, parts, empty, phrase, onClick }: PerfRowProps) {
   // What the row shows, as text: "Longest wait 1010 · FA 4 24m" (a button's name starts with it, WCAG 2.5.3).
-  const shown = [label, context, parts ? parts.map((p) => `${p.value}${p.unit}`).join(' ') : NO_VALUE].filter(Boolean).join(' ');
+  const shown = [label, context, parts ? parts.map((p) => `${p.value}${p.unit}`).join(' ') : empty].filter(Boolean).join(' ');
   const visual = (
     <>
       <Icon size={16} className={s.ki} aria-hidden />
@@ -447,7 +491,7 @@ function PerfRow({ testId, icon: Icon, label, context, parts, phrase, onClick }:
               </Fragment>
             ))
           ) : (
-            <span className={`${s.val} ${s.none}`}>{NO_VALUE}</span>
+            <span className={`${s.val} ${s.none}`}>{empty}</span>
           )}
         </span>
       </span>

@@ -98,6 +98,8 @@ export interface SnackbarItem {
   id: string;
   /** e.g. "LP-1012 · In medical" */
   message: string;
+  /** (Pending v9.1) What a screen reader hears instead of `message`, when the words differ ("B.W. closed, not found in medical."). */
+  said?: string;
   expiresAt: number;
 }
 
@@ -556,6 +558,8 @@ export function useOutbox(): OutboxItem[] {
 }
 
 export function useCounts(): ViewCounts {
+  // Pending v9.1: Pending counts every request Waiting for check (held ones included: "Not found yet" is an
+  // indicator, not a lane) and every one In medical.
   return useStoreSelector(selectCounts, shallowEqual);
 }
 

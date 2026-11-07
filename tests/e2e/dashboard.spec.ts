@@ -164,8 +164,7 @@ test('open counts move by the deltas of this test, and tiles and bars open All f
   await page.goBack();
   await page.getByTestId('tile-open').click();
   await expect(page).toHaveURL(/\?view=pending$/);
-  // Pending v8 shows one queue at a time on a phone: the In medical request is under Friend coming.
-  await page.getByRole('tab', { name: /^Friend coming/ }).click();
+  // Pending v9.1 is one page: the In medical request is under Friend coming, below Waiting for check.
   await expect(page.locator(`[data-testid="friend-coming-card"] [data-request-id="${row.id}"]`)).toBeVisible();
   await page.goBack();
   // Regression: the bar opens the open requests it counts (?open=1), so the chip's count is the bar's.
@@ -331,12 +330,15 @@ test.describe('with /api/stats mocked', () => {
     await expect(page).toHaveURL(/\?r=5eed0000-0000-4000-8000-000000001010$/);
   });
 
-  test('Performance shows "—" for values the server leaves null or out, and no sub without discharged / cancelled', async ({ page }) => {
+  test('Performance shows "None" for values the server leaves null or out (Brian 2026-11-06 21:55), and no sub without discharged / cancelled', async ({ page }) => {
     const stats = mockStats({ longestWait: null, avgAnswerMinutes: null, avgReuniteMinutes: null, discharged: 0, cancelled: 0 });
     delete (stats as Record<string, unknown>).loggedLastHour;
     await routeStats(page, stats);
     await page.goto('/?dashboard=1');
-    for (const id of ['perf-longest-wait', 'perf-answer', 'perf-reunite', 'perf-logged']) await expect(value(page, id)).toHaveText('—');
+    for (const id of ['perf-longest-wait', 'perf-answer', 'perf-reunite', 'perf-logged']) await expect(value(page, id)).toHaveText('None');
+    await expect(page.getByTestId('perf-answer-context')).toHaveText('last 2 hours');
+    await expect(page.getByTestId('perf-reunite-context')).toHaveText('last 2 hours');
+    await expect(page.getByTestId('perf-logged-context')).toHaveText('last hour');
     // Without a waiting request there is nothing to open.
     await expect(page.getByRole('button', { name: /^Longest wait/ })).toHaveCount(0);
     await expect(page.getByTestId('reunited-sub')).toHaveCount(0);

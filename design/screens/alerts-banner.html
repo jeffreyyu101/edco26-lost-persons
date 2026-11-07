@@ -1,0 +1,76 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Alerts reminder</title>
+<!-- 2026-11-06 ~17:00. Brian: an always-on reminder until a phone can actually receive lock-screen alerts. Shown on the
+     signed-in views until done; one row; it goes away by itself once alerts work. iPhone Safari can only get push from the
+     Home Screen app, so that case shows the two taps as glyphs. Synthetic data. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@radix-ui/themes@3.3.0/styles.css">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+body{margin:0;background:#0c0c0d}
+.radix-themes{--default-font-family:InterVariable,Inter,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;font-feature-settings:"cv11";-webkit-font-smoothing:antialiased}
+.radix-themes[data-is-root-theme]{min-height:0!important;height:100%;position:relative}
+.board{display:flex;flex-wrap:wrap;justify-content:center;gap:28px 20px;padding:24px;max-width:1320px}
+.board figure{margin:0}.frame{width:390px;height:520px;border-radius:30px;overflow:hidden;border:1px solid #2b2b30}
+figcaption{margin-top:10px;text-align:center;font:500 15px/1.3 system-ui;color:#e4e4e7}
+figcaption span{display:block;font-weight:400;font-size:13px;color:#8e8e96;margin-top:2px}
+.app{height:100%;display:flex;flex-direction:column;background:var(--color-background)}
+.sp{flex:1}
+.ban{display:flex;align-items:center;gap:10px;margin:12px 12px 0;padding:10px 10px 10px 12px;border-radius:12px;background:var(--blue-a3);box-shadow:inset 0 0 0 1px var(--blue-a5)}
+.ban .ic{color:var(--blue-11);display:flex}
+.ban .t{font-size:14.5px;font-weight:600;color:var(--gray-12)}
+.ban .steps{display:flex;align-items:center;gap:6px;font-size:13.5px;color:var(--gray-12)}
+.ban .k{display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 8px;border-radius:7px;background:var(--gray-a3);font-size:13px;color:var(--gray-12)}
+.ban .k svg{color:var(--blue-11)}
+.ban .btn{height:34px;padding:0 12px;border-radius:9px;background:var(--blue-10);color:#fff;font-size:14px;font-weight:600;display:grid;place-items:center;white-space:nowrap}
+.lt{display:flex;align-items:center;gap:6px;padding:14px 12px 8px 16px}
+.lt .tx{font-size:28px;font-weight:700;letter-spacing:-.022em;color:var(--gray-12)}.lt .tc{font-size:28px;color:var(--gray-9)}
+.live{display:flex;align-items:center;gap:7px;padding:0 16px 10px;font-size:12.5px;color:var(--gray-11)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green-9)}
+.row{display:grid;grid-template-columns:40px 1fr 110px 60px;padding:0 16px;height:48px;align-items:center;border-bottom:1px solid var(--gray-a3);font-size:15px;color:var(--gray-12)}
+.row .n{font-size:13px;color:var(--gray-10)}.row .s{font-size:12.5px}.row .t{text-align:right;font-size:13px;color:var(--gray-11)}
+</style>
+<script type="importmap">{"imports":{
+"react":"https://esm.sh/react@18.3.1","react-dom":"https://esm.sh/react-dom@18.3.1","react-dom/client":"https://esm.sh/react-dom@18.3.1/client",
+"@radix-ui/themes":"https://esm.sh/@radix-ui/themes@3.3.0?deps=react@18.3.1,react-dom@18.3.1","htm":"https://esm.sh/htm@3.1.1"}}</script>
+</head><body><div id="b"></div>
+<script type="module">
+import React from 'react';
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
+import htm from 'htm';
+import { Theme } from '@radix-ui/themes';
+const h = htm.bind(React.createElement);
+const svg = (p, s = 16, w = 1.75) => h`<svg width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth=${w} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style=${{ flex: 'none' }} dangerouslySetInnerHTML=${{ __html: p }} />`;
+const P = { bell: '<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>',
+  share: '<path d="M12 2v13"/><path d="m16 6-4-4-4 4"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>', plus: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M8 12h8"/><path d="M12 8v8"/>', chev: '<path d="m9 18 6-6-6-6"/>',
+  bellOff: '<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M17 17H4a1 1 0 0 1-.74-1.673C4.59 13.956 6 12.499 6 8a6 6 0 0 1 .258-1.742"/><path d="m2 2 20 20"/><path d="M8.668 3.01A6 6 0 0 1 18 8c0 2.687.77 4.653 1.707 6.05"/>',
+  gear: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+  lock: '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  tune: '<path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/>',
+  refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>' };
+const List = () => h`<div className="lt"><span className="tx">All requests</span><span className="tc">4</span></div><div className="live"><span className="dot"></span>Updated just now</div>
+  ${[['0012', 'J.D.', 'Waiting', 'var(--blue-11)', '4:51 PM'], ['0011', 'K.M.', 'In medical', 'var(--green-11)', '4:40 PM'], ['0010', 'B.W.', 'Waiting', 'var(--blue-11)', '4:33 PM']].map(([a, b, c, col, d]) => h`<div key=${a} className="row"><span className="n">${a}</span><span>${b}</span><span className="s" style=${{ color: col }}>${c}</span><span className="t">${d}</span></div>`)}`;
+const Shell = ({ children }) => h`<${Theme} appearance="dark" accentColor="gray" grayColor="gray" radius="medium"><div className="app">${children}</div><//>`;
+const AllowBan = () => h`<div className="ban" role="status"><span className="ic">${svg(P.bell, 18)}</span><span className="t">Alerts are off</span><span className="sp"></span><span className="btn">Turn on</span></div>`;
+const InstallBan = () => h`<div className="ban" role="status"><span className="ic">${svg(P.bell, 18)}</span><div style=${{ display: 'flex', flexDirection: 'column', gap: 5 }}><span className="t">Get alerts on your lock screen</span>
+  <span className="steps"><span className="k">${svg(P.share, 14, 2)}Share</span>${svg(P.chev, 13, 2)}<span className="k">${svg(P.plus, 14, 2)}Add to Home Screen</span></span></div></div>`;
+// Blocked: show the exact path for THIS device as step chips (detected platform), plus a re-check button.
+const Steps = ({ items }) => h`<span className="steps" style=${{ flexWrap: 'wrap', rowGap: 6 }}>${items.map((it, i) => h`${i ? svg(P.chev, 13, 2) : null}<span key=${i} className="k">${it.icon ? svg(it.icon, 14, 2) : null}${it.t}</span>`)}</span>`;
+const Blocked = ({ items, reload }) => h`<div className="ban" role="status" style=${{ background: 'var(--amber-a3)', boxShadow: 'inset 0 0 0 1px var(--amber-a5)', alignItems: 'flex-start' }}>
+  <span className="ic" style=${{ color: 'var(--amber-11)', marginTop: 2 }}>${svg(P.bellOff, 18)}</span>
+  <div style=${{ display: 'flex', flexDirection: 'column', gap: 7, minWidth: 0 }}><span className="t">Alerts are blocked</span><${Steps} items=${items}/></div>
+  ${reload ? h`<span className="sp"></span><span className="btn" style=${{ background: 'var(--gray-a4)', color: 'var(--gray-12)' }}>${svg(P.refresh, 15, 2)}</span>` : null}
+</div>`;
+const IOS = [{ icon: P.gear, t: 'Settings' }, { t: 'Notifications' }, { t: 'Is my friend in medical?' }, { t: 'Allow' }];
+const ANDROID = [{ icon: P.lock, t: 'Site icon' }, { t: 'Permissions' }, { t: 'Notifications' }, { t: 'Allow' }];
+const CHROME = [{ icon: P.tune, t: 'Icon left of the address' }, { t: 'Notifications' }, { t: 'Allow' }];
+const Fig = ({ cap, sub, children }) => h`<figure><div className="frame">${children}</div><figcaption>${cap}<span>${sub}</span></figcaption></figure>`;
+const Board = () => h`<div className="board">
+  <${Fig} cap="Home Screen app, Android, desktop" sub="One tap asks for permission; the row disappears once alerts work"><${Shell}><${AllowBan}/><${List}/><//><//>
+  <${Fig} cap="iPhone in Safari" sub="Push needs the Home Screen app: the two taps, as glyphs"><${Shell}><${InstallBan}/><${List}/><//><//>
+  <${Fig} cap="Blocked · iPhone Home Screen app" sub="The exact path in the Settings app"><${Shell}><${Blocked} items=${IOS}/><${List}/><//><//>
+  <${Fig} cap="Blocked · Android Chrome" sub="Site icon in the address bar → Permissions"><${Shell}><${Blocked} items=${ANDROID}/><${List}/><//><//>
+  <${Fig} cap="Blocked · desktop Chrome / Edge" sub="Path + a re-check button (goes away once allowed)"><${Shell}><${Blocked} items=${CHROME} reload/><${List}/><//><//>
+</div>`;
+flushSync(() => createRoot(document.getElementById('b')).render(h`<${Board}/>`));
+</script></body></html>

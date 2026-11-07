@@ -121,6 +121,7 @@ export function viewCounts(
   const groups = pendingGroups(rows);
   return {
     all: rows.length + outboxShown.length,
+    // Pending v9.1: Waiting for check (held requests included) + Friend coming.
     pending: groups.friendComing.length + groups.waiting.length,
     mine: rows.filter((r) => isMine(r, myIds, sessionStaff)).length + outboxShown.length,
   };

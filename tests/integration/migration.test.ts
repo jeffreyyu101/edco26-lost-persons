@@ -4,9 +4,11 @@
 // guard). Afterwards PostgREST must have reloaded its schema before other tests run.
 // Then the free-text age (2026-11-06): smallint → text on a scratch copy of production as it is today
 // (rework already applied once), pasted twice. And patients.medical_location (Pending v8, 2026-11-06
-// afternoon) on a scratch copy built with the rework file as the F1 release shipped it (commit 7291a7b).
+// afternoon) on a scratch copy built with the rework file as the F1 release shipped it (commit 7291a7b). And the
+// "Not found yet" hold (F5) on a scratch copy of production as the F2 release left it (commit 85c9320): a dry run
+// that ends in rollback changes nothing, then two pastes.
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -223,5 +225,98 @@ describe('20261106000000_rework.sql: medical_location on production as it is bef
       from audit_events a join patients p on p.id = a.patient_id
       where p.first_name = 'TEST-loc-1' and a.action_type = 'patient_updated' and a.new_value ? 'medical_location'`))
       .toBe('{"medical_location": null} -> {"medical_location": "Chair 14"}');
+  }, 120_000);
+});
+
+/**
+ * Production at the F2 release: the rework file as commit 85c9320 shipped it (medical_location, no hold) applied on
+ * the baseline, with rows written through those functions. The F5 file must first survive the dry run (its last
+ * line changed to rollback: nothing is kept), then add the hold once, keep every hold and location on a second
+ * paste, and leave the calls the F2 build makes working (its allowlist ignores the two new lp_row keys).
+ */
+describe('20261106000000_rework.sql: the "Not found yet" hold on production as the F2 release left it', () => {
+  const FIXTURE = 'lp_hold_fixture';
+  const RELEASED = '85c9320';
+  const REWORK = 'supabase/migrations/20261106000000_rework.sql';
+  const fixtureUrl = () => `${dbUrl().replace(/\/[^/]*$/, '')}/${FIXTURE}`;
+  const sqlIn = (sql: string) =>
+    execFileSync('psql', [fixtureUrl(), '-v', 'ON_ERROR_STOP=1', '-q', '-At', '-c', sql], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+  const applyPath = (path: string) => {
+    const r = spawnSync('psql', [fixtureUrl(), '-v', 'ON_ERROR_STOP=1', '-q', '-f', path], { encoding: 'utf8' });
+    expect(r.status, r.stderr).toBe(0);
+  };
+  const holdColumns = () =>
+    sqlIn(`select coalesce(string_agg(column_name || ':' || data_type || '/' || is_nullable || '/' || coalesce(column_default, 'none'), ' ' order by column_name), 'missing')
+           from information_schema.columns where table_schema = 'public' and table_name = 'patients' and column_name in ('recheck_at', 'not_found_checks')`);
+  const rows = () =>
+    sqlIn(`select string_agg(first_name || '=' || status || '/' || coalesce(medical_location, 'null') || '/' || not_found_checks || '/' || (recheck_at is not null)::text, ' ' order by first_name)
+           from patients where first_name like 'TEST-hold-%'`);
+  let scratch: string | null = null;
+
+  afterAll(() => {
+    psql(`drop database if exists ${FIXTURE}`);
+    if (scratch) rmSync(scratch, { recursive: true, force: true });
+  });
+
+  it('a dry run keeps nothing; the first paste adds the hold, the second keeps every hold; the F2 build keeps working', () => {
+    psql(`drop database if exists ${FIXTURE}`);
+    psql(`create database ${FIXTURE}`);
+    scratch = mkdtempSync(join(tmpdir(), 'lp-hold-'));
+    const released = join(scratch, 'rework-f2.sql');
+    const releasedSql = execFileSync('git', ['show', `${RELEASED}:${REWORK}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+    expect(releasedSql).toContain('medical_location');
+    expect(releasedSql).not.toContain('recheck_at');
+    writeFileSync(released, releasedSql);
+    for (const file of readdirSync(join(ROOT, 'supabase/migrations')).filter((f) => f.endsWith('.sql')).sort()) {
+      applyPath(file.startsWith('20261106000000') ? released : join(ROOT, 'supabase/migrations', file));
+    }
+    // Rows the F2 build wrote: two waiting, one with a medical location after In medical.
+    sqlIn(`set role service_role;
+      select lp_create_request('{"client_mutation_id":"00000000-0000-4000-8000-0000000000a1","reporting_location":"Base","first_name":"TEST-hold-1"}', 'T · Medical');
+      select lp_create_request('{"client_mutation_id":"00000000-0000-4000-8000-0000000000a2","reporting_location":"Command","first_name":"TEST-hold-2"}', 'T · Medical');
+      select lp_create_request('{"client_mutation_id":"00000000-0000-4000-8000-0000000000a3","reporting_location":"Base","first_name":"TEST-hold-3"}', 'T · Medical');`);
+    sqlIn(`set role service_role;
+      select lp_set_status(id, row_version, 'Found – Awaiting Reunion', 'T · Medical', 'answer') from patients where first_name = 'TEST-hold-3';`);
+    sqlIn(`set role service_role;
+      select lp_update_fields(id, '{"medical_location": "Chair 14"}', row_version, 'T · Medical') from patients where first_name = 'TEST-hold-3';`);
+    expect(holdColumns()).toBe('missing');
+    const before = sqlIn("select md5(string_agg(p::text, '|' order by id)) from patients p");
+
+    // 1. The dry run: the whole file with its last line `commit;` changed to `rollback;`.
+    const file = readFileSync(join(ROOT, REWORK), 'utf8');
+    expect(file.trimEnd().endsWith('commit;')).toBe(true);
+    const dryRun = join(scratch, 'rework-dry-run.sql');
+    writeFileSync(dryRun, `${file.trimEnd().replace(/commit;$/, 'rollback;')}\n`);
+    applyPath(dryRun);
+    expect(holdColumns()).toBe('missing');
+    expect(sqlIn("select count(*) from pg_proc where proname = 'lp_stages_recheck_minutes'")).toBe('0');
+    expect(sqlIn("select md5(string_agg(p::text, '|' order by id)) from patients p")).toBe(before);
+
+    // 2. The commit run.
+    applyPath(join(ROOT, REWORK));
+    expect(holdColumns()).toBe('not_found_checks:smallint/NO/0 recheck_at:timestamp with time zone/YES/none');
+    expect(sqlIn('select lp_stages_recheck_minutes()')).toBe('20');
+    expect(rows()).toBe('TEST-hold-1=Added/null/0/false TEST-hold-2=Added/null/0/false TEST-hold-3=Found – Awaiting Reunion/Chair 14/0/false');
+    expect(sqlIn(`select bool_and(lp_row(p) ?& array['medical_location', 'recheck_at', 'not_found_checks']) from patients p`)).toBe('t');
+
+    // The F2 build's first Not found (same call, same arguments): the hold. Its row is still Waiting for check.
+    expect(sqlIn(`set role service_role;
+      select lp_set_status(id, row_version, 'Checked – Not Found', 'T · Medical', 'answer') -> 'row' ->> 'status' from patients where first_name = 'TEST-hold-1'`)).toBe('Added');
+    expect(rows()).toContain('TEST-hold-1=Added/null/1/true');
+
+    // 3. A second paste keeps the hold and the location.
+    applyPath(join(ROOT, REWORK));
+    expect(rows()).toBe('TEST-hold-1=Added/null/1/true TEST-hold-2=Added/null/0/false TEST-hold-3=Found – Awaiting Reunion/Chair 14/0/false');
+
+    // The second Not found is final; lp_stats counts the hold as waiting, the final one as not in medical.
+    expect(sqlIn(`set role service_role;
+      select lp_set_status(id, row_version, 'Checked – Not Found', 'T · Medical', 'answer') -> 'row' ->> 'status' from patients where first_name = 'TEST-hold-1'`)).toBe('Checked – Not Found');
+    sqlIn(`set role service_role;
+      select lp_set_status(id, row_version, 'Checked – Not Found', 'T · Medical', 'answer') from patients where first_name = 'TEST-hold-2'`);
+    expect(rows()).toBe('TEST-hold-1=Checked – Not Found/null/2/false TEST-hold-2=Added/null/1/true TEST-hold-3=Found – Awaiting Reunion/Chair 14/0/false');
+    expect(sqlIn(`set role service_role; select concat_ws('/', s -> 'open' ->> 'waiting', s -> 'open' ->> 'inMedical', s ->> 'notInMedical') from (select lp_stats() s) x`)).toBe('1/1/1');
   }, 120_000);
 });

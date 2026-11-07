@@ -1,0 +1,475 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pending v9</title>
+<!-- v9.1 (Brian, 2026-11-06 ~20:20): Not found yet is an INDICATOR, not a lane. Held / due requests stay in Waiting for check in
+     plain longest-wait order with their wait time showing (that's what medical needs to see: waiting a while, not found, confirm or clear).
+     A violet chip says "Not found yet"; after 20 min it reads "Recheck due" (still violet). The ONLY time shown is the elapsed wait (no recheck time, no "not found 4:20"). Nothing moves, no Later group anywhere.
+     Within Waiting for check everything is longest wait first (Needs info included). The friend's name/relationship line is removed from
+     Friend coming cards. The notes below are v9 and are superseded where they mention Later or Recheck-on-top. -->
+<!-- 2026-11-06 evening. FINAL v9 (hybrid of angles A and B, per the judge). Brian: "for the pending screen u need to show
+     waiting for check above friend coming … there also needs to be a way to sort by status so they can easily like click it
+     and it shows waiting at the top then the rest". Base = pending-v9-b.html (structure, cards, fold); grafted from
+     pending-v9-a.html: the live line, the desk/tablet two-column board, the full status cell. Mobbin refs: design/references/mobbin-pending-sort.txt.
+
+     STATUS ORDER (one order everywhere a list is in status order)
+       Waiting for check   1 Recheck due ........ most overdue first (blue Recheck chip in the timer slot)
+                           2 Waiting for check .. longest wait first (red timers on top)
+                           3 Needs info ......... longest wait first (medical acts on 2 before 3; the jump up when answered is the signal)
+       Friend coming       4 Friend arrived ..... earliest arrival first
+                           5 Friend en route .... soonest ETA first, no ETA last
+                           6 In medical ......... nobody coming; longest since found first
+       Later               7 Not found yet ...... held; soonest recheck first; when due it becomes rank 1
+       Archived            8 Reunited, Not found in medical, Discharged, Cancelled; folded; newest closed first
+     The four group names are identical on Pending, All requests and My requests ("Closed" instead of "Archived" on My).
+     Not found yet rows keep their violet tag under the Later divider.
+
+     PENDING, phone (< 768 px): one scroll — title row, live line ("● Updated just now ⟳", 40 px), Waiting for check,
+       Friend coming, Later. No sort control (Pending is already in status order). The SegmentedControl is gone.
+       Section header = one 44 px button row: glyph · label · count · chevron. It pins while its section scrolls and one tap
+       folds it; a folded header keeps its most urgent value on the right (oldest wait, heat-coloured; next recheck time).
+       Empty Waiting keeps its header with a dimmed glyph and 0; Friend coming never moves up. "Pending N" = Waiting + Friend coming.
+       Fold memory: the Waiting fold is session-only (never persisted) and re-opens by itself when the Waiting count rises.
+       Friend coming and Later folds persist per device (localStorage, every read/write in try/catch). Later starts folded.
+     PENDING, desk + tablet (>= 768 px): two-column board, Waiting for check left, Friend coming right; each column scrolls on
+       its own; Later is pinned to the bottom of the Waiting column. Board headers keep the chevron (fold parity with phone).
+     Friend coming timers are gray-11 only. Red / amber mean "waiting for check too long" and never appear on a found patient.
+
+     SORT (All requests, My requests): one-tap toggle button at the right end of the live line (aria-pressed + polite live
+       region). Its label names the current order: outline "⇅ Newest" (All default) or "⇅ Updated" (My default, latest
+       update first) → filled gray-a4 "⇅ Status". No menu. At <= 360 px (container query) it drops to its own row, left-aligned.
+       Choice remembered per view per device (try/catch). The production filter-chip row stays filter chips only.
+       In status order the list gets thin pinned dividers (glyph · label · count) and Archived / Closed folds last (›).
+       Status cells keep the full tag in every order: phone "○ Waiting for check"; desk "○ Waiting for check · 27m"
+       (heat-coloured value), "⧗ Not found yet · 4:40 PM", "Friend en route · ~4 min", "Friend arrived · 4:29 PM".
+     DESK TABLE: the header is the sort control; only the active column is gray-12 with an arrow. Default "Created ↓"
+       (aria-sort descending). Click Status → "Status ↓", aria-sort="other". Clicking Status again returns to Created ↓
+       (no reverse status order). Inactive headers show a faint ↕ on hover / focus only.
+     GLYPHS: lucide history = Recheck (chips, status tag, Later value). refresh-cw = the live line's Refresh button only.
+     CONTRAST: meta, counts, row numbers, chevrons, Updated column: gray-11 (DECISIONS.md accessibility pass). No gray-10 text.
+     BUILD: components/list/ListViews.tsx already stacks SectionHeader sections (Friend coming first, ~line 248) — swap the
+       order, restyle the header to this 44 px row with sticky + fold, add Later as a third folded section, add the toggle
+       to All / My. The v8 SegmentedControl never shipped.
+     Frames: 1–3 Pending phone (top, Waiting folded, nothing to check) · 4 tablet 820 light · 5 desk 1240 · 6 All by status ·
+       7 All newest (light) · 8 All desk by status · 9 My by status (430 × 932, so Closed is in view). Synthetic data only (initials). -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@radix-ui/themes@3.3.0/styles.css">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+body{margin:0;background:#0c0c0d}
+.radix-themes{--default-font-family:InterVariable,Inter,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;font-feature-settings:"cv11";-webkit-font-smoothing:antialiased}
+.radix-themes[data-is-root-theme]{min-height:0!important;height:100%;position:relative}
+.board{display:flex;flex-wrap:wrap;justify-content:center;gap:28px 20px;padding:24px;max-width:1300px}
+.board figure{margin:0}.frame{width:390px;height:844px;border-radius:30px;overflow:hidden;border:1px solid #2b2b30;position:relative}
+.frame.desk{width:1240px;height:760px;border-radius:12px}.frame.desk.tall{height:900px}
+.frame.ipad{width:820px;height:1180px;border-radius:28px}
+.frame.max{width:430px;height:932px;border-radius:34px}
+figcaption{margin-top:10px;text-align:center;font:500 15px/1.3 system-ui;color:#e4e4e7}
+figcaption span{display:block;font-weight:400;font-size:13px;color:#8e8e96;margin-top:2px}
+.app{height:100%;display:flex;flex-direction:column;background:var(--color-background);position:relative;overflow:hidden;container-type:inline-size}
+.sp{flex:1}.tab{font-variant-numeric:tabular-nums}
+.scroller{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;position:relative}
+.scroller::-webkit-scrollbar{display:none}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+
+/* title row + live line (polish-v7 LogTitle, f34 / alerts-banner live line) */
+.bar{flex:none;background:var(--color-background);position:relative;z-index:5}
+.lt{display:flex;align-items:center;gap:6px;height:64px;padding:12px 12px 0 16px;box-sizing:border-box}
+.lt .tx{font-size:28px;font-weight:700;letter-spacing:-.022em;color:var(--gray-12);white-space:nowrap}.lt .tc{font-size:28px;color:var(--gray-9)}
+.lt .chv{color:var(--gray-11);display:flex;margin-top:3px}
+.ib{width:36px;height:36px;display:grid;place-items:center;color:var(--gray-11)}
+.av{width:32px;height:32px;border-radius:50%;background:var(--gray-12);color:var(--gray-1);display:grid;place-items:center;font-size:12px;font-weight:600;flex:none}
+.live{display:flex;align-items:center;gap:7px;height:40px;padding:0 12px 4px 16px;box-sizing:border-box;font-size:13px;color:var(--gray-11);white-space:nowrap;position:relative}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green-9);flex:none}
+.rf{all:unset;box-sizing:border-box;position:relative;width:32px;height:32px;margin-left:-4px;display:grid;place-items:center;color:var(--gray-11);border-radius:8px;cursor:pointer;flex:none}
+.rf::after{content:"";position:absolute;inset:-6px}
+.live .brk{display:none}
+.live.dl{height:auto;padding:0;margin-left:8px}
+/* sort toggle: one tap, names the current order, fills when it is Status */
+.sort{all:unset;box-sizing:border-box;margin-left:auto;position:relative;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 11px 0 9px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--gray-a6);font-size:13.5px;font-weight:500;color:var(--gray-11);white-space:nowrap;flex:none;cursor:pointer}
+.sort::before{content:"";position:absolute;inset:-6px -2px}
+.sort[aria-pressed="true"]{box-shadow:none;background:var(--gray-a4);color:var(--gray-12)}
+@container (max-width:360px){
+  .live{flex-wrap:wrap;height:auto;row-gap:0;padding:4px 12px 10px 16px}
+  .live .brk{display:block;flex-basis:100%;height:0}
+  .live .sort{margin:6px 0 0}
+}
+
+/* Pending section headers: one row, pins while its section scrolls, one tap folds it */
+.pl{display:flex;flex-direction:column;padding:0 12px 132px}
+.psec{display:flex;flex-direction:column}
+h2.qh{position:sticky;top:0;z-index:3;margin:0 -12px;font:inherit;background:var(--color-background)}
+h2.qh.pinned{box-shadow:0 1px 0 var(--gray-a4)}
+.qhb{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:8px;width:100%;height:44px;padding:0 14px 0 16px;cursor:pointer}
+.qhb .l{font-size:15px;font-weight:600;color:var(--gray-12);white-space:nowrap}
+.qhb .n{font-size:15px;color:var(--gray-11);font-variant-numeric:tabular-nums}
+.qhb .v{margin-left:auto;display:flex;align-items:center;gap:4px;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--gray-11);white-space:nowrap}
+.qhb .ch{margin-left:auto;color:var(--gray-11);display:flex}
+.qhb .v + .ch{margin-left:8px}
+h2.qh.zero .g{opacity:.38}h2.qh.zero .l{color:var(--gray-11)}
+h2.qh.static .qhb{cursor:default}
+.cards{display:flex;flex-direction:column;gap:10px;padding:2px 0 14px}
+
+/* cards (v8 / clarify / colours) */
+.card{border-radius:14px;background:var(--gray-a2);box-shadow:inset 0 0 0 1px var(--gray-a4);padding:14px;display:flex;flex-direction:column;gap:10px}
+.photo{width:60px;height:72px;border-radius:10px;background:linear-gradient(160deg,#5b4a7a,#2c2638);flex:none;display:grid;place-items:end center;overflow:hidden;color:#c9bde0}
+.l1{display:flex;align-items:baseline;gap:8px}
+.nm{font-size:18px;font-weight:600;color:var(--gray-12);letter-spacing:-.01em;white-space:nowrap}
+.as{font-size:15px;color:var(--gray-11);white-space:nowrap}
+.wait{margin-left:auto;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--gray-11);display:flex;align-items:center;gap:4px;white-space:nowrap}
+.wait.amber{color:var(--amber-11)}.wait.red{color:var(--red-11)}
+.desc{font-size:14.5px;line-height:1.35;color:var(--gray-12)}
+.meta2{font-size:12.5px;color:var(--gray-11)}
+.acts3{display:grid;grid-template-columns:44px 1fr 1fr;gap:8px;margin-top:auto}
+.ibx{height:44px;border-radius:10px;box-shadow:inset 0 0 0 1px var(--gray-a7);display:grid;place-items:center;color:var(--gray-12);position:relative}
+.btn{height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;gap:8px;font-size:15px;font-weight:600;white-space:nowrap}
+.btn.soft{background:var(--gray-a3);color:var(--gray-12);font-weight:500}.btn.green{background:var(--green-9);color:#fff}
+.btn.solid{background:var(--gray-12);color:var(--gray-1)}.btn.outline{box-shadow:inset 0 0 0 1px var(--gray-a7);color:var(--gray-12);font-weight:500}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:auto}
+.mbtn{position:relative}
+.badge{position:absolute;top:-6px;right:-6px;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--blue-9);color:#fff;font-size:12px;font-weight:700;display:grid;place-items:center;box-sizing:border-box}
+.qprev{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;background:var(--gray-a3);font-size:14px;color:var(--gray-12);min-width:0}
+.qprev span.tx{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.qprev .who{color:var(--gray-11)}
+.qprev .ud{width:7px;height:7px;border-radius:50%;background:var(--blue-9);flex:none}
+.need{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 8px;border-radius:7px;background:var(--amber-a4);color:var(--amber-11);font-size:12.5px;font-weight:600;white-space:nowrap;flex:none}
+.rc{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 8px;border-radius:7px;background:var(--blue-a4);color:var(--blue-11);font-size:12.5px;font-weight:600;white-space:nowrap}
+.chipc{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 8px;border-radius:7px;font-size:12.5px;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
+.loc{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:8px;background:var(--green-a4);color:var(--green-12);font-size:14px;font-weight:600;white-space:nowrap}
+.loc.add{background:none;box-shadow:inset 0 0 0 1px var(--gray-a6);color:var(--gray-11);font-weight:500}
+.row2{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.to{font-size:14px;color:var(--gray-11);white-space:nowrap}
+.enr{display:flex;align-items:center;gap:10px;padding:0 12px;height:44px;border-radius:12px;font-size:15px;font-weight:600;white-space:nowrap}
+.enr .m{margin-left:auto;font-variant-numeric:tabular-nums;font-weight:600}
+.enr.teal{background:var(--teal-a3);color:var(--teal-11)}.enr.green{background:var(--green-a3);color:var(--green-11)}
+.fab{position:absolute;right:16px;bottom:26px;height:50px;padding:0 20px 0 16px;border-radius:999px;display:flex;align-items:center;gap:8px;background:var(--gray-12);color:var(--gray-1);font-size:15px;font-weight:600;box-shadow:0 8px 24px -6px rgba(0,0,0,.5);z-index:6;white-space:nowrap}
+
+/* status cell (colours board) */
+.st{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;font-size:13px}
+.st.blue{color:var(--blue-11)}.st.amber{color:var(--amber-11)}.st.green{color:var(--green-11)}.st.gray{color:var(--gray-11)}
+.st.violet{color:var(--violet-11)}.st.teal{color:var(--teal-11)}
+.st .x{font-variant-numeric:tabular-nums}.st .x.red{color:var(--red-11)}.st .x.amber{color:var(--amber-11)}
+
+/* phone log rows + thin group dividers (status order only) */
+.lrow{display:grid;grid-template-columns:40px minmax(0,1fr) auto 58px;column-gap:8px;padding:0 16px;height:48px;align-items:center;border-bottom:1px solid var(--gray-a3);font-size:15px;color:var(--gray-12)}
+.lrow .n{font-size:13px;color:var(--gray-11);font-variant-numeric:tabular-nums}.lrow .t{text-align:right;font-size:13px;color:var(--gray-11);font-variant-numeric:tabular-nums;white-space:nowrap}
+.lrow .f{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gd{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:8px;height:34px;padding:0 16px;background:var(--gray-2);border-bottom:1px solid var(--gray-a3);font-size:13px;font-weight:600;color:var(--gray-12);white-space:nowrap}
+.gd .n{font-weight:400;color:var(--gray-11);font-variant-numeric:tabular-nums}
+.arch{all:unset;box-sizing:border-box;width:100%;display:flex;align-items:center;gap:8px;height:44px;padding:0 16px;font-size:14px;font-weight:600;color:var(--gray-11);border-bottom:1px solid var(--gray-a3);cursor:pointer}
+.arch .c{min-width:20px;height:20px;padding:0 6px;box-sizing:border-box;border-radius:999px;background:var(--gray-a4);display:grid;place-items:center;font-size:12px}
+.arch .chx{margin-left:auto;color:var(--gray-11);display:flex}
+.mine .cards{padding:8px 12px}
+
+/* desk (v8 side + desktop-log top) */
+.dwin{height:100%;display:grid;grid-template-columns:232px minmax(0,1fr);background:var(--color-background)}
+.dwin.rail{grid-template-columns:60px minmax(0,1fr)}
+.side{background:var(--gray-2);border-right:1px solid var(--gray-a4);padding:16px 10px;display:flex;flex-direction:column;gap:2px}
+.ni{display:flex;align-items:center;gap:10px;height:32px;padding:0 8px;border-radius:7px;font-size:14px;color:var(--gray-11)}
+.ni.on{background:var(--gray-a4);color:var(--gray-12);font-weight:500}.ni .c{margin-left:auto;font-size:12.5px;color:var(--gray-11)}
+.dmain{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
+.dtop{display:flex;align-items:center;gap:10px;height:56px;padding:0 20px 0 24px;border-bottom:1px solid var(--gray-a4);flex:none;box-sizing:border-box}
+.dtop .h{font-size:17px;font-weight:600;color:var(--gray-12);letter-spacing:-.01em;white-space:nowrap}.dtop .hc{font-size:17px;color:var(--gray-11)}
+.search{display:flex;align-items:center;gap:8px;width:260px;height:32px;padding:0 8px 0 10px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--gray-a5);color:var(--gray-11);font-size:13.5px;box-sizing:border-box}
+.kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:4px;font-size:11px;font-weight:500;color:var(--gray-11);box-shadow:inset 0 0 0 1px var(--gray-a5);box-sizing:border-box}
+.newb{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 12px;border-radius:8px;background:var(--gray-12);color:var(--gray-1);font-size:13.5px;font-weight:600;white-space:nowrap}
+.newb .kbd{color:var(--gray-1);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--gray-1) 35%,transparent)}
+.dsc{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-width:none}
+.dt{display:grid;grid-template-columns:56px minmax(120px,1fr) 236px 128px 84px 72px 170px;column-gap:12px;padding:0 24px;align-items:center}
+.dt.h{height:38px;border-bottom:1px solid var(--gray-a4);font-size:12.5px;font-weight:500;color:var(--gray-11);position:sticky;top:0;z-index:3;background:var(--color-background)}
+.dt.r{height:44px;border-bottom:1px solid var(--gray-a3);font-size:14px;color:var(--gray-12)}
+.dt .num{font-size:13px;color:var(--gray-11);font-variant-numeric:tabular-nums}
+.dt .nm2{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dt .nm2 small{font-size:12.5px;color:var(--gray-11);margin-left:8px}
+.dt .mut{font-size:13px;color:var(--gray-11);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dt .ra{text-align:right;justify-self:end}.dt .lb{padding-left:20px}
+.thb{all:unset;box-sizing:border-box;position:relative;display:inline-flex;align-items:center;gap:4px;height:28px;margin:0 -6px;padding:0 6px;border-radius:6px;cursor:pointer;white-space:nowrap}
+.thb::after{content:"";position:absolute;inset:-8px -2px}
+.thb.on{color:var(--gray-12);font-weight:600}
+.dgh{position:sticky;top:38px;z-index:2;display:flex;align-items:center;gap:8px;height:36px;padding:0 24px;background:var(--gray-2);border-bottom:1px solid var(--gray-a3);font-size:13px;font-weight:600;color:var(--gray-12);white-space:nowrap}
+.dgh .n{font-weight:400;color:var(--gray-11);font-variant-numeric:tabular-nums}
+/* tablet rail (desktop-new-tablet) */
+.rl{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 0;background:var(--gray-2);border-right:1px solid var(--gray-a4)}
+.rl .ri{width:40px;height:40px;border-radius:9px;display:grid;place-items:center;color:var(--gray-11);position:relative}
+.rl .ri.on{background:var(--gray-a4);color:var(--gray-12)}
+.rl .ri .bd{position:absolute;top:4px;right:3px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;background:var(--gray-12);color:var(--gray-1);font-size:9.5px;font-weight:600;display:grid;place-items:center;box-sizing:border-box}
+.mark{width:22px;height:22px;border-radius:6px;background:var(--gray-12);color:var(--gray-1);display:grid;place-items:center;font-size:12px;font-weight:700}
+/* board (>= 768 px): each column scrolls on its own; Later pinned to the bottom of the Waiting column */
+.cols{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:20px;padding:0 24px}
+.cols.t{gap:16px;padding:0 16px}
+.colsec{min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;padding-top:6px;display:flex;flex-direction:column}
+.colsec::-webkit-scrollbar{display:none}
+.colsec>*{flex-shrink:0}
+.colsec h2.qh{margin:0}.colsec .qhb{padding:0 6px 0 4px}
+.colfoot{position:sticky;bottom:0;z-index:4;margin-top:auto;background:var(--color-background);box-shadow:0 -1px 0 var(--gray-a4);padding-bottom:10px}
+.colfoot h2.qh{position:static}
+</style>
+<script type="importmap">{"imports":{
+"react":"https://esm.sh/react@18.3.1","react-dom":"https://esm.sh/react-dom@18.3.1","react-dom/client":"https://esm.sh/react-dom@18.3.1/client",
+"@radix-ui/themes":"https://esm.sh/@radix-ui/themes@3.3.0?deps=react@18.3.1,react-dom@18.3.1","htm":"https://esm.sh/htm@3.1.1"}}</script>
+</head><body><div id="b"></div>
+<script type="module">
+import React from 'react';
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
+import htm from 'htm';
+import { Theme } from '@radix-ui/themes';
+const h = htm.bind(React.createElement);
+const svg = (p, s = 16, w = 1.75) => h`<svg width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth=${w} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style=${{ flex: 'none' }} dangerouslySetInnerHTML=${{ __html: p }} />`;
+const P = {
+  check: '<path d="M20 6 9 17l-5-5"/>', x: '<path d="M18 6 6 18M6 6l12 12"/>', search: '<circle cx="11" cy="11" r="7.5"/><path d="m20.5 20.5-4.2-4.2"/>',
+  chev: '<path d="m6 9 6 6 6-6"/>', chevR: '<path d="m9 18 6-6-6-6"/>', plus: '<path d="M5 12h14M12 5v14"/>',
+  pin: '<path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>',
+  walk: '<circle cx="13" cy="4" r="2"/><path d="m7 21 2-6 3 3v3"/><path d="m9 12 2-4 3 2 3 1"/><path d="M11 8 8 9 6 12"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', bust: '<circle cx="12" cy="10" r="5"/><path d="M2 26a10 9 0 0 1 20 0"/>',
+  msg: '<path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/>',
+  hour: '<path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/>',
+  // lucide history (Recheck) vs lucide refresh-cw (live line Refresh only)
+  hist: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
+  refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+  sort: '<path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/>', down: '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
+  list: '<path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/>',
+  inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/>', chart: '<path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
+  bell: '<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>',
+};
+// status glyphs (colours board): blue ring · amber ? · violet hourglass · green pie · teal walker · green check · grey closed
+const pie = (f) => { const a = f * 2 * Math.PI, x = 7 + 3.25 * Math.sin(a), y = 7 - 3.25 * Math.cos(a); return `M7 7L7 3.75A3.25 3.25 0 ${f > 0.5 ? 1 : 0} 1 ${x.toFixed(2)} ${y.toFixed(2)}Z`; };
+const gW = (s = 14) => h`<svg width=${s} height=${s} viewBox="0 0 14 14" style=${{ flex: 'none' }} aria-hidden="true"><circle cx="7" cy="7" r="5.75" fill="none" stroke="var(--blue-9)" strokeWidth="1.5"/></svg>`;
+const gQ = (s = 14) => h`<svg width=${s} height=${s} viewBox="0 0 14 14" style=${{ flex: 'none' }} aria-hidden="true"><circle cx="7" cy="7" r="5.75" fill="none" stroke="var(--amber-9)" strokeWidth="1.5"/><text x="7" y="9.9" textAnchor="middle" fontSize="8" fontWeight="700" fill="var(--amber-9)" fontFamily="Inter,system-ui">?</text></svg>`;
+const gIn = (s = 14) => h`<svg width=${s} height=${s} viewBox="0 0 14 14" style=${{ flex: 'none' }} aria-hidden="true"><circle cx="7" cy="7" r="5.75" fill="none" stroke="var(--green-9)" strokeWidth="1.5"/><path d=${pie(0.75)} fill="var(--green-9)"/></svg>`;
+const gDone = (s = 14) => h`<svg width=${s} height=${s} viewBox="0 0 14 14" style=${{ flex: 'none' }} aria-hidden="true"><circle cx="7" cy="7" r="6.25" fill="var(--gray-8)"/><path d="M4.4 7.2l1.8 1.8 3.5-3.7" fill="none" stroke="var(--color-background)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>`;
+const gNF = (s = 14) => h`<svg width=${s} height=${s} viewBox="0 0 14 14" style=${{ flex: 'none' }} aria-hidden="true"><circle cx="7" cy="7" r="6.25" fill="var(--gray-8)"/><path d="M5 5l4 4M9 5l-4 4" stroke="var(--color-background)" strokeWidth="1.6" strokeLinecap="round"/></svg>`;
+const tint = (c) => `var(--${c}-11)`;
+const gIc = (p, c, w = 2) => (s = 14) => h`<span style=${{ color: tint(c), display: 'flex' }}>${svg(p, s + 1, w)}</span>`;
+const gArr = gIc(P.check, 'green', 2.4), gEn = gIc(P.walk, 'teal'), gHold = gIc(P.hour, 'violet'), gRe = gIc(P.hist, 'violet', 2.25);
+const S = {
+  recheck: { g: gRe, t: 'Recheck due', c: 'violet' }, waiting: { g: gW, t: 'Waiting for check', c: 'blue' }, need: { g: gQ, t: 'Needs info', c: 'amber' },
+  arrived: { g: gArr, t: 'Friend arrived', c: 'green' }, enroute: { g: gEn, t: 'Friend en route', c: 'teal' }, inmed: { g: gIn, t: 'In medical', c: 'green' },
+  held: { g: gHold, t: 'Not found yet', c: 'violet' },
+  reunited: { g: gDone, t: 'Reunited', c: 'gray' }, notfound: { g: gNF, t: 'Not found in medical', c: 'gray' }, cancelled: { g: gNF, t: 'Cancelled', c: 'gray' },
+};
+const heat = (m) => (m >= 20 ? 'red' : m >= 10 ? 'amber' : '');
+// full tag in every sort order; desk adds the one value after it (heat-coloured for wait times)
+const St = ({ k, x, xc }) => { const m = S[k]; return h`<span className=${'st ' + m.c}>${m.g(14)}${m.t}${x ? h`<span className=${'x ' + (xc || '')}>· ${x}</span>` : null}</span>`; };
+const Shell = ({ dark = true, children }) => h`<${Theme} appearance=${dark ? 'dark' : 'light'} accentColor="gray" grayColor="gray" radius="medium"><div className="app">${children}</div><//>`;
+
+// ---- data (now = 4:31 PM), already in status order -------------------------------------------------
+// Waiting for check: Recheck due → longest wait → Needs info.
+const WAIT = [
+  { k: 'held', n: '0006', nm: 'P.V.', as: '30 M', m: 51, d: 'Black bucket hat, silver chain', meta: 'Command', ind: 'held', at: '4:40' },
+  { k: 'held', n: '0007', nm: 'S.O.', as: '28 M', m: 47, d: 'Orange bandana, white tank top', meta: 'FA 3', ind: 'held', at: '4:51' },
+  { k: 'recheck', n: '0009', nm: 'M.R.', as: '22 F', m: 40, d: 'Pink tutu, silver body glitter', meta: 'FA 4', ind: 'due' },
+  { k: 'waiting', n: '0010', nm: 'B.W.', as: '23 F', m: 27, photo: true, d: 'Neon green bikini top, white platform boots, red bandana', meta: 'FA 4 · LP-0010' },
+  { k: 'waiting', n: '0013', nm: 'K.T.', as: '19 F', m: 16, d: 'Butterfly wings, light-up shoes, blue braids', meta: 'FA 3 · LP-0013', prev: ['Dana K.', 'Butterfly tattoo, left wrist'], unread: 1 },
+  { k: 'need', n: '0014', nm: 'J.D.', as: 'mid-20s M', m: 9, d: 'Red hoodie, black joggers', meta: 'FA 3 · LP-0014', prev: ['You', 'Any tattoos or marks?'] },
+  { k: 'waiting', n: '0015', nm: 'E.N.', as: '23', m: 1, d: 'Neon green bucket hat, mesh top', meta: 'FA 4 · LP-0015' },
+];
+// Friend coming: Friend arrived → Friend en route (soonest ETA) → In medical, nobody coming (longest since found).
+const COME = [
+  { k: 'arrived', n: '0008', nm: 'M.P.', as: '26 M', m: 26, loc: 'Bed 3 · triage', who: 'Ana P.', rel: 'friend', at: '4:29 PM' },
+  { k: 'enroute', n: '0011', nm: 'A.L.', as: '21 F', m: 7, loc: 'Chair 14', who: 'Chris P.', rel: 'boyfriend', eta: '~4 min', unread: 1 },
+  { k: 'inmed', n: '0012', nm: 'R.P.', as: '30 M', m: 2, who: 'Alex M.', rel: 'partner' },
+];
+const COME2 = COME.slice(0, 2);
+
+// ---- Pending cards (kept from clarify / updates) -------------------------------------------------
+const MsgBtn = ({ n }) => h`<span className="ibx" aria-label=${n ? `Messages, ${n} unread` : 'Messages'}>${svg(P.msg, 18)}${n ? h`<span className="badge">${n}</span>` : null}</span>`;
+const say = (r) => `${r.ind === 'due' ? 'not found yet, recheck due, ' : r.ind === 'held' ? 'not found yet, ' : r.k === 'need' ? 'needs info, ' : ''}waiting ${r.m} ${r.m === 1 ? 'minute' : 'minutes'}`;
+const Ind = ({ r }) => r.ind === 'due' ? chipC('violet', svg(P.hist, 13, 2.25), 'Recheck due', true) : chipC('violet', svg(P.hour, 13, 2), 'Not found yet');
+const CheckCard = ({ r }) => h`<div className="card" aria-label=${`${r.nm}, ${r.as}, ${say(r)}`}>
+  <div style=${{ display: 'flex', gap: 12 }}>${r.photo ? h`<div className="photo">${svg(P.bust, 48)}</div>` : null}
+    <div style=${{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div className="l1"><span className="nm">${r.nm}</span><span className="as">${r.as}</span>
+        <span className=${'wait ' + heat(r.m)}>${svg(P.clock, 13, 2)}${r.m}m</span></div>
+      <div className="desc">${r.d}</div><div className="meta2">${r.meta}</div></div></div>
+  ${r.ind ? h`<div className="row2"><${Ind} r=${r}/></div>` : null}
+  ${r.prev ? h`<div style=${{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>${r.k === 'need' ? h`<span className="need">${gQ(13)}Needs info</span>` : null}<div className="qprev" style=${{ flex: 1 }}>${r.unread ? h`<span className="ud"></span>` : null}<span className="tx"><span className="who">${r.prev[0]}:</span> ${r.prev[1]}</span></div></div>` : null}
+  <div className="acts3"><${MsgBtn} n=${r.unread}/>${r.ind ? h`<span className="btn soft" aria-label="Not found. Closes this request as not found in medical">${svg(P.x, 16, 2.25)}Not found</span>` : h`<span className="btn soft" aria-label="Not found yet. Keeps this request open and schedules a recheck">${svg(P.hour, 16)}Not found yet</span>`}<span className="btn green">${svg(P.check, 16, 2.25)}In medical</span></div>
+</div>`;
+// Friend coming timer is gray-11 only: red / amber are reserved for "waiting for check too long".
+const ComingCard = ({ r }) => h`<div className="card" aria-label=${`${r.nm}, ${S[r.k].t}${r.eta ? ', about 4 minutes away' : r.at ? `, arrived ${r.at}` : ', nobody coming yet'}`}>
+  <div className="l1"><span className="nm">${r.nm}</span><span className="as">${r.as}</span><span className="wait">${r.m}m</span></div>
+  <div className="row2">${r.loc ? h`<span className="loc">${svg(P.pin, 14, 2)}${r.loc}</span>` : h`<span className="loc add">${svg(P.plus, 14, 2)}Location</span>`}</div>
+  ${r.k === 'arrived' ? h`<div className="enr green">${svg(P.check, 18, 2.4)}Friend arrived<span className="m">${r.at}</span></div>` : r.k === 'enroute' ? h`<div className="enr teal">${svg(P.walk, 18, 2)}Friend en route<span className="m">${r.eta}</span></div>` : null}
+  <div className="two"><span className="btn outline mbtn">${svg(P.msg, 16)}Message${r.unread ? h`<span className="badge">${r.unread}</span>` : null}</span><span className="btn solid">${svg(P.check, 16, 2.25)}Reunited</span></div>
+</div>`;
+
+// ---- section header: glyph · label · count ··· [value when folded] · chevron -----------------------
+// Fold memory: Waiting for check = session only, re-opens when its count rises. Friend coming / Later = per device (try/catch).
+const QH = ({ g, label, n, open, value, pinned, zero, fixed, id }) => h`<h2 className=${'qh' + (pinned ? ' pinned' : '') + (zero ? ' zero' : '') + (fixed ? ' static' : '')} id=${id}>
+  <button type="button" className="qhb" aria-expanded=${zero || fixed ? undefined : String(!!open)} aria-disabled=${zero ? 'true' : undefined}
+    aria-label=${`${label}, ${n} ${n === 1 ? 'request' : 'requests'}${zero || fixed ? '' : open ? '. Collapse' : '. Expand'}`}>
+    <span className="g" style=${{ display: 'flex' }}>${g(16)}</span><span className="l">${label}</span><span className="n">${n}</span>
+    ${!open && value ? h`<span className="v">${value}</span>` : null}
+    ${zero || fixed ? null : h`<span className="ch">${svg(open ? P.chev : P.chevR, 18, 2)}</span>`}
+  </button></h2>`;
+const oldestWait = h`<span style=${{ color: 'var(--red-11)', display: 'flex', alignItems: 'center', gap: 4 }}>${svg(P.clock, 13, 2)}51m</span>`;
+const nextRecheck = h`${svg(P.hist, 13, 2)}4:40 PM`;
+
+// ---- title row + live line; the sort toggle sits at the live line's right end (All / My only) ---------
+const VIEW = { all: { off: 'Newest', offSay: 'Newest first' }, mine: { off: 'Updated', offSay: 'Updated, latest first' } };
+const SortToggle = ({ on, view = 'all' }) => { const o = VIEW[view]; return h`<button type="button" className="sort" aria-pressed=${String(!!on)}
+    aria-label=${on ? 'Status order, waiting for check first' : `${o.offSay}. Sort by status, waiting for check first`}>${svg(P.sort, 14, 2)}${on ? 'Status' : o.off}</button>
+  <span role="status" aria-live="polite" className="vh">${on ? 'Sorted by status' : `Sorted: ${o.offSay.toLowerCase()}`}</span>`; };
+const Bar = ({ title, n, sort }) => h`<div className="bar">
+  <div className="lt"><span className="tx">${title}</span><span className="tc tab">${n}</span><span className="chv">${svg(P.chev, 18, 2.25)}</span><span className="sp"></span><span className="ib" aria-label="Search">${svg(P.search, 20)}</span><span className="av">DK</span></div>
+  <div className="live"><span className="dot"></span><span>Updated just now</span><button type="button" className="rf" aria-label="Refresh now">${svg(P.refresh, 15, 2)}</button>${sort ? h`<span className="brk"></span><${SortToggle} ...${sort}/>` : null}</div>
+</div>`;
+const Fab = () => h`<span className="fab">${svg(P.plus, 18, 2.25)}New request</span>`;
+
+// ---- 1–3 Pending phone -----------------------------------------------------------------------------------
+const PendingList = ({ waitOpen = true, empty, come = COME }) => h`<div className="pl">
+  <section className="psec" aria-label=${`Waiting for check, ${empty ? 0 : WAIT.length} requests`}>
+    <${QH} g=${gW} label="Waiting for check" n=${empty ? 0 : WAIT.length} open=${waitOpen} zero=${empty} value=${oldestWait}/>
+    ${!empty && waitOpen ? h`<div className="cards">${WAIT.map((r) => h`<${CheckCard} key=${r.n} r=${r}/>`)}</div>` : null}
+  </section>
+  <section className="psec" aria-label=${`Friend coming, ${come.length} requests`}>
+    <${QH} g=${gIn} label="Friend coming" n=${come.length} open/>
+    <div className="cards">${come.map((r) => h`<${ComingCard} key=${r.n} r=${r}/>`)}</div>
+  </section>
+</div>`;
+const PendingTop = () => h`<${Shell}><${Bar} title="Pending" n=${WAIT.length + COME.length}/><div className="scroller"><${PendingList}/></div><${Fab}/><//>`;
+const PendingFolded = () => h`<${Shell}><${Bar} title="Pending" n=${WAIT.length + COME2.length}/><div className="scroller"><${PendingList} waitOpen=${false} come=${COME2}/></div><${Fab}/><//>`;
+const PendingEmpty = () => h`<${Shell}><${Bar} title="Pending" n=${COME2.length}/><div className="scroller"><${PendingList} empty come=${COME2}/></div><${Fab}/><//>`;
+
+// ---- 4–5 Pending board (>= 768 px) --------------------------------------------------------------------------
+const DLive = () => h`<span className="live dl"><span className="dot"></span>Updated just now<button type="button" className="rf" aria-label="Refresh now">${svg(P.refresh, 15, 2)}</button></span>`;
+const DTop = ({ title, n, icon }) => h`<div className="dtop"><span className="h">${title}</span><span className="hc tab">${n}</span><${DLive}/><span className="sp"></span>
+  ${icon ? h`<span className="ib" aria-label="Search">${svg(P.search, 18)}</span>` : h`<div className="search">${svg(P.search, 15)}Search<span className="sp"></span><span className="kbd">/</span></div>`}
+  <div className="newb">${svg(P.plus, 15, 2.25)}New request<span className="kbd">N</span></div></div>`;
+const Side = ({ on }) => h`<aside className="side">
+  ${[['list', 'All requests', 13, 'all'], ['inbox', 'Pending', 10, 'pending'], ['user', 'My requests', 5, 'mine'], ['chart', 'Dashboard', null, 'dash']].map(([ic, t, c, k]) => h`<div key=${k} className=${'ni' + (on === k ? ' on' : '')}>${svg(P[ic])}${t}${c != null ? h`<span className="c tab">${c}</span>` : null}</div>`)}
+</aside>`;
+const Rail = () => h`<aside className="rl">
+  <span className="mark" style=${{ marginBottom: 10 }}>?</span>
+  <span className="ri">${svg(P.list, 19)}</span><span className="ri on">${svg(P.inbox, 19)}<span className="bd tab">10</span></span><span className="ri">${svg(P.user, 19)}</span>
+  <span style=${{ height: 1, width: 28, background: 'var(--gray-a4)', margin: '4px 0' }}></span><span className="ri">${svg(P.chart, 19)}</span>
+  <span className="sp"></span><span className="ri">${svg(P.bell, 19)}</span><span className="av" style=${{ width: 30, height: 30, fontSize: 11.5 }}>DK</span>
+</aside>`;
+const BoardCols = ({ tablet }) => h`<div className=${'cols' + (tablet ? ' t' : '')}>
+  <section className="colsec" aria-label=${`Waiting for check, ${WAIT.length} requests`}>
+    <${QH} g=${gW} label="Waiting for check" n=${WAIT.length} open/>
+    <div className="cards">${WAIT.map((r) => h`<${CheckCard} key=${r.n} r=${r}/>`)}</div>
+  </section>
+  <section className="colsec" aria-label=${`Friend coming, ${COME.length} requests`}>
+    <${QH} g=${gIn} label="Friend coming" n=${COME.length} open/>
+    <div className="cards">${COME.map((r) => h`<${ComingCard} key=${r.n} r=${r}/>`)}</div>
+  </section>
+</div>`;
+const PendingTablet = () => h`<${Theme} appearance="light" accentColor="gray" grayColor="gray" radius="medium"><div className="dwin rail"><${Rail}/>
+  <main className="dmain"><${DTop} title="Pending" n=${WAIT.length + COME.length} icon/><${BoardCols} tablet/></main></div><//>`;
+const PendingDesk = () => h`<${Theme} appearance="dark" accentColor="gray" grayColor="gray" radius="medium"><div className="dwin"><${Side} on="pending"/>
+  <main className="dmain"><${DTop} title="Pending" n=${WAIT.length + COME.length}/><${BoardCols}/></main></div><//>`;
+
+// ---- 6–8 All requests --------------------------------------------------------------------------------------
+// [n, name, age, stage, created, desk value, value colour, post, updated, logged by]
+const ROWS = {
+  M_R: ['0009', 'M.R.', '22 F', 'recheck', '3:51 PM', '40m', 'red', 'FA 4 – Oasis', '9m', 'Lee W. · Base'],
+  B_W: ['0010', 'B.W.', '23 F', 'waiting', '4:04 PM', '27m', 'red', 'FA 4 – Oasis', '—', 'Sam R. · Dispatch'],
+  K_T: ['0013', 'K.T.', '19 F', 'waiting', '4:15 PM', '16m', 'amber', 'FA 3 – Kinetic', '1m', 'Sam R. · Dispatch'],
+  E_N: ['0015', 'E.N.', '23', 'waiting', '4:30 PM', '1m', null, 'FA 4 – Oasis', '—', 'Dana K. · Transpo'],
+  J_D: ['0014', 'J.D.', 'mid-20s M', 'need', '4:22 PM', '9m', null, 'FA 3 – Kinetic', '6m', 'Dana K. · Transpo'],
+  M_P: ['0008', 'M.P.', '26 M', 'arrived', '3:50 PM', '4:29 PM', null, 'FA 3 – Kinetic', '2m', 'Sam R. · Dispatch'],
+  A_L: ['0011', 'A.L.', '21 F', 'enroute', '4:09 PM', '~4 min', null, 'FA 4 – Oasis', '3m', 'Dana K. · Transpo'],
+  R_P: ['0012', 'R.P.', '30 M', 'inmed', '4:12 PM', null, null, 'Base', '2m', 'Lee W. · Base'],
+  S_O: ['0007', 'S.O.', '28 M', 'held', '3:44 PM', '47m', 'red', 'FA 3 – Kinetic', '11m', 'Dana K. · Transpo'],
+  P_V: ['0006', 'P.V.', '30 M', 'held', '3:40 PM', '51m', 'red', 'Command', 'now', 'Lee W. · Base'],
+};
+const GROUPS = [
+  { g: gW, t: 'Waiting for check', rows: ['P_V', 'S_O', 'M_R', 'B_W', 'K_T', 'J_D', 'E_N'] },
+  { g: gIn, t: 'Friend coming', rows: ['M_P', 'A_L', 'R_P'] },
+];
+const NEWEST = ['E_N', 'J_D', 'K_T', 'R_P', 'A_L', 'B_W', 'M_R', 'M_P', 'S_O', 'P_V'];
+const Row = ({ id }) => { const [n, nm, , k, t] = ROWS[id]; return h`<div className="lrow" aria-label=${`${n}, ${nm}, ${S[k].t}, logged ${t}`}><span className="n">${n}</span><span className="f">${nm}</span><${St} k=${k}/><span className="t">${t}</span></div>`; };
+const GD = ({ G, n }) => h`<div className="gd" role="heading" aria-level="2" aria-label=${`${G.t}, ${n} ${n === 1 ? 'request' : 'requests'}`}>${G.g(14)}<span>${G.t}</span><span className="n">${n}</span></div>`;
+const Arch = ({ label = 'Archived', n = 3, desk }) => h`<button type="button" className="arch" style=${desk ? { padding: '0 24px' } : null} aria-expanded="false" aria-label=${`${label}, ${n} closed ${n === 1 ? 'request' : 'requests'}. Expand`}>${label}<span className="c tab">${n}</span><span className="chx">${svg(P.chevR, 16, 2)}</span></button>`;
+const AllStatus = () => h`<${Shell}><${Bar} title="All requests" n=${13} sort=${{ on: true }}/>
+  <div className="scroller">${GROUPS.map((G) => h`<section key=${G.t}><${GD} G=${G} n=${G.rows.length}/>${G.rows.map((id) => h`<${Row} key=${id} id=${id}/>`)}</section>`)}<${Arch}/></div><//>`;
+const AllNewest = () => h`<${Shell} dark=${false}><${Bar} title="All requests" n=${13} sort=${{ on: false }}/>
+  <div className="scroller">${NEWEST.map((id) => h`<${Row} key=${id} id=${id}/>`)}<${Arch}/></div><//>`;
+
+// desk table: the header is the sort control. Default Created ↓; Status ↓ (aria-sort other); Status again → Created ↓.
+const DeskHead = ({ by }) => h`<div className="dt h" role="row"><span role="columnheader">#</span><span role="columnheader">Friend</span>
+  <span role="columnheader" aria-sort=${by === 'status' ? 'other' : undefined}><button type="button" className=${'thb' + (by === 'status' ? ' on' : '')}
+    aria-label=${by === 'status' ? 'Status, sorted waiting for check first. Sort by newest' : 'Status. Sort by status, waiting for check first'}>Status${by === 'status' ? svg(P.down, 13, 2.25) : null}</button></span>
+  <span role="columnheader">Post</span>
+  <span role="columnheader" className="ra" aria-sort=${by === 'created' ? 'descending' : undefined}><button type="button" className=${'thb' + (by === 'created' ? ' on' : '')}
+    aria-label=${by === 'created' ? 'Created, newest first. Sort oldest first' : 'Created. Sort by newest'}>Created${by === 'created' ? svg(P.down, 13, 2.25) : null}</button></span>
+  <span role="columnheader" className="ra">Updated</span><span role="columnheader" className="lb">Logged by</span></div>`;
+const DeskRow = ({ id }) => { const [n, nm, as, k, t, x, xc, post, up, by] = ROWS[id]; return h`<div className="dt r" role="row"><span className="num">${n}</span><span className="nm2">${nm}<small>${as}</small></span><${St} k=${k} x=${x} xc=${xc}/><span className="mut">${post}</span><span className="ra mut tab">${t}</span><span className="ra mut tab">${up}</span><span className="mut lb">${by}</span></div>`; };
+const AllDesk = () => h`<${Theme} appearance="dark" accentColor="gray" grayColor="gray" radius="medium"><div className="dwin"><${Side} on="all"/>
+  <main className="dmain"><${DTop} title="All requests" n=${13}/>
+    <div className="dsc" role="table" aria-label="All requests, sorted by status"><${DeskHead} by="status"/>
+      ${GROUPS.map((G) => h`<section key=${G.t}><div className="dgh" role="heading" aria-level="2">${G.g(14)}<span>${G.t}</span><span className="n">${G.rows.length}</span></div>${G.rows.map((id) => h`<${DeskRow} key=${id} id=${id}/>`)}</section>`)}
+      <${Arch} desk/>
+    </div></main></div><//>`;
+
+// ---- 9 My requests (front of house), status order ----------------------------------------------------------
+const chipC = (c, ic, t, solid) => h`<span className="chipc" style=${{ background: solid ? `var(--${c}-a4)` : 'none', boxShadow: solid ? 'none' : `inset 0 0 0 1px var(--${c}-a6)`, color: tint(c) }}>${ic}${t}</span>`;
+const MineStatus = () => h`<${Shell}><${Bar} title="My requests" n=${5} sort=${{ on: true, view: 'mine' }}/>
+  <div className="scroller mine">
+    <section><${GD} G=${GROUPS[0]} n=${3}/><div className="cards">
+      <div className="card" aria-label="S.O., 28 male, not found yet, waiting 47 minutes"><div className="l1"><span className="nm">S.O.</span><span className="as">28 M</span><span className="wait red">${svg(P.clock, 13, 2)}47m</span></div>
+        <div className="row2">${chipC('violet', svg(P.hour, 13, 2), 'Not found yet')}</div>
+        <span className="btn outline">${svg(P.msg, 16)}Message</span></div>
+      <div className="card" aria-label="J.D., mid-20s male, needs info, 1 unread question"><div className="l1"><span className="nm">J.D.</span><span className="as">mid-20s M</span><span className="wait"><span className="need">${gQ(13)}Needs info</span></span></div>
+        <div className="qprev"><span className="ud"></span><span className="tx"><span className="who">Rae C.:</span> Any tattoos or marks?</span></div>
+        <span className="btn outline mbtn">${svg(P.msg, 16)}Message<span className="badge">1</span></span></div>
+      <div className="card" aria-label="E.N., 23, waiting 1 minute"><div className="l1"><span className="nm">E.N.</span><span className="as">23</span><span className="wait">${svg(P.clock, 13, 2)}1m</span></div>
+        <span className="btn outline">${svg(P.msg, 16)}Message</span></div>
+</div></section>
+    <section><${GD} G=${GROUPS[1]} n=${1}/><div className="cards">
+      <div className="card" aria-label="A.L., 21 female, in medical at Chair 14, friend en route about 4 minutes"><div className="l1"><span className="nm">A.L.</span><span className="as">21 F</span><span className="wait">${gIn(16)}</span></div>
+        <div className="row2"><span className="loc">${svg(P.pin, 14, 2)}Chair 14</span></div>
+        <div className="enr teal">${svg(P.walk, 18, 2)}Friend en route<span className="m">~4 min</span>${svg(P.chevR, 16, 2.25)}</div>
+        <div className="two"><span className="btn outline">${svg(P.check, 16, 2)}Arrived</span><span className="btn outline">${svg(P.msg, 16)}Message</span></div></div></div></section>
+    <${Arch} label="Closed" n=${1}/>
+    <div style=${{ height: 24 }}></div>
+  </div><//>`;
+
+// ---- board -------------------------------------------------------------------------------------------------------
+const Toast = ({ t }) => h`<div style=${{ position: 'absolute', left: 12, right: 12, bottom: 34, height: 48, borderRadius: 12, background: 'var(--gray-12)', color: 'var(--gray-1)', display: 'flex', alignItems: 'center', padding: '0 6px 0 16px', fontSize: 15, fontWeight: 500, zIndex: 9 }}>${t}<span style=${{ marginLeft: 'auto', height: 36, padding: '0 12px', display: 'grid', placeItems: 'center', fontWeight: 600 }}>Undo</span></div>`;
+const OneCard = ({ r, toast }) => h`<${Shell}><${Bar} title="Pending" n=${10}/><div className="scroller"><div className="pl"><section className="psec"><${QH} g=${gW} label="Waiting for check" n=${7} open/><div className="cards"><${CheckCard} r=${r}/></div></section></div></div>${toast ? h`<${Toast} t=${toast}/>` : null}<//>`;
+// ---- close-button variants (Brian 20:35: "Close · not found" is cramped; keep it clear without clutter) ----
+P.archive = P.archive || '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>';
+const DueCard = ({ variant }) => { const r = { ...WAIT[3], k: 'recheck', ind: 'due', m: 47 };
+  const head = h`<div style=${{ display: 'flex', gap: 12 }}>${r.photo ? h`<div className="photo">${svg(P.bust, 48)}</div>` : null}
+    <div style=${{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div className="l1"><span className="nm">${r.nm}</span><span className="as">${r.as}</span><span className=${'wait ' + heat(r.m)}>${svg(P.clock, 13, 2)}${r.m}m</span></div>
+      <div className="desc">${r.d}</div><div className="meta2">${r.meta}</div></div></div>`;
+  const chip = chipC('violet', svg(P.hist, 13, 2.25), 'Recheck due', true);
+  const green = h`<span className="btn green">${svg(P.check, 16, 2.25)}In medical</span>`;
+  if (variant === 'a') return h`<div className="card">${head}<div className="row2">${chip}</div>
+    <div className="acts3"><${MsgBtn}/><span className="btn soft" aria-label="Not found, close it">${svg(P.x, 16)}Not found</span>${green}</div></div>`;
+  if (variant === 'b') return h`<div className="card">${head}<div className="row2">${chip}</div>
+    <div className="acts3"><${MsgBtn}/><span className="btn soft" aria-label="Close as not found in medical">${svg(P.archive, 16)}Close</span>${green}</div></div>`;
+  if (variant === 'c') return h`<div className="card">${head}<div className="row2" style=${{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>${chip}<span style=${{ flex: 'none', width: 44, display: 'grid' }}><${MsgBtn}/></span></div>
+    <div className="two"><span className="btn soft" aria-label="Close as not found in medical">${svg(P.x, 16)}Close · not found</span>${green}</div></div>`;
+  return h`<div className="card">${head}<div className="row2">${chip}</div>
+    <div className="acts3"><${MsgBtn}/><span className="btn soft" style=${{ flexDirection: 'column', gap: 0, lineHeight: 1.1 }} aria-label="Not found, close it"><span style=${{ display: 'flex', alignItems: 'center', gap: 6 }}>${svg(P.x, 15)}Not found</span><span style=${{ fontSize: 11.5, fontWeight: 500, color: 'var(--gray-11)' }}>closes it</span></span>${green}</div></div>`; };
+const DueFrame = ({ variant, toast }) => h`<${Shell}><${Bar} title="Pending" n=${10}/><div className="scroller"><div className="pl"><section className="psec"><${QH} g=${gW} label="Waiting for check" n=${7} open/><div className="cards"><${DueCard} variant=${variant}/></div></section></div></div>${toast ? h`<${Toast} t=${toast}/>` : null}<//>`;
+const CloseBoard = () => h`<div className="board">
+  <${Fig} cap="A · Not found yet → Not found" sub="Same word, no 'yet' = final; toast confirms the close"><${DueFrame} variant="a" toast="B.W. closed · not found in medical"/><//>
+  <${Fig} cap="B · Close (archive glyph)" sub="One short verb; the Recheck due chip gives the why"><${DueFrame} variant="b"/><//>
+  <${Fig} cap="C · Message moves up" sub="Full label fits: message icon sits by the chip"><${DueFrame} variant="c"/><//>
+  <${Fig} cap="D · Two-line button" sub="Not found + small 'closes it'"><${DueFrame} variant="d"/><//>
+</div>`;
+const ButtonsBoard = () => h`<div className="board">
+  <${Fig} cap="A · First check" sub="Not found yet keeps it open (20 min hold)"><${OneCard} r=${WAIT[3]}/><//>
+  <${Fig} cap="B · Tapped Not found yet" sub="Chip says Not found yet; the left button becomes × Not found (closes)"><${OneCard} r=${{ ...WAIT[3], k: 'held', ind: 'held' }} toast="Not found yet · recheck in 20 min"/><//>
+  <${Fig} cap="C · Recheck due (20 min later)" sub="× Not found closes it; In medical if they're there"><${OneCard} r=${{ ...WAIT[3], k: 'recheck', ind: 'due', m: 47 }}/><//>
+  <${Fig} cap="D · Closed" sub="Second answer closes it, with Undo"><${OneCard} r=${WAIT[4]} toast="B.W. closed · not found in medical"/><//>
+</div>`;
+const Fig = ({ cap, sub, cls = '', children }) => h`<figure><div className=${'frame ' + cls}>${children}</div><figcaption>${cap}<span>${sub}</span></figcaption></figure>`;
+const Board = () => h`<div className="board">
+  <${Fig} cap="1 · Pending" sub="Waiting longest first; Not found yet stays in place with its wait"><${PendingTop}/><//>
+  <${Fig} cap="2 · Waiting folded" sub="One tap; folded header keeps the oldest wait (51m)"><${PendingFolded}/><//>
+  <${Fig} cap="3 · Nothing to check" sub="Header stays with 0; Friend coming never moves up"><${PendingEmpty}/><//>
+  <${Fig} cls="ipad" cap="4 · Pending, tablet 820 (light)" sub="Board from 768 px; columns scroll apart; no Later lane"><${PendingTablet}/><//>
+  <${Fig} cls="desk tall" cap="5 · Pending, desk 1240" sub="Same board; headers keep the chevron"><${PendingDesk}/><//>
+  <${Fig} cap="6 · All requests by status" sub="Waiting longest first; Recheck is just a tag"><${AllStatus}/><//>
+  <${Fig} cap="7 · All requests, newest (light)" sub="Default ⇅ Newest; one tap → frame 6"><${AllNewest}/><//>
+  <${Fig} cls="desk" cap="8 · All requests, desk, by status" sub="Status ↓; waiting rows show their wait, e.g. Not found yet · 47m"><${AllDesk}/><//>
+  <${Fig} cls="max" cap="9 · My requests by status, 430 × 932" sub="Waiting longest first incl. Not found yet; Closed folded last"><${MineStatus}/><//>
+</div>`;
+flushSync(() => createRoot(document.getElementById('b')).render(location.hash === '#buttons' ? h`<${ButtonsBoard}/>` : location.hash === '#close' ? h`<${CloseBoard}/>` : h`<${Board}/>`));
+window.__layout = () => document.querySelectorAll('.colsec,.scroller').forEach((c) => { c.scrollTop = 0; });
+window.__layout();
+document.fonts.ready.then(() => { window.__layout(); document.body.dataset.ready = '1'; });
+</script></body></html>

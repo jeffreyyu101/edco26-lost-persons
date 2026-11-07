@@ -144,6 +144,59 @@ button.portrait {
 .statusBox[data-tone='amber'] {
   background: var(--amber-a3);
 }
+/* (F5) Colour = meaning (design/screens/colors-4.png): violet Not found yet, teal Friend en route. */
+.statusBox[data-tone='violet'] {
+  background: var(--violet-a3);
+}
+.statusBox[data-tone='teal'] {
+  background: var(--teal-a3);
+}
+
+/* "↺ Recheck 4:40 PM" (lucide history) under a "Not found yet" block (recheck-3.png): a hairline in the block's colour. */
+.recheckRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border-top: 1px solid var(--violet-a4);
+  font-size: 17px;
+  line-height: 22px;
+  font-weight: 600;
+  color: var(--gray-12);
+  font-variant-numeric: tabular-nums;
+}
+.recheckGlyph {
+  flex: none;
+  color: var(--violet-11);
+}
+
+/* The medical side's two answers inside the block (clarify-7.png, recheck-3.png): 44 px, equal halves. */
+.blockActs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+.recheckRow + .blockActs,
+.status + .blockActs {
+  padding-top: 0;
+}
+.blockBtn.blockBtn {
+  --base-button-height: 44px;
+  height: 44px;
+  min-width: 0;
+  gap: 8px;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.blockBtn.blockBtn svg {
+  flex: none;
+}
 .status {
   display: flex;
   align-items: center;

@@ -44,7 +44,7 @@ export function AllSkeleton() {
   );
 }
 
-/** A To check card (pending-v8.html): name and minutes, two lines of what they wear, the quiet line, two 44 px answers. */
+/** A Waiting for check card (pending-v8.html): name and minutes, two lines of what they wear, the quiet line, two 44 px answers. */
 function PendingCardSkeleton() {
   return (
     <div className={s.skCard}>
@@ -65,7 +65,7 @@ function PendingCardSkeleton() {
   );
 }
 
-/** Pending: the segmented control is already there; only the cards are placeholders. */
+/** Pending: the large title is already there; only the cards are placeholders. */
 export function PendingSkeleton() {
   return (
     <div className={s.skScroll} aria-busy="true" aria-label="Loading requests" data-testid="list-skeleton">

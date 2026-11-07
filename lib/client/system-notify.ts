@@ -20,7 +20,9 @@
 //     the store closes one whose alert is out of date (alerts.ts alertStillCurrent). 3+ at once are one
 //     notification ("3 new requests"), like the toast.
 //   * Content: the LP number, "New request" or the status, initials and the post. Never a phone number or
-//     any other contact detail: it lands on the lock screen and in the notification centre.
+//     any other contact detail: it lands on the lock screen and in the notification centre. (F5) A request
+//     going on hold reads as contract B and recheck-6.png, with no LP number: "K.T." / "Not found yet ·
+//     recheck 4:40 PM" (the alert's own words, alerts.ts holdAlert).
 //   * Click: public/sw.js focuses an app window and posts {type: 'lp-open', url}; this page opens that view
 //     in place (no reload, so an open form or sheet is not lost) and answers {ok}. A page that does not
 //     answer (a sign-in page, an older build) is navigated by the worker instead.
@@ -29,7 +31,7 @@
 // browserEnv), and the avatar menu and the sheets import it from their own view chunks.
 import { useSyncExternalStore } from 'react';
 import type { RequestSummary } from '../api-types';
-import { initials, statusMeta } from '../domain';
+import { initials, isHeld, statusMeta } from '../domain';
 import { formatCaseNumber } from '../format';
 import { alertKey } from './alerts';
 import { hrefFor, navigate, parseView, viewToParams } from './nav';
@@ -166,6 +168,10 @@ export function systemNotice(
   const url = hrefFor({ r: id });
   const requireInteraction = alert.kind === 'in_medical';
   if (!row) return { title: alert.title, body: '', tag: id, url, key: null, requireInteraction };
+  // (F5) A request on hold: the hold alert's own words, initials and "Not found yet · recheck 4:40 PM" (no LP).
+  if (alert.kind === 'status_changed' && isHeld(row)) {
+    return { title: alert.title, body: alert.subtitle ?? '', tag: id, url, key: alertKey(row), requireInteraction };
+  }
   const lp = formatCaseNumber(row.caseNumber);
   const title = alert.kind === 'new_request' ? `New request · ${lp}` : `${lp} · ${statusMeta(row.status).shortLabel}`;
   const body = alert.kind === 'in_medical' ? [who(row), 'Bring the friend to Main Med'].filter(Boolean).join('\n') : who(row);

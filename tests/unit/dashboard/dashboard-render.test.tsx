@@ -1,6 +1,7 @@
 // Server renders of the dashboard (design/screens/polish-v7.html Dash / Laptop) against the stub store and
 // mocked Stats: section order, the tiles and their numbers, Open by post busiest first, Recently updated rows,
-// Performance with "—" for missing values, the connection chip, and no Export CSV. Synthetic data only.
+// Performance ("None" for an empty value, "—" only while the stats request fails), the connection chip, and no
+// Export CSV. Synthetic data only.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Theme } from '@radix-ui/themes';
@@ -173,12 +174,15 @@ describe('dashboard render', () => {
     expect(slice(perf, 'perf-longest-wait', 2000)).toContain('>1010 · FA 4<');
     expect(perf).toMatch(/data-testid="perf-longest-wait-value"><span[^>]*>24<\/span><span[^>]*>m<\/span>/);
     expect(perf).toMatch(/data-testid="perf-answer-value"><span[^>]*>9<\/span><span[^>]*>m<\/span>/);
-    expect(perf).toContain('>avg, 2 h<');
     expect(perf).toMatch(/data-testid="perf-reunite-value"><span[^>]*>18<\/span><span[^>]*>m<\/span>/);
     expect(perf).toMatch(/data-testid="perf-logged-value"><span[^>]*>6<\/span><\/span>/);
-    expect(perf).toContain('>last hour<');
+    // The windows (Brian 2026-11-06 21:55): both averages over the last 2 hours, Logged over the last hour.
+    expect(perf).toMatch(/data-testid="perf-answer-context">last 2 hours</);
+    expect(perf).toMatch(/data-testid="perf-reunite-context">last 2 hours</);
+    expect(perf).toMatch(/data-testid="perf-logged-context">last hour</);
+    expect(perf).not.toContain('avg');
     expect(perf).toContain('Average time to answer over the last 2 hours: 9 minutes.');
-    expect(perf).toContain('Average time to reunite: 18 minutes.');
+    expect(perf).toContain('Average time to reunite over the last 2 hours: 18 minutes.');
     expect(perf).toContain('Logged in the last hour: 6 requests.');
   });
 
@@ -207,21 +211,43 @@ describe('dashboard render', () => {
     expect(rule('.kv')).toContain('min-width: 0;');
   });
 
-  it('Performance shows "—" when the server sends null or nothing (v2.2 fields not deployed yet)', () => {
+  it('Performance: an empty value reads "None" with its sentence (Brian 2026-11-06 21:55)', () => {
+    const stats = v7Stats({ longestWait: null, avgAnswerMinutes: null, avgReuniteMinutes: null });
+    const html = render(storeWith(), <DashboardContent stats={stats} />);
+    for (const id of ['perf-longest-wait', 'perf-answer', 'perf-reunite']) {
+      expect(html).toMatch(new RegExp(`data-testid="${id}-value"><span[^>]*>None</span></span>`));
+    }
+    expect(html).not.toMatch(/-value"><span[^>]*>—</);
+    // Nothing to open without a waiting request.
+    expect(html).toMatch(/<div[^>]*data-testid="perf-longest-wait"/);
+    expect(html).toContain('No one is waiting for a check.');
+    expect(html).toContain('No answers in the last 2 hours.');
+    expect(html).toContain('No reunions in the last 2 hours.');
+    // Logged is a count: 0 is a value.
+    expect(render(storeWith(), <DashboardContent stats={v7Stats({ loggedLastHour: 0 })} />)).toMatch(/data-testid="perf-logged-value"><span[^>]*>0<\/span><\/span>/);
+    // A missing field (an older lp_stats) is empty too.
+    const missing = v7Stats();
+    delete (missing as Partial<Stats>).avgReuniteMinutes;
+    delete (missing as Partial<Stats>).loggedLastHour;
+    const old = render(storeWith(), <DashboardContent stats={missing} />);
+    expect(old).toMatch(/data-testid="perf-reunite-value"><span[^>]*>None</);
+    expect(old).toMatch(/data-testid="perf-logged-value"><span[^>]*>None</);
+    expect(old).toContain('Nothing logged in the last hour.');
+  });
+
+  it('Performance keeps "—" only while the stats request fails: an empty value is not known to be empty', () => {
     const stats = v7Stats({ longestWait: null, avgAnswerMinutes: null, avgReuniteMinutes: null });
     delete (stats as Partial<Stats>).loggedLastHour;
-    const html = render(storeWith(), <DashboardContent stats={stats} />);
+    const html = render(storeWith(), <DashboardContent stats={stats} failed />);
     for (const id of ['perf-longest-wait', 'perf-answer', 'perf-reunite', 'perf-logged']) {
       expect(html).toMatch(new RegExp(`data-testid="${id}-value"><span[^>]*>—</span></span>`));
     }
-    // Nothing to open without a waiting request.
-    expect(html).toMatch(/<div[^>]*data-testid="perf-longest-wait"/);
-    expect(html).toContain('Longest wait: nobody is waiting for a check.');
+    expect(html).not.toContain('>None<');
+    expect(html).toContain('Longest wait: not available.');
+    expect(html).toContain('Average time to answer over the last 2 hours: not available.');
     expect(html).toContain('Logged in the last hour: not available.');
-    // A missing avgReuniteMinutes (undefined) reads the same as null.
-    const missing = v7Stats();
-    delete (missing as Partial<Stats>).avgReuniteMinutes;
-    expect(render(storeWith(), <DashboardContent stats={missing} />)).toMatch(/data-testid="perf-reunite-value"><span[^>]*>—</);
+    // Known values still show while it fails (the last good stats).
+    expect(render(storeWith(), <DashboardContent stats={v7Stats()} failed />)).toMatch(/data-testid="perf-answer-value"><span[^>]*>9<\/span>/);
   });
 
   it('title: large "Dashboard" with Back, the line under it (empty until the first stats arrive), then the banner', () => {

@@ -15,8 +15,9 @@ import { syncRows } from './helpers/sync';
 // into "Archived N" (Brian, 2026-11-06), Alerts in the avatar menu, and no badge on the avatar unless the
 // connection is down; Jeffrey's brand row (2026-11-06 10:31, made compact with an X that hides it on this
 // device, 2026-11-06 afternoon) over All requests only (Pending v8, Brian 2026-11-06 afternoon: Pending and
-// My requests open with their large title; Pending is To check | Friend coming, tests/e2e/pending-v8.spec.ts
-// has the rest); and the live indicator under the title. Runs against
+// My requests open with their large title; Pending v9.1 is one page, Waiting for check then Friend coming,
+// tests/e2e/pending-v8.spec.ts and pending-v9.spec.ts have the rest); and the live indicator under the title.
+// Runs against
 // the real store and API on the local stack. Every row is synthetic and unique to this run (TEST-L-<tag>);
 // nothing is truncated or reset, and the requests a test opened are closed after it.
 
@@ -53,6 +54,12 @@ async function setStatus(page: Page, r: RequestSummary, status: string, kind: st
   const res = await page.request.post(`/api/requests/${r.id}/status`, { headers: { origin: BASE }, data: { status, expectedVersion: r.rowVersion, kind } });
   expect(res.ok(), `status → ${res.status()}`).toBe(true);
   return ((await res.json()) as { request: RequestSummary }).request;
+}
+
+/** (F5) Not in medical, final: the first Not found only puts it on a "Not found yet" hold; the second closes it. */
+async function notFound(page: Page, r: RequestSummary): Promise<RequestSummary> {
+  const held = await setStatus(page, r, 'Checked – Not Found', 'answer');
+  return setStatus(page, held, 'Checked – Not Found', 'answer');
 }
 
 const row = (page: Page, id: string) => page.locator(`[data-request-id="${id}"]`);
@@ -438,9 +445,11 @@ test.describe('the line under the title (v2.2 afternoon: minutes, a banner for p
     const line = (await live(page).boundingBox())!;
     expect(line.y).toBeGreaterThanOrEqual(title.y + title.height - 1);
     expect(line.y).toBeLessThan(title.y + title.height + 8);
-    expect(Math.abs(line.x + 16 - title.x)).toBeLessThan(2);
     await expect(live(page)).toHaveCSS('font-variant-numeric', 'tabular-nums');
     const dot = live(page).locator('[class*="liveDot"]');
+    // Its dot lines up with the title's first letter. (F5 release: on All and My requests the line shares a row
+    // with the "⇅" toggle, which holds the 16 px inset instead of the line, so the dot is measured, not the line.)
+    expect(Math.abs((await dot.boundingBox())!.x - title.x)).toBeLessThan(2);
     await expect(dot).toHaveCSS('width', '7px');
     await expect(dot).toHaveCSS('box-shadow', 'none');
     const dotColour = () => dot.evaluate((el) => getComputedStyle(el).backgroundColor);
@@ -577,7 +586,7 @@ test('All rows: Created with AM/PM in the event timezone, Updated "—" until it
 
 test('All (option B): closed requests fold into "Archived N"; the fold opens in place, greyed, and stays open this session', async ({ page }) => {
   const openRow = await createRequest(page);
-  const notIn = await setStatus(page, await createRequest(page), 'Checked – Not Found', 'answer');
+  const notIn = await notFound(page, await createRequest(page));
   await page.goto('/');
   await expect(row(page, openRow.id)).toBeVisible({ timeout: 10_000 });
 
@@ -681,7 +690,7 @@ test('at 375 px after midnight the name keeps at least 80 px; numbers and times 
   await page.clock.setFixedTime(later);
   await page.setViewportSize({ width: 375, height: 812 });
   const r = await createRequest(page, { name: `${TAG} Kayla Alexandra Martinez-Rodriguez` });
-  const notIn = await setStatus(page, await createRequest(page), 'Checked – Not Found', 'answer');
+  const notIn = await notFound(page, await createRequest(page));
   await page.goto('/');
   await expect(row(page, r.id)).toBeVisible({ timeout: 10_000 });
   const created = formatCreatedTime(r.createdAt, later, TZ);
@@ -784,7 +793,6 @@ test('Pending: In medical → Friend coming, Undo, then Reunited closes it (grey
   const r = await createRequest(page);
   await page.goto('/?view=pending');
   await expect(checkCard(page, r.id)).toBeVisible({ timeout: 10_000 });
-  const tab = (name: RegExp) => page.getByRole('tab', { name });
 
   // In medical saves at once, then asks where they are (Skip saves nothing more).
   await checkCard(page, r.id).getByRole('button', { name: 'In medical', exact: true }).click();
@@ -793,20 +801,18 @@ test('Pending: In medical → Friend coming, Undo, then Reunited closes it (grey
   await expect(sheet).toBeVisible();
   await sheet.getByRole('button', { name: 'Skip' }).click();
   await expect(sheet).toHaveCount(0);
-  await tab(/^Friend coming/).click();
+  // (v9.1) Friend coming is on the same page, under Waiting for check; its cards carry no friend line.
   await expect(comingCard(page, r.id)).toBeVisible();
-  await expect(comingCard(page, r.id)).toContainText(`${TAG} Friend · on the way`);
+  await expect(comingCard(page, r.id)).not.toContainText(`${TAG} Friend`);
   await expect(comingCard(page, r.id)).not.toContainText('from FA 3');
 
   await expect(page.getByText(`${lp(r)} · In medical`)).toBeVisible();
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect(comingCard(page, r.id)).toHaveCount(0);
-  await tab(/^To check/).click();
   await expect(checkCard(page, r.id)).toBeVisible();
 
   await checkCard(page, r.id).getByRole('button', { name: 'In medical', exact: true }).click();
   await sheet.getByRole('button', { name: 'Skip' }).click();
-  await tab(/^Friend coming/).click();
   await expect(comingCard(page, r.id)).toBeVisible();
   await comingCard(page, r.id).getByRole('button', { name: 'Reunited' }).click();
   await expect(comingCard(page, r.id)).toHaveCount(0);
@@ -826,8 +832,12 @@ test('Not found leaves Pending; ?status= shows a filter chip that clears to All'
   const r = await createRequest(page);
   await page.goto('/?view=pending');
   await expect(checkCard(page, r.id)).toBeVisible({ timeout: 10_000 });
-  await checkCard(page, r.id).getByRole('button', { name: 'Not found', exact: true }).click();
+  // (v9.1) The first Not found holds it, in place with a "Not found yet" chip; the second closes it.
+  await checkCard(page, r.id).getByTestId('not-found-answer').click();
+  await expect(checkCard(page, r.id).getByTestId('hold-chip')).toHaveText('Not found yet');
+  await checkCard(page, r.id).getByTestId('not-found-answer').click();
   await expect(checkCard(page, r.id)).toHaveCount(0);
+  await expect.poll(async () => ((await (await page.request.get(`/api/requests/${r.id}`)).json()) as RequestSummary).status).toBe('Checked – Not Found');
 
   await page.goto(`/?status=${encodeURIComponent('Checked – Not Found')}`);
   const chip = page.getByTestId('status-chip');
@@ -927,7 +937,6 @@ test('front of house logs a request with a photo; the liaison sees it in Pending
     await expect(locationForm).toBeVisible();
     await page.getByRole('textbox', { name: 'Location' }).fill('Chair 7');
     await locationForm.getByRole('button', { name: 'Save' }).click();
-    await page.getByRole('tab', { name: /^Friend coming/ }).click();
     await expect(comingCard(page, id!)).toBeVisible();
     await expect(comingCard(page, id!).getByTestId('location-chip')).toHaveAccessibleName('Chair 7, edit location');
 

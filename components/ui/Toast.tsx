@@ -91,14 +91,19 @@ export interface SnackbarProps {
   onDismiss: () => void;
 }
 
-/** The 6 s Undo bar. Escape dismisses it while Undo has focus. */
+/**
+ * The 10 s Undo bar. Escape dismisses it while Undo has focus. (Pending v9.1) When the bar's words are compact
+ * ("B.W. closed · not found in medical"), screen readers hear them as a sentence instead ("B.W. closed, not found
+ * in medical.").
+ */
 export function Snackbar({ snackbar, onUndo, onDismiss }: SnackbarProps) {
   if (!snackbar) return null;
   return (
     <div role="status" aria-live="polite" className={`lp-snack ${styles.snack}`}>
-      <Text size="2" className={styles.snackText} truncate>
+      <Text size="2" className={styles.snackText} truncate aria-hidden={snackbar.said ? true : undefined}>
         {snackbar.message}
       </Text>
+      {snackbar.said ? <span className={styles.visuallyHidden}>{snackbar.said}</span> : null}
       <button
         type="button"
         className={styles.undo}

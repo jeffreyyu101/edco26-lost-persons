@@ -89,6 +89,21 @@ screenshots.
   double tap or a held key in the crop step answers one photo, never the next.
 - **System notifications** (above) ship in this release too.
 
+### 2026-11-06 night (F5 release, `release/f5`)
+
+- **Stages and the "Not found yet" hold** (F5): a request shows its stage (Needs info, Not found yet, Recheck
+  due, Friend en route, Friend arrived) over its stored status. The first Not found ("⧗ Not found yet") keeps
+  it open for a recheck in 20 minutes; on a held request the button reads "× Not found" and closes it. **This
+  needs the migration below re-applied, before the deploy.**
+- **Pending v9.1**: one page on a phone (Waiting for check, then Friend coming, each header folds its
+  section), two columns that scroll on their own from 768 px; no To check | Friend coming tabs, no Later lane.
+- **Sort by status** on All requests and My requests ("⇅ Newest" / "⇅ Updated" ↔ "⇅ Status" at the right end
+  of the line under the title; the column header on the desk table).
+- **Dashboard Performance**: "last 2 hours" / "last hour" on each row, and "None" for an empty value ("—" only
+  while the dashboard can't reach the server).
+- **Jeffrey's test-data banner is gone.** It drew nothing after 12:30 PM on Nov 6, and the first load had to stay
+  within its 230 KB budget (`docs/BUILD_SPEC.md` A71).
+
 ## The production migration
 
 [`supabase/migrations/20261106000000_rework.sql`](supabase/migrations/20261106000000_rework.sql) is the only
@@ -116,6 +131,18 @@ file production needs. The other files in that folder are the local chain: the b
 
   (Release `release/f1` needed the same file for `lp_stats`' `avgReuniteMinutes` / `loggedLastHour` and the
   free-text `age`; that run is done.)
+
+- **The "Not found yet" hold (F5, `feat/stages`) needs the file applied again too, before that build
+  deploys.** It adds two columns (`patients.recheck_at`, nullable, and `patients.not_found_checks`, smallint
+  default 0, both `add column if not exists`: no table rewrite), the function `lp_stages_recheck_minutes()`,
+  and recreates `lp_row` (two extra keys), `lp_set_status` (a first Not found keeps the request Waiting for
+  check, on hold for 20 minutes) and `lp_stats` (a hold counts as Waiting). **The build that is live now keeps
+  working on it**: its server calls `lp_set_status` exactly as before and maps `lp_row` through its
+  allowlist, so its first Not found comes back Waiting for check and stays in its queue (a second Not found
+  closes it, as on the new build), and its Undo clears the hold. Check after the commit:
+  `select lp_stages_recheck_minutes();` returns `20`, and
+  `select column_name from information_schema.columns where table_name = 'patients' and column_name in ('recheck_at', 'not_found_checks');`
+  returns both. A second paste keeps every hold.
 
 By hand, in the Supabase dashboard:
 
@@ -196,6 +223,13 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 - [ ] The re-run of the migration on production **before** this build deploys (lp_stats + age → text): dry
       run, then commit (see above).
 - [ ] Several staff sign in at once behind the venue Wi-Fi (one shared IP).
+- [ ] The "Not found yet" hold on real phones (Pending v9.1): medical taps "Not found yet" → the card stays in
+      place with the violet chip, "Not found yet · recheck in 20 min" and Undo, and its button reads "× Not
+      found"; 20 minutes later (phone clock) the chip reads "Recheck due" and nothing has moved; "× Not found"
+      closes it ("B.W. closed · not found in medical", Undo). Front of house's My requests shows the chip (no
+      recheck time) meanwhile.
+- [ ] Pending v9.1 on a phone and an iPad: one page (Waiting for check, then Friend coming), each header folds
+      its section; the board's columns scroll on their own; "⇅ Status" on All and My requests is remembered.
 
 ## Known limits
 
