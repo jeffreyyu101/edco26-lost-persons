@@ -1,5 +1,5 @@
-// docs/export.sql (v2.5, A50): Jeffrey's end-of-event export from the Supabase SQL editor, which replaced the
-// app's CSV route. Both queries run on the local database inside a READ ONLY transaction (so the file can't
+// docs/export.sql (v2.5, A50; F3 Query 3): Jeffrey's end-of-event export from the Supabase SQL editor, which
+// replaced the app's CSV route. Every query runs on the local database inside a READ ONLY transaction (so the file can't
 // write), return every request once by case number with every field the old CSV had, times in New York, and
 // the full audit trail joined to the LP number. The spreadsheet formula guard in the file is checked with
 // every injection prefix the old CSV export was tested with.
@@ -14,7 +14,8 @@ import { api, cookieFor, createBody, dbUrl, newStaff, pii, psql, staffOf, uniq, 
 withTestServer();
 
 const SQL = readFileSync(join(ROOT, 'docs', 'export.sql'), 'utf8');
-const [QUERY_1, QUERY_2] = SQL.split(/^-- Query 2: audit trail$/m) as [string, string];
+const [QUERY_1, REST] = SQL.split(/^-- Query 2: audit trail$/m) as [string, string];
+const [QUERY_2, QUERY_3] = REST.split(/^-- Query 3: messages and en route$/m) as [string, string];
 
 const REQUEST_COLUMNS = [
   'Case number', 'Name', 'Age', 'Gender', 'Height/build', 'Hair', 'Identifying features', 'Physical description',
@@ -23,6 +24,7 @@ const REQUEST_COLUMNS = [
   'Reunion started', 'Closed', 'Created by', 'Updated by',
 ];
 const AUDIT_COLUMNS = ['Case number', 'When', 'Staff', 'Action', 'From status', 'To status', 'Kind', 'Notes', 'Previous value', 'New value'];
+const THREAD_COLUMNS = ['Case number', 'When', 'Staff', 'Team', 'Type', 'Text or state', 'ETA', 'Unsent', 'Unsent at'];
 
 /** RFC 4180 records from psql --csv (quoted fields may hold commas, quotes and line breaks). */
 function parseCsv(text: string): string[][] {
@@ -83,11 +85,53 @@ function newYork(iso: string): string {
 const lp = (n: number) => `LP-${String(n).padStart(4, '0')}`;
 
 describe('docs/export.sql', () => {
-  it('has exactly the two queries, each read-only in a READ ONLY session', () => {
+  it('has exactly the three queries, each read-only in a READ ONLY session', () => {
     expect(QUERY_1).toMatch(/-- Query 1: requests/);
     expect(QUERY_2).toMatch(/from public\.audit_events e/);
+    expect(QUERY_3).toMatch(/from public\.lp_messages m/);
     expect(runReadOnly(QUERY_1).header).toEqual(REQUEST_COLUMNS);
     expect(runReadOnly(QUERY_2).header).toEqual(AUDIT_COLUMNS);
+    expect(runReadOnly(QUERY_3).header).toEqual(THREAD_COLUMNS);
+  });
+
+  it('Query 3: every message (unsent ones marked) and en route event, by case number and time', async () => {
+    const foh = newStaff();
+    const medical = newStaff('Medical');
+    const fohCookie = await cookieFor(foh);
+    const medCookie = await cookieFor(medical);
+    const created = await api('/api/requests', { json: createBody({ name: pii(`TEST-core-${uniq()}`) }), cookie: fohCookie });
+    expect(created.status).toBe(201);
+    const r = created.body.request;
+    const ask = await api(`/api/requests/${r.id}/messages`, { json: { clientMutationId: crypto.randomUUID(), body: '=SUM(A1) tattoos?' }, cookie: medCookie });
+    expect(ask.status).toBe(201);
+    const oops = await api(`/api/requests/${r.id}/messages`, { json: { clientMutationId: crypto.randomUUID(), body: 'Wrong one' }, cookie: fohCookie });
+    expect(oops.status).toBe(201);
+    expect((await api(`/api/requests/${r.id}/messages/${oops.body.message.id}/unsend`, { json: {}, cookie: fohCookie })).status).toBe(200);
+    const answered = await api(`/api/requests/${r.id}/status`, {
+      json: { status: STATUS.inMedical, expectedVersion: r.rowVersion, kind: 'answer' },
+      cookie: medCookie,
+    });
+    expect(answered.status).toBe(200);
+    expect((await api(`/api/requests/${r.id}/enroute`, { json: { action: 'set', etaMinutes: 5 }, cookie: fohCookie })).status).toBe(200);
+    expect((await api(`/api/requests/${r.id}/enroute`, { json: { action: 'arrive' }, cookie: fohCookie })).status).toBe(200);
+
+    const { header, rows } = runReadOnly(QUERY_3);
+    expect(rows.every((row) => row.length === THREAD_COLUMNS.length)).toBe(true);
+    const col = (row: string[], name: string) => row[header.indexOf(name)];
+    const mine = rows.filter((row) => row[0] === lp(r.caseNumber));
+    expect(mine.map((row) => [col(row, 'Type'), col(row, 'Text or state'), col(row, 'Unsent')])).toEqual([
+      ['Message', "'=SUM(A1) tattoos?", 'no'],
+      ['Message', 'Wrong one', 'yes'],
+      ['En route', 'enroute', ''],
+      ['En route', 'arrived', ''],
+    ]);
+    expect(col(mine[0] as string[], 'Staff')).toBe(staffOf(medical));
+    expect(col(mine[0] as string[], 'Team')).toBe('Medical');
+    expect(col(mine[1] as string[], 'Unsent at')).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    expect(col(mine[2] as string[], 'ETA')).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    expect(mine.map((row) => col(row, 'When'))).toEqual([...mine.map((row) => col(row, 'When'))].sort());
+    const nums = rows.map((row) => row[0] as string).filter((n) => n !== '').map((n) => Number(n.slice(3)));
+    expect(nums).toEqual([...nums].sort((a, b) => a - b));
   });
 
   it('Query 1: every request once by case number, every field, New York times, guarded formula text', async () => {

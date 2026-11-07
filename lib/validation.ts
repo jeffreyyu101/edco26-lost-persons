@@ -295,3 +295,63 @@ export function searchParamsToObject(params: URLSearchParams): Record<string, st
   });
   return out;
 }
+
+// ---------------------------------------------------------------------------------------------------
+// Messages and en route (F3, spec §18 A53–A58)
+// ---------------------------------------------------------------------------------------------------
+
+/** A message body: trimmed, 1–500 code points, storable. Plain text (never rendered as HTML). */
+export const messageBodySchema = z
+  .string()
+  .transform((v) => v.trim())
+  .refine((v) => v.length > 0, { message: 'Type a message' })
+  .refine((v) => codePoints(v) <= 500, { message: 'Must be 500 characters or fewer' })
+  .refine((v) => storable(v), { message: UNSTORABLE });
+
+/** POST /api/requests/:id/messages. `clientMutationId` makes a retried send land once. */
+export const postMessageSchema = z.strictObject({
+  clientMutationId: uuidSchema,
+  body: messageBodySchema,
+});
+export type PostMessageBody = z.input<typeof postMessageSchema>;
+
+/** POST /api/requests/:id/messages/read: up to the newest message on screen (absent = everything until now). */
+export const markReadSchema = z.strictObject({
+  upto: isoDateTimeSchema.optional(),
+});
+
+/** GET /api/requests/:id/messages: `beforeAt` + `beforeId` together page back ("Earlier messages"). */
+export const threadQuerySchema = z
+  .strictObject({
+    beforeAt: syncCursorSchema.optional(),
+    beforeId: uuidSchema.optional(),
+  })
+  .superRefine((v, ctx) => {
+    if ((v.beforeAt === undefined) !== (v.beforeId === undefined)) {
+      ctx.addIssue({ code: 'custom', path: ['beforeAt'], message: 'beforeAt and beforeId go together' });
+    }
+  });
+
+/** Route params `:id` + `:messageId`. */
+export const messageParamsSchema = z.strictObject({ id: uuidSchema, messageId: uuidSchema });
+
+/**
+ * POST /api/requests/:id/enroute.
+ *   set:    etaMinutes 0 (Now) / 5 / 10 / 15 or null (no ETA), or etaAt (the exact ETA back, the Undo of a
+ *           cancel). `queuedMs`: how long ago the tap was (a queued tap keeps its ETA), 0–6 h.
+ *   cancel / arrive: nothing else.
+ */
+export const enrouteSchema = z
+  .strictObject({
+    action: z.enum(['set', 'cancel', 'arrive']),
+    etaMinutes: z.union([z.literal(0), z.literal(5), z.literal(10), z.literal(15), z.null()]).optional(),
+    etaAt: isoDateTimeSchema.nullable().optional(),
+    queuedMs: z.number().int().min(0).max(6 * 3_600_000).optional(),
+  })
+  .superRefine((v, ctx) => {
+    const hasEta = (v.etaMinutes !== undefined && v.etaMinutes !== null) || (v.etaAt !== undefined && v.etaAt !== null);
+    if (v.action !== 'set' && hasEta) {
+      ctx.addIssue({ code: 'custom', path: ['etaMinutes'], message: 'Only en route takes an ETA' });
+    }
+  });
+export type EnrouteBody = z.input<typeof enrouteSchema>;

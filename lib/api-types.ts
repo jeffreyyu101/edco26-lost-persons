@@ -83,6 +83,99 @@ export interface RequestSummary {
   recheckAt?: IsoDateTime | null;
   /** Not found answers in this round: 0, 1 while held, 2 after the final Not found (shown as "2 checks"). */
   notFoundChecks?: number;
+  // Added 2026-11-06 evening (F3 Messages + en route, spec §18 A55). All optional: rows cached on a phone
+  // before them, and mutation responses (built by lp_row alone), do not carry them; the client keeps the
+  // previous values then (sync-merge carryActivity). Sync and the detail always send them.
+  /** Messages on the request (unsent ones never count). */
+  messageCount?: number;
+  /** When the latest message was written, or null. */
+  lastMessageAt?: IsoDateTime | null;
+  /** Other people's messages after the caller's read cursor (never the caller's own). */
+  unread?: number;
+  /**
+   * Waiting for check, the latest message is from the Medical team, and nobody wrote or changed the status
+   * since: front of house has a question to answer. Cleared by a front-of-house reply or any status change.
+   */
+  needsInfo?: boolean;
+  /** The latest message, for the one-line preview on cards (text ≤ 120 characters). No other bodies in sync. */
+  lastMessage?: LastMessage | null;
+  /** Who is bringing the friend (In medical only), or null when nobody is. */
+  enroute?: EnrouteSummary | null;
+  /** The caller is involved in the request (lp_involved_staff): a new message from someone else alerts. */
+  involved?: boolean;
+}
+
+/** RequestSummary.lastMessage (F3). */
+export interface LastMessage {
+  /** The sender's short name, "Rae C." (never the full name). */
+  by: string;
+  /** Written by the caller (any of their phones). Previews then say "You". */
+  mine: boolean;
+  /** The first 120 characters. */
+  text: string;
+}
+
+/** RequestSummary.enroute (F3): one row for every staff member bringing the friend. */
+export interface EnrouteSummary {
+  /** How many are en route now (arrived rows not counted). */
+  count: number;
+  /** The earliest ETA among them, or null when none gave one. */
+  earliestEta: IsoDateTime | null;
+  /** 'arrived' as soon as anyone arrived (the friend is there). */
+  state: 'enroute' | 'arrived';
+  /** The caller's own en route, or null. `etaMinutes` is the pill chosen (0 = Now); `state` its own state. */
+  mine: { etaAt: IsoDateTime | null; etaMinutes?: number | null; state?: 'enroute' | 'arrived' } | null;
+}
+
+/** One message of a thread (GET /api/requests/:id/messages). Plain text: never rendered as HTML. */
+export interface ThreadMessage {
+  id: string;
+  /** Attribution "Name · Team" of the sender. */
+  staff: string;
+  /** "Rae C." */
+  by: string;
+  /** The sender's short team ("Medical", "GCHX Med Transpo"). */
+  team: string;
+  body: string;
+  createdAt: IsoDateTime;
+  /** Sent by the caller (any of their phones). */
+  mine: boolean;
+  /** The id the sending phone chose (matches its queued bubble). */
+  clientMutationId: string;
+}
+
+/** Under my latest message: "Delivered", or "Read 4:14 PM" once someone else opened the thread after it. */
+export interface ThreadReceipt {
+  messageId: string;
+  readAt: IsoDateTime | null;
+}
+
+/** RequestSummary's activity fields, all present (mutation responses of the messages routes). */
+export type RequestActivityDto = Required<Pick<RequestSummary, 'messageCount' | 'lastMessageAt' | 'unread' | 'needsInfo' | 'lastMessage' | 'enroute' | 'involved'>>;
+
+/** GET /api/requests/:id/messages[?beforeAt&beforeId]: oldest first. */
+export interface ThreadPage {
+  messages: ThreadMessage[];
+  /** There are older messages ("Earlier messages"). */
+  hasEarlier: boolean;
+  /** Only on the first (latest) page, and only when the caller has written. */
+  receipt: ThreadReceipt | null;
+  activity: RequestActivityDto;
+}
+
+/** POST /api/requests/:id/messages → 201 when created, 200 for a retry of the same clientMutationId. */
+export interface PostMessageResponse {
+  created: boolean;
+  message: ThreadMessage;
+  activity: RequestActivityDto;
+}
+
+/** POST /api/requests/:id/messages/read, POST …/messages/:messageId/unsend, POST /api/requests/:id/enroute. */
+export interface ActivityResponse {
+  changed: boolean;
+  activity: RequestActivityDto;
+  /** En route only: the call was accepted but the request is not In medical, so nothing changed. */
+  ignored?: boolean;
 }
 
 export interface PhotoInfo {
@@ -165,6 +258,8 @@ export interface AuditHold {
 export interface RequestDetail extends RequestSummary {
   photos: PhotoInfo[];
   audit: AuditEvent[];
+  /** (F3) The thread's latest page, with the receipt. Absent when it could not be read. */
+  thread?: ThreadPage;
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -251,6 +346,10 @@ export interface Stats {
   /** The 5 most recently updated requests. */
   recent: Array<{ id: string; caseNumber: number; name: string | null; status: StatusValue; postShort: string; updatedAt: IsoDateTime }>;
   serverTime: IsoDateTime;
+  /** (F3, lp_enroute_stats) Requests In medical with someone bringing the friend now. Absent: show "—". */
+  friendsEnRoute?: number;
+  /** (F3) Mean minutes from en route to Arrived, over arrivals in the last 2 hours; null if none. */
+  avgArriveMinutes?: number | null;
 }
 
 // ---------------------------------------------------------------------------------------------------

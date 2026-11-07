@@ -29,6 +29,8 @@ import { Camera, Check, ChevronDown, Clock, CloudOff, Ellipsis, History, Hourgla
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { CropSheet } from '@/components/photo/CropSheet';
 import { useCropQueue, type CropPick } from '@/components/photo/use-crop-queue';
+import { StatusEnroute } from '@/components/messages/Enroute';
+import { MessagesSection } from '@/components/messages/MessagesSection';
 import { Banner, ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ProfileSkeleton } from '@/components/ui/Skeleton';
@@ -422,9 +424,13 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
           panel={panel}
           onNeedsConnection={() => actions.showToast({ tone: 'amber', icon: 'cloud-off', title: NEEDS_CONNECTION, durationMs: 3_000 })}
           answers={answersInBlock ? <BlockAnswers row={row} offline={offline} onAnswer={setStatus} /> : null}
+          enrouteSlot={<StatusEnroute row={row} />}
         />
 
         {panel ? actionBar : null}
+
+        {/* F3: the request's thread, at every status (updates.html v7). */}
+        <MessagesSection row={row} panel={panel} />
 
         <Details row={row} />
 

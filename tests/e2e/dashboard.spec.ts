@@ -309,10 +309,14 @@ test.describe('with /api/stats mocked', () => {
   test.use({ serviceWorkers: 'block' });
 
   test('Performance rows: Longest wait opens the request; averages and Logged show their values', async ({ page }) => {
-    await routeStats(page, mockStats());
+    await routeStats(page, mockStats({ friendsEnRoute: 2, avgArriveMinutes: 6 }));
     await page.goto('/?dashboard=1');
     await expect(page.getByTestId('open-count')).toHaveText('7');
     await expect(value(page, 'tile-closed')).toHaveText('6');
+    // (F3) Friends en route now, named by its own text; Time to arrive in Performance.
+    await expect(page.getByTestId('tile-enroute-value')).toHaveText('2');
+    await expect(page.getByRole('button', { name: 'Friends en route 2', exact: true })).toBeVisible();
+    await expect(value(page, 'perf-arrive')).toHaveText('6m');
     // (Non-breaking spaces inside each part: a narrow tile wraps only after the "·".)
     await expect(page.getByTestId('reunited-sub')).toContainText('+1\u00a0discharged\u00a0· 1\u00a0cancelled');
     await expect(value(page, 'perf-longest-wait')).toHaveText('24m');
@@ -335,10 +339,14 @@ test.describe('with /api/stats mocked', () => {
     delete (stats as Record<string, unknown>).loggedLastHour;
     await routeStats(page, stats);
     await page.goto('/?dashboard=1');
-    for (const id of ['perf-longest-wait', 'perf-answer', 'perf-reunite', 'perf-logged']) await expect(value(page, id)).toHaveText('None');
+    for (const id of ['perf-longest-wait', 'perf-answer', 'perf-reunite', 'perf-logged', 'perf-arrive']) await expect(value(page, id)).toHaveText('None');
     await expect(page.getByTestId('perf-answer-context')).toHaveText('last 2 hours');
     await expect(page.getByTestId('perf-reunite-context')).toHaveText('last 2 hours');
+    await expect(page.getByTestId('perf-arrive-context')).toHaveText('last 2 hours');
     await expect(page.getByTestId('perf-logged-context')).toHaveText('last hour');
+    // (F3) A server without the en route fields: the tile shows "—".
+    await expect(page.getByTestId('tile-enroute-value')).toContainText('—');
+    await expect(page.getByRole('button', { name: 'Friends en route not available', exact: true })).toBeVisible();
     // Without a waiting request there is nothing to open.
     await expect(page.getByRole('button', { name: /^Longest wait/ })).toHaveCount(0);
     await expect(page.getByTestId('reunited-sub')).toHaveCount(0);

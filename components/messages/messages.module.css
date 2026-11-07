@@ -1,0 +1,717 @@
+/* Messages and en route (F3; design/screens/updates.html v7, #edit, #clarify; f34-states.html 5 and 6).
+   Contrast (spec §7, DECISIONS "Accessibility pass"): text on a tint uses step 12 in light mode (step 11 is
+   under 4.5:1 there) and step 11 in dark mode; my bubble is white on blue-11 (light) / blue-8 (dark), the
+   accessible shades of the mockup's blue-9. Every control is at least 44 px or has a 44 px hit area. */
+
+.section,
+.section *,
+.section *::before,
+.section *::after,
+.sheetBody,
+.sheetBody *,
+.cardSlot,
+.cardSlot *,
+.cardSlot *::before,
+.cardSlot *::after,
+.inStatus,
+.inStatus * {
+  box-sizing: border-box;
+}
+
+/* ---- the Messages section of a request -------------------------------------------------------------- */
+
+.section {
+  position: relative;
+  margin-top: 4px;
+  min-width: 0;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 16px 4px 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gray-12);
+}
+
+/* The thread scrolls inside its own box and opens at the newest message. */
+.scroller {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  max-height: min(60vh, 520px);
+  max-height: min(60dvh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0 8px;
+  min-width: 0;
+}
+
+.earlier {
+  align-self: center;
+  margin: 2px 0 8px;
+}
+
+.from {
+  margin: 10px 0 3px 12px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--gray-11);
+  overflow-wrap: anywhere;
+}
+.from b {
+  font-weight: 500;
+  color: var(--gray-12);
+}
+
+.gap {
+  height: 8px;
+  flex: none;
+}
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.row[data-mine] {
+  justify-content: flex-end;
+}
+
+.bubble {
+  position: relative;
+  max-width: 76%;
+  min-height: 36px;
+  padding: 8px 13px;
+  border-radius: 19px;
+  font-size: 16px;
+  line-height: 1.3;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+.bubble:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+
+.them {
+  background: var(--gray-4);
+  color: var(--gray-12);
+}
+/* iMessage grouping: the corner on the sender's side tightens inside a run. */
+.them[data-run='mid'],
+.them[data-run='end'] {
+  border-top-left-radius: 6px;
+}
+.them[data-run='start'],
+.them[data-run='mid'] {
+  border-bottom-left-radius: 6px;
+}
+
+.mine {
+  background: var(--blue-11);
+  color: #fff;
+}
+:global(.dark) .mine {
+  background: var(--blue-8);
+}
+.mine[data-run='mid'],
+.mine[data-run='end'] {
+  border-top-right-radius: 6px;
+}
+.mine[data-run='start'],
+.mine[data-run='mid'] {
+  border-bottom-right-radius: 6px;
+}
+.mine[data-pending] {
+  opacity: 0.55;
+}
+
+/* "Delivered" / "Read 4:14 PM" / "Sending…" / "Not delivered · Retry", under my latest message. */
+.receipt {
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 18px;
+  margin: 3px 6px 0 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--gray-11);
+  white-space: nowrap;
+}
+.receipt b {
+  font-weight: 600;
+  color: var(--gray-12);
+}
+.failed {
+  color: var(--red-11);
+}
+.failed b {
+  color: var(--red-11);
+}
+.retry {
+  position: relative;
+  height: 24px;
+  margin: 0;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--red-11);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.retry::before {
+  content: '';
+  position: absolute;
+  inset: -10px -4px;
+}
+.retry:focus-visible {
+  outline: 2px solid var(--focus-8);
+}
+
+/* The ⋯ on a bubble: shown on hover / focus on a desktop, always reachable by keyboard. */
+.more.more {
+  flex: none;
+  opacity: 0;
+  color: var(--gray-11);
+}
+.row:hover .more,
+.more.more:focus-visible,
+.more.more[data-state='open'] {
+  opacity: 1;
+}
+@media (hover: none) {
+  .more.more {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+}
+
+.empty {
+  display: grid;
+  place-items: center;
+  padding: 26px 0 18px;
+  color: var(--gray-9);
+}
+
+.loadFail {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 18px 0 12px;
+  color: var(--gray-11);
+}
+
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0 10px;
+}
+
+/* "New messages": over the bottom of the thread when new ones arrive while it is scrolled up. */
+.newPill {
+  position: sticky;
+  bottom: 8px;
+  z-index: 2;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  margin: -42px auto 8px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--blue-11);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: var(--shadow-4);
+  cursor: pointer;
+}
+:global(.dark) .newPill {
+  background: var(--blue-8);
+}
+.newPill::before {
+  content: '';
+  position: absolute;
+  inset: -5px 0;
+}
+
+/* ---- composer ------------------------------------------------------------------------------------- */
+
+/* Right under the thread (the request's sticky action bar keeps the foot of the screen). */
+.composer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 0 6px;
+}
+
+/* Quick lines: one row that scrolls sideways; never cut off, never wrapped. */
+.pills {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 0 2px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.pills::-webkit-scrollbar {
+  display: none;
+}
+.panel .pills {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.pill {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  margin: 4px 0;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 18px;
+  background: var(--gray-a3);
+  color: var(--gray-12);
+  font: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.pill::before {
+  content: '';
+  position: absolute;
+  inset: -4px 0;
+}
+.pill:active {
+  background: var(--gray-a5);
+}
+.pill:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 1px;
+}
+
+.field {
+  position: relative;
+  min-width: 0;
+}
+
+/* Radix TextArea in a rounded field with the send arrow inside it; grows with the text up to 6 lines. */
+.input.input {
+  min-height: 44px;
+  border-radius: 22px;
+}
+.input :global(.rt-TextAreaInput) {
+  min-height: 44px;
+  max-height: 150px;
+  padding: 11px 50px 11px 16px;
+  font-size: 16px;
+  line-height: 22px;
+  overflow-y: auto;
+  resize: none;
+}
+
+.send.send {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  z-index: 1;
+  width: 36px;
+  height: 36px;
+}
+.send.send[data-ready]:not([data-disabled]) {
+  background-color: var(--blue-11);
+  color: #fff;
+}
+:global(.dark) .send.send[data-ready]:not([data-disabled]) {
+  background-color: var(--blue-8);
+}
+.send::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+}
+
+.counter {
+  align-self: flex-end;
+  margin: -2px 10px 0 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--gray-11);
+}
+.counter[data-over] {
+  color: var(--red-11);
+}
+
+/* ---- en route row (one row: "Friend en route" + "~4 min") ------------------------------------------ */
+
+.enr {
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--teal-a3);
+  color: var(--teal-12);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+:global(.dark) .enr {
+  color: var(--teal-11);
+}
+.enrIcon {
+  flex: none;
+  color: var(--teal-11);
+}
+.enr[data-tone='amber'] {
+  background: var(--amber-a3);
+  color: var(--amber-12);
+}
+:global(.dark) .enr[data-tone='amber'] {
+  color: var(--amber-11);
+}
+.enr[data-tone='amber'] .enrIcon {
+  color: var(--amber-11);
+}
+.enr[data-tone='green'] {
+  background: var(--green-a3);
+  color: var(--green-12);
+}
+:global(.dark) .enr[data-tone='green'] {
+  color: var(--green-11);
+}
+.enr[data-tone='green'] .enrIcon {
+  color: var(--green-11);
+}
+button.enr {
+  cursor: pointer;
+}
+/* A read-only row on a card: taps fall through to the card's open button. */
+div.enr {
+  pointer-events: none;
+}
+button.enr:active,
+button.enr[data-pressed] {
+  background: var(--teal-a5);
+}
+button.enr[data-tone='amber']:active {
+  background: var(--amber-a5);
+}
+button.enr:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+.enrLabel {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.enrCount {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--teal-a5);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.enr[data-tone='amber'] .enrCount {
+  background: var(--amber-a5);
+}
+.enrEta {
+  flex: none;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.enrChev {
+  flex: none;
+  opacity: 0.75;
+}
+.enrChev.enrPush {
+  margin-left: auto;
+}
+
+/* My tap that was not delivered: "Not delivered · Retry" and Delete, under the row (or in its place). */
+.enrFail {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 0 0 4px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--red-11);
+  white-space: nowrap;
+}
+.enrFail b {
+  font-weight: 600;
+}
+.inStatus .enrFail {
+  margin-top: 4px;
+}
+.enrFailDelete.enrFailDelete {
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  color: var(--gray-11);
+}
+
+/* In the request's status block: under the location, inset like the mockup. */
+.inStatus {
+  padding: 0 10px 10px;
+}
+.inStatus:first-child {
+  padding-top: 10px;
+}
+
+/* ---- en route sheet ---------------------------------------------------------------------------------- */
+
+.sheetBody {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.etas {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.eta {
+  position: relative;
+  min-width: 0;
+  height: 44px;
+  margin: 0;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--gray-a7);
+  color: var(--gray-12);
+  font: inherit;
+  font-size: 15px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.eta[aria-checked='true'] {
+  box-shadow: inset 0 0 0 2px var(--blue-9);
+  color: var(--blue-11);
+  font-weight: 600;
+}
+.eta:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+
+.two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.btn.btn {
+  --base-button-height: 44px;
+  height: 44px;
+  min-width: 0;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.btnQuiet.btnQuiet {
+  font-weight: 500;
+}
+
+/* ---- cards (My requests, Pending) ------------------------------------------------------------------ */
+
+/* Above the card's stretched open button; only its buttons take taps (the rest opens the card). */
+.cardSlot {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  pointer-events: none;
+}
+.cardSlot button {
+  pointer-events: auto;
+}
+.mineSlot {
+  margin-top: 12px;
+}
+
+/* "Rae C.: Any tattoos or marks?" with an unread dot: one line, ellipsis. */
+.preview {
+  /* Taps fall through to the card's open button underneath. */
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--gray-a3);
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--gray-12);
+}
+.previewText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.previewWho {
+  color: var(--gray-11);
+}
+.udot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--blue-9);
+}
+
+.cardBtns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.cardBtns[data-count='1'] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.msgBtn {
+  position: relative;
+}
+
+/* Unread count: white on the accessible blue, at the button's top-right corner. */
+.badge {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--blue-11);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  pointer-events: none;
+}
+:global(.dark) .badge {
+  background: var(--blue-8);
+}
+
+/* A count after a name in a table row. */
+.rowBadge {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  margin-left: 8px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--blue-11);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+:global(.dark) .rowBadge {
+  background: var(--blue-8);
+}
+
+/* An unread dot after a tab or nav label. */
+.navDot {
+  flex: none;
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--blue-9);
+}
+
+.railDot {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  margin: 0;
+}
+
+.iconBtn.iconBtn {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+}
+
+/* Pending → To check: Message | Not in medical | In medical. */
+.checkActs {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}

@@ -67,8 +67,9 @@ and starts with a dry-run note.
 
 ### End-of-event export
 
-The app has no export. [`docs/export.sql`](docs/export.sql) holds two read-only queries for the Supabase SQL
-editor: every request (one row each, by case number, times in New York) and the whole audit trail. Run each
+The app has no export. [`docs/export.sql`](docs/export.sql) holds three read-only queries for the Supabase SQL
+editor: every request (one row each, by case number, times in New York), the whole audit trail, and every
+message and en route event (unsent messages marked). Run each
 one and use "Download CSV" on the results; the steps are at the top of the file. The files hold names and
 phone numbers, so treat them as sensitive.
 
@@ -155,6 +156,13 @@ Pending.
 - **Answers.** Not found, In medical, Reunited and Change answer each offer Undo for 10 s. Change answer
   is a menu: the other answer, or Back to Waiting for check. Two people giving the same answer is harmless.
   A change made by someone else shows as "Updated by someone else".
+- **Messages** (2026-11-06 evening). Every request has its own thread, at every status: iMessage-style
+  bubbles, "Delivered" / "Read 4:14 PM" under your latest message, quick lines for the status and your side
+  (medical or front of house), Copy and Unsend (15 minutes). My requests and Pending cards show the last
+  message and an unread count. A message written offline is saved on the phone and sent once the signal is
+  back. Front of house can say **Friend en route** (optional ETA) and **Arrived**; one teal row shows it, with
+  no names. Any status change out of In medical clears it (an Undo within 30 s puts it back). An En route
+  tap that could not be sent shows "Not delivered · Retry" under the row.
 - **Alerts** appear only while the app is open: changes to your requests by someone else, and new requests
   when alerts are on (the bell, in the avatar menu). With the app in front, an alert is a toast with a
   chime. In the background (another tab, a minimised window) it is a system notification instead, where the

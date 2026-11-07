@@ -195,5 +195,8 @@ export function alertToast(alert: AlertEvent, view: (id: string) => void): Omit<
       return { ...base, tone: 'neutral', icon: 'info', durationMs: ALERT_TOAST_MS };
     case 'combined':
       return { ...base, tone: 'neutral', icon: 'bell', durationMs: ALERT_TOAST_MS };
+    case 'message':
+      // F3: a new message from someone else on a request I'm involved in ("J.D." / "Rae C.: Any tattoos?").
+      return { ...base, tone: 'blue', icon: 'message', durationMs: ALERT_TOAST_MS };
   }
 }

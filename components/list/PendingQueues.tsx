@@ -14,6 +14,7 @@
 // coming per device. The card closed by a final Not found animates out (useLeaving).
 import { ChevronDown, ChevronRight, Clock } from 'lucide-react';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { UnreadDot } from '@/components/messages/CardActivity';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { RequestSummary } from '@/lib/api-types';
 import { STATUS_GROUP_META, oldestWaitMinutes } from '@/lib/client/status-order';
@@ -41,13 +42,15 @@ export interface QueueHeaderProps {
   /** The id of the cards this header folds (aria-controls while they are on the page). */
   controls: string;
   id?: string;
+  /** (F3) After the count: the unread-messages dot of Friend coming. */
+  marker?: ReactNode;
 }
 
 /**
  * One 44 px row: glyph · label · count ··· [oldest wait, folded] · chevron. The whole row is the fold button;
  * with nothing in the section it is a plain heading (dimmed glyph, 0, no chevron).
  */
-export function QueueHeader({ queue, count, open, onToggle, oldestWait = null, controls, id }: QueueHeaderProps) {
+export function QueueHeader({ queue, count, open, onToggle, oldestWait = null, controls, id, marker = null }: QueueHeaderProps) {
   const label = QUEUE_LABEL[queue];
   const glyph = <StatusGlyph kind={STATUS_GROUP_META[queue].glyph} size={16} />;
   if (count === 0) {
@@ -87,6 +90,7 @@ export function QueueHeader({ queue, count, open, onToggle, oldestWait = null, c
         <span className={s.qheadLabel}>{label}</span>{' '}
         <span className={s.qheadCount}>{count}</span>
         <span className={s.vh}>{` ${count === 1 ? 'request' : 'requests'}${showWait ? ',' : ''}`}</span>
+        {marker}
         {showWait ? (
           <span className={s.qheadWait} data-tone={waitTone(oldestWait)} data-testid="queue-oldest-wait">
             <Clock size={13} strokeWidth={2} aria-hidden />
@@ -243,6 +247,7 @@ export function PendingQueues({ waiting, coming, now, offline, onNotFound, onInM
         hasCards={coming.length > 0}
         open={!comingFolded}
         onToggle={() => setComingFolded(!comingFolded)}
+        marker={<UnreadDot rows={coming} label="Unread messages" />}
         variant={variant}
         boardClasses={boardClasses}
       >
@@ -263,6 +268,7 @@ function Queue({
   open,
   onToggle,
   oldestWait = null,
+  marker = null,
   variant,
   boardClasses,
   children,
@@ -274,6 +280,7 @@ function Queue({
   open: boolean;
   onToggle: () => void;
   oldestWait?: number | null;
+  marker?: ReactNode;
   variant: 'phone' | 'board';
   boardClasses?: { col?: string; cards?: string };
   children: ReactNode;
@@ -291,7 +298,7 @@ function Queue({
       data-open={shown ? '' : undefined}
       data-testid={board ? `pending-column-${queue}` : `pending-section-${queue}`}
     >
-      <QueueHeader queue={queue} count={count} open={open} onToggle={onToggle} oldestWait={oldestWait} controls={cardsId} id={headingId} />
+      <QueueHeader queue={queue} count={count} open={open} onToggle={onToggle} oldestWait={oldestWait} controls={cardsId} id={headingId} marker={marker} />
       {shown ? (
         <div id={cardsId} className={board ? boardClasses?.cards : s.qcards}>
           {children}

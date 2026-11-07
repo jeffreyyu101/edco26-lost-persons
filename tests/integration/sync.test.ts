@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SyncResponse } from '@/lib/api-types';
 import { syncPath } from '@/lib/client/api-paths';
+import { ACTIVITY_KEYS } from '@/lib/messaging';
 import { REQUEST_SUMMARY_KEYS } from '@/lib/server/mappers';
 import { admin, api, cookieFor, createRequest, newStaff, psql, psqlAsync, randomUUID, withTestServer } from './harness';
 
@@ -69,7 +70,8 @@ describe('GET /api/sync', () => {
     const ids = new Set(rows.map((r) => r.id));
     expect(ids.size).toBeGreaterThanOrEqual(before);
     expect(ids.size).toBeLessThanOrEqual(after);
-    for (const row of rows) expect(Object.keys(row).sort()).toEqual(REQUEST_SUMMARY_KEYS);
+    // F3: every sync row also carries the caller's message / en route activity (spec §18 A55).
+    for (const row of rows) expect(Object.keys(row).sort()).toEqual([...REQUEST_SUMMARY_KEYS, ...ACTIVITY_KEYS].sort());
     const seed = rows.find((r) => r.caseNumber === 1012);
     expect(seed).toMatchObject({ name: 'Kayla Martinez', postShort: 'FA 3', photoCount: 2, status: 'Added' });
   });

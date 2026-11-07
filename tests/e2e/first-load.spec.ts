@@ -7,11 +7,14 @@ import { sessionCookieHeader } from './helpers/session';
 // default level). View chunks loaded later through next/dynamic are not part of the first load.
 // Request-based, so it runs in one project only. Needs a production build (npm run build:test).
 const KB = 1024;
+// §18 A59 (F3, 2026-11-06 evening): 230 → 234 KB and 40 → 42 KB. The F3 base already measured 230.2 KB
+// (route-only 38.8 KB); messages add 1.9 KB to the first load (the store's side of it), the engine itself
+// loading after start (lib/client/messages-lazy.ts).
 const BUDGET = {
   /** Everything `/` loads first: framework + Radix baseline (~192 KB at Phase 1a) + app code. */
-  homeTotal: 230 * KB,
+  homeTotal: 234 * KB,
   /** Scripts `/` loads that /signin does not: the app's own first-load code (shell, store, nav). */
-  homeOnly: 40 * KB,
+  homeOnly: 42 * KB,
 };
 
 async function scriptSizes(request: APIRequestContext, path: string, cookie?: string): Promise<Map<string, number>> {
