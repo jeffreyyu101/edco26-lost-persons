@@ -90,6 +90,8 @@ export class FakeServer {
   /** How many seq units each delta repeats (the 30 s overlap). */
   overlap = 2;
   override: Override | null = null;
+  /** Extra fields of every sync response (F4: activityUnread / activityUnreadIds). */
+  syncExtras: Record<string, unknown> | null = null;
   private seq = 0;
   private nextCase = 2000;
   /** serverTime strings this server issued → seq at that moment (a mangled '+' won't be found → 400). */
@@ -281,6 +283,6 @@ export class FakeServer {
     }
     const res: SyncResponse = { serverTime: now, rows: page.map((s) => s.row), hasMore, next };
     if (q.get('reconcile') === '1') res.versions = [...this.rows.values()].map((s) => [s.row.id, s.row.rowVersion]);
-    return json(200, res);
+    return json(200, this.syncExtras ? { ...res, ...this.syncExtras } : res);
   }
 }

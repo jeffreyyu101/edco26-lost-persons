@@ -1,0 +1,351 @@
+// Web Push, the Alerts switches and the Activity inbox through the real routes (F4, spec §18 A53–A59), against
+// the local stack and a fake push service that decrypts every push (tests/integration/push-service.ts).
+//   * POST /api/push/prefs, POST/DELETE /api/push/subscribe, POST /api/push/test: session, same-origin,
+//     validation, defaults (Medical: New requests on), re-binding, endpoint rotation, 410 deletes.
+//   * The routes notify (after the response): In medical reaches the logger (Activity row + push, initials as
+//     the title, no ids or contact details), never the actor; a Not in medical answer sends NOTHING (F5 owns
+//     it); new requests reach whoever has New requests on; the location completes the answer or moves it.
+//   * GET /api/activity, POST /api/activity/read | unread, and sync's activityUnread.
+//   * A hanging push service never slows the API response.
+// Synthetic data only; every request is closed afterwards.
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { RequestSummary, SyncResponse } from '@/lib/api-types';
+import { admin, api, cookieFor, createRequest, newStaff, staffOf, withTestServer, type Staff } from './harness';
+import { eventually, startPushService, type FakeDevice, type PushService } from './push-service';
+
+withTestServer();
+
+let push: PushService;
+beforeAll(async () => {
+  push = await startPushService();
+});
+afterAll(async () => {
+  await push?.close();
+  // The shared local stack: leave no synthetic staff with "New requests" on (they would get every new
+  // request of later runs) and no subscription pointing at this closed service.
+  for (const table of ['lp_activity', 'lp_push_subscriptions', 'lp_push_prefs'] as const) {
+    const { error } = await admin().from(table).delete().like('staff', 'test-s staff %');
+    if (error) throw new Error(`cleanup ${table}: ${error.code}`);
+  }
+});
+
+const canon = (s: Staff) => staffOf(s).toLowerCase();
+
+async function subscribe(staff: Staff, device: FakeDevice, extra: Record<string, unknown> = {}) {
+  const res = await api('/api/push/subscribe', { json: { endpoint: device.endpoint, keys: device.keys, ...extra }, cookie: await cookieFor(staff) });
+  expect(res.status, JSON.stringify(res.body)).toBe(200);
+  return res.body as { enabled: boolean; publicKey: string; newRequests: boolean; myUpdates: boolean };
+}
+
+async function subRow(endpoint: string) {
+  const { data, error } = await admin().from('lp_push_subscriptions').select('staff, team, new_requests, my_updates, failures, last_ok_at').eq('endpoint', endpoint).maybeSingle();
+  if (error) throw new Error(error.code);
+  return data as { staff: string; team: string; new_requests: boolean; my_updates: boolean; failures: number; last_ok_at: string | null } | null;
+}
+
+async function activityOf(staff: Staff, requestId: string) {
+  const { data, error } = await admin().from('lp_activity').select('kind, actor, detail, read_at, at').eq('staff', canon(staff)).eq('request_id', requestId).maybeSingle();
+  if (error) throw new Error(error.code);
+  return data as { kind: string; actor: string; detail: string; read_at: string | null; at: string } | null;
+}
+
+async function setStatus(r: RequestSummary, status: string, kind: string, staff: Staff): Promise<RequestSummary> {
+  const res = await api(`/api/requests/${r.id}/status`, { json: { status, expectedVersion: r.rowVersion, kind }, cookie: await cookieFor(staff) });
+  expect(res.status, JSON.stringify(res.body)).toBe(200);
+  return res.body.request as RequestSummary;
+}
+
+const medical = () => newStaff('Medical');
+
+describe('POST /api/push/prefs', () => {
+  it('needs a session and the same origin', async () => {
+    expect((await api('/api/push/prefs', { json: {} })).status).toBe(401);
+    expect((await api('/api/push/prefs', { json: {}, cookie: await cookieFor(newStaff()), origin: 'https://evil.example' })).status).toBe(403);
+  });
+
+  it('push is on (the test keys), with the defaults: New requests off (unless the phone bell was on), Updates on', async () => {
+    const res = await api('/api/push/prefs', { json: {}, cookie: await cookieFor(medical()) });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ enabled: true, newRequests: false, myUpdates: true });
+    expect(res.body.publicKey).toBe(process.env.VAPID_PUBLIC_KEY);
+    expect((await api('/api/push/prefs', { json: {}, cookie: await cookieFor(newStaff()) })).body).toMatchObject({ newRequests: false, myUpdates: true });
+    // The phone's old "Alerts" bell is the default for a staff member seen for the first time.
+    expect((await api('/api/push/prefs', { json: { bell: true }, cookie: await cookieFor(newStaff()) })).body).toMatchObject({ newRequests: true });
+  });
+
+  it('changes a switch for every device of the staff member', async () => {
+    const staff = newStaff();
+    const cookie = await cookieFor(staff);
+    const d1 = push.device();
+    const d2 = push.device();
+    await subscribe(staff, d1);
+    await subscribe(staff, d2);
+    const res = await api('/api/push/prefs', { json: { newRequests: true, myUpdates: false }, cookie });
+    expect(res.body).toMatchObject({ newRequests: true, myUpdates: false });
+    expect(await subRow(d1.endpoint)).toMatchObject({ new_requests: true, my_updates: false });
+    expect(await subRow(d2.endpoint)).toMatchObject({ new_requests: true, my_updates: false });
+    // A first read never changes them back.
+    expect((await api('/api/push/prefs', { json: { bell: false }, cookie })).body).toMatchObject({ newRequests: true, myUpdates: false });
+  });
+
+  it('refuses unknown fields', async () => {
+    expect((await api('/api/push/prefs', { json: { newRequests: 'yes' }, cookie: await cookieFor(newStaff()) })).status).toBe(422);
+    expect((await api('/api/push/prefs', { json: { other: true }, cookie: await cookieFor(newStaff()) })).status).toBe(422);
+  });
+});
+
+describe('POST / DELETE /api/push/subscribe', () => {
+  it('needs a session and the same origin', async () => {
+    const d = push.device();
+    expect((await api('/api/push/subscribe', { json: { endpoint: d.endpoint, keys: d.keys } })).status).toBe(401);
+    expect((await api('/api/push/subscribe', { json: { endpoint: d.endpoint, keys: d.keys }, cookie: await cookieFor(newStaff()), origin: 'https://evil.example' })).status).toBe(403);
+  });
+
+  it('validates: https, known push services only, base64url keys', async () => {
+    const cookie = await cookieFor(newStaff());
+    const d = push.device();
+    for (const endpoint of ['http://fcm.googleapis.com/fcm/send/x', 'https://evil.example/push/1', 'https://fcm.googleapis.com.evil.example/x', 'not a url']) {
+      const res = await api('/api/push/subscribe', { json: { endpoint, keys: d.keys }, cookie });
+      expect(res.status, endpoint).toBe(422);
+    }
+    expect((await api('/api/push/subscribe', { json: { endpoint: d.endpoint, keys: { p256dh: 'no spaces allowed!', auth: d.keys.auth } }, cookie })).status).toBe(422);
+    expect((await api('/api/push/subscribe', { json: { endpoint: d.endpoint }, cookie })).status).toBe(422);
+  });
+
+  it('stores one row per device; a different staff signing in re-binds it; a rotation drops the old endpoint', async () => {
+    const dana = newStaff();
+    const rae = medical();
+    const d = push.device();
+    expect(await subscribe(dana, d)).toMatchObject({ enabled: true, newRequests: false, myUpdates: true });
+    expect(await subRow(d.endpoint)).toMatchObject({ staff: canon(dana), team: dana.team, new_requests: false, my_updates: true });
+    await api('/api/push/prefs', { json: { newRequests: true }, cookie: await cookieFor(rae) });
+    await subscribe(rae, d);
+    expect(await subRow(d.endpoint)).toMatchObject({ staff: canon(rae), new_requests: true });
+    const { count } = await admin().from('lp_push_subscriptions').select('*', { count: 'exact', head: true }).eq('endpoint', d.endpoint);
+    expect(count).toBe(1);
+    const rotated = push.device();
+    await subscribe(rae, rotated, { oldEndpoint: d.endpoint });
+    expect(await subRow(d.endpoint)).toBeNull();
+    expect(await subRow(rotated.endpoint)).not.toBeNull();
+  });
+
+  it('DELETE removes this device (sign-out) and never re-issues the cookie', async () => {
+    const staff = newStaff();
+    const d = push.device();
+    await subscribe(staff, d);
+    const res = await api('/api/push/subscribe', { method: 'DELETE', json: { endpoint: d.endpoint }, cookie: await cookieFor(staff, { issuedAgo: 2 * 3600 }) });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ removed: true });
+    expect(res.headers.getSetCookie()).toEqual([]);
+    expect(await subRow(d.endpoint)).toBeNull();
+  });
+});
+
+describe('POST /api/push/test', () => {
+  it('a real push to this device only, with a fixed text', async () => {
+    const staff = newStaff();
+    const d = push.device();
+    await subscribe(staff, d);
+    const res = await api('/api/push/test', { json: { endpoint: d.endpoint }, cookie: await cookieFor(staff) });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ sent: true });
+    expect(d.deliveries).toHaveLength(1);
+    expect(d.deliveries[0]?.payload).toMatchObject({ title: 'Is my friend in medical?', body: 'Test alert', tag: 'lp-test', url: '/' });
+    expect((await subRow(d.endpoint))?.last_ok_at).not.toBeNull();
+  });
+
+  it("another staff member's device: 404, nothing sent", async () => {
+    const d = push.device();
+    await subscribe(newStaff(), d);
+    const res = await api('/api/push/test', { json: { endpoint: d.endpoint }, cookie: await cookieFor(newStaff()) });
+    expect(res.status).toBe(404);
+    expect(d.deliveries).toHaveLength(0);
+  });
+
+  it('a device the push service says is gone (410) is deleted', async () => {
+    const staff = newStaff();
+    const d = push.device();
+    await subscribe(staff, d);
+    d.mode = 'gone';
+    const res = await api('/api/push/test', { json: { endpoint: d.endpoint }, cookie: await cookieFor(staff) });
+    expect(res.body).toEqual({ sent: false });
+    expect(await subRow(d.endpoint)).toBeNull();
+  });
+});
+
+describe('the routes notify (contract D)', () => {
+  it('In medical: the logger gets one Activity row and one push (initials, no ids or contact details); the actor nothing', async () => {
+    const dana = newStaff();
+    const rae = medical();
+    const danaPhone = push.device();
+    const raePhone = push.device();
+    await subscribe(dana, danaPhone);
+    await subscribe(rae, raePhone);
+    const r = await createRequest(dana, { name: 'Jordan TEST-S Diaz', contactPhone: '(407) 555-0142' });
+    const started = Date.now();
+    await setStatus(r, 'Found – Awaiting Reunion', 'answer', rae);
+    expect(Date.now() - started).toBeLessThan(1_500);
+    const row = await eventually(() => activityOf(dana, r.id).then((a) => a ?? undefined));
+    expect(row).toMatchObject({ kind: 'in_medical', detail: 'In medical', read_at: null });
+    expect(row.actor).toBe(staffOf(rae));
+    expect(await activityOf(rae, r.id)).toBeNull();
+    await eventually(() => danaPhone.deliveries.length === 1);
+    const p = danaPhone.deliveries[0]!;
+    expect(p.payload).toMatchObject({ title: 'J.D.', body: 'In medical', tag: `lp-${r.id}`, url: `/?r=${r.id}`, kind: 'in_medical', renotify: false });
+    expect(p.urgency).toBe('high');
+    expect(p.ttl).toBe('3600');
+    const text = JSON.stringify(p.payload);
+    expect(text).not.toMatch(/LP-?\d/);
+    expect(text).not.toContain('555');
+    expect(text).not.toContain('Jordan');
+    // The actor never hears about their own answer (the new-request push Rae's switch asked for is another event).
+    expect(raePhone.deliveries.filter((d) => d.payload.requestId === r.id && d.payload.kind !== 'new_request')).toHaveLength(0);
+    // The where completes the answer ("In medical · Chair 9"), then a move reads "Chair 9 → Bed 3".
+    const after = (await api(`/api/sync?ids=${r.id}`, { cookie: await cookieFor(rae) })).body.rows[0] as RequestSummary;
+    const patch = async (loc: string, version: number) =>
+      api(`/api/requests/${r.id}`, { method: 'PATCH', json: { patch: { medicalLocation: loc }, expectedVersion: version }, cookie: await cookieFor(rae) });
+    const p1 = await patch('Chair 9', after.rowVersion);
+    expect(p1.status).toBe(200);
+    await eventually(() => activityOf(dana, r.id).then((a) => a?.detail === 'In medical · Chair 9' && a));
+    await patch('Bed 3', p1.body.request.rowVersion);
+    const moved = await eventually(() => activityOf(dana, r.id).then((a) => a?.kind === 'moved' && a));
+    expect(moved.detail).toBe('Chair 9 → Bed 3');
+    // Still ONE row for the request.
+    const { count } = await admin().from('lp_activity').select('*', { count: 'exact', head: true }).eq('staff', canon(dana)).eq('request_id', r.id);
+    expect(count).toBe(1);
+    await eventually(() => danaPhone.deliveries.length === 3);
+    expect(danaPhone.deliveries.map((d) => d.payload.body)).toEqual(['In medical', 'In medical · Chair 9', 'Chair 9 → Bed 3']);
+  });
+
+  it('a Not in medical answer through these routes notifies NOBODY (the Not found yet hold, F5, owns it)', async () => {
+    const dana = newStaff();
+    const rae = medical();
+    const danaPhone = push.device();
+    await subscribe(dana, danaPhone);
+    const r = await createRequest(dana);
+    const answered = await setStatus(r, 'Checked – Not Found', 'answer', rae);
+    // Back to waiting and Not in medical again (a changed answer): still nothing for not_in_medical.
+    const back = await setStatus(answered, 'Added', 'undo', rae);
+    const back2 = await setStatus(back, 'Checked – Not Found', 'answer', rae);
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    const row = await activityOf(dana, r.id);
+    // Only the Back to Waiting for check in between.
+    expect(row?.kind).toBe('back_to_waiting');
+    const { data } = await admin().from('lp_activity').select('kind').eq('request_id', r.id).eq('kind', 'not_in_medical');
+    expect(data).toEqual([]);
+    expect(danaPhone.deliveries.map((d) => d.payload.kind)).toEqual(['back_to_waiting']);
+    expect(back2.status).toBe('Checked – Not Found');
+  });
+
+  it('a new request reaches whoever has New requests on (never its logger); a retry tells nobody again', async () => {
+    const rae = medical();
+    const raePhone = push.device();
+    await subscribe(rae, raePhone, { bell: true }); // the phone's old bell was on: New requests on
+    const off = newStaff();
+    const offPhone = push.device();
+    await subscribe(off, offPhone);
+    const dana = newStaff();
+    const body = { clientMutationId: crypto.randomUUID(), reportingLocation: 'FA 4 – Oasis', name: 'Tara TEST-S Ruiz', age: '24', gender: 'Male', contactPhone: '4075550142' };
+    const cookie = await cookieFor(dana);
+    const res = await api('/api/requests', { json: body, cookie });
+    expect(res.status).toBe(201);
+    const id = res.body.request.id as string;
+    await eventually(() => raePhone.deliveries.some((d) => d.payload.requestId === id));
+    const p = raePhone.deliveries.find((d) => d.payload.requestId === id)!;
+    expect(p.payload).toMatchObject({ title: 'New request', body: 'T.R. · 24 M · FA 4', kind: 'new_request' });
+    expect(JSON.stringify(p.payload)).not.toContain('555');
+    expect(await activityOf(rae, id)).toMatchObject({ kind: 'new_request', detail: 'T.R. · 24 M · FA 4' });
+    expect(await activityOf(dana, id)).toBeNull();
+    expect(offPhone.deliveries.some((d) => d.payload.requestId === id)).toBe(false);
+    const n = raePhone.deliveries.length;
+    expect((await api('/api/requests', { json: body, cookie })).status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    expect(raePhone.deliveries.length).toBe(n);
+  });
+
+  it('cancel tells the answerer; Updates on my requests off: an Activity row but no push', async () => {
+    const dana = newStaff();
+    const rae = medical();
+    const raePhone = push.device();
+    await subscribe(rae, raePhone);
+    await api('/api/push/prefs', { json: { myUpdates: false, newRequests: false }, cookie: await cookieFor(rae) });
+    const r = await createRequest(dana);
+    const answered = await setStatus(r, 'Found – Awaiting Reunion', 'answer', rae);
+    const back = await setStatus(answered, 'Added', 'undo', rae);
+    const res = await api(`/api/requests/${r.id}/cancel`, { json: { expectedVersion: back.rowVersion }, cookie: await cookieFor(dana) });
+    expect(res.status).toBe(200);
+    const row = await eventually(() => activityOf(rae, r.id).then((a) => a?.kind === 'cancelled' && a));
+    expect(row.detail).toBe('Cancelled');
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(raePhone.deliveries).toHaveLength(0);
+  });
+
+  it('a hanging push service never slows the response; failures are counted', async () => {
+    const dana = newStaff();
+    const rae = medical();
+    const stuck = push.device();
+    stuck.mode = 'hang';
+    await subscribe(dana, stuck);
+    const r = await createRequest(dana);
+    const started = Date.now();
+    await setStatus(r, 'Found – Awaiting Reunion', 'answer', rae);
+    expect(Date.now() - started).toBeLessThan(1_500);
+    await eventually(async () => ((await subRow(stuck.endpoint))?.failures ?? 0) >= 1, 15_000);
+  }, 30_000);
+});
+
+describe('Activity routes', () => {
+  async function seeded() {
+    const dana = newStaff();
+    const rae = medical();
+    const a = await createRequest(dana, { name: 'Ava TEST-S Lane' });
+    const b = await createRequest(dana, { name: 'Ben TEST-S Wu' });
+    await setStatus(a, 'Found – Awaiting Reunion', 'answer', rae);
+    await setStatus(b, 'Found – Awaiting Reunion', 'answer', rae);
+    await eventually(async () => (await activityOf(dana, a.id)) && (await activityOf(dana, b.id)));
+    return { dana, rae, a, b, cookie: await cookieFor(dana) };
+  }
+
+  it('need a session and (for writes) the same origin', async () => {
+    expect((await api('/api/activity')).status).toBe(401);
+    expect((await api('/api/activity/read', { json: { all: true } })).status).toBe(401);
+    const cookie = await cookieFor(newStaff());
+    expect((await api('/api/activity/read', { json: { all: true }, cookie, origin: 'https://evil.example' })).status).toBe(403);
+    expect((await api('/api/activity/unread', { json: { requestIds: [crypto.randomUUID()] }, cookie, origin: null })).status).toBe(403);
+    expect((await api('/api/activity/read', { json: { requestId: 'nope' }, cookie })).status).toBe(422);
+    expect((await api('/api/activity/unread', { json: { requestIds: [] }, cookie })).status).toBe(422);
+  });
+
+  it('GET: one row per request, newest first, initials only; sync carries the unread count', async () => {
+    const { a, b, cookie } = await seeded();
+    const res = await api('/api/activity', { cookie });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const rows = res.body.rows as Array<{ requestId: string; title: string; detail: string; kind: string; read: boolean }>;
+    expect(rows.map((r) => r.requestId)).toEqual([b.id, a.id]);
+    expect(rows[0]).toMatchObject({ title: 'B.W.', detail: 'In medical', kind: 'in_medical', read: false });
+    expect(JSON.stringify(res.body)).not.toContain('TEST-S');
+    const sync = (await api('/api/sync', { cookie })).body as SyncResponse;
+    expect(sync.activityUnread).toBe(2);
+    expect(sync.activityUnreadIds).toEqual([b.id, a.id]);
+  });
+
+  it('read one (the request was opened), then Mark all read and Undo', async () => {
+    const { a, b, cookie } = await seeded();
+    expect((await api('/api/activity/read', { json: { requestId: a.id }, cookie })).body).toEqual({ count: 1, ids: [a.id] });
+    expect((await api('/api/activity/read', { json: { requestId: a.id }, cookie })).body).toEqual({ count: 0, ids: [] });
+    const all = await api('/api/activity/read', { json: { all: true }, cookie });
+    expect(all.body).toEqual({ count: 1, ids: [b.id] });
+    expect(((await api('/api/sync', { cookie })).body as SyncResponse).activityUnread).toBe(0);
+    expect((await api('/api/activity/unread', { json: { requestIds: all.body.ids }, cookie })).body).toEqual({ count: 1 });
+    const sync = (await api('/api/sync', { cookie })).body as SyncResponse;
+    expect(sync.activityUnreadIds).toEqual([b.id]);
+  });
+
+  it("only ever touches the signed-in staff member's rows", async () => {
+    const { a, cookie } = await seeded();
+    const other = await cookieFor(newStaff());
+    expect((await api('/api/activity/read', { json: { requestId: a.id }, cookie: other })).body).toEqual({ count: 0, ids: [] });
+    expect(((await api('/api/sync', { cookie })).body as SyncResponse).activityUnread).toBe(2);
+  });
+});

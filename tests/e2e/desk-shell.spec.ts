@@ -331,13 +331,13 @@ test.describe('desktop 1440 × 900', () => {
     await expect(page.getByTestId('dashboard')).toBeVisible();
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
 
-    // Alerts (the phone's bell) and the account menu (the phone's avatar menu).
-    const alerts = page.getByTestId('desk-sidebar').getByRole('switch', { name: 'Alerts' });
-    await expect(alerts).toHaveAttribute('aria-checked', 'false');
-    await alerts.click();
-    await expect(alerts).toHaveAttribute('aria-checked', 'true');
-    await expect(page.getByRole('dialog', { name: 'Alerts are on' })).toBeVisible();
-    await page.getByRole('button', { name: 'Got it' }).click();
+    // Alerts (F4: it opens the Alerts sheet) and the account menu (the phone's avatar menu).
+    await page.getByTestId('desk-sidebar').getByTestId('desk-alerts').click();
+    const alertsSheet = page.getByRole('dialog', { name: 'Alerts' });
+    await expect(alertsSheet).toBeVisible();
+    await expect(alertsSheet.getByRole('switch', { name: /New requests/ })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(alertsSheet).toHaveCount(0);
     await page.getByTestId('desk-sidebar').getByTestId('account-trigger').click();
     const menu = page.getByRole('dialog', { name: 'Account' });
     await expect(menu).toBeVisible();

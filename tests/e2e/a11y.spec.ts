@@ -183,18 +183,23 @@ for (const theme of ['light', 'dark'] as const) {
         await expect(page.getByRole('dialog', { name: 'Account' })).toBeVisible();
         results.push(await audit(page, 'account menu'));
 
-        // The Alerts switch in the avatar menu (it replaced the header bell).
-        await page.getByRole('dialog', { name: 'Account' }).getByRole('switch', { name: 'Alerts' }).click();
-        const bell = page.getByRole('dialog', { name: 'Alerts are on' });
-        await expect(bell).toBeVisible();
-        // Named and described by the visible heading and line, each in the sheet once (no hidden copy that
-        // a screen reader would read twice).
-        await expect(bell).toHaveAccessibleDescription('New requests alert you while this app is open.');
-        await expect(bell.getByText('Alerts are on', { exact: true })).toHaveCount(1);
-        await expect(bell.getByText('New requests alert you while this app is open.', { exact: true })).toHaveCount(1);
-        await expect(bell.getByRole('heading', { name: 'Alerts are on' })).toBeVisible();
-        results.push(await audit(page, 'bell sheet'));
-        await page.getByRole('button', { name: 'Got it' }).click();
+        // Alerts in the avatar menu opens the Alerts sheet (F4): named by its visible heading.
+        await page.getByRole('dialog', { name: 'Account' }).getByTestId('alerts-menu').click();
+        const alertsSheet = page.getByRole('dialog', { name: 'Alerts' });
+        await expect(alertsSheet).toBeVisible();
+        await expect(alertsSheet.getByRole('heading', { name: 'Alerts' })).toBeVisible();
+        await expect(alertsSheet.getByRole('switch', { name: /New requests/ })).toBeVisible();
+        results.push(await audit(page, 'Alerts sheet'));
+        await page.keyboard.press('Escape');
+        await expect(alertsSheet).toHaveCount(0);
+        // The Activity sheet from the bell (F4).
+        await page.getByTestId('activity-bell').click();
+        const activity = page.getByRole('dialog', { name: 'Activity' });
+        await expect(activity).toBeVisible();
+        await expect(activity.getByTestId('activity-panel')).toBeVisible();
+        results.push(await audit(page, 'Activity sheet'));
+        await page.keyboard.press('Escape');
+        await expect(activity).toHaveCount(0);
 
         await visit('/?view=pending', 'Pending', () => expect(row(waiting.id)).toBeVisible({ timeout: 15_000 }));
         await page.locator(`[data-testid="check-card"]:has([data-request-id="${answerMe.id}"])`).getByRole('button', { name: 'Not in medical' }).click();

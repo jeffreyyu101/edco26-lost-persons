@@ -57,13 +57,13 @@ beforeEach(() => {
 
 describe('lp-caps (a page notifies only once the active worker handles clicks)', () => {
   it('this worker says it handles notification clicks', async () => {
-    expect(await worker.message({ type: 'lp-caps' })).toEqual({ notificationClick: true });
+    expect(await worker.message({ type: 'lp-caps' })).toEqual({ notificationClick: true, push: true });
   });
 
   it('the answer changes nothing else: no skipWaiting, no caching', async () => {
     const caches = new FakeCacheStorage();
     const w = loadWorker({ version: 'n2', caches, network: new FakeNetwork(), active: 'n1', waiting: 'n2' });
-    expect(await w.message({ type: 'lp-caps' })).toEqual({ notificationClick: true });
+    expect(await w.message({ type: 'lp-caps' })).toEqual({ notificationClick: true, push: true });
     expect(w.skipWaitingCalls()).toBe(0);
     expect(await caches.keys()).toEqual([]);
   });

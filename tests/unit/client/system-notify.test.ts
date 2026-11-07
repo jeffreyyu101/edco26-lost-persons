@@ -129,7 +129,7 @@ describe('what a notification shows', () => {
     expect(n).toEqual({
       title: 'LP-1004 · In medical',
       body: 'S.L. · FA 3\nBring the friend to Main Med',
-      tag: sofia.id,
+      tag: `lp-${sofia.id}`,
       url: `/?r=${sofia.id}`,
       key: `${sofia.id}:3`,
       requireInteraction: true,
@@ -154,7 +154,7 @@ describe('what a notification shows', () => {
   it('a new request: "New request · LP-####", initials and post (no age or gender either)', () => {
     const row = makeRow(13, { firstName: 'Tara', lastName: 'Reyes', age: '24', gender: 'Female', caseNumber: 1013, contactPhone: '4075550123' });
     const n = systemNotice(newRequestAlert(row), () => row);
-    expect(n).toMatchObject({ title: 'New request · LP-1013', body: 'T.R. · FA 4', tag: row.id, url: `/?r=${row.id}` });
+    expect(n).toMatchObject({ title: 'New request · LP-1013', body: 'T.R. · FA 4', tag: `lp-${row.id}`, url: `/?r=${row.id}` });
   });
 
   it('never carries a phone number, a contact or a full name, in the text or the data', () => {
@@ -187,7 +187,7 @@ describe('what a notification shows', () => {
   it('options: tag per request so a later alert replaces it, renotify so it sounds, the click target in data', () => {
     const options = noticeOptions(systemNotice(statusAlert(sofia), rowOf));
     expect(options).toMatchObject({
-      tag: sofia.id,
+      tag: `lp-${sofia.id}`,
       renotify: true,
       requireInteraction: true,
       icon: '/icons/icon-192.png',
