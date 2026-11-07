@@ -19,6 +19,7 @@ import { Button, Text } from '@radix-ui/themes';
 import { MapPin, Plus, Search as SearchIcon, X } from 'lucide-react';
 import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { AccountMenu } from '@/components/account/AccountMenu';
+import { AlertsBanner } from '@/components/alerts/AlertsBanner';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
@@ -124,6 +125,8 @@ function Chrome({ view, chips, filtered = false, skeleton, children }: ChromePro
   return (
     <div className={s.root} data-view={view} ref={rootRef}>
       {inDesk || view !== 'all' ? null : <BrandCard />}
+      {/* F4: until lock-screen alerts work on this phone (on the desk it sits in the main column). */}
+      {inDesk ? null : <AlertsBanner />}
       <div className={s.sticky} ref={stickyRef}>
         <AppHeader
           view={view}
@@ -140,7 +143,10 @@ function Chrome({ view, chips, filtered = false, skeleton, children }: ChromePro
         {loading ? null : <ConnectionBanner />}
         {chips}
       </div>
-      <main className={s.body}>{body}</main>
+      <main className={s.body}>
+        {inDesk ? <AlertsBanner /> : null}
+        {body}
+      </main>
       {snackbar ? null : <NewRequestButton />}
     </div>
   );

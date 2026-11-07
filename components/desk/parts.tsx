@@ -2,7 +2,7 @@
 // Small pieces shared by the sidebar, the rail and the top bar.
 import type { MouseEvent, ReactNode } from 'react';
 import { hrefFor, navigate, type NavParams } from '@/lib/client/nav';
-import { useActions, useAllRows, useConnection, useCounts, useIsLoading, usePrefs, type Connection } from '@/lib/client/store-contract';
+import { useActions, useAllRows, useConnection, useCounts, useIsLoading, type Connection } from '@/lib/client/store-contract';
 import type { MainView } from './views';
 import d from './desk.module.css';
 
@@ -86,13 +86,6 @@ export function LiveMark({ variant, className }: { variant: 'side' | 'rail'; cla
       <span className={d.live} data-state={state} />
     </button>
   );
-}
-
-/** New-request alerts. The shell's host shows "Alerts are on" the first time it is switched on. */
-export function useBell(): { on: boolean; toggle: () => void } {
-  const actions = useActions();
-  const prefs = usePrefs();
-  return { on: prefs.bell, toggle: () => actions.setPref('bell', !prefs.bell) };
 }
 
 /** A key cap, decoration only (the control carries aria-keyshortcuts). */

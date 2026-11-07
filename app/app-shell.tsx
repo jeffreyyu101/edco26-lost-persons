@@ -53,6 +53,8 @@ const ProfileView = dynamic(() => loadProfile().then((m) => m.ProfileView), { ss
 const DashboardView = dynamic(() => loadDashboard().then((m) => m.DashboardView), { ssr: false });
 const OutboxPromptDialog = dynamic(() => loadDialogs().then((m) => m.OutboxPromptDialog), { ssr: false });
 const BellIntroSheet = dynamic(() => loadDialogs().then((m) => m.BellIntroSheet), { ssr: false });
+// Web Push and Activity (F4): starts after hydration, in its own chunk.
+const ActivityHost = dynamic(() => import('@/components/activity/ActivityHost').then((m) => m.ActivityHost), { ssr: false });
 // Desk only. The pane's profile skeleton has no chrome of its own: the pane draws the header.
 const PaneProfileView = dynamic(() => loadProfile().then((m) => m.ProfileView), { ssr: false, loading: () => <ProfileSkeleton chrome={false} /> });
 const DeskNav = dynamic(() => loadDesk().then((m) => m.DeskNav), { ssr: false });
@@ -267,6 +269,7 @@ function ShellHosts() {
       <Snackbar snackbar={snackbar} onUndo={(id) => void actions.undo(id)} onDismiss={actions.dismissSnackbar} />
       {prompt ? <OutboxPromptDialog prompt={prompt} onAnswer={answerPrompt} /> : null}
       {bellIntro ? <BellIntroSheet open={bellIntro} onOpenChange={setBellIntro} /> : null}
+      <ActivityHost />
     </>
   );
 }

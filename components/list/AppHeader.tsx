@@ -1,12 +1,13 @@
 'use client';
 // List-view header (design/screens/polish-v7.html LogTitle, v7-log.png): the large title is the view menu
-// ("All requests 13 ⌄"), then search and the avatar (account menu, owned by components/account, which also
-// holds the Alerts switch). There is no live dot while the app is live (2026-11-06 header declutter): only
+// ("All requests 13 ⌄"), then search, the Activity bell (F4, components/activity) and the avatar (account
+// menu, owned by components/account, which also opens the Alerts sheet). There is no live dot while the app is live (2026-11-06 header declutter): only
 // while it is offline or reconnecting does a small badge sit on the avatar, like a presence dot, amber with a
 // crossed-out cloud when offline, red with a turning arrow while it can't reach the log. It takes no room
 // from the title, and the banner under the header says the same in words (with Try again).
 import { CloudOff, RefreshCw, Search } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { ActivityBell } from '@/components/activity/ActivityBell';
 import type { ViewCounts } from '@/lib/client/selectors';
 import type { Connection } from '@/lib/client/store-contract';
 import { ViewSwitcher, type ListViewName } from './ViewSwitcher';
@@ -62,6 +63,7 @@ export function AppHeader({ view, counts, onSelect, connection, syncing, onOpenS
         <button type="button" className={s.ib} aria-label="Search" onClick={onOpenSearch}>
           <Search size={20} strokeWidth={1.75} aria-hidden />
         </button>
+        <ActivityBell place="phone" />
         <span className={s.avatar}>
           {account}
           <ConnectionIndicator connection={connection} syncing={syncing} />

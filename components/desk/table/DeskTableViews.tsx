@@ -15,6 +15,7 @@
 //   Search       results by the top bar's query (?q=), newest first, the match highlighted.
 import { MapPin, X } from 'lucide-react';
 import { useDeferredValue, useId, useMemo, type ReactNode } from 'react';
+import { AlertsBanner } from '@/components/alerts/AlertsBanner';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
@@ -70,6 +71,8 @@ function Frame({ view, chips = null, skeleton = <TableSkeleton />, children }: F
   );
   return (
     <div className={t.root} data-desk-view={view} data-testid="desk-table-view">
+      {/* F4: until lock-screen alerts work on this computer (All and My requests; Pending draws its own). */}
+      {view === 'search' ? null : <AlertsBanner />}
       {loading ? null : (
         <div className={t.banner}>
           <ConnectionBanner />

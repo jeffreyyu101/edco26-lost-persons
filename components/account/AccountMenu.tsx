@@ -1,9 +1,11 @@
 'use client';
 // Avatar + account menu (design/screens/states.html "Avatar"): name and short team, Theme (Light / Dark /
-// Auto), Alerts (On / Off: the new-request alerts the header bell used to toggle, 2026-11-06 header
-// declutter), system notifications where the device has them (v2.5 A52: "Allow notifications", "System
-// notifications on" or "Blocked in browser"), Dashboard, Sign out, and "Built by Jeffrey Yu". Export CSV is
-// no longer offered to staff (Jeffrey exports from Supabase at the end, docs/export.sql).
+// Auto), Alerts (this device's lock-screen alerts, On / Off / Blocked; it opens the Alerts sheet with the
+// "New requests" and "Updates on my requests" switches and the device state, F4), Dashboard, Sign out, and
+// "Built by Jeffrey Yu". Where this device has no Web Push but the page can notify while open (v2.5 A52),
+// the system-notification row stays under Alerts ("Allow notifications", "System notifications on",
+// "Blocked in browser"). Export CSV is no longer offered to staff (Jeffrey exports from Supabase at the end,
+// docs/export.sql).
 // Self-contained: reads the store. Sign out is refused by the store while unsent outbox jobs exist; the
 // menu then asks once, and only an explicit "Discard & sign out" throws them away. When the server can't
 // confirm the sign-out (no signal), the store keeps the session and the menu or dialog says so.
@@ -13,9 +15,12 @@
 import { AlertDialog, Avatar, Button, Popover, SegmentedControl, Text, VisuallyHidden } from '@radix-ui/themes';
 import { BellDot, BellOff, BellPlus, BellRing, ChartColumn, LogOut, Sun } from 'lucide-react';
 import { useId, useState } from 'react';
-import { BellSheet, isStandalone } from '@/components/list/BellSheet';
-import { NOTIFY_COPY } from '@/components/ui/NotifyStatus';
+import { alertsValue } from '@/components/alerts/AlertsSheet';
+import { usePushStarted } from '@/components/alerts/AlertsBanner';
+import { openAlertsSheet } from '@/lib/client/alerts-ui';
 import { navigate } from '@/lib/client/nav';
+import { NOTIFY_COPY } from '@/components/ui/NotifyStatus';
+import { useAlerts } from '@/lib/client/push-client';
 import { useActions, usePrefs, useSession, type ThemePref } from '@/lib/client/store-contract';
 import { askNotifyPermission, useNotifyState, type NotifyState } from '@/lib/client/system-notify';
 import { avatarInitials, teamShort } from '@/lib/domain';
@@ -34,7 +39,7 @@ const THEMES: ReadonlyArray<[ThemePref, string]> = [
 
 const isTheme = (v: string): v is ThemePref => v === 'light' || v === 'dark' || v === 'auto';
 
-/** System notifications (v2.5 A52), for every alert including "my request was answered". */
+/** System notifications (v2.5 A52) where this device has no Web Push: every alert while the app is open. */
 function NotifyItem({ state }: { state: NotifyState }) {
   if (state.permission === 'default') {
     return (
@@ -65,32 +70,21 @@ export function AccountMenu({ size = '2' }: AccountMenuProps) {
   const session = useSession();
   const prefs = usePrefs();
   const actions = useActions();
+  usePushStarted();
+  const alerts = useAlerts();
   const notify = useNotifyState();
   const [open, setOpen] = useState(false);
   const [unsent, setUnsent] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [bellSheet, setBellSheet] = useState({ open: false, standalone: false });
   const themeLabelId = useId();
+  const alertsOn = alerts.status === 'on';
+  const alertsShown = alertsValue(alerts.status);
 
   // Offline the session may not be confirmed yet: fall back to who signed in last on this phone.
   const name = session.staffName ?? prefs.rememberedName ?? '';
   const team = session.team ?? prefs.rememberedTeam ?? '';
   const initials = avatarInitials(name) || '?';
-
-  // Exactly what the header bell did: flip the pref; the first time it goes on, "Alerts are on" explains
-  // where alerts show (and the Home Screen tip). Turning it on also asks for system notifications, inside
-  // this tap, where the device has them and nobody answered yet (v2.5 A52; a no-op everywhere else).
-  const toggleAlerts = () => {
-    const on = !prefs.bell;
-    if (on) void askNotifyPermission();
-    actions.setPref('bell', on);
-    if (on && !prefs.bellIntroSeen) {
-      actions.setPref('bellIntroSeen', true);
-      setOpen(false);
-      setBellSheet({ open: true, standalone: isStandalone() });
-    }
-  };
 
   const signOut = async (discardOutbox: boolean) => {
     setBusy(true);
@@ -172,22 +166,29 @@ export function AccountMenu({ size = '2' }: AccountMenuProps) {
               ))}
             </SegmentedControl.Root>
           </div>
-          {/* A switch named "Alerts"; its state is announced, so the visible On / Off is not read twice. */}
+          {/* Opens the Alerts sheet (F4). The name says this device's state once, in full. */}
           <button
             type="button"
-            role="switch"
-            aria-checked={prefs.bell}
             className={s.mitem}
-            onClick={toggleAlerts}
-            data-testid="alerts-switch"
+            aria-haspopup="dialog"
+            aria-label={alertsShown ? `Alerts, ${alertsShown}` : 'Alerts'}
+            onClick={() => {
+              setOpen(false);
+              openAlertsSheet();
+            }}
+            data-testid="alerts-menu"
           >
-            {prefs.bell ? <BellRing size={16} aria-hidden /> : <BellOff size={16} aria-hidden />}
-            <span className={s.sp}>Alerts</span>
-            <span className={s.mval} data-on={prefs.bell ? '' : undefined} aria-hidden>
-              {prefs.bell ? 'On' : 'Off'}
+            {alertsOn ? <BellRing size={16} aria-hidden /> : <BellOff size={16} aria-hidden />}
+            <span className={s.sp} aria-hidden>
+              Alerts
             </span>
+            {alertsShown ? (
+              <span className={s.mval} data-on={alertsOn ? '' : undefined} aria-hidden>
+                {alertsShown}
+              </span>
+            ) : null}
           </button>
-          {notify.supported ? <NotifyItem state={notify} /> : null}
+          {alerts.status === 'unsupported' && notify.supported ? <NotifyItem state={notify} /> : null}
           <button
             type="button"
             className={s.mitem}
@@ -247,11 +248,6 @@ export function AccountMenu({ size = '2' }: AccountMenuProps) {
         </AlertDialog.Content>
       </AlertDialog.Root>
 
-      <BellSheet
-        open={bellSheet.open}
-        standalone={bellSheet.standalone}
-        onOpenChange={(o) => setBellSheet((b) => ({ ...b, open: o }))}
-      />
     </>
   );
 }

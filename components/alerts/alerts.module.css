@@ -1,0 +1,190 @@
+/* The alerts reminder banner and the Alerts sheet (design/screens/alerts-banner.html .ban .k .btn,
+   alerts-banner-1..5; f34-states.html .devst .btn.outline .sw, f34-v2-7). Text the mockups draw in gray-10
+   uses gray-11 (4.5:1). Glyphs sit bare (no circle containers). Chips wrap, never get cut off. */
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  margin: 12px 12px 0;
+  padding: 10px 10px 10px 12px;
+  border-radius: 12px;
+  background: var(--blue-a3);
+  box-shadow: inset 0 0 0 1px var(--blue-a5);
+}
+.banner[data-state='blocked'] {
+  align-items: flex-start;
+  background: var(--amber-a3);
+  box-shadow: inset 0 0 0 1px var(--amber-a5);
+}
+.banner[data-state='install'] {
+  align-items: flex-start;
+}
+.icon {
+  flex: none;
+  display: flex;
+  color: var(--blue-11);
+}
+.banner[data-state='install'] .icon,
+.banner[data-state='blocked'] .icon {
+  margin-top: 2px;
+}
+.banner[data-state='blocked'] .icon {
+  color: var(--amber-11);
+}
+.body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.title {
+  font-size: 14.5px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--gray-12);
+}
+.turnOn {
+  flex: none;
+}
+.recheck {
+  flex: none;
+}
+
+/* Step chips: the exact taps, as chips with › between them. They wrap onto more lines. */
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  row-gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 26px;
+  padding: 3px 8px;
+  border-radius: 7px;
+  background: var(--gray-a3);
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--gray-12);
+  overflow-wrap: anywhere;
+}
+.chip svg {
+  flex: none;
+  color: var(--blue-11);
+}
+.sep {
+  flex: none;
+  color: var(--gray-11);
+}
+
+/* ---- The Alerts sheet ---- */
+.sheetTitle {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--gray-12);
+  margin: 0 0 12px;
+}
+.device {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--gray-a3);
+  min-width: 0;
+}
+.device[data-state='on'] {
+  background: var(--green-a3);
+}
+.device[data-state='blocked'] {
+  background: var(--amber-a3);
+}
+.deviceIcon {
+  flex: none;
+  display: flex;
+  margin-top: 1px;
+  color: var(--gray-12);
+}
+.deviceBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.deviceTitle {
+  font-size: 16px;
+  line-height: 22px;
+  font-weight: 600;
+  color: var(--gray-12);
+}
+.device[data-state='on'] .deviceTitle {
+  color: var(--green-11);
+}
+.device[data-state='blocked'] .deviceTitle {
+  color: var(--amber-12);
+}
+.deviceSub {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--gray-11);
+}
+.testButton {
+  width: 100%;
+  margin-top: 12px;
+}
+.switches {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+}
+.switchRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 6px 0;
+  cursor: pointer;
+}
+.switchRow + .switchRow {
+  box-shadow: inset 0 1px 0 var(--gray-a3);
+}
+.switchText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.switchLabel {
+  font-size: 16px;
+  line-height: 22px;
+  color: var(--gray-12);
+}
+.switchSub {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--gray-11);
+}
+.notifyRow {
+  margin-top: 12px;
+}

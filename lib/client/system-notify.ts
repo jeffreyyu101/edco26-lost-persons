@@ -49,6 +49,9 @@ export interface NotifyState {
 /** The server render, and every device without system notifications. */
 export const NO_NOTIFY: Readonly<NotifyState> = Object.freeze({ supported: false, permission: 'default' });
 
+/** The tag of one request's notifications: the page's and Web Push's alike, so the OS replaces, never stacks. */
+export const requestTag = (id: string) => `lp-${id}`;
+
 /** Tag of a combined notification ("3 new requests"): the next burst replaces it. */
 export const COMBINED_TAG = 'lp-alerts';
 const ICON = '/icons/icon-192.png';
@@ -121,7 +124,7 @@ export function routeAlert(state: NotifyState, win: WindowInfo, otherTabInFront 
 export interface SystemNotice {
   title: string;
   body: string;
-  /** The request id (one notification per request), or COMBINED_TAG. */
+  /** "lp-<request id>" (one notification per request; Web Push uses the same tag, F4), or COMBINED_TAG. */
   tag: string;
   /** Path + query a click opens: "/?r=<id>", or "/" for a combined one. */
   url: string;
@@ -165,11 +168,12 @@ export function systemNotice(
   const row = rowOf(id);
   const url = hrefFor({ r: id });
   const requireInteraction = alert.kind === 'in_medical';
-  if (!row) return { title: alert.title, body: '', tag: id, url, key: null, requireInteraction };
+  const tag = requestTag(id);
+  if (!row) return { title: alert.title, body: '', tag, url, key: null, requireInteraction };
   const lp = formatCaseNumber(row.caseNumber);
   const title = alert.kind === 'new_request' ? `New request · ${lp}` : `${lp} · ${statusMeta(row.status).shortLabel}`;
   const body = alert.kind === 'in_medical' ? [who(row), 'Bring the friend to Main Med'].filter(Boolean).join('\n') : who(row);
-  return { title, body, tag: id, url, key: alertKey(row), requireInteraction };
+  return { title, body, tag, url, key: alertKey(row), requireInteraction };
 }
 
 /** registration.showNotification options. `renotify`: every alert sounds, as its toast would have chimed. */

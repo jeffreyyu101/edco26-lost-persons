@@ -36,6 +36,16 @@
  * request (`/?r=<id>`, `/` for a combined one) in place; a window that does not answer is navigated there;
  * with no window, one opens. A page asks {type: 'lp-caps'} first and notifies only once the active worker
  * answers {notificationClick: true}: the worker of an older build has no click handler and never answers.
+ *
+ * Web Push (F4, spec §18 A54): a push shows its notification (title, body, tag "lp-<id>", the app icon;
+ * messages sound again when they replace one) and sets the app icon badge to the recipient's unread
+ * Activity count. Never both a toast and a notification: while a window of the app is visible AND focused,
+ * that window gets {type: 'lp-push'} and syncs at once (its toast and bell carry the event) and nothing is
+ * shown, except on WebKit (Safari, every iPhone browser), which revokes a subscription after three pushes
+ * that show nothing: there the notification is shown silently and closed at once. A click opens the request
+ * (the handler above). pushsubscriptionchange re-subscribes with the same key and tells the server, which
+ * drops the old endpoint. The worker answers {type: 'lp-caps'} with {push: true} too: a page subscribes
+ * only once the active worker can show pushes.
  */
 'use strict';
 
@@ -390,9 +400,10 @@ self.addEventListener('message', (event) => {
     return;
   }
   if (data.type === CAPS_MESSAGE) {
-    // This worker handles notification clicks (A52): the page may show alerts as notifications.
+    // This worker handles notification clicks (A52): the page may show alerts as notifications. It also
+    // shows Web Pushes (F4): the page may subscribe.
     const port = event.ports && event.ports[0];
-    if (port) port.postMessage({ notificationClick: true });
+    if (port) port.postMessage({ notificationClick: true, push: true });
     return;
   }
   if (data.type === 'precache' && Array.isArray(data.urls)) {
@@ -579,4 +590,122 @@ async function openFromNotification(url) {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   event.waitUntil(openFromNotification(notificationTarget(event.notification.data)).catch(() => undefined));
+});
+
+// ---- Web Push (F4) ------------------------------------------------------------------------------------
+
+const PUSH_MESSAGE = 'lp-push';
+const PUSH_ICON = '/icons/icon-192.png';
+const APP_NAME = 'Is my friend in medical?';
+
+/** WebKit (Safari on a Mac, every browser on an iPhone or iPad) revokes push after silent pushes. */
+function isWebKit() {
+  const ua = (self.navigator && self.navigator.userAgent) || '';
+  return /AppleWebKit/.test(ua) && !/Chrome\/|Chromium\/|Edg\/|Firefox\//.test(ua);
+}
+
+/** The payload, checked: {title, body, tag, url, kind, requestId, renotify, badge}. Never throws. */
+function pushData(event) {
+  let raw = null;
+  try {
+    raw = event.data ? event.data.json() : null;
+  } catch (e) {
+    raw = null;
+  }
+  const text = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+  const tag = text(raw && raw.tag, 80);
+  return {
+    title: text(raw && raw.title, 80) || APP_NAME,
+    body: text(raw && raw.body, 240),
+    tag: /^lp-[A-Za-z0-9-]{1,64}$/.test(tag) ? tag : 'lp-update',
+    url: notificationTarget({ url: raw && raw.url }),
+    kind: text(raw && raw.kind, 40),
+    requestId: text(raw && raw.requestId, 64) || null,
+    renotify: !!(raw && raw.renotify === true),
+    badge: raw && typeof raw.badge === 'number' && raw.badge >= 0 ? Math.floor(raw.badge) : null,
+  };
+}
+
+async function setBadge(count) {
+  const nav = self.navigator;
+  try {
+    if (count === null || !nav) return;
+    if (count > 0 && nav.setAppBadge) await nav.setAppBadge(count);
+    else if (count === 0 && nav.clearAppBadge) await nav.clearAppBadge();
+  } catch (e) {
+    // badges are best effort
+  }
+}
+
+function showPush(data, silent) {
+  return self.registration.showNotification(data.title, {
+    body: data.body,
+    tag: data.tag,
+    renotify: data.renotify && !silent,
+    silent: !!silent,
+    icon: PUSH_ICON,
+    lang: 'en-US',
+    timestamp: Date.now(),
+    data: { url: data.url, key: null, push: true, kind: data.kind, requestId: data.requestId },
+  });
+}
+
+async function handlePush(event) {
+  const data = pushData(event);
+  const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  const app = windows.filter((c) => windowPath(c) !== null);
+  // The app is in front: its own sync shows the toast and the bell (never both).
+  const front = app.some((c) => c.visibilityState === 'visible' && c.focused);
+  for (const c of app) {
+    try {
+      c.postMessage({ type: PUSH_MESSAGE, kind: data.kind, requestId: data.requestId });
+    } catch (e) {
+      // that window is going away
+    }
+  }
+  await setBadge(data.badge);
+  if (!front) {
+    await showPush(data, false);
+    return;
+  }
+  if (!isWebKit()) return;
+  // WebKit counts a push that shows nothing against the subscription: show it silently and take it away.
+  await showPush(data, true);
+  try {
+    const shown = await self.registration.getNotifications({ tag: data.tag });
+    for (const n of shown) if (n.data && n.data.push === true) n.close();
+  } catch (e) {
+    // it stays in the notification centre; still one alert
+  }
+}
+
+self.addEventListener('push', (event) => {
+  event.waitUntil(
+    handlePush(event).catch(() =>
+      // Whatever went wrong, a push always shows something (WebKit revokes silent ones).
+      self.registration.showNotification(APP_NAME, { tag: 'lp-update', icon: PUSH_ICON, data: { url: '/', push: true } }).catch(() => undefined),
+    ),
+  );
+});
+
+async function resubscribe(event) {
+  const old = event.oldSubscription || null;
+  let next = event.newSubscription || null;
+  if (!next) {
+    const key = old && old.options ? old.options.applicationServerKey : null;
+    if (!key) return;
+    next = await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+  }
+  const json = next.toJSON();
+  if (!json || !json.endpoint || !json.keys) return;
+  await fetch('/api/push/subscribe', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ endpoint: json.endpoint, keys: { p256dh: json.keys.p256dh, auth: json.keys.auth }, oldEndpoint: old ? old.endpoint : null }),
+  });
+}
+
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil(resubscribe(event).catch(() => undefined));
 });
