@@ -125,7 +125,7 @@ screenshots.
   check". Whoever gave the first Not found is now involved in the request.
 - **On phones under 430 px wide** the log's status reads "Waiting" / "Not found" (was under 400 px), so an
   earlier day's time never cuts the full label at 400–429 px.
-- Decisions: `design/DECISIONS.md` "The F3 + F4 release"; spec: `docs/BUILD_SPEC.md` §23 (A89–A92).
+- Decisions: `design/DECISIONS.md` "The F3 + F4 release"; spec: `docs/BUILD_SPEC.md` §23 (A90–A93).
 
 ### 2026-11-06 evening (F4: lock-screen alerts, the Alerts sheet and Activity)
 

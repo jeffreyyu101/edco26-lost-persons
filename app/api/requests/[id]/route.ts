@@ -1,7 +1,7 @@
 // GET /api/requests/:id (RequestDetail through lp_detail) and PATCH /api/requests/:id (lp_update_fields).
 // F3: the detail also carries the thread's latest page (lp_messages_thread) and the caller's activity; when
 // the thread can't be read the detail goes out without it.
-// A real edit tells everyone involved (Activity + Web Push, F4 spec §22 A85), after the response: where
+// A real edit tells everyone involved (Activity + Web Push, F4 spec §22 A86), after the response: where
 // medical has them as "Chair 9 → Bed 3" (or the In medical answer completed with it, "In medical · Chair 9"),
 // anything else as "Details changed".
 import type { ChangeResponse, RequestDetail } from '@/lib/api-types';

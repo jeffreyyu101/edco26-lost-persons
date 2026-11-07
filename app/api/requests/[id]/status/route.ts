@@ -1,6 +1,6 @@
 // POST /api/requests/:id/status (lp_set_status). Idempotent repeat → 200 {changed: false}; stale
 // expectedVersion → 409 (currentStatus); illegal transition → 422; Cancelled → Waiting by a non-creator → 403.
-// A real change tells everyone involved in the request (Activity + Web Push, F4 spec §22 A85), after the
+// A real change tells everyone involved in the request (Activity + Web Push, F4 spec §22 A86), after the
 // response: In medical (with where medical has them), Back to Waiting for check, Reunited, Discharged,
 // Cancelled. Not found is never F4's: both of its answers (the "Not found yet" hold, which keeps the status
 // Waiting for check, and the final one) are F5's not_in_medical (lib/server/stage-notify.ts), sent once.

@@ -1673,7 +1673,7 @@ grant execute on function public.lp_stats() to service_role;
 grant execute on function public.lp_detail(uuid) to service_role;
 
 -- -----------------------------------------------------------------------------------------------------
--- 7. Messages and en route (F3, 2026-11-06 evening; spec §21 A73-A80, design/DECISIONS.md "Messages and en
+-- 7. Messages and en route (F3, 2026-11-06 evening; spec §21 A74-A81, design/DECISIONS.md "Messages and en
 --    route"). Additive only: three new tables, two indexes on existing tables (one partial), an AFTER UPDATE
 --    OF status trigger on patients and new functions. No existing column, constraint or function changes, so
 --    the build that is live now keeps working on a migrated database (it never calls them; the trigger only
@@ -2542,7 +2542,7 @@ grant execute on function public.lp_messages_sync(text, uuid[], timestamptz, boo
 grant execute on function public.lp_enroute_stats() to service_role;
 
 -- -----------------------------------------------------------------------------------------------------
--- 8. F4 · Web Push, the Alerts switches and the Activity inbox (2026-11-06 evening; spec §22 A81–A88).
+-- 8. F4 · Web Push, the Alerts switches and the Activity inbox (2026-11-06 evening; spec §22 A82–A89).
 --    ADDITIVE ONLY: three new tables and new lp_push_* / lp_activity_* functions. Nothing above changes, so
 --    the build that is live now keeps working on a database that has this, and a re-run keeps every
 --    subscription, switch and Activity row (create table if not exists; functions are dropped by name and

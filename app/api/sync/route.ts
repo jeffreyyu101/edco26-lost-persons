@@ -1,9 +1,9 @@
 // GET /api/sync (spec §6, A7, A37). Delta / full / paged / reconcile, or ?ids= for specific rows (≤ 200).
 // Cursors (serverTime, next.at) are returned verbatim from the database clock; no ETag / 304.
-// F3 (spec §21 A75): every row carries the caller's message / en route activity, and the first page of a
+// F3 (spec §21 A76): every row carries the caller's message / en route activity, and the first page of a
 // delta adds the rows whose thread changed since the cursor without their patients row changing
 // (lib/server/messages.ts decorateSync; a failure there leaves the rows as lp_sync returned them).
-// The first page of a poll also carries the signed-in staff member's unread Activity (F4, spec §22 A84,
+// The first page of a poll also carries the signed-in staff member's unread Activity (F4, spec §22 A85,
 // additive: activityUnread and the fingerprint activityKey, about 50 bytes; the ids are fetched only when the
 // key moves), read in parallel; when it can't be read the fields are left out and the rows still sync.
 import type { SyncResponse } from '@/lib/api-types';
