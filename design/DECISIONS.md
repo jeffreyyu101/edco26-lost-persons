@@ -343,6 +343,9 @@ What the next release ships on top of the live F2 (`main` 85c9320): F5 (stages a
 - **F2 wins** for the rename ("Not found in medical"; the final answer reads "Not found", the same words), the brand row and the line under the title, the desk top bar fixes, the Created column and the photo fixes. On All and My requests the line and the "⇅" toggle share one row: "● Updated just now ⟳" at its left, the toggle at its right end.
 - **F5 wins** for the hold's SQL, the stage colours and the hold alerts. Its wider status column with a request docked stays (184–232 px; 176 px at least at 1024–1279, so the five columns still fit beside F2's 96 px Created column), and a closed row's "· 2 checks" still drops out where the column is narrow.
 - **The desk follows the open request on Pending**: its card is scrolled into view (the board has no tabs to switch any more).
+- **The first load stays within its 230 KB** (`docs/BUILD_SPEC.md` A71; the budget is not raised). The hold's client rules load right after the page, as the stages do; the alert chime too; and Jeffrey's test-data banner is removed (it drew nothing after 12:30 PM on Nov 6, and its file said to delete it once the event started).
+- **Where the line meets the header** (All and My requests, phone): the search and avatar buttons' 44 px tap areas grow up and sideways, the "⇅" toggle's down, so a tap at the seam goes to the control drawn there. Under 361 px the stacked line and toggle are 12 px apart.
+- **Nothing docked under 1040 px, the desk's status column is 176 px** (as docked at 1024–1279), so beside F2's 96 px Created column the Friend column keeps more than 100 px at 768.
 
 ## Dashboard Performance windows and "None" (Brian, 2026-11-06 21:55–22:05)
 

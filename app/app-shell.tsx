@@ -26,10 +26,8 @@ import { isDeskNow, useHydrated, useIsDesk } from '@/components/desk/breakpoints
 import { DeskFrame, useBrandInHtml } from '@/components/desk/DeskFrame';
 import { useMainView } from '@/components/desk/use-main-view';
 import { isFormView, paneRequestId, type MainView } from '@/components/desk/views';
-import { TestDataBanner } from '@/components/ui/TestDataBanner';
 import { ProfileSkeleton, RowSkeletons } from '@/components/ui/Skeleton';
 import { Snackbar, Toaster } from '@/components/ui/Toast';
-import { installAudioUnlock, playChime, vibrate } from '@/lib/client/chime';
 import { useView, type View, type ViewName } from '@/lib/client/nav';
 import { StoreProvider } from '@/lib/client/store';
 import { useActions, useAppStore, usePrefs, useSnackbar, useStoreSelector, useToasts, type StoreState } from '@/lib/client/store-contract';
@@ -43,7 +41,10 @@ const loadDialogs = () => import('@/components/ui/ShellDialogs');
 // Photo compression (store.actions.preparePhoto) is its own chunk: without it, a photo can't be added to a
 // new request once the phone is offline.
 const loadImage = () => import('@/lib/client/image');
-const VIEW_CHUNKS = [loadList, loadForm, loadProfile, loadDashboard, loadDialogs, loadImage];
+// The alert chime and vibration (lib/client/chime.ts, see ShellHosts): its own chunk, so the first load (A25) does
+// not carry it; loaded when the shell mounts, and prefetched and cached with the views.
+const loadChime = () => import('@/lib/client/chime');
+const VIEW_CHUNKS = [loadList, loadForm, loadProfile, loadDashboard, loadDialogs, loadImage, loadChime];
 const loadDesk = () => import('@/components/desk/DeskChrome');
 const loadDeskTable = () => import('@/components/desk/table/DeskTableViews');
 
@@ -83,7 +84,6 @@ export interface AppShellProps {
 export function AppShell({ eventTimezone, brand = null }: AppShellProps) {
   return (
     <StoreProvider eventTimezone={eventTimezone}>
-      <TestDataBanner />
       <Suspense fallback={<RowSkeletons />}>
         <ShellBanners />
         <ViewRouter brand={brand} />
@@ -252,13 +252,32 @@ function ShellHosts() {
   // Auto theme follows the phone's setting live.
   useEffect(() => followSystemTheme(), []);
 
-  // Alerts: the store shows the toast; this host adds the chime (once a tap unlocked audio) and vibration.
-  useEffect(() => installAudioUnlock(), []);
+  // Alerts: the store shows the toast; this host adds the chime (once a tap unlocked audio) and vibration. Both
+  // are lib/client/chime.ts, its own chunk (loadChime): the first load (A25) does not carry it.
+  useEffect(() => {
+    let off: (() => void) | null = null;
+    let gone = false;
+    loadChime().then(
+      (m) => {
+        if (!gone) off = m.installAudioUnlock();
+      },
+      () => undefined,
+    );
+    return () => {
+      gone = true;
+      off?.();
+    };
+  }, []);
   useEffect(
     () =>
       actions.subscribeAlerts(() => {
-        playChime();
-        vibrate();
+        loadChime().then(
+          (m) => {
+            m.playChime();
+            m.vibrate();
+          },
+          () => undefined,
+        );
       }),
     [actions],
   );

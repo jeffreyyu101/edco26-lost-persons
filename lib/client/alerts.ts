@@ -10,7 +10,8 @@
 //   * (F5) The hold's alert names the request by its initials only, never its LP number (contract B: it may
 //     reach the lock screen): "K.T." / "Not found yet · recheck 4:40 PM".
 import type { RequestSummary } from '../api-types';
-import { STATUS, ageGender, holdDetail, initials, isHeld, isInMedical, sameStaff, statusMeta } from '../domain';
+import { STATUS, ageGender, initials, isHeld, isInMedical, sameStaff, statusMeta } from '../domain';
+import { holdDetail } from '../hold-detail';
 import { formatCaseNumber } from '../format';
 import type { AlertEvent, ToastItem } from './store-contract';
 

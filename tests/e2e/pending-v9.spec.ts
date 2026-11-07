@@ -6,7 +6,7 @@ import type { AuditEvent, RequestDetail, RequestSummary } from '../../lib/api-ty
 import { NOT_FOUND_YET_LABEL, STATUS, STATUS_META, initials } from '../../lib/domain';
 import { NOT_FOUND_FINAL_LABEL, RECHECK_DUE_LABEL } from '../../lib/stages';
 import { ROOT, testBaseUrl } from '../../scripts/test-env.mjs';
-import { axeViolations, smallTargets } from './helpers/a11y';
+import { axeViolations, overlappingTargets, smallTargets } from './helpers/a11y';
 import { newSignedInContext, signedInAs, type TestStaff } from './helpers/session';
 
 // Pending v9.1 (Brian 2026-11-06 19:35–20:40, design/screens/pending-v9.html), end to end:
@@ -487,8 +487,29 @@ test.describe('fixture', () => {
       await expect(toggle).toBeVisible({ timeout: 20_000 });
       const box = (await toggle.boundingBox())!;
       expect(box.x).toBeLessThan(24);
+      // (F5 release) Its tap area and Refresh now's above it never reach over each other, nor the header's.
+      expect(await overlappingTargets(page)).toEqual([]);
     });
   });
+
+  // (F5 release) F2's header puts search and the avatar right above the toggle at the live line's right end: their
+  // tap areas grow up, the toggle's down, so a tap at the seam goes to the control drawn there.
+  for (const width of [375, 390, 430] as const) {
+    test(`${width} px: the toggle under the header's search and avatar, no tap area over another`, async ({ browser }) => {
+      await withPage(browser, DANA, { ...PHONE, viewport: { width, height: 780 } }, async (page) => {
+        await serve(page, { rows: [...ALL_FIX] });
+        for (const path of ['/', '/?view=mine']) {
+          await page.goto(path);
+          const toggle = page.getByTestId('sort-toggle');
+          await expect(toggle).toBeVisible({ timeout: 20_000 });
+          const search = (await page.getByRole('button', { name: 'Search' }).boundingBox())!;
+          const box = (await toggle.boundingBox())!;
+          expect(box.x + box.width).toBeGreaterThan(search.x);
+          expect(await overlappingTargets(page), path).toEqual([]);
+        }
+      });
+    });
+  }
 
   test('desk table: the header sorts — Created ↓ by default, Status ↓ with group rows and the wait after every waiting label, Created goes back', async ({ browser }) => {
     await withPage(browser, DANA, viewportFor(1440), async (page) => {

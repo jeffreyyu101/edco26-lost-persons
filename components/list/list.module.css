@@ -162,7 +162,8 @@
 }
 
 /* The offline / reconnecting button, search and the avatar. Every one has a 44 px tap area that never
-   reaches into its neighbour's box. */
+   reaches into its neighbour's box. Like the title's, it grows up and sideways, never down: on All requests and
+   My requests the "⇅" toggle sits right under them at the live line's right end (Pending v9.1). */
 .icons {
   flex: none;
   display: flex;
@@ -188,7 +189,13 @@
 .ib::before {
   content: '';
   position: absolute;
-  inset: min(0px, calc((100% - 44px) / 2));
+  inset: min(0px, calc(100% - 44px)) min(0px, calc((100% - 44px) / 2)) 0;
+}
+
+/* The avatar (components/account, a 32 px trigger) grows its 44 px hit area the same way here: 12 px up, 6 px to
+   each side, none down. (Its own -6 px all round stays in the desk's sidebar.) */
+.icons [data-testid='account-trigger']::after {
+  inset: -12px -6px 0;
 }
 
 .ib:active {
@@ -1408,7 +1415,8 @@ button.qheadBtn:focus-visible {
 
 /* ---- The live line's right end: "⇅ Newest" / "⇅ Updated" ↔ "⇅ Status" (All, My requests) --------------------
    One tap; outlined while it names the default order, filled gray-a4 when sorted by status. 32 px with a 44 px
-   tap area. Under 360 px of width it drops to its own row, left-aligned. The row keeps F2's line spacing (.live):
+   tap area that, like Refresh now's, reaches 12 px down and never up (the header's search and avatar are right
+   above it). Under 360 px of width it drops to its own row, left-aligned. The row keeps F2's line spacing (.live):
    F1.2's "● Updated just now ⟳" (.liveLead) at its left. */
 .liveRow {
   container-type: inline-size;
@@ -1453,7 +1461,7 @@ button.qheadBtn:focus-visible {
 .sort::before {
   content: '';
   position: absolute;
-  inset: -6px -2px;
+  inset: 0 -2px -12px;
 }
 
 .sort[aria-pressed='true'] {
@@ -1468,11 +1476,12 @@ button.qheadBtn:focus-visible {
 }
 
 @container (max-width: 360px) {
+  /* 12 px apart: Refresh now's tap area reaches 12 px down, to the toggle's top and no further. */
   .liveIn {
     flex-direction: column;
     align-items: flex-start;
     justify-content: center;
-    gap: 2px;
+    gap: 12px;
   }
 
   .liveLead {

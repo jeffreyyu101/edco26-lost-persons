@@ -30,9 +30,10 @@
    96 px wherever it is narrow: the widest earlier-day time, "Mon 12:58 AM", is 92 px (88 cut it in WebKit).
    (F5) The status column fits the longest stage with what follows it ("Not found in medical · 2 checks",
    "Not found yet · 11:40 PM", "Friend en route · ~4 min", design/screens/colors-6.png) from a 1040 px table
-   (240 px); beside Post under that (180 px) what follows the label takes its short form instead of being cut. */
+   (240 px); beside Post under that (176 px, as docked at 1024–1279: with F2's 96 px Created the Friend column
+   keeps more than 100 px at 768) what follows the label takes its short form instead of being cut. */
 .table {
-  --tbl-cols: 56px minmax(0, 1fr) 180px 120px 96px 64px;
+  --tbl-cols: 56px minmax(0, 1fr) 176px 120px 96px 64px;
   --tbl-gap: 10px;
   --tbl-pad-l: 24px;
   --tbl-pad-r: calc(20px + env(safe-area-inset-right));

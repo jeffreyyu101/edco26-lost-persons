@@ -463,7 +463,9 @@ test.describe('1024 × 768 with a request open', () => {
     await page.goto(`/?status=${encodeURIComponent(NOT_IN_MEDICAL)}`);
     await row(page, nf.id).click({ timeout: 15_000 });
     await expect(page.getByTestId('desk-pane')).toBeVisible({ timeout: 15_000 });
-    await expect(cell(page, nf.id, 'status')).toHaveText('Not found in medical');
+    // (F5) What follows it, "· 2 checks" (two Not found answers), drops out in a column this narrow: what shows is
+    // the label alone (innerText: the hidden whole form is still in the DOM for a wider column).
+    await expect(cell(page, nf.id, 'status')).toHaveText('Not found in medical', { useInnerText: true });
     expect(await notCut(page, nf.id, 'status')).toBe(true);
     expect((await cell(page, nf.id, 'status').boundingBox())!.height).toBeLessThan(24);
   });

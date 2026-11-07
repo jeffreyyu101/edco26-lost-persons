@@ -26,7 +26,24 @@ import type {
   Stats,
   SyncResponse,
 } from '../api-types';
-import { SETTABLE_STATUSES, STATUS, canonStaff, isHeld, isUuid, sameStaff, statusMeta, staffString, undoTarget, type SettableStatus, type StatusKind } from '../domain';
+import {
+  NOT_FOUND_YET_LABEL,
+  RECHECK_MINUTES,
+  SETTABLE_STATUSES,
+  STATUS,
+  STATUS_META,
+  canonStaff,
+  initials,
+  isHeld,
+  isUuid,
+  notFoundHolds,
+  sameStaff,
+  statusMeta,
+  staffString,
+  undoTarget,
+  type SettableStatus,
+  type StatusKind,
+} from '../domain';
 import { formatCaseNumber } from '../format';
 import { syncPath } from './api-paths';
 import {
@@ -88,7 +105,7 @@ import {
   type ToastItem,
 } from './store-contract';
 import { chunk, isRow, mergeRows, overlayForPatch, replaceAll, staleIds, summaryOf } from './sync-merge';
-import { holdChanged, notFoundSnack, statusOverlayFields } from './hold';
+import type { HoldRules, SnackWords } from './hold-rules';
 import { uuid } from './uuid';
 
 // ---------------------------------------------------------------------------------------------------
@@ -190,6 +207,25 @@ function lazyNotifier(): AlertNotifier {
 
 /** Every alert a toast (no notifier, or system-notify not loaded yet). Kept here: a type import costs nothing on the first load. */
 const TOAST_PLAN: AlertPlan = { route: 'toast', skip: new Set<string>() };
+
+/**
+ * (F5) The "Not found yet" hold on the client (lib/client/hold-rules.ts: what a status tap shows before the server
+ * answers, the Undo bar's words, the 409 resend check) is stage-only code, loaded with import() so the first load
+ * (A25) does not carry it, and bound here to the same domain values as lib/client/hold.ts (which the store must not
+ * import: it would bring the rules back into the first load). The store starts loading it when it starts; a status
+ * tap waits for it (it is in long before). A failed load is forgotten, so the next tap tries again.
+ */
+let holdModule: Promise<HoldRules> | null = null;
+function loadHold(): Promise<HoldRules> {
+  holdModule ??= import('./hold-rules').then(
+    (m) => m.holdRules({ STATUS, STATUS_META, NOT_FOUND_YET_LABEL, RECHECK_MINUTES, initials, isHeld, notFoundHolds, formatCaseNumber }),
+    (error: unknown) => {
+      holdModule = null;
+      throw error;
+    },
+  );
+  return holdModule;
+}
 
 export interface CreateAppStoreOptions {
   eventTimezone: string;
@@ -1202,15 +1238,14 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   /** The row's latest version came from this phone, or from the same staff member on another phone. */
   const changedByThisStaff = (row: RequestSummary) => ownKeys.has(alertKey(row)) || sameStaff(row.updatedBy, state.session.staff);
 
-  const showUndo = (row: RequestSummary, from: string, to: SettableStatus) => {
+  const showUndo = (row: RequestSummary, from: string, to: SettableStatus, words: SnackWords | null) => {
     const back = undoTarget(from);
     if (!back || !isSettable(back) || back === to) return;
     clearSnackbar();
     const snackId = uuid();
     undoRecords.set(snackId, { id: row.id, to: back, version: row.rowVersion });
-    // (Pending v9.1) A Not found says what it did: "Not found yet · recheck in 20 min" (the hold) or "B.W. closed ·
-    // not found in medical" (the final answer).
-    const words = notFoundSnack(row, to);
+    // (Pending v9.1) A Not found says what it did (`words`, hold.notFoundSnack): "Not found yet · recheck in 20 min"
+    // (the hold) or "B.W. closed · not found in medical" (the final answer).
     const message = words?.message ?? `${formatCaseNumber(row.caseNumber)} · ${statusMeta(to).shortLabel}`;
     set({ snackbar: { id: snackId, message, ...(words ? { said: words.said } : {}), expiresAt: now() + UNDO_MS } });
     // Held (the location sheet covers the bar): the countdown starts when the hold is released.
@@ -1246,6 +1281,12 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   };
 
   const runStatus = async (id: string, to: SettableStatus, kind: StatusKind, undoVersion: number | null, tapHeld?: boolean): Promise<MutationResult> => {
+    // (F5) The hold's client side (loadHold). Nothing is on screen yet, so a failed load is only the toast.
+    const hold = await loadHold().catch(() => null);
+    if (!hold) {
+      toastFailure(COPY.failed);
+      return fail('failed', COPY.failed);
+    }
     const gen = ownerGen();
     const row = state.confirmed.get(id);
     if (!row) return fail('not_found', COPY.notFound);
@@ -1257,8 +1298,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     if (undoVersion === null && to === STATUS.notInMedical && kind === 'answer' && tapHeld === false && isHeld(row)) {
       return { ok: true, changed: false, request: row };
     }
-    // (F5) A first Not found keeps the status and goes on hold (lib/client/hold.ts predicts it).
-    setOverlay(id, { mutationId: uuid(), kind: 'status', fields: statusOverlayFields(row, to, kind, now()), startedAt: now() });
+    // (F5) A first Not found keeps the status and goes on hold (lib/client/hold-rules.ts predicts it).
+    setOverlay(id, { mutationId: uuid(), kind: 'status', fields: hold.statusOverlayFields(row, to, kind, now()), startedAt: now() });
     let res: HttpResult<ChangeResponse> = await postStatus(id, to, undoVersion ?? row.rowVersion, kind);
     if (gen !== state.generation) return fail('failed', COPY.failed);
     if (!res.ok && res.kind === 'http' && res.status === 409 && kind !== 'undo') {
@@ -1267,7 +1308,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       if (gen !== state.generation) return fail('failed', COPY.failed);
       // (F5) Not a Not found when the hold moved: a request someone else just put on hold must not be closed by
       // the resend (the same tap, meant as the first Not found, would be the final one now).
-      if (latest && latest.status === from && !(to === STATUS.notInMedical && holdChanged(row, latest))) {
+      if (latest && latest.status === from && !(to === STATUS.notInMedical && hold.holdChanged(row, latest))) {
         res = await postStatus(id, to, latest.rowVersion, kind);
         if (gen !== state.generation) return fail('failed', COPY.failed);
       } else {
@@ -1289,7 +1330,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       const request = res.data.request;
       commitOwn(request, id);
       markLive();
-      if (res.data.changed && UNDOABLE_KINDS.has(kind)) showUndo(request, from, to);
+      if (res.data.changed && UNDOABLE_KINDS.has(kind)) showUndo(request, from, to, hold.notFoundSnack(request, to));
       return { ok: true, changed: !!res.data.changed, request: state.confirmed.get(id) ?? request };
     }
     if (res.ok) return mutationFailed(id, { ok: false, kind: 'network' }, { conflictToast: true });
@@ -2517,6 +2558,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     channel?.addEventListener('message', onChannelMessage);
     notifier = e.notifier?.() ?? null;
     if (armed) notifier?.setActive(true);
+    // (F5) In before anyone can tap a status (see loadHold).
+    void loadHold().catch(() => undefined);
     sw = e.serviceWorker({
       onUpdateReady: () => {
         if (!state.updateReady) set({ updateReady: true });

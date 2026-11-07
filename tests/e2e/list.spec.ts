@@ -445,9 +445,11 @@ test.describe('the line under the title (v2.2 afternoon: minutes, a banner for p
     const line = (await live(page).boundingBox())!;
     expect(line.y).toBeGreaterThanOrEqual(title.y + title.height - 1);
     expect(line.y).toBeLessThan(title.y + title.height + 8);
-    expect(Math.abs(line.x + 16 - title.x)).toBeLessThan(2);
     await expect(live(page)).toHaveCSS('font-variant-numeric', 'tabular-nums');
     const dot = live(page).locator('[class*="liveDot"]');
+    // Its dot lines up with the title's first letter. (F5 release: on All and My requests the line shares a row
+    // with the "⇅" toggle, which holds the 16 px inset instead of the line, so the dot is measured, not the line.)
+    expect(Math.abs((await dot.boundingBox())!.x - title.x)).toBeLessThan(2);
     await expect(dot).toHaveCSS('width', '7px');
     await expect(dot).toHaveCSS('box-shadow', 'none');
     const dotColour = () => dot.evaluate((el) => getComputedStyle(el).backgroundColor);

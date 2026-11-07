@@ -101,6 +101,8 @@ screenshots.
   of the line under the title; the column header on the desk table).
 - **Dashboard Performance**: "last 2 hours" / "last hour" on each row, and "None" for an empty value ("—" only
   while the dashboard can't reach the server).
+- **Jeffrey's test-data banner is gone.** It drew nothing after 12:30 PM on Nov 6, and the first load had to stay
+  within its 230 KB budget (`docs/BUILD_SPEC.md` A71).
 
 ## The production migration
 

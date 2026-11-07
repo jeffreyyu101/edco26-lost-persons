@@ -419,30 +419,6 @@
   border: 0;
 }
 
-/* Temporary test-data banner (TestDataBanner.tsx, until 12:30 PM ET on Nov 6). */
-.testBanner {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: calc(env(safe-area-inset-top) + 12px) calc(env(safe-area-inset-right) + 16px) 12px
-    calc(env(safe-area-inset-left) + 16px);
-  background: var(--amber-a4);
-  color: var(--amber-12);
-  border-bottom: 1px solid var(--amber-a6);
-}
-.testBannerText {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 14px;
-  line-height: 1.35;
-}
-.testBannerText strong {
-  font-size: 16px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-}
-
 /* The line under the title (LiveIndicator.tsx; v2.2 afternoon, the Apple Mail model): a plain solid 7 px dot
    (no ring, no glow) in the state's colour, one quiet gray-11 line (4.5:1 in both themes, DECISIONS.md
    accessibility pass), then Refresh now. The row is the button's 32 px tall, and keeps that height while it is
