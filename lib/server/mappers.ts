@@ -240,11 +240,18 @@ export function mapAudit(raw: unknown): AuditEvent {
   }
 }
 
+/**
+ * Audit actions the profile's trail leaves out (F3, spec §18 A56): messages live in the thread and en route
+ * in its row. They stay in audit_events, so docs/export.sql still has every one.
+ */
+export const THREAD_AUDIT_ACTIONS: ReadonlySet<string> = new Set(['message_posted', 'message_unsent', 'enroute']);
+
 /** lp_detail JSON {row, photos, events} → RequestDetail (photos and audit oldest first). */
 export function mapDetail(raw: unknown): RequestDetail {
   const d = isObject(raw) ? raw : {};
   const photos = Array.isArray(d.photos) ? d.photos.map(mapPhoto) : [];
-  const audit = Array.isArray(d.events) ? d.events.map(mapAudit) : [];
+  const events = Array.isArray(d.events) ? d.events.filter((e) => !(isObject(e) && THREAD_AUDIT_ACTIONS.has(reqStr(e.action_type)))) : [];
+  const audit = events.map(mapAudit);
   return { ...mapRow(d.row), photos, audit };
 }
 

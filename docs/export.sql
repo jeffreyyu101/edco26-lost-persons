@@ -1,13 +1,15 @@
 -- docs/export.sql: the end-of-event export for "Is my friend in medical?" (EDC Orlando 2026).
--- It replaces the app's Export CSV button (removed 2026-11-06). Two read-only queries; nothing is changed.
+-- It replaces the app's Export CSV button (removed 2026-11-06). Three read-only queries; nothing is changed.
 --
 --   1. Supabase dashboard → SQL Editor → New query. Paste this whole file.
 --   2. Highlight Query 1 (from its "with" to its ";") and click Run, so only that query runs. If the
 --      editor offers a row limit, set it to "No limit" first, so every row comes back.
---   3. Above the results, click "Download CSV" (under Export). Then repeat steps 2 and 3 for Query 2.
+--   3. Above the results, click "Download CSV" (under Export). Then repeat steps 2 and 3 for Query 2 and
+--      Query 3.
 --
 -- Query 1 is every request, one row each, by case number. Query 2 is the whole audit trail, one row per
--- event, by case number and time. Times are America/New_York, the event's time zone.
+-- event, by case number and time. Query 3 is every message and en route event, by case number and time
+-- (unsent messages included, marked "yes"). Times are America/New_York, the event's time zone.
 -- Text a spreadsheet could run as a formula (starting with = + - @ or the full-width ＝ ＋ － ＠, after
 -- any spaces or invisible characters, or starting with a tab or a line break) gets a leading ', as the
 -- app's CSV export did. The files hold names and phone numbers: keep them off shared devices.
@@ -79,3 +81,33 @@ from public.audit_events e
 left join public.patients p on p.id = e.patient_id
 cross join settings s
 order by p.case_number nulls last, e.occurred_at, e.id;
+
+-- Query 3: messages and en route
+with settings as (
+  select 'America/New_York'::text as tz,
+         'YYYY-MM-DD HH24:MI:SS'::text as fmt,
+         '^(?=[\t\r\n]|[\u0001- \u007f- ­؜ ᠎ -‏ -  -⁤　﻿]*[=+@＝＋－＠-])'::text as guard
+), events as (
+  select m.request_id, m.created_at as at, m.staff, nullif(m.team, '') as team, 'Message'::text as kind, m.body as said,
+         null::text as eta, m.unsent_at
+  from public.lp_messages m
+  union all
+  select e.patient_id, e.occurred_at, e.staff_name, nullif(substring(e.staff_name from '· ([^·]*)$'), ''),
+         'En route'::text, e.new_value ->> 'state', e.new_value ->> 'eta_at', null::timestamptz
+  from public.audit_events e
+  where e.action_type = 'enroute'
+)
+select
+  'LP-' || lpad(p.case_number::text, greatest(4, length(p.case_number::text)), '0') as "Case number",
+  to_char(ev.at at time zone s.tz, s.fmt) as "When",
+  regexp_replace(ev.staff, s.guard, '''') as "Staff",
+  regexp_replace(ev.team, s.guard, '''') as "Team",
+  ev.kind as "Type",
+  regexp_replace(ev.said, s.guard, '''') as "Text or state",
+  to_char(ev.eta::timestamptz at time zone s.tz, s.fmt) as "ETA",
+  case when ev.kind = 'Message' then case when ev.unsent_at is null then 'no' else 'yes' end end as "Unsent",
+  to_char(ev.unsent_at at time zone s.tz, s.fmt) as "Unsent at"
+from events ev
+left join public.patients p on p.id = ev.request_id
+cross join settings s
+order by p.case_number nulls last, ev.at;

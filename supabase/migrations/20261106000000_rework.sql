@@ -23,6 +23,8 @@
 --   4. patient_photos.thumb_path.
 --   5. lp_login_attempts (sign-in rate limiting), RLS on, no policies.
 --   6. The lp_* functions the app calls. Only service_role may execute them.
+--   7. Messages and en route (2026-11-06 evening): lp_messages, lp_message_reads, lp_enroute, their
+--      functions and the trigger that clears en route when a request leaves In medical. Additive.
 -- =====================================================================================================
 
 begin;
@@ -1531,6 +1533,811 @@ grant execute on function public.lp_login_begin(text, text) to service_role;
 grant execute on function public.lp_login_finish(bigint, boolean) to service_role;
 grant execute on function public.lp_stats() to service_role;
 grant execute on function public.lp_detail(uuid) to service_role;
+
+-- -----------------------------------------------------------------------------------------------------
+-- 7. Messages and en route (F3, 2026-11-06 evening; spec §18 A53-A58, design/DECISIONS.md "Messages and en
+--    route"). Additive only: three new tables, two indexes on existing tables (one partial), an AFTER UPDATE
+--    OF status trigger on patients and new functions. No existing column, constraint or function changes, so
+--    the build that is live now keeps working on a migrated database (it never calls them; the trigger only
+--    deletes en route rows, which only this build writes).
+--
+--    lp_messages       one row per message; never deleted (an unsend sets unsent_at, kept for the audit and the
+--                      export). Idempotent on client_mutation_id (a queued send retried from a phone).
+--    lp_message_reads  one read cursor per (request, staff): unread = other people's messages after it.
+--                      last_read_at = the newest message the reader has seen; read_at = when they saw it (the
+--                      "Read 4:14 PM" receipt).
+--    lp_enroute        who is walking the friend to medical: one row per (request, staff), 'enroute' or
+--                      'arrived', with an optional absolute ETA. Cleared (same transaction) by any status change
+--                      out of In medical: Not in medical, Back to Waiting, Reunited, Discharged, Cancelled.
+--
+--    Staff are keyed by lp_canon_staff(attribution), stored at write time (staff_key / staff): no index,
+--    default or constraint may depend on lp_canon_staff, because section 6 drops and recreates it.
+--    Every write goes through one function and writes its audit_events row in the same transaction
+--    (message_posted, message_unsent, enroute). Reads are not audited (they change nothing in the record).
+--    Every name below starts with lp_messages / lp_enroute, except the tables and functions the F3/F4/F5
+--    contract names (lp_messages, lp_message_reads, lp_enroute, lp_post_message, lp_mark_read,
+--    lp_set_enroute, lp_unsend_message, lp_involved_staff).
+-- -----------------------------------------------------------------------------------------------------
+
+create table if not exists public.lp_messages (
+  id uuid primary key default gen_random_uuid(),
+  request_id uuid not null references public.patients (id) on delete cascade,
+  -- The attribution string "Name · Team" from the session (display), and its canonical form (comparisons).
+  staff text not null,
+  staff_key text not null,
+  -- The session's canonical team: 'Medical' marks a medical-side message (Needs info).
+  team text not null default '',
+  body text not null,
+  created_at timestamptz not null default clock_timestamp(),
+  unsent_at timestamptz,
+  client_mutation_id uuid not null,
+  constraint lp_messages_client_mutation_id_key unique (client_mutation_id),
+  constraint lp_messages_body_check check (char_length(body) between 1 and 500)
+);
+create index if not exists lp_messages_request_idx on public.lp_messages (request_id, created_at desc, id desc);
+create index if not exists lp_messages_created_at_idx on public.lp_messages (created_at);
+create index if not exists lp_messages_unsent_at_idx on public.lp_messages (unsent_at) where unsent_at is not null;
+create index if not exists lp_messages_staff_idx on public.lp_messages (staff_key, created_at);
+
+create table if not exists public.lp_message_reads (
+  request_id uuid not null references public.patients (id) on delete cascade,
+  -- Canonical staff (lp_canon_staff).
+  staff text not null,
+  last_read_at timestamptz not null,
+  read_at timestamptz not null default clock_timestamp(),
+  primary key (request_id, staff)
+);
+create index if not exists lp_message_reads_staff_idx on public.lp_message_reads (staff, read_at);
+
+create table if not exists public.lp_enroute (
+  request_id uuid not null references public.patients (id) on delete cascade,
+  -- Canonical staff (lp_canon_staff), and the attribution string for the export.
+  staff text not null,
+  staff_name text not null,
+  eta_at timestamptz,
+  -- The ETA pill chosen (0 = Now, 5, 10, 15), so the edit sheet shows it selected. Null = no ETA.
+  eta_minutes smallint,
+  state text not null,
+  updated_at timestamptz not null default clock_timestamp(),
+  primary key (request_id, staff),
+  constraint lp_enroute_state_check check (state in ('enroute', 'arrived')),
+  constraint lp_enroute_eta_minutes_check check (eta_minutes is null or eta_minutes between 0 and 60)
+);
+
+-- Message and en route events are read back from the audit trail (sync deltas, the export, Time to arrive).
+create index if not exists lp_messages_audit_at_idx on public.audit_events (occurred_at)
+  where action_type in ('message_posted', 'message_unsent', 'enroute');
+
+alter table public.lp_messages enable row level security;
+alter table public.lp_message_reads enable row level security;
+alter table public.lp_enroute enable row level security;
+revoke all on table public.lp_messages, public.lp_message_reads, public.lp_enroute from anon, authenticated;
+grant select, insert, update on table public.lp_messages to service_role;
+grant select, insert, update, delete on table public.lp_message_reads to service_role;
+grant select, insert, update, delete on table public.lp_enroute to service_role;
+
+-- A status change out of In medical clears every en route on the request, in the same transaction, with one
+-- audit row ('enroute' / cleared) attributed to whoever changed the status (updated_by). No notification of
+-- its own: the status change's notification reaches en-route staff through lp_involved_staff.
+-- create or replace (never drop): the trigger depends on it.
+create or replace function public.lp_enroute_on_status()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $fn$
+declare
+  v_n integer;
+begin
+  if new.status in ('Found – Awaiting Reunion', 'Bring friend to medical') then
+    return null;
+  end if;
+  with gone as (
+    delete from public.lp_enroute e where e.request_id = new.id returning e.staff
+  )
+  select pg_catalog.count(*)::integer into v_n from gone;
+  if v_n > 0 then
+    insert into public.audit_events (patient_id, staff_name, action_type, previous_value, new_value, occurred_at)
+    values (new.id, new.updated_by, 'enroute', pg_catalog.jsonb_build_object('count', v_n),
+            pg_catalog.jsonb_build_object('state', 'cleared', 'status', new.status), pg_catalog.clock_timestamp());
+  end if;
+  return null;
+end
+$fn$;
+
+create or replace trigger lp_enroute_clear
+  after update of status on public.patients
+  for each row
+  when (old.status is distinct from new.status)
+  execute function public.lp_enroute_on_status();
+
+drop function if exists public.lp_messages_json(public.lp_messages, text);
+drop function if exists public.lp_enroute_summary(uuid, text);
+drop function if exists public.lp_involved_staff(uuid);
+drop function if exists public.lp_messages_activity(uuid, text, text);
+drop function if exists public.lp_post_message(uuid, text, uuid, text, text);
+drop function if exists public.lp_unsend_message(uuid, uuid, text);
+drop function if exists public.lp_mark_read(uuid, text, timestamptz);
+drop function if exists public.lp_set_enroute(uuid, text, integer, timestamptz, integer, text);
+drop function if exists public.lp_messages_thread(uuid, text, timestamptz, uuid, integer);
+drop function if exists public.lp_messages_sync(text, uuid[], timestamptz, boolean);
+drop function if exists public.lp_enroute_stats();
+
+-- lp_messages_json: one message as the API returns it (snake_case), `mine` for the caller. Internal helper.
+create function public.lp_messages_json(m public.lp_messages, p_key text)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public, pg_temp
+as $fn$
+begin
+  return pg_catalog.jsonb_build_object(
+    'id', m.id,
+    'request_id', m.request_id,
+    'staff', m.staff,
+    'team', m.team,
+    'body', m.body,
+    'created_at', m.created_at,
+    'unsent_at', m.unsent_at,
+    'client_mutation_id', m.client_mutation_id,
+    'mine', m.staff_key = p_key
+  );
+end
+$fn$;
+
+-- lp_enroute_summary: the request's en route state for the caller, or null when nobody is en route: how many
+-- are en route, the earliest ETA, 'arrived' once anyone arrived (it wins: the friend is there), and the
+-- caller's own row. Internal helper.
+create function public.lp_enroute_summary(p_request uuid, p_key text)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public, pg_temp
+as $fn$
+declare
+  v_rows integer;
+  v_count integer;
+  v_eta timestamptz;
+  v_arrived boolean;
+  v_mine public.lp_enroute;
+begin
+  select pg_catalog.count(*)::integer,
+         pg_catalog.count(*) filter (where e.state = 'enroute')::integer,
+         pg_catalog.min(e.eta_at) filter (where e.state = 'enroute'),
+         coalesce(pg_catalog.bool_or(e.state = 'arrived'), false)
+    into v_rows, v_count, v_eta, v_arrived
+  from public.lp_enroute e
+  where e.request_id = p_request;
+
+  if v_rows = 0 then
+    return null;
+  end if;
+
+  select * into v_mine from public.lp_enroute e where e.request_id = p_request and e.staff = p_key;
+
+  return pg_catalog.jsonb_build_object(
+    'count', v_count,
+    'earliest_eta', v_eta,
+    'state', case when v_arrived then 'arrived' else 'enroute' end,
+    'mine', case
+      when v_mine.request_id is null then null
+      else pg_catalog.jsonb_build_object('eta_at', v_mine.eta_at, 'eta_minutes', v_mine.eta_minutes, 'state', v_mine.state)
+    end
+  );
+end
+$fn$;
+
+-- lp_involved_staff (contract C): everyone a change to this request concerns (canonical staff, distinct): the
+-- logger, whoever answered In medical / Not in medical (legacy answers too), whoever set the location,
+-- everyone who messaged, everyone who was ever en route on it (from the audit trail, so it still holds after a
+-- status change cleared them) and anyone en route now. F4's notifications call it right after a change.
+create function public.lp_involved_staff(p_request uuid)
+returns setof text
+language plpgsql
+stable
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+begin
+  return query
+  select distinct x.s
+  from (
+    select public.lp_canon_staff(p.created_by) as s
+    from public.patients p
+    where p.id = p_request
+    union all
+    select public.lp_canon_staff(e.staff_name)
+    from public.audit_events e
+    where e.patient_id = p_request
+      and (
+        (e.action_type in ('status_changed', 'check_completed')
+          and e.new_value ->> 'status' in ('Found – Awaiting Reunion', 'Checked – Not Found', 'Bring friend to medical'))
+        or e.action_type in ('medical_search', 'medical_search_found')
+        or (e.action_type = 'patient_updated' and e.new_value ? 'medical_location')
+        or (e.action_type = 'enroute' and e.new_value ->> 'state' in ('enroute', 'changed', 'arrived'))
+      )
+    union all
+    select m.staff_key from public.lp_messages m where m.request_id = p_request
+    union all
+    select r.staff from public.lp_enroute r where r.request_id = p_request
+  ) as x
+  where x.s is not null and x.s <> '';
+end
+$fn$;
+
+-- lp_messages_activity: what the lists show of a request's thread, for the caller: message count, the latest
+-- message (first 120 characters, the card preview), unread (other people's messages after the caller's read
+-- cursor), needs_info (Waiting for check, the latest message is from the Medical team, and it was written
+-- after the request's last status change: a front-of-house reply or any status change clears it), involved
+-- (the caller is in lp_involved_staff: the in-app alert) and the en route summary. Unsent messages never
+-- count. Internal helper.
+create function public.lp_messages_activity(p_request uuid, p_key text, p_status text)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public, pg_temp
+as $fn$
+declare
+  v_count integer;
+  v_last public.lp_messages;
+  v_read timestamptz;
+  v_unread integer;
+  v_changed timestamptz;
+  v_needs boolean := false;
+  v_involved boolean := false;
+begin
+  select pg_catalog.count(*)::integer into v_count
+  from public.lp_messages m where m.request_id = p_request and m.unsent_at is null;
+
+  select * into v_last
+  from public.lp_messages m
+  where m.request_id = p_request and m.unsent_at is null
+  order by m.created_at desc, m.id desc
+  limit 1;
+
+  select r.last_read_at into v_read from public.lp_message_reads r where r.request_id = p_request and r.staff = p_key;
+
+  select pg_catalog.count(*)::integer into v_unread
+  from public.lp_messages m
+  where m.request_id = p_request and m.unsent_at is null and m.staff_key <> p_key
+    and (v_read is null or m.created_at > v_read);
+
+  if p_status = 'Added' and v_last.id is not null and pg_catalog.lower(pg_catalog.btrim(v_last.team)) = 'medical' then
+    select pg_catalog.max(e.occurred_at) into v_changed
+    from public.audit_events e
+    where e.patient_id = p_request and e.action_type in ('status_changed', 'cancelled');
+    v_needs := v_changed is null or v_last.created_at > v_changed;
+  end if;
+
+  if v_count > 0 then
+    v_involved := exists (select 1 from public.lp_involved_staff(p_request) as s(staff) where s.staff = p_key);
+  end if;
+
+  return pg_catalog.jsonb_build_object(
+    'message_count', v_count,
+    'last_message_at', v_last.created_at,
+    'last_message', case
+      when v_last.id is null then null
+      else pg_catalog.jsonb_build_object(
+        'staff', v_last.staff,
+        'team', v_last.team,
+        'body', pg_catalog.left(v_last.body, 120),
+        'mine', v_last.staff_key = p_key,
+        'at', v_last.created_at)
+    end,
+    'unread', v_unread,
+    'needs_info', v_needs,
+    'involved', v_involved,
+    'enroute', public.lp_enroute_summary(p_request, p_key)
+  );
+end
+$fn$;
+
+-- lp_post_message: a message on a request, at any status (closed ones too).
+--   Idempotent on p_client_mutation_id: a retry returns the message already stored ({created: false}); the
+--   same id on another request or by another staff → P0422 field:client_mutation_id.
+--   Body: trimmed, 1–500 characters (P0422 field:body). Plain text; the client never renders it as HTML.
+--   Rate limit: 20 messages a minute per staff (canonical), serialised per staff with an advisory lock;
+--   over it → P0429 with HINT = seconds until the next one is allowed.
+--   Audit message_posted {message_id, body}. Returns {created, message, activity, recipients}: recipients =
+--   lp_involved_staff, for the notification (contract D) sent after the response.
+create function public.lp_post_message(p_request uuid, p_body text, p_client_mutation_id uuid, p_staff text, p_team text)
+returns jsonb
+language plpgsql
+volatile
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_key text;
+  v_status text;
+  v_msg public.lp_messages;
+  v_body text;
+  v_n integer;
+  v_oldest timestamptz;
+  v_created boolean := true;
+begin
+  perform public.lp_require_staff(p_staff);
+  if p_request is null then
+    raise exception using errcode = 'P0002', message = 'not_found';
+  end if;
+  if p_client_mutation_id is null then
+    raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:client_mutation_id';
+  end if;
+  v_key := public.lp_canon_staff(p_staff);
+
+  select p.status into v_status from public.patients p where p.id = p_request;
+  if not found then
+    raise exception using errcode = 'P0002', message = 'not_found';
+  end if;
+
+  select * into v_msg from public.lp_messages m where m.client_mutation_id = p_client_mutation_id;
+  if v_msg.id is not null then
+    if v_msg.request_id <> p_request or v_msg.staff_key <> v_key then
+      raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:client_mutation_id';
+    end if;
+    v_created := false;
+  else
+    v_body := pg_catalog.btrim(p_body, E' \t\r\n');
+    if v_body is null or v_body = '' then
+      raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:body';
+    end if;
+    if pg_catalog.char_length(v_body) > 500 then
+      raise exception using errcode = 'P0422', message = 'field_too_long', detail = 'field:body';
+    end if;
+
+    perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('lp_messages:' || v_key));
+    select pg_catalog.count(*)::integer, pg_catalog.min(m.created_at) into v_n, v_oldest
+    from public.lp_messages m
+    where m.staff_key = v_key and m.created_at > pg_catalog.clock_timestamp() - interval '60 seconds';
+    if v_n >= 20 then
+      raise exception using errcode = 'P0429', message = 'rate_limited',
+        hint = greatest(1, pg_catalog.ceil(60 - extract(epoch from pg_catalog.clock_timestamp() - v_oldest)))::integer::text;
+    end if;
+
+    insert into public.lp_messages as t (request_id, staff, staff_key, team, body, client_mutation_id)
+    values (p_request, p_staff, v_key, coalesce(pg_catalog.btrim(p_team), ''), v_body, p_client_mutation_id)
+    on conflict (client_mutation_id) do nothing
+    returning t.* into v_msg;
+
+    if v_msg.id is null then
+      -- A concurrent identical send won the race: answer with its message.
+      select * into v_msg from public.lp_messages m where m.client_mutation_id = p_client_mutation_id;
+      if v_msg.request_id <> p_request or v_msg.staff_key <> v_key then
+        raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:client_mutation_id';
+      end if;
+      v_created := false;
+    else
+      insert into public.audit_events (patient_id, staff_name, action_type, previous_value, new_value, occurred_at)
+      values (p_request, p_staff, 'message_posted', null,
+              pg_catalog.jsonb_build_object('message_id', v_msg.id, 'body', v_msg.body), v_msg.created_at);
+    end if;
+  end if;
+
+  return pg_catalog.jsonb_build_object(
+    'created', v_created,
+    'message', public.lp_messages_json(v_msg, v_key),
+    'activity', public.lp_messages_activity(p_request, v_key, v_status),
+    'recipients', case when v_created
+      then (select coalesce(pg_catalog.jsonb_agg(s.staff), '[]'::jsonb) from public.lp_involved_staff(p_request) as s(staff))
+      else '[]'::jsonb end
+  );
+end
+$fn$;
+
+-- lp_unsend_message: the sender takes a message back within 15 minutes. It disappears from every thread,
+-- count and preview, and stays in lp_messages (unsent_at), in the audit trail and in the export.
+--   A message of another request (p_request) → P0002. Someone else's message → P0403. Older than 15 minutes
+--   → P0422 too_late (field:message). Already unsent → {changed: false}. Audit message_unsent (previous {message_id, body}). Returns {changed, message, activity}.
+create function public.lp_unsend_message(p_request uuid, p_message uuid, p_staff text)
+returns jsonb
+language plpgsql
+volatile
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_key text;
+  v_msg public.lp_messages;
+  v_status text;
+begin
+  perform public.lp_require_staff(p_staff);
+  if p_message is null then
+    raise exception using errcode = 'P0002', message = 'not_found';
+  end if;
+  v_key := public.lp_canon_staff(p_staff);
+  select * into v_msg from public.lp_messages m where m.id = p_message for update;
+  if v_msg.id is null or v_msg.request_id is distinct from p_request then
+    raise exception using errcode = 'P0002', message = 'not_found';
+  end if;
+  if v_msg.staff_key <> v_key then
+    raise exception using errcode = 'P0403', message = 'sender_only';
+  end if;
+  select p.status into v_status from public.patients p where p.id = v_msg.request_id;
+  if v_msg.unsent_at is not null then
+    return pg_catalog.jsonb_build_object('changed', false, 'message', public.lp_messages_json(v_msg, v_key),
+      'activity', public.lp_messages_activity(v_msg.request_id, v_key, v_status));
+  end if;
+  if pg_catalog.clock_timestamp() - v_msg.created_at > interval '15 minutes' then
+    raise exception using errcode = 'P0422', message = 'too_late', detail = 'field:message';
+  end if;
+
+  update public.lp_messages m set unsent_at = pg_catalog.clock_timestamp() where m.id = p_message returning * into v_msg;
+
+  insert into public.audit_events (patient_id, staff_name, action_type, previous_value, new_value, occurred_at)
+  values (v_msg.request_id, p_staff, 'message_unsent',
+          pg_catalog.jsonb_build_object('message_id', v_msg.id, 'body', v_msg.body),
+          pg_catalog.jsonb_build_object('message_id', v_msg.id), v_msg.unsent_at);
+
+  return pg_catalog.jsonb_build_object('changed', true, 'message', public.lp_messages_json(v_msg, v_key),
+    'activity', public.lp_messages_activity(v_msg.request_id, v_key, v_status));
+end
+$fn$;
+
+-- lp_mark_read: the caller saw the thread up to p_upto (the newest message on their screen; null = now). The
+-- cursor only moves forward, and only past someone else's message, so "Read 4:14 PM" keeps the time the
+-- message was first seen and an open thread with nothing new writes nothing. Not audited.
+-- Returns {changed, activity}.
+create function public.lp_mark_read(p_request uuid, p_staff text, p_upto timestamptz default null)
+returns jsonb
+language plpgsql
+volatile
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_key text;
+  v_status text;
+  v_now timestamptz := pg_catalog.clock_timestamp();
+  v_upto timestamptz;
+  v_last timestamptz;
+  v_changed boolean := false;
+begin
+  perform public.lp_require_staff(p_staff);
+  if p_request is null then
+    raise exception using errcode = 'P0002', message = 'not_found';
+  end if;
+  v_key := public.lp_canon_staff(p_staff);
+  select p.status into v_status from public.patients p where p.id = p_request;
+  if not found then
+    raise exception using errcode = 'P0002', message = 'not_found';
+  end if;
+  v_upto := least(coalesce(p_upto, v_now), v_now);
+
+  select r.last_read_at into v_last from public.lp_message_reads r where r.request_id = p_request and r.staff = v_key for update;
+  if (v_last is null or v_upto > v_last) and exists (
+    select 1 from public.lp_messages m
+    where m.request_id = p_request and m.unsent_at is null and m.staff_key <> v_key
+      and m.created_at <= v_upto and (v_last is null or m.created_at > v_last)
+  ) then
+    insert into public.lp_message_reads as r (request_id, staff, last_read_at, read_at)
+    values (p_request, v_key, v_upto, v_now)
+    on conflict (request_id, staff) do update
+      set last_read_at = greatest(r.last_read_at, excluded.last_read_at), read_at = excluded.read_at;
+    v_changed := true;
+  end if;
+
+  return pg_catalog.jsonb_build_object('changed', v_changed, 'activity', public.lp_messages_activity(p_request, v_key, v_status));
+end
+$fn$;
+
+-- lp_set_enroute: front of house walking the friend over. p_action:
+--   'set'    en route, or a new ETA: p_eta_at (absolute; the Undo of a cancel), else clock_timestamp() +
+--            p_eta_offset_seconds (the pill's minutes minus how long ago it was tapped, so a queued tap keeps
+--            its ETA), else no ETA. ETAs are clamped to ±6 h. p_eta_minutes is the pill (0–60) or null.
+--   'cancel' clears only the caller's en route.
+--   'arrive' the friend arrived (the caller's row becomes 'arrived').
+--   Only while the request is In medical; at any other status the call is accepted and changes nothing
+--   ({changed: false, ignored: true}), so a queued tap that lands after the answer changed never fails.
+--   Repeats change nothing (same state and ETA within 30 s). Audit 'enroute' {state: enroute | changed |
+--   cancelled | arrived, eta_at, eta_minutes, staff_key}. Returns {changed, ignored, event, activity,
+--   recipients} (recipients = lp_involved_staff when it changed, for the notification).
+create function public.lp_set_enroute(
+  p_request uuid,
+  p_action text,
+  p_eta_offset_seconds integer,
+  p_eta_at timestamptz,
+  p_eta_minutes integer,
+  p_staff text
+)
+returns jsonb
+language plpgsql
+volatile
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_key text;
+  v_now timestamptz := pg_catalog.clock_timestamp();
+  v_status text;
+  v_cur public.lp_enroute;
+  v_eta timestamptz;
+  v_event text;
+  v_prev jsonb;
+begin
+  perform public.lp_require_staff(p_staff);
+  if p_request is null then
+    raise exception using errcode = 'P0002', message = 'not_found';
+  end if;
+  if p_action is null or p_action not in ('set', 'cancel', 'arrive') then
+    raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:action';
+  end if;
+  if p_eta_minutes is not null and (p_eta_minutes < 0 or p_eta_minutes > 60) then
+    raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:eta_minutes';
+  end if;
+  v_key := public.lp_canon_staff(p_staff);
+
+  -- FOR SHARE: a status change (FOR UPDATE, then the clearing trigger) waits for this, and this for it.
+  select p.status into v_status from public.patients p where p.id = p_request for share;
+  if not found then
+    raise exception using errcode = 'P0002', message = 'not_found';
+  end if;
+  if v_status not in ('Found – Awaiting Reunion', 'Bring friend to medical') then
+    return pg_catalog.jsonb_build_object('changed', false, 'ignored', true, 'event', null,
+      'activity', public.lp_messages_activity(p_request, v_key, v_status), 'recipients', '[]'::jsonb);
+  end if;
+
+  select * into v_cur from public.lp_enroute e where e.request_id = p_request and e.staff = v_key for update;
+  v_prev := case when v_cur.request_id is null then null
+    else pg_catalog.jsonb_build_object('state', v_cur.state, 'eta_at', v_cur.eta_at, 'eta_minutes', v_cur.eta_minutes) end;
+
+  if p_action = 'set' then
+    v_eta := coalesce(p_eta_at, case when p_eta_offset_seconds is null then null
+                                     else v_now + pg_catalog.make_interval(secs => p_eta_offset_seconds) end);
+    if v_eta is not null then
+      v_eta := least(greatest(v_eta, v_now - interval '6 hours'), v_now + interval '6 hours');
+    end if;
+    if v_cur.request_id is not null and v_cur.state = 'enroute'
+       and v_cur.eta_minutes is not distinct from p_eta_minutes::smallint
+       and ((v_cur.eta_at is null and v_eta is null)
+            or (v_cur.eta_at is not null and v_eta is not null and abs(extract(epoch from v_cur.eta_at - v_eta)) < 30)) then
+      return pg_catalog.jsonb_build_object('changed', false, 'ignored', false, 'event', null,
+        'activity', public.lp_messages_activity(p_request, v_key, v_status), 'recipients', '[]'::jsonb);
+    end if;
+    v_event := case when v_cur.request_id is null or v_cur.state = 'arrived' then 'enroute' else 'changed' end;
+    insert into public.lp_enroute as e (request_id, staff, staff_name, eta_at, eta_minutes, state, updated_at)
+    values (p_request, v_key, p_staff, v_eta, p_eta_minutes::smallint, 'enroute', v_now)
+    on conflict (request_id, staff) do update
+      set staff_name = excluded.staff_name, eta_at = excluded.eta_at, eta_minutes = excluded.eta_minutes,
+          state = 'enroute', updated_at = excluded.updated_at;
+  elsif p_action = 'cancel' then
+    if v_cur.request_id is null then
+      return pg_catalog.jsonb_build_object('changed', false, 'ignored', false, 'event', null,
+        'activity', public.lp_messages_activity(p_request, v_key, v_status), 'recipients', '[]'::jsonb);
+    end if;
+    delete from public.lp_enroute e where e.request_id = p_request and e.staff = v_key;
+    v_event := 'cancelled';
+    v_eta := v_cur.eta_at;
+  else
+    if v_cur.state = 'arrived' then
+      return pg_catalog.jsonb_build_object('changed', false, 'ignored', false, 'event', null,
+        'activity', public.lp_messages_activity(p_request, v_key, v_status), 'recipients', '[]'::jsonb);
+    end if;
+    v_eta := v_cur.eta_at;
+    insert into public.lp_enroute as e (request_id, staff, staff_name, eta_at, eta_minutes, state, updated_at)
+    values (p_request, v_key, p_staff, v_eta, v_cur.eta_minutes, 'arrived', v_now)
+    on conflict (request_id, staff) do update set staff_name = excluded.staff_name, state = 'arrived', updated_at = excluded.updated_at;
+    v_event := 'arrived';
+  end if;
+
+  insert into public.audit_events (patient_id, staff_name, action_type, previous_value, new_value, occurred_at)
+  values (p_request, p_staff, 'enroute', v_prev,
+          pg_catalog.jsonb_build_object('state', v_event, 'eta_at', v_eta,
+            'eta_minutes', case when p_action = 'set' then p_eta_minutes else v_cur.eta_minutes end, 'staff_key', v_key),
+          v_now);
+
+  return pg_catalog.jsonb_build_object('changed', true, 'ignored', false, 'event', v_event,
+    'activity', public.lp_messages_activity(p_request, v_key, v_status),
+    'recipients', (select coalesce(pg_catalog.jsonb_agg(s.staff), '[]'::jsonb) from public.lp_involved_staff(p_request) as s(staff)));
+end
+$fn$;
+
+-- lp_messages_thread: a request's messages for the caller, the latest p_limit (≤ 200) before the
+-- (created_at, id) cursor, oldest first, with has_earlier. Unsent messages are left out. The first page also
+-- carries the receipt of the caller's latest message: read_at = when the first other reader whose cursor is at
+-- or past it read the thread. Returns {messages, has_earlier, receipt: {message_id, read_at} | null, activity}.
+create function public.lp_messages_thread(p_request uuid, p_staff text, p_before_at timestamptz default null, p_before_id uuid default null, p_limit integer default 100)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_key text;
+  v_status text;
+  v_limit integer := least(greatest(coalesce(p_limit, 100), 1), 200);
+  v_messages jsonb;
+  v_more boolean;
+  v_mine public.lp_messages;
+  v_receipt jsonb := null;
+begin
+  perform public.lp_require_staff(p_staff);
+  if p_request is null then
+    raise exception using errcode = 'P0002', message = 'not_found';
+  end if;
+  if (p_before_at is null) <> (p_before_id is null) then
+    raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:before';
+  end if;
+  v_key := public.lp_canon_staff(p_staff);
+  select p.status into v_status from public.patients p where p.id = p_request;
+  if not found then
+    raise exception using errcode = 'P0002', message = 'not_found';
+  end if;
+
+  select coalesce(pg_catalog.jsonb_agg(public.lp_messages_json(t.m, v_key) order by (t.m).created_at, (t.m).id)
+                    filter (where t.rn <= v_limit), '[]'::jsonb),
+         pg_catalog.count(*) > v_limit
+    into v_messages, v_more
+  from (
+    select m, pg_catalog.row_number() over (order by m.created_at desc, m.id desc) as rn
+    from public.lp_messages m
+    where m.request_id = p_request and m.unsent_at is null
+      and (p_before_at is null or (m.created_at, m.id) < (p_before_at, p_before_id))
+    order by m.created_at desc, m.id desc
+    limit v_limit + 1
+  ) as t;
+
+  if p_before_at is null then
+    select * into v_mine
+    from public.lp_messages m
+    where m.request_id = p_request and m.unsent_at is null and m.staff_key = v_key
+    order by m.created_at desc, m.id desc
+    limit 1;
+    if v_mine.id is not null then
+      v_receipt := pg_catalog.jsonb_build_object(
+        'message_id', v_mine.id,
+        'read_at', (select pg_catalog.min(r.read_at) from public.lp_message_reads r
+                    where r.request_id = p_request and r.staff <> v_key and r.last_read_at >= v_mine.created_at));
+    end if;
+  end if;
+
+  return pg_catalog.jsonb_build_object('messages', v_messages, 'has_earlier', v_more, 'receipt', v_receipt,
+    'activity', public.lp_messages_activity(p_request, v_key, v_status));
+end
+$fn$;
+
+-- lp_messages_sync: the thread activity /api/sync attaches to its rows, for the caller.
+--   threads: {id, …lp_messages_activity} for every id in p_ids that has any message or en route, and, with
+--            p_changed, every request whose thread changed since p_since − 30 s (a message posted or unsent,
+--            an en route event, the caller's own read on another device).
+--   rows:    lp_row of those changed requests that are not in p_ids (their patients row did not change, so
+--            lp_sync did not return them).
+-- Requests with neither messages nor en route are left out (the server fills the empty activity).
+-- Returns {threads, rows}.
+create function public.lp_messages_sync(p_staff text, p_ids uuid[], p_since timestamptz, p_changed boolean)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_key text;
+  v_ids uuid[] := coalesce(p_ids, '{}'::uuid[]);
+  v_delta boolean := coalesce(p_changed, false) and p_since is not null;
+  v_from timestamptz := p_since - interval '30 seconds';
+  v_threads jsonb;
+  v_rows jsonb;
+begin
+  perform public.lp_require_staff(p_staff);
+  if pg_catalog.cardinality(v_ids) > 1000 then
+    raise exception using errcode = 'P0422', message = 'too_many_ids', detail = 'field:ids';
+  end if;
+  v_key := public.lp_canon_staff(p_staff);
+
+  with changed as (
+    select e.patient_id as id from public.audit_events e
+    where v_delta and e.action_type in ('message_posted', 'message_unsent', 'enroute') and e.occurred_at > v_from
+    union
+    select m.request_id from public.lp_messages m
+    where v_delta and (m.created_at > v_from or m.unsent_at > v_from)
+    union
+    select r.request_id from public.lp_message_reads r
+    where v_delta and r.staff = v_key and r.read_at > v_from
+  ), active as (
+    select m.request_id as id from public.lp_messages m where m.request_id = any (v_ids)
+    union
+    select e.request_id from public.lp_enroute e where e.request_id = any (v_ids)
+  ), wanted as (
+    select c.id from changed c where c.id is not null
+    union
+    select a.id from active a
+  )
+  select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('id', p.id) || public.lp_messages_activity(p.id, v_key, p.status)), '[]'::jsonb),
+         coalesce(pg_catalog.jsonb_agg(public.lp_row(p)) filter (where not (p.id = any (v_ids))), '[]'::jsonb)
+    into v_threads, v_rows
+  from public.patients p
+  where p.id in (select w.id from wanted w);
+
+  return pg_catalog.jsonb_build_object('threads', v_threads, 'rows', v_rows);
+end
+$fn$;
+
+-- lp_enroute_stats: the dashboard's "Friends en route" (requests In medical with someone en route now) and
+-- "Time to arrive" (mean minutes from going en route to Arrived, over arrivals in the last 2 hours, 1 decimal;
+-- null when none). An arrival is measured from the same staff's latest 'enroute' event on the request before
+-- it: a changed ETA does not restart the clock, a cancel and a new en route does. /api/stats merges it into
+-- lp_stats (additive fields: friendsEnRoute, avgArriveMinutes).
+create function public.lp_enroute_stats()
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_now timestamptz := pg_catalog.clock_timestamp();
+  v_friends integer;
+  v_avg numeric;
+begin
+  select pg_catalog.count(distinct e.request_id)::integer into v_friends
+  from public.lp_enroute e
+  join public.patients p on p.id = e.request_id
+  where e.state = 'enroute' and p.status in ('Found – Awaiting Reunion', 'Bring friend to medical');
+
+  select pg_catalog.round(pg_catalog.avg(extract(epoch from (x.arrived_at - x.started_at)) / 60.0)::numeric, 1) into v_avg
+  from (
+    select a.occurred_at as arrived_at,
+           (select pg_catalog.max(s.occurred_at)
+              from public.audit_events s
+             where s.action_type = 'enroute' and s.patient_id = a.patient_id
+               and s.new_value ->> 'staff_key' = a.new_value ->> 'staff_key'
+               and s.new_value ->> 'state' = 'enroute'
+               and s.occurred_at <= a.occurred_at) as started_at
+    from public.audit_events a
+    where a.action_type = 'enroute' and a.new_value ->> 'state' = 'arrived'
+      and a.occurred_at > v_now - interval '2 hours' and a.occurred_at <= v_now
+  ) as x
+  where x.started_at is not null;
+
+  return pg_catalog.jsonb_build_object('friendsEnRoute', v_friends, 'avgArriveMinutes', v_avg);
+end
+$fn$;
+
+revoke all on function public.lp_enroute_on_status() from public, anon, authenticated;
+revoke all on function public.lp_messages_json(public.lp_messages, text) from public, anon, authenticated;
+revoke all on function public.lp_enroute_summary(uuid, text) from public, anon, authenticated;
+revoke all on function public.lp_involved_staff(uuid) from public, anon, authenticated;
+revoke all on function public.lp_messages_activity(uuid, text, text) from public, anon, authenticated;
+revoke all on function public.lp_post_message(uuid, text, uuid, text, text) from public, anon, authenticated;
+revoke all on function public.lp_unsend_message(uuid, uuid, text) from public, anon, authenticated;
+revoke all on function public.lp_mark_read(uuid, text, timestamptz) from public, anon, authenticated;
+revoke all on function public.lp_set_enroute(uuid, text, integer, timestamptz, integer, text) from public, anon, authenticated;
+revoke all on function public.lp_messages_thread(uuid, text, timestamptz, uuid, integer) from public, anon, authenticated;
+revoke all on function public.lp_messages_sync(text, uuid[], timestamptz, boolean) from public, anon, authenticated;
+revoke all on function public.lp_enroute_stats() from public, anon, authenticated;
+
+grant execute on function public.lp_messages_json(public.lp_messages, text) to service_role;
+grant execute on function public.lp_enroute_summary(uuid, text) to service_role;
+grant execute on function public.lp_involved_staff(uuid) to service_role;
+grant execute on function public.lp_messages_activity(uuid, text, text) to service_role;
+grant execute on function public.lp_post_message(uuid, text, uuid, text, text) to service_role;
+grant execute on function public.lp_unsend_message(uuid, uuid, text) to service_role;
+grant execute on function public.lp_mark_read(uuid, text, timestamptz) to service_role;
+grant execute on function public.lp_set_enroute(uuid, text, integer, timestamptz, integer, text) to service_role;
+grant execute on function public.lp_messages_thread(uuid, text, timestamptz, uuid, integer) to service_role;
+grant execute on function public.lp_messages_sync(text, uuid[], timestamptz, boolean) to service_role;
+grant execute on function public.lp_enroute_stats() to service_role;
 
 notify pgrst, 'reload schema';
 

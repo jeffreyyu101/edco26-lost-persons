@@ -99,10 +99,14 @@ const INVALID_MESSAGES: Readonly<Record<string, string>> = {
   photo_id_in_use: 'Photo id already used',
   photo_path_in_use: 'Photo already stored',
   invalid_staff: 'Sign in again',
+  too_late: 'Too late to unsend',
 };
 
-/** Where an error came from: P0429 means "too many sign-in attempts" for login and "photo limit" for photos. */
-export type DbContext = 'default' | 'login' | 'photo';
+/**
+ * Where an error came from: P0429 means "too many sign-in attempts" for login, "photo limit" for photos and
+ * "too many messages" for messages (F3: 20 a minute per staff, Retry-After from the HINT).
+ */
+export type DbContext = 'default' | 'login' | 'photo' | 'message';
 
 /**
  * Maps a supabase-js error to an ApiFailure (spec §5 Errors):
@@ -133,6 +137,14 @@ export function mapDbError(error: DbError, context: DbContext = 'default'): ApiF
       return new ApiFailure('forbidden', undefined, { dbCode: code });
     case 'P0429': {
       if (context === 'photo') return new ApiFailure('photo_limit', undefined, { dbCode: code, extra: { field: 'photo' } });
+      if (context === 'message') {
+        const seconds = Math.max(1, Math.min(60, Number.parseInt(error.hint ?? '', 10) || 30));
+        return new ApiFailure('rate_limited', 'Too many messages. Wait a moment', {
+          dbCode: code,
+          extra: { retryAfterSeconds: seconds },
+          headers: { 'Retry-After': String(seconds) },
+        });
+      }
       if (context === 'login') {
         const seconds = Math.max(1, Math.min(24 * 3600, Number.parseInt(error.hint ?? '', 10) || 60));
         return new ApiFailure('rate_limited', `Too many attempts. Try again in ${Math.max(1, Math.ceil(seconds / 60))} min`, {
