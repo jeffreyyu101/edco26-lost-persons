@@ -389,7 +389,7 @@ describe('stub store', () => {
 
     const answered = await actions.setStatus(id, 'Found – Awaiting Reunion', 'answer');
     expect(answered).toMatchObject({ ok: true, changed: true });
-    expect(store.getState().snackbar?.message).toBe('LP-1012 · In medical');
+    expect(store.getState().snackbar?.message).toBe('LP-1012 · Located');
 
     const repeat = await actions.setStatus(id, 'Found – Awaiting Reunion', 'answer');
     expect(repeat).toMatchObject({ ok: true, changed: false });

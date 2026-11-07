@@ -131,7 +131,7 @@ describe('sentences', () => {
     );
     const inMedical = byCase(1004);
     expect(tableRowLabel(inMedical, rowTimes(inMedical, NOW, TZ))).toMatch(
-      /^LP-1004, S\.L\., 20 F, In medical, friend coming, created .+, updated 3 minutes ago, FA 3 – Kinetic, logged by Dana Kim, Dispatch$/,
+      /^LP-1004, S\.L\., 20 F, Located, friend coming, created .+, updated 3 minutes ago, FA 3 – Kinetic, logged by Dana Kim, Dispatch$/,
     );
     const nameless = { ...row, name: '', age: null, gender: null };
     expect(tableRowLabel(nameless, times)).toMatch(/^LP-1013, No name, Waiting for check, /);

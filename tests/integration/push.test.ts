@@ -295,14 +295,14 @@ describe('the routes notify (contract D)', () => {
     await setStatus(r, 'Found – Awaiting Reunion', 'answer', rae);
     expect(Date.now() - started).toBeLessThan(1_500);
     const row = await eventually(() => activityOf(dana, r.id).then((a) => a ?? undefined));
-    expect(row).toMatchObject({ kind: 'in_medical', detail: 'In medical', read_at: null });
+    expect(row).toMatchObject({ kind: 'in_medical', detail: 'Located', read_at: null });
     expect(row.actor).toBe(staffOf(rae));
     // The actor's own answer is never theirs to hear. (F6 7b: Rae's Medical default pushes the new request, but writes
     // no Activity row.)
     expect(await activityOf(rae, r.id)).toBeNull();
     await eventually(() => danaPhone.deliveries.length === 1);
     const p = danaPhone.deliveries[0]!;
-    expect(p.payload).toMatchObject({ title: 'J.D.', body: 'In medical', tag: `lp-${r.id}`, url: `/?r=${r.id}`, kind: 'in_medical', renotify: true, requireInteraction: true });
+    expect(p.payload).toMatchObject({ title: 'J.D.', body: 'Located', tag: `lp-${r.id}`, url: `/?r=${r.id}`, kind: 'in_medical', renotify: true, requireInteraction: true });
     expect(p.urgency).toBe('high');
     expect(p.ttl).toBe('3600');
     const text = JSON.stringify(p.payload);
@@ -311,13 +311,13 @@ describe('the routes notify (contract D)', () => {
     expect(text).not.toContain('Jordan');
     // The actor never hears about their own answer (the new-request push Rae's switch asked for is another event).
     expect(raePhone.deliveries.filter((d) => d.payload.requestId === r.id && d.payload.kind !== 'new_request')).toHaveLength(0);
-    // The where completes the answer ("In medical · Chair 9"), then a move reads "Chair 9 → Bed 3".
+    // The where completes the answer ("Located · Chair 9"), then a move reads "Chair 9 → Bed 3".
     const after = (await api(`/api/sync?ids=${r.id}`, { cookie: await cookieFor(rae) })).body.rows[0] as RequestSummary;
     const patch = async (loc: string, version: number) =>
       api(`/api/requests/${r.id}`, { method: 'PATCH', json: { patch: { medicalLocation: loc }, expectedVersion: version }, cookie: await cookieFor(rae) });
     const p1 = await patch('Chair 9', after.rowVersion);
     expect(p1.status).toBe(200);
-    await eventually(() => activityOf(dana, r.id).then((a) => a?.detail === 'In medical · Chair 9' && a));
+    await eventually(() => activityOf(dana, r.id).then((a) => a?.detail === 'Located · Chair 9' && a));
     await patch('Bed 3', p1.body.request.rowVersion);
     const moved = await eventually(() => activityOf(dana, r.id).then((a) => a?.kind === 'moved' && a));
     expect(moved.detail).toBe('Chair 9 → Bed 3');
@@ -325,7 +325,7 @@ describe('the routes notify (contract D)', () => {
     const { data: one } = await admin().from('lp_activity').select('request_id').eq('staff', canon(dana)).eq('request_id', r.id);
     expect(one).toHaveLength(1);
     await eventually(() => danaPhone.deliveries.length === 3);
-    expect(danaPhone.deliveries.map((d) => d.payload.body)).toEqual(['In medical', 'In medical · Chair 9', 'Chair 9 → Bed 3']);
+    expect(danaPhone.deliveries.map((d) => d.payload.body)).toEqual(['Located', 'Located · Chair 9', 'Chair 9 → Bed 3']);
   });
 
   // F3 + F4 release: F5's stage-notify sends both Not found answers (not_in_medical); F4's status events never
@@ -336,15 +336,15 @@ describe('the routes notify (contract D)', () => {
     const danaPhone = push.device();
     await subscribe(dana, danaPhone);
     const r = await createRequest(dana);
-    // The first Not found: the "Not found yet" hold (the row stays Waiting for check, recheck in 20 minutes).
+    // The first Not found: the "Not located yet" hold (the row stays Waiting for check, recheck in 20 minutes).
     const held = await setStatus(r, 'Checked – Not Found', 'answer', rae);
     expect(held.status).toBe('Added');
     expect(held.recheckAt).toBeTruthy();
     const first = await eventually(() => activityOf(dana, r.id).then((a) => a ?? undefined));
     expect(first).toMatchObject({ kind: 'not_in_medical', read_at: null });
-    expect(first.detail).toMatch(/^Not found yet · recheck \d{1,2}:\d{2} (AM|PM)$/);
+    expect(first.detail).toMatch(/^Not located yet · recheck \d{1,2}:\d{2} (AM|PM)$/);
     await eventually(() => danaPhone.deliveries.length === 1);
-    // The final Not found closes it: the status's own label (STATUS_META, "Not found in medical").
+    // The final Not found closes it: the status's own label (STATUS_META, "Not located").
     const closed = await setStatus(held, 'Checked – Not Found', 'answer', rae);
     expect(closed.status).toBe('Checked – Not Found');
     await eventually(() => activityOf(dana, r.id).then((a) => a?.detail === STATUS_META['Checked – Not Found'].label && a));
@@ -463,7 +463,7 @@ describe('Activity routes', () => {
     expect(res.headers.get('cache-control')).toBe('no-store');
     const rows = res.body.rows as Array<{ requestId: string; title: string; detail: string; kind: string; read: boolean }>;
     expect(rows.map((r) => r.requestId)).toEqual([b.id, a.id]);
-    expect(rows[0]).toMatchObject({ title: 'B.W.', detail: 'In medical', kind: 'in_medical', read: false });
+    expect(rows[0]).toMatchObject({ title: 'B.W.', detail: 'Located', kind: 'in_medical', read: false });
     expect(JSON.stringify(res.body)).not.toContain('TEST-S');
     const sync = (await api('/api/sync', { cookie })).body as SyncResponse & Record<string, unknown>;
     expect(sync.activityUnread).toBe(2);
@@ -483,7 +483,7 @@ describe('Activity routes', () => {
     const row = ((await api(`/api/sync?ids=${a.id}`, { cookie })).body as SyncResponse).rows[0] as RequestSummary;
     const patched = await api(`/api/requests/${a.id}`, { method: 'PATCH', json: { patch: { medicalLocation: 'Bed 3' }, expectedVersion: row.rowVersion }, cookie: await cookieFor(rae) });
     expect(patched.status).toBe(200);
-    await eventually(async () => (await activityOf(dana, a.id))?.detail === 'In medical · Bed 3' || null);
+    await eventually(async () => (await activityOf(dana, a.id))?.detail === 'Located · Bed 3' || null);
     const moved = (await api('/api/sync', { cookie })).body as SyncResponse;
     expect(moved.activityUnread).toBe(2);
     expect(moved.activityKey).not.toBe(first.activityKey);

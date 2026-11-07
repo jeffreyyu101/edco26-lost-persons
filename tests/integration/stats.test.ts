@@ -49,7 +49,7 @@ function expectedAvgAnswerMinutes(): number | null {
       ((e.type === 'status_changed' || e.type === 'check_completed') && e.prev === STATUS.waiting && answers.has(e.next ?? '')) ||
       (e.type === 'medical_search' && e.outcome === 'not_found') ||
       e.type === 'medical_search_found' ||
-      // (F5) The first Not found, which put the request on a "Not found yet" hold (status stays Waiting).
+      // (F5) The first Not found, which put the request on a "Not located yet" hold (status stays Waiting).
       (e.type === 'status_changed' && e.held === 'true');
     if (!isAnswer) continue;
     const prev = first.get(e.pid);
@@ -75,7 +75,7 @@ function rawAudit() {
 /**
  * The dashboard's average time to reunite, recomputed from the raw audit trail (A49): per request that is
  * Reunited now, its latest status change into Reunited – Closed in the last 2 h, minus the latest In medical
- * answer at or before it (out of Waiting or Not found in medical into In medical or legacy Bring friend, or a legacy
+ * answer at or before it (out of Waiting or Not located into In medical or legacy Bring friend, or a legacy
  * medical_search_found). Reunions with no such answer are left out.
  */
 function expectedAvgReuniteMinutes(): number | null {
@@ -339,7 +339,7 @@ describe('lp_stats avgReuniteMinutes and loggedLastHour: exact values on a scrat
         // 1: answered 40, reunited 30 → 10 min.
         change('TEST-core-1', S.waiting, S.inMedical, 'answer', 40),
         change('TEST-core-1', S.inMedical, S.reunited, 'reunite', 30),
-        // 2: In medical 95, changed to Not found in medical 90, changed back 60, reunited 35 → 25 min (latest answer).
+        // 2: In medical 95, changed to Not located 90, changed back 60, reunited 35 → 25 min (latest answer).
         change('TEST-core-2', S.waiting, S.inMedical, 'answer', 95),
         change('TEST-core-2', S.inMedical, S.notInMedical, 'change', 90),
         change('TEST-core-2', S.notInMedical, S.inMedical, 'change', 60),

@@ -4,7 +4,7 @@
 // setMedicalLocation (PATCH {medicalLocation}, audited like any edit). Used right after an In medical tap
 // (Skip / Save) and to edit it later from a Friend coming card or the request's status block (Cancel / Save).
 //
-//   phone (< 768)  a bottom sheet: the green "B.W. is in medical" line, the field (focused, normal keyboard),
+//   phone (< 768)  a bottom sheet: the green "B.W. located" line, the field (focused, normal keyboard),
 //                  Skip / Save. Skip, a tap on the scrim, Esc or a swipe down closes it with nothing saved.
 //   desk (≥ 768)   the same form in a small popover pointing at the card (or the location row).
 //
@@ -17,7 +17,7 @@ import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type RefOb
 import { Sheet, SheetTitle } from '@/components/ui/Sheet';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import { useActions, useConnection } from '@/lib/client/store-contract';
-import { LIMITS } from '@/lib/domain';
+import { LIMITS, STATUS, statusMeta } from '@/lib/domain';
 import s from './location.module.css';
 
 export interface LocationTarget {
@@ -127,7 +127,7 @@ function Form({ target, onClose, inputRef, titleId }: FormProps) {
   const title = (
     <>
       <StatusGlyph kind="inMedical" size={20} />
-      <span className={s.doneText}>{`${target.name} is in medical`}</span>
+      <span className={s.doneText}>{`${target.name} ${statusMeta(STATUS.inMedical).shortLabel.toLowerCase()}`}</span>
     </>
   );
   return (

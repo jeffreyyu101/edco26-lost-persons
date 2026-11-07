@@ -1,4 +1,4 @@
-// Not found in medical on the profile (v2.2, Jeffrey 2026-11-06): it counts as closed and is grey everywhere, like
+// Not located on the profile (v2.2, Jeffrey 2026-11-06): it counts as closed and is grey everywhere, like
 // Reunited / Discharged / Cancelled, but it keeps exactly the actions it had before (Change answer, nothing
 // else: no Reopen, no Mark discharged, no Cancel request). Change answer opens its menu (In medical, Back to
 // Waiting for check) since the v2.2 "Change answer and Undo" decision. Server renders against the stub store, plus the
@@ -45,8 +45,8 @@ const footer = (html: string): string => {
   return i < 0 ? '' : html.slice(html.lastIndexOf('<div', i), html.indexOf('</div>', i));
 };
 
-describe('Not found in medical on the profile', () => {
-  // 1009 A.N. is Not found in medical, logged by Dana Kim (the stub session, so the creator); 1003 C.H. is Reunited.
+describe('Not located on the profile', () => {
+  // 1009 A.N. is Not located, logged by Dana Kim (the stub session, so the creator); 1003 C.H. is Reunited.
   const notIn = byCase(1009);
   const reunited = byCase(1003);
 
@@ -63,8 +63,8 @@ describe('Not found in medical on the profile', () => {
     expect(block).toMatch(/data-glyph="notInMedical"[^>]*><circle[^>]*fill="var\(--gray-9\)"/);
     expect(block).not.toMatch(/amber/);
     // The label: Radix gray text, not the high-contrast step-12 used on coloured tints.
-    expect(block).toMatch(/<span[^>]*data-accent-color="gray"[^>]*>Not found in medical<\/span>/);
-    expect(block).not.toMatch(/rt-high-contrast[^>]*>Not found in medical</);
+    expect(block).toMatch(/<span[^>]*data-accent-color="gray"[^>]*>Not located<\/span>/);
+    expect(block).not.toMatch(/rt-high-contrast[^>]*>Not located</);
 
     // Same treatment as Reunited.
     const closed = statusBlock(render(<ProfileView id={reunited.id} />));
@@ -81,14 +81,14 @@ describe('Not found in medical on the profile', () => {
     // v2.2 (Brian + Jeffrey, 2026-11-06): Change answer opens a menu (tests/unit/profile/change-answer.test.tsx).
     expect(bar).toMatch(/<button[^>]*data-testid="change-answer"[^>]*aria-haspopup="menu"/);
     expect(bar).toContain('Change answer');
-    for (const other of ['>Reunited<', '>In medical<', '>Not found<', 'Reopen', 'Mark discharged']) expect(bar).not.toContain(other);
+    for (const other of ['>Reunited<', '>Located<', '>Not located<', 'Reopen', 'Mark discharged']) expect(bar).not.toContain(other);
     // Even for the person who logged it: Cancel request is only for Waiting.
     expect(html).not.toContain('Cancel request');
-    // A closed status has no action bar at all; Not found in medical still has its own.
+    // A closed status has no action bar at all; Not located still has its own.
     expect(footer(render(<ProfileView id={reunited.id} />))).toBe('');
   });
 
-  it('domain: the profile’s buttons and ⋯ menu for Not found in medical are unchanged by the closed bucket', () => {
+  it('domain: the profile’s buttons and ⋯ menu for Not located are unchanged by the closed bucket', () => {
     expect(statusMeta(STATUS.notInMedical)).toMatchObject({ bucket: 'closed', tone: 'gray', glyph: 'notInMedical' });
     expect(primaryActions(STATUS.notInMedical)).toEqual([
       { id: 'changeToInMedical', label: 'Change answer', to: STATUS.inMedical, kind: 'change', undoable: true, creatorOnly: false },
@@ -100,7 +100,7 @@ describe('Not found in medical on the profile', () => {
     expect(canCancel(STATUS.notInMedical, notIn.createdBy, STUB_SESSION.staff)).toBe(false);
   });
 
-  it('the audit trail draws Not found in medical grey, like Reunited', () => {
+  it('the audit trail draws Not located grey, like Reunited', () => {
     const ev = (id: string, minute: string, to: string, from: string): AuditEvent => ({
       id,
       action: 'status',
@@ -121,10 +121,10 @@ describe('Not found in medical on the profile', () => {
       expect(end).toBeGreaterThan(0);
       return html.slice(html.lastIndexOf('<li', end), end + label.length + 8);
     };
-    const notInItem = item('Not found in medical');
+    const notInItem = item('Not located');
     // The timeline marker and the inline "to" glyph are both the grey ×; the label is grey text.
     expect(notInItem.match(/data-glyph="notInMedical"[^>]*><circle[^>]*fill="var\(--gray-9\)"/g)).toHaveLength(2);
-    expect(notInItem).toMatch(/data-accent-color="gray"[^>]*>Not found in medical<\/span>$/);
+    expect(notInItem).toMatch(/data-accent-color="gray"[^>]*>Not located<\/span>$/);
     expect(notInItem).not.toContain('amber');
     const reunitedItem = item('Reunited');
     expect(reunitedItem).toMatch(/data-accent-color="gray"[^>]*>Reunited<\/span>$/);

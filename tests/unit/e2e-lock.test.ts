@@ -6,7 +6,7 @@ import type * as NodeFs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { acquireLock, removeStaleLock } from '../e2e/global-setup';
+import { DEFAULT_LOCK_DIR, acquireLock, lockDirFrom, removeStaleLock } from '../e2e/global-setup';
 
 // Lets a test run code just before the lock's next renameSync (to interleave "another process").
 const beforeRename = vi.hoisted(() => ({ once: null as null | (() => void) }));
@@ -42,6 +42,17 @@ const deadPid = () => spawnSync(process.execPath, ['-e', '']).pid as number;
 const DAY = 24 * 60 * 60_000;
 
 describe('e2e lock', () => {
+  it('lives at /tmp/lp-e2e.lock unless LP_E2E_LOCK_DIR names another (a run on its own isolated stack)', () => {
+    expect(DEFAULT_LOCK_DIR).toBe('/tmp/lp-e2e.lock');
+    expect(lockDirFrom({})).toBe('/tmp/lp-e2e.lock');
+    expect(lockDirFrom({ LP_E2E_LOCK_DIR: '' })).toBe('/tmp/lp-e2e.lock');
+    expect(lockDirFrom({ LP_E2E_LOCK_DIR: '  ' })).toBe('/tmp/lp-e2e.lock');
+    expect(lockDirFrom({ LP_E2E_LOCK_DIR: '/tmp/lp-e2e.lock-s4' })).toBe('/tmp/lp-e2e.lock-s4');
+    // scripts/with-e2e-lock.mjs reads the same variable the same way.
+    const script = readFileSync(join(__dirname, '../../scripts/with-e2e-lock.mjs'), 'utf8');
+    expect(script).toContain("const LOCK_DIR = process.env.LP_E2E_LOCK_DIR?.trim() || '/tmp/lp-e2e.lock';");
+  });
+
   it('takes a free lock and records the owner pid', async () => {
     await acquireLock(lock, 1_000, 10);
     expect(readFileSync(join(lock, 'pid'), 'utf8')).toBe(String(process.pid));

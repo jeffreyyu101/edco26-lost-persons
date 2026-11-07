@@ -15,7 +15,7 @@ import { HoldChip, StageChip, hasStageChip } from './StageChips';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { photoPath } from '@/lib/client/api-paths';
 import { navigate } from '@/lib/client/nav';
-import { ANSWER_LABEL, STATUS, ageGender, isHeld, isRecheckDue, statusMeta, waitTone } from '@/lib/domain';
+import { ANSWER_LABEL, NOT_FOUND_YET_LABEL, STATUS, ageGender, isHeld, isRecheckDue, statusMeta, waitTone } from '@/lib/domain';
 import { displayStage, notFoundAnswer, type StageTone } from '@/lib/stages';
 import { formatCaseNumber, formatDuration, minutesSince } from '@/lib/format';
 import {
@@ -256,7 +256,7 @@ export const CheckCard = memo(function CheckCard({ row, now, offline, onNotInMed
   const hold = holdState(row, now);
   const answer = notFoundAnswer(row);
   const meta = `${row.postShort} · ${formatCaseNumber(row.caseNumber)}`;
-  const holdSaid = hold === 'due' ? 'Not found yet, recheck due. ' : hold === 'held' ? 'Not found yet. ' : '';
+  const holdSaid = hold === 'due' ? `${NOT_FOUND_YET_LABEL}, recheck due. ` : hold === 'held' ? `${NOT_FOUND_YET_LABEL}. ` : '';
   const label = `${whoPhrase(row)}. ${meta}. ${holdSaid}Waiting ${minutesPhrase(minutes)}.${desc ? ` ${desc}` : ''}`;
   const fresh = isFresh(row.createdAt, now);
   const describedBy = offline ? `${nameId} ${metaId} ${reasonId}` : `${nameId} ${metaId}`;
@@ -308,7 +308,10 @@ export const CheckCard = memo(function CheckCard({ row, now, offline, onNotInMed
           onClick={() => onNotInMedical(row)}
         >
           {answer.kind === 'hold' ? <Hourglass size={16} strokeWidth={1.75} aria-hidden /> : <X size={16} strokeWidth={2.25} aria-hidden />}
-          {answer.label}
+          {/* Sized for the longer of its two labels, so it keeps one width and place in both states. */}
+          <span className={s.ansLabel} data-size-as={NOT_FOUND_YET_LABEL}>
+            {answer.label}
+          </span>
         </Button>
         <Button
           size="3"
@@ -347,7 +350,7 @@ export const ComingCard = memo(function ComingCard({ row, now, offline, onReunit
   const minutes = minutesSince(statusSince(row), now);
   const ag = ageGender(row.age, row.gender);
   const location = (row.medicalLocation ?? '').trim();
-  const label = `${whoPhrase(row)}. In medical${location ? `, ${location}` : ''}, ${minutesPhrase(minutes)} ago. ${row.postShort} · ${formatCaseNumber(row.caseNumber)}.`;
+  const label = `${whoPhrase(row)}. ${statusMeta(STATUS.inMedical).shortLabel}${location ? `, ${location}` : ''}, ${minutesPhrase(minutes)} ago. ${row.postShort} · ${formatCaseNumber(row.caseNumber)}.`;
   const describedBy = offline ? `${nameId} ${reasonId}` : nameId;
   const messages = useHasMessages();
   const reunited = (
@@ -435,7 +438,7 @@ export const MineCard = memo(function MineCard({
   const stage = displayStage(row, { now, ...(timeZone ? { timeZone } : {}) });
   const chip = hasStageChip(stage);
   const hold = holdState(row, now);
-  const holdSaid = hold === 'due' ? 'not found yet, recheck due' : hold === 'held' ? 'not found yet' : '';
+  const holdSaid = hold === 'due' ? `${NOT_FOUND_YET_LABEL.toLowerCase()}, recheck due` : hold === 'held' ? NOT_FOUND_YET_LABEL.toLowerCase() : '';
   const stageSaid = stage.key === 'needsInfo' ? stage.said : hold !== 'none' ? '' : statusMeta(row.status).label;
   const said = [stageSaid, holdSaid].filter(Boolean).join(', ').replace(/^n/, 'N');
   const label = `${whoPhrase(row)}. ${sub}. ${said}${waiting ? `, waiting ${minutesPhrase(minutes)}` : `, ${minutesPhrase(minutes)} ago`}.`;

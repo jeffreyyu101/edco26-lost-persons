@@ -49,7 +49,7 @@ describe('setMedicalLocation', () => {
     await ready();
     await finish(a.setStatus(R1.id, STATUS.inMedical, 'answer'));
     const snack = s().snackbar;
-    expect(snack?.message).toBe('LP-1001 · In medical');
+    expect(snack?.message).toBe('LP-1001 · Located');
     await finish(a.setMedicalLocation(R1.id, 'Bed 3 · triage'));
     expect(s().snackbar?.id).toBe(snack?.id);
     const undone = await finish(a.undo(snack?.id ?? ''));
@@ -68,7 +68,7 @@ describe('setMedicalLocation', () => {
     const release = a.holdUndo();
     await finish(a.setStatus(R1.id, STATUS.inMedical, 'answer'));
     const snack = s().snackbar;
-    expect(snack?.message).toBe('LP-1001 · In medical');
+    expect(snack?.message).toBe('LP-1001 · Located');
     // Someone takes their time typing "Chair 9".
     await advance(UNDO_MS + 5_000);
     expect(s().snackbar?.id).toBe(snack?.id);
