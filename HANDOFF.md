@@ -70,6 +70,19 @@ file production needs. The other files in that folder are the local chain: the b
   for it. The file is one transaction, keeps its preflight, and is safe to re-run on a database that already
   has every `lp_*` function and a text `age`. `lp_stats` is `create or replace`, and step 1b prints
   `patients.age: already text, unchanged.` on a second run.
+- **Messages and en route (section 7, 2026-11-06 evening)** need it again before that build deploys. It is
+  additive: three new tables (`lp_messages`, `lp_message_reads`, `lp_enroute`, RLS on, `service_role`
+  only), a partial index on `audit_events`, the trigger `lp_enroute_clear` on `patients` (a status change out
+  of In medical deletes that request's en route rows in the same transaction), and new functions
+  (`lp_post_message`, `lp_mark_read`, `lp_set_enroute`, `lp_unsend_message`, `lp_involved_staff`,
+  `lp_messages_thread`, `lp_messages_sync`, `lp_enroute_stats` and three helpers). No existing column,
+  constraint or function changes. The build that is live now keeps working on it: it never calls the new
+  functions, and the trigger only deletes rows only the new build writes. Migration first, then deploy (the
+  new build's sync, detail and message routes call the new functions; if they are missing, sync and the
+  detail still answer, without messages). A second paste keeps every message, read cursor and en route.
+  Check: `select count(*) from pg_proc where proname in ('lp_post_message', 'lp_mark_read', 'lp_set_enroute',
+  'lp_unsend_message', 'lp_involved_staff', 'lp_messages_thread', 'lp_messages_sync', 'lp_enroute_stats');`
+  returns `8`.
 
 By hand, in the Supabase dashboard:
 
@@ -125,6 +138,10 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
       the focused window and nothing in the other; with both minimised it is one notification.
 - [ ] iPhone Home Screen app: turning Alerts on asks to allow notifications, and the app then appears in
       Settings → Notifications. In a Safari tab on iPhone nothing is asked and alerts stay toasts.
+- [ ] Messages on two phones (one Medical, one front of house): medical asks from a To check card, the other
+      phone shows the badge and the preview within a few seconds, the reply shows "Read" on the asker's phone.
+      En route ~5 min, change it, cancel and Undo, Arrived; Reunited clears the row. A message typed in
+      airplane mode shows "Sending…" and goes out once the signal is back.
 - [ ] At the end, run `docs/export.sql` in the SQL editor and download the results (Query 1, then Query 2;
       the steps are at the top of the file).
 - [ ] Redeploy on Vercel with an old tab open: "Update ready · Reload" appears. It shows only once the phone

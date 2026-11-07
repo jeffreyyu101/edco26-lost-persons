@@ -1,6 +1,6 @@
 # Build spec v2: "Is my friend in medical?" (EDC Orlando 2026)
 
-This is the single contract for every agent building the app. Version 2 adds the findings from the GPT-6 Astra (Codex) and Claude Fable 5.1 plan reviews. §13 (v2.1), §14 (v2.2, the Phase 1a review), §15 (v2.3, the Phase 1a verification), §16 (v2.4, the integrated QA) and §17 (v2.5, the product decisions of 2026-11-06 morning) override anything above them.
+This is the single contract for every agent building the app. Version 2 adds the findings from the GPT-6 Astra (Codex) and Claude Fable 5.1 plan reviews. §13 (v2.1), §14 (v2.2, the Phase 1a review), §15 (v2.3, the Phase 1a verification), §16 (v2.4, the integrated QA), §17 (v2.5, the product decisions of 2026-11-06 morning) and §18 (v2.6, messages and en route) override anything above them.
 
 - **When documents disagree:**
   - This file wins on engineering questions.
@@ -1201,3 +1201,64 @@ Brian and Jeffrey decided these after the app went live (`design/DECISIONS.md` "
   - `tests/unit/client/notify-open.test.ts` and `tests/unit/sw/notification-click.test.ts`: the click, on both sides, and the worker's `lp-caps` answer.
   - `tests/e2e/notify.spec.ts` (Chromium, a desktop context with `context.grantPermissions(['notifications'])` and a spy on `registration.showNotification`): a hidden page notifies and shows no toast, a visible page toasts and does not notify, two windows of one browser never give a toast and a notification for one alert, denied shows "Blocked in browser" and is never prompted, and the iPhone 14 layout is unchanged (Chromium and WebKit).
 
+
+## 18. v2.6 amendments (OVERRIDE anything above; F3 Messages + en route, Brian 2026-11-06 evening)
+
+Product decisions: `design/DECISIONS.md` "Messages and en route". Visual spec: `design/screens/updates.html` (v7, `#edit`, `#clarify`, `#colors`) and `design/screens/f34-states.html` frames 5–6. Shared with F4 / F5 through the F3/F4/F5 contract (A57). Numbering continues from A52; the integrator renumbers if another branch took these numbers.
+
+**A53 · Data** (`20261106000000_rework.sql` section 7; additive only).
+
+- **Tables** (RLS on, no policies; `service_role` only):
+  - `lp_messages(id uuid pk, request_id → patients on delete cascade, staff text, staff_key text, team text, body text 1–500, created_at clock_timestamp(), unsent_at null, client_mutation_id uuid unique)`. Never deleted: an unsend sets `unsent_at`. `staff_key` = `lp_canon_staff(staff)`, stored at write time (no index or constraint may depend on `lp_canon_staff`, which section 6 drops and recreates). Indexes `(request_id, created_at desc, id desc)`, `(created_at)`, partial `(unsent_at)`, `(staff_key, created_at)`.
+  - `lp_message_reads(request_id, staff (canonical), last_read_at, read_at, pk (request_id, staff))`: `last_read_at` is the newest message the reader has seen, `read_at` when (the receipt). Index `(staff, read_at)`.
+  - `lp_enroute(request_id, staff (canonical), staff_name, eta_at null, eta_minutes 0–60 null, state 'enroute' | 'arrived', updated_at, pk (request_id, staff))`.
+  - Partial index `lp_messages_audit_at_idx` on `audit_events(occurred_at)` for the three new action types.
+- **Trigger** `lp_enroute_clear` (`after update of status on patients … when old.status is distinct from new.status`, function `lp_enroute_on_status()`, `create or replace`, never dropped): any status other than In medical (legacy Bring friend included) deletes the request's `lp_enroute` rows in the same transaction and writes one `enroute` audit row `{state: 'cleared', status}` attributed to `updated_by`. `lp_set_status` is untouched (F5 owns it).
+- **Functions** (plpgsql, `security invoker`, `search_path = public, pg_temp`, the RPCs with `statement_timeout = '4s'` / `lock_timeout = '2s'`; dropped and recreated each run; `revoke … from public, anon, authenticated`, `grant execute … to service_role`):
+
+  | Function | Behaviour |
+  |---|---|
+  | `lp_post_message(p_request, p_body, p_client_mutation_id, p_staff, p_team)` | Any status. Idempotent on the mutation id (a retry → `created: false`; the same id on another request or by another staff → P0422 `field:client_mutation_id`). Body trimmed, 1–500 (P0422 `field:body`). 20 a minute per canonical staff, serialised with an advisory lock (P0429, HINT = seconds). Audit `message_posted {message_id, body}`. Returns `{created, message, activity, recipients}`. |
+  | `lp_unsend_message(p_request, p_message, p_staff)` | Another request's message → P0002; someone else's → P0403; older than 15 min → P0422 `too_late` (`field:message`); repeat → `changed: false`. Sets `unsent_at`; audit `message_unsent`. |
+  | `lp_mark_read(p_request, p_staff, p_upto)` | Moves the cursor forward to `least(p_upto, now)` only past someone else's message; `read_at` = now. Not audited. Returns `{changed, activity}`. |
+  | `lp_set_enroute(p_request, p_action, p_eta_offset_seconds, p_eta_at, p_eta_minutes, p_staff)` | `set` (ETA = `p_eta_at`, else now + offset, clamped ±6 h), `cancel` (only mine), `arrive`. Not In medical → accepted, `{changed: false, ignored: true}`. A repeat (same state, same pill, ETA within 30 s) changes nothing. Locks the patient row `for share`. Audit `enroute {state: enroute | changed | cancelled | arrived, eta_at, eta_minutes, staff_key}`. Returns `{changed, ignored, event, activity, recipients}`. |
+  | `lp_involved_staff(p_request) returns setof text` | Contract C: canonical logger, In medical / Not in medical answerers (legacy actions too), location setters, everyone who messaged, everyone ever en route (audit) or en route now. |
+  | `lp_messages_thread(p_request, p_staff, p_before_at, p_before_id, p_limit 100 ≤ 200)` | The latest page before the keyset cursor, oldest first, unsent left out, `has_earlier`, and on the first page the receipt of the caller's latest message (`read_at` = earliest `read_at` of another reader whose cursor is at or past it). |
+  | `lp_messages_sync(p_staff, p_ids, p_since, p_changed)` | The activity of every id in `p_ids` with any message or en route, plus (with `p_changed`) every request whose thread changed since `p_since − 30 s` (a message posted or unsent, an en route event, the caller's own read), and `lp_row` of those not in `p_ids` whose own row is older than `p_since − 30 s` (the others are in lp_sync's delta, on this page or a later one, so a paged delta never repeats a row). |
+  | `lp_enroute_stats()` | `{friendsEnRoute, avgArriveMinutes}` (A58). |
+  | `lp_messages_activity`, `lp_enroute_summary`, `lp_messages_json` | Internal helpers. |
+
+- **Production**: additive and safe while the live build serves (it never calls these; the trigger only deletes en route rows, which only this build writes). Apply the file before deploying this build; a second paste keeps every message, read and en route.
+
+**A54 · API** (every route: session, same-origin for writes, zod, `no-store`, codes only in logs).
+
+| Route | Behaviour |
+|---|---|
+| `GET /api/requests/:id/messages[?beforeAt&beforeId]` | `ThreadPage` (`lp_messages_thread`). |
+| `POST /api/requests/:id/messages` | `{clientMutationId, body}` → 201 / 200 `PostMessageResponse`. P0429 → 429 `rate_limited` with `Retry-After` and `retryAfterSeconds` (DbContext `message`). |
+| `POST /api/requests/:id/messages/read` | `{upto?}` → `ActivityResponse`. |
+| `POST /api/requests/:id/messages/:messageId/unsend` | → `ActivityResponse`; 403 / 404 / 422 as A53. |
+| `POST /api/requests/:id/enroute` | `{action: set, etaMinutes: 0 | 5 | 10 | 15 | null, queuedMs?}`, `{action: set, etaAt, etaMinutes}` (Undo of a cancel), `{action: cancel | arrive}` → `ActivityResponse` (`ignored` when not In medical). |
+| `GET /api/sync` | Every row carries the activity (A55); the first page of a delta adds the rows whose thread changed. If `lp_messages_sync` fails the rows go out without it (the client keeps what it had). |
+| `GET /api/requests/:id` | Plus `thread` (the first page) and the activity; without them if the thread can't be read. The audit trail leaves out `message_posted`, `message_unsent` and `enroute` (`THREAD_AUDIT_ACTIONS`). |
+| `GET /api/stats` | Plus `friendsEnRoute` and `avgArriveMinutes` from `lp_enroute_stats()`; left out if it fails. |
+
+**A55 · RequestSummary activity** (`lib/api-types.ts`, all optional; contract F): `messageCount`, `lastMessageAt`, `unread` (for the caller), `needsInfo`, `lastMessage {by: "Rae C.", mine, text ≤ 120}`, `enroute {count, earliestEta, state, mine: {etaAt, etaMinutes?, state?} | null}`, plus `involved` (the caller is in `lp_involved_staff`; for the message alert). Rows without them (cached before this build, or a mutation answer built by `lp_row`) keep the client's (`carryActivity`): a status change ends `needsInfo` and drops `enroute` outside In medical. `sameRow` compares object values as JSON, so an unchanged poll keeps the row's identity.
+- **needsInfo** = status `Added`, the latest (not unsent) message is from the Medical team, and it was written after the request's last `status_changed` / `cancelled` audit event.
+
+**A56 · Client** (`lib/client/messages-core.ts`, `messages-logic.ts`, `messages-hooks.ts`; `StoreActions.messages`).
+- **Outbox**: every message and en route tap is a job saved in IndexedDB (`mjob:<id>`, a prefix older builds never read) before it is sent, sent in order under the Web Lock `lp-msg-outbox`, exactly once (server idempotency; en route repeats are no-ops). Offline it waits ("Sending…", attempts not counted). 401 pauses; 429 waits `Retry-After` (toast once); a definitive 4xx with our error body, or 3 failures online, → `failed` ("Not delivered · Retry", Delete). Only sent while the signed-in staff is the job's operator. `queuedMs` keeps an en route's ETA from the tap. Other tabs reload on BroadcastChannel `mjobs`.
+- **Threads**: loaded when a request's Messages is on screen (`open`), refreshed every 6 s while visible and whenever the synced `lastMessageAt` / `messageCount` changes; the latest page cached per staff under `cache:<event>:<staff>:thread:<id>` (cleared with the cache at sign-out). `markRead` posts the newest message shown, once per newest message from someone else, and clears the badge at once.
+- **Alerts**: `diffMessageAlerts` (a newer `lastMessageAt`, not mine, unread, involved, not the first sync, not an open thread) → `AlertEvent.kind 'message'`, toast + chime through the A52 plan when it routes to a toast; nothing when the page is hidden (F4's Web Push). Key `${id}:m:${lastMessageAt}`.
+- **Sign-out** is refused while jobs exist (`{reason: 'outbox', count, messages}`); discarding deletes the `mjob:` keys. Another staff signing in clears the threads; jobs stay for their owner.
+- **En route Undo** uses the store's snackbar with a custom handler (`showCustomUndo`), 5 s.
+
+**A57 · Notifications** (contract A/B/D). `lib/server/notify.ts` is F3's no-op stub with F4's exact API. After a real write the route calls `notifyStaff(recipients, event)` with the recipients the SQL function returned (`lp_involved_staff`): `message` ("Rae C.: Bring 1 person only"), `enroute` / `enroute_changed` ("Friend en route · ~4 min", or "Friend en route"), `enroute_cancelled` ("En route cancelled"), `arrived` ("Friend arrived"). Unsend, read and repeats notify nobody.
+
+**A58 · UI** (`components/messages/*`).
+- **Request**: `MessagesSection` after the status block (and the desk pane's actions): heading, the thread in a scroll box (`min(60dvh, 520px)`, opens at the newest, "Earlier messages", "New messages" pill, `aria-live` for incoming), the composer right under it. `StatusEnroute` under the location row.
+- **Cards**: `MineActivity` (My requests), `CheckPreview` + `MessageIconButton` (To check, grid `44px 1fr 1fr`), `ComingEnroute` + `MessageButton | Reunited` (Friend coming). Slots read the store themselves; their wrappers let taps fall through to the card's open button.
+- **Badges and dots**: `UnreadBadge` after the name in desk tables (the row's sentence adds "2 unread messages."), `FriendComingDot` on the tab, `PendingDot` in the sidebar and rail.
+- **Dashboard**: `EnrouteTile` (full width under the tiles; "—" when missing) and the "Time to arrive" Performance row.
+- **Export**: `docs/export.sql` Query 3 (case number, when, staff, team, type, text or state, ETA, unsent, unsent at).
+- **Tests**: `tests/unit/messaging.test.ts`, `tests/unit/client/store-messages.test.ts`, `tests/integration/messages.test.ts`, `tests/e2e/messages.spec.ts` (two phones; overflow at 375, 390, 820, 1180, 1440 via `tests/e2e/helpers/overflow.ts`).
