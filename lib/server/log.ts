@@ -43,6 +43,17 @@ export function logRequest(fields: LogFields): void {
   else if (line.status >= 400 || line.ms >= SLOW_REQUEST_MS) console.warn(JSON.stringify({ lp: 'api', ...line }));
 }
 
+export type SignInMethod = 'password' | 'invite';
+
+/**
+ * One line per checked sign-in: how ("password" or "invite", the team join link) and whether it passed.
+ * Nothing else: never the name, the password, the code, its hash or the IP.
+ */
+export function logSignIn(method: SignInMethod, ok: boolean): void {
+  // eslint-disable-next-line no-console -- deliberate: a fixed-shape line, the method and the outcome only (J1)
+  console.info(JSON.stringify({ lp: 'signin', method: method === 'invite' ? 'invite' : 'password', ok: ok === true }));
+}
+
 /** A short random error id, e.g. "e7c1f09a2b". */
 export function newErrorId(): string {
   const bytes = new Uint8Array(5);
