@@ -3,6 +3,7 @@
 // runs, the overlay shows it at once, a 409 is resent once on the latest version, the status Undo still on
 // screen keeps working (a location is not a status), and offline it needs a connection. Synthetic data.
 import { describe, expect, it } from 'vitest';
+import { UNDO_MS } from '@/lib/client/constants';
 import { COPY } from '@/lib/client/store-core';
 import { applyOverlay } from '@/lib/client/selectors';
 import { STATUS } from '@/lib/domain';
@@ -57,6 +58,52 @@ describe('setMedicalLocation', () => {
     expect(posts.at(-1)?.body).toEqual({ status: STATUS.waiting, expectedVersion: 3, kind: 'undo' });
     expect(s().confirmed.get(R1.id)).toMatchObject({ status: STATUS.waiting, medicalLocation: 'Bed 3 · triage' });
     expect(s().toasts.map((t) => t.title)).not.toContain(COPY.undoStale);
+  });
+
+  it('held while the sheet is open (it covers the bar): the Undo never runs out, then gets a full 10 s from the close', async () => {
+    const server = new FakeServer([R1]);
+    const { a, s } = boot(server);
+    await ready();
+    // The sheet opens with the tap, before the answer is back.
+    const release = a.holdUndo();
+    await finish(a.setStatus(R1.id, STATUS.inMedical, 'answer'));
+    const snack = s().snackbar;
+    expect(snack?.message).toBe('LP-1001 · In medical');
+    // Someone takes their time typing "Chair 9".
+    await advance(UNDO_MS + 5_000);
+    expect(s().snackbar?.id).toBe(snack?.id);
+    await finish(a.setMedicalLocation(R1.id, 'Chair 9'));
+    const closedAt = Date.now();
+    release();
+    release(); // idempotent: a second release changes nothing
+    expect(s().snackbar?.id).toBe(snack?.id);
+    expect(s().snackbar?.expiresAt).toBe(closedAt + UNDO_MS);
+    await advance(UNDO_MS - 100);
+    expect(s().snackbar?.id).toBe(snack?.id);
+    const undone = await finish(a.undo(snack?.id ?? ''));
+    expect(undone).toMatchObject({ ok: true, changed: true });
+    expect(s().confirmed.get(R1.id)).toMatchObject({ status: STATUS.waiting, medicalLocation: 'Chair 9' });
+  });
+
+  it('a hold taken while the Undo counts down pauses it; holds nest; released, it runs out after a full 10 s', async () => {
+    const server = new FakeServer([R1]);
+    const { a, s } = boot(server);
+    await ready();
+    await finish(a.setStatus(R1.id, STATUS.inMedical, 'answer'));
+    const snack = s().snackbar;
+    await advance(UNDO_MS - 1_000);
+    const outer = a.holdUndo();
+    const inner = a.holdUndo();
+    await advance(UNDO_MS * 2);
+    inner();
+    await advance(UNDO_MS * 2);
+    expect(s().snackbar?.id).toBe(snack?.id);
+    outer();
+    await advance(UNDO_MS - 100);
+    expect(s().snackbar?.id).toBe(snack?.id);
+    await advance(200);
+    expect(s().snackbar).toBeNull();
+    expect(await a.undo(snack?.id ?? '')).toBeNull();
   });
 
   it('someone else saved in between (409): resent once on the latest version', async () => {

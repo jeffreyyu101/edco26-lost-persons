@@ -8,7 +8,8 @@ import { syncRows } from './helpers/sync';
 
 // The desk request table (components/desk/table; design/screens/desktop-log.html): from 768 px, All
 // requests, My requests and Search are a table in the shell's main column. Columns # · Friend · Status ·
-// Created · Updated, plus Post and Logged by from 1280 px while nothing is open; open rows first and the
+// Created · Updated, plus Post whenever no request is docked beside the table and Logged by too on a table
+// 1040 px or wider (the table's own width decides, not the window's); open rows first and the
 // Archived fold as on F1's phone log; unsent rows on top; the dashboard's filters and their chips; search
 // highlighting; the selected row; the skeleton, offline, error and empty states. Under 768 px the phone list
 // is unchanged. Synthetic rows only (TEST-table-e2e-…), closed afterwards.
@@ -19,6 +20,7 @@ const STAFF = { staffName: 'TEST-table Dana', team: 'GC/HX - Dispatch' };
 const STAFF_SHORT = 'TEST-table D. · Dispatch';
 const TAG = `TEST-table-e2e-${Date.now().toString(36)}`;
 const ALL_COLUMNS = ['#', 'Friend', 'Status', 'Post', 'Created', 'Updated', 'Logged by'];
+const SIX_COLUMNS = ['#', 'Friend', 'Status', 'Post', 'Created', 'Updated'];
 const FIVE_COLUMNS = ['#', 'Friend', 'Status', 'Created', 'Updated'];
 const NOT_IN_MEDICAL = 'Checked – Not Found';
 
@@ -392,14 +394,16 @@ test.describe('desktop 1440 × 900', () => {
 test.describe('iPad landscape 1180 × 820 (touch)', () => {
   test.use({ viewport: { width: 1180, height: 820 }, isMobile: false, hasTouch: true, deviceScaleFactor: 1 });
 
-  test('five columns with or without a request open; nothing cut but names; 44 px rows and chips', async ({ page }) => {
+  test('nothing open: every column (the table is 1120 px); docked: five; nothing cut but names; 44 px rows and chips', async ({ page }) => {
     const tag = nextTag();
     const [one] = await createRequests(page, 1, tag);
     await page.goto('/');
     await expect(row(page, one!.id)).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId('desk-rail')).toBeVisible();
-    expect(await shownColumns(page)).toEqual(FIVE_COLUMNS);
+    // The columns follow the table's own width, not the window's: wider than at 1280 with nothing open.
+    expect(await shownColumns(page)).toEqual(ALL_COLUMNS);
     await columnsLineUp(page, one!.id);
+    for (const col of ['number', 'status', 'post', 'created', 'updated']) expect(await notCut(page, one!.id, col), col).toBe(true);
 
     // Docked at 420 px: the main column is 700 px; the tighter grid keeps the status label whole (the
     // longest, "Not found in medical", too: F2).
@@ -448,18 +452,36 @@ test.describe('1024 × 768 with a request open', () => {
 test.describe('iPad portrait 820 × 1180 (touch)', () => {
   test.use({ viewport: { width: 820, height: 1180 }, isMobile: false, hasTouch: true, deviceScaleFactor: 1 });
 
-  test('the table under the icon rail, five columns; a request is a sheet over it, its row selected', async ({ page }) => {
+  test('the table under the icon rail with Post (desktop-new-tablet-3.png); a request is a sheet over it, its row selected', async ({ page }) => {
     const tag = nextTag();
     const [one] = await createRequests(page, 1, tag);
     await page.goto('/');
     await expect(row(page, one!.id)).toBeVisible({ timeout: 15_000 });
-    expect(await shownColumns(page)).toEqual(FIVE_COLUMNS);
+    expect(await shownColumns(page)).toEqual(SIX_COLUMNS);
+    await expect(cell(page, one!.id, 'post')).toHaveText('FA 3 – Kinetic');
     await columnsLineUp(page, one!.id);
+    for (const col of ['number', 'status', 'post', 'created', 'updated']) expect(await notCut(page, one!.id, col), col).toBe(true);
     await expect(main(page).getByTestId('view-switcher')).toHaveCount(0);
     await row(page, one!.id).click();
     await expect(page.getByTestId('desk-pane')).toBeVisible();
-    expect(await shownColumns(page)).toEqual(FIVE_COLUMNS);
+    // A sheet over the table, not docked beside it: the table keeps its columns.
+    expect(await shownColumns(page)).toEqual(SIX_COLUMNS);
     await expect(row(page, one!.id)).toHaveAttribute('aria-current', 'true');
+  });
+});
+
+test.describe('the narrowest desk, 768 × 1024 (touch)', () => {
+  test.use({ viewport: { width: 768, height: 1024 }, isMobile: false, hasTouch: true, deviceScaleFactor: 1 });
+
+  test('Post still fits beside the name; nothing but names cut, no sideways scroll', async ({ page }) => {
+    const tag = nextTag();
+    const [one] = await createRequests(page, 1, tag);
+    await page.goto('/');
+    await expect(row(page, one!.id)).toBeVisible({ timeout: 15_000 });
+    expect(await shownColumns(page)).toEqual(SIX_COLUMNS);
+    await columnsLineUp(page, one!.id);
+    for (const col of ['number', 'status', 'post', 'created', 'updated']) expect(await notCut(page, one!.id, col), col).toBe(true);
+    expect((await cell(page, one!.id, 'friend').boundingBox())!.width).toBeGreaterThan(100);
   });
 });
 

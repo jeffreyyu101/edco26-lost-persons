@@ -3,13 +3,17 @@
    mockup's gray-9 / gray-10 cells are gray-11 here), closed rows dim their text to gray-11 and fade the glyph
    instead of fading the row, and touch screens get 44 px targets.
 
-   Columns (fixed widths, so every row lines up without measuring; the Friend column takes the rest):
-     768+, or a request open      #  Friend  Status  Created  Updated            (.withPanel .tbl)
-     1024–1279 with a request     the same, tighter (the main column is 544–799 px)
-     1280+ with nothing open      #  Friend  Status  Post  Created  Updated  Logged by   (.tbl)
+   Columns (fixed widths, so every row lines up without measuring; the Friend column takes the rest). What
+   fits is decided by the table's own width (a container query), except that a request docked beside it
+   (from 1024 px) always leaves five, as the mockup's .withPanel:
+     nothing docked, under 1040 px    #  Friend  Status  Post  Created  Updated            (iPad portrait, 1024)
+     nothing docked, 1040 px and up   #  Friend  Status  Post  Created  Updated  Logged by (1180 and wider)
+     a request docked                 #  Friend  Status  Created  Updated                 (tighter at 1024–1279)
+   At 768–1023 a request is a sheet over the table, not docked: the table keeps its columns behind it.
    The frame marks an open request with [data-pane] (components/desk/DeskFrame.tsx). */
 
 .root {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   min-height: calc(100vh - var(--desk-top, 56px));
@@ -18,9 +22,10 @@
   box-sizing: border-box;
 }
 
+/* Nothing docked: Post shows (desktop-new-tablet.html .rail.wideT, iPad portrait 820 × 1180). */
 .table {
-  --tbl-cols: 56px minmax(0, 1fr) 160px 96px 72px;
-  --tbl-gap: 12px;
+  --tbl-cols: 56px minmax(0, 1fr) 160px 120px 88px 64px;
+  --tbl-gap: 10px;
   --tbl-pad-l: 24px;
   --tbl-pad-r: calc(20px + env(safe-area-inset-right));
   display: flex;
@@ -28,36 +33,41 @@
   min-width: 0;
 }
 
-.cPost,
 .cBy {
   display: none;
 }
 
-/* With a request docked at 1024-1279 the status column still takes "Not found in medical" on one line, uncut
-   (the longest status, F2); the name gives way. */
+/* A wide table: Logged by too (desktop-log.html .tbl). */
+@container (min-width: 1040px) {
+  .table {
+    --tbl-cols: 64px minmax(0, 1fr) 170px 128px 104px 76px 150px;
+    --tbl-gap: 12px;
+  }
+  .cBy {
+    display: block;
+  }
+}
+
+/* A request docked beside the table: five columns (desktop-log.html .withPanel .tbl). */
+@media (min-width: 1024px) {
+  [data-pane] .table {
+    --tbl-cols: 56px minmax(0, 1fr) 160px 96px 72px;
+    --tbl-gap: 12px;
+  }
+  [data-pane] .cPost,
+  [data-pane] .cBy {
+    display: none;
+  }
+}
+
+/* Docked at 1024–1279, the main column is 544–799 px: the same five, tighter. The status column still takes
+   "Not found in medical" on one line, uncut (the longest status, F2); the name gives way. */
 @media (min-width: 1024px) and (max-width: 1279.98px) {
   [data-pane] .table {
     --tbl-cols: 48px minmax(0, 1fr) 154px 88px 56px;
     --tbl-gap: 10px;
     --tbl-pad-l: 20px;
     --tbl-pad-r: 16px;
-  }
-}
-
-@media (min-width: 1280px) {
-  .table {
-    --tbl-cols: 64px minmax(0, 1fr) 170px 128px 104px 76px 150px;
-  }
-  .cPost,
-  .cBy {
-    display: block;
-  }
-  [data-pane] .table {
-    --tbl-cols: 56px minmax(0, 1fr) 160px 96px 72px;
-  }
-  [data-pane] .cPost,
-  [data-pane] .cBy {
-    display: none;
   }
 }
 

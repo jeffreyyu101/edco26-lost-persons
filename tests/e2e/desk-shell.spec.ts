@@ -254,6 +254,43 @@ test.describe('desktop 1440 × 900', () => {
     expect(await page.evaluate(() => (window.history.state as { lpDepth?: number } | null)?.lpDepth ?? 0)).toBe(0);
   });
 
+  test('J / K from the sidebar or the top bar move the focus to the row, so Enter opens that row', async ({ page }) => {
+    const tag = nextTag();
+    await createRequests(page, 2, tag);
+    await page.goto('/?view=mine');
+    await expect(main(page).locator('[data-request-id]').nth(1)).toBeVisible({ timeout: 15_000 });
+    const ids = await rowOrder(page);
+
+    // The focus on a sidebar link (where a click on it leaves it in Chromium).
+    await page.getByTestId('desk-sidebar').getByRole('link', { name: /^My requests/ }).focus();
+    await page.keyboard.press('j');
+    await expect.poll(() => activeRowId(page)).toBe(ids[0]);
+    await page.keyboard.press('j');
+    await expect.poll(() => activeRowId(page)).toBe(ids[1]);
+
+    // New request closed with Esc gives the focus back to its button; K then moves it to the row above,
+    // and Enter opens that row, not New request again.
+    await page.getByTestId('desk-new').focus();
+    await page.keyboard.press('Enter');
+    await expect.poll(() => paramOf(page, 'new')).toBe('1');
+    await expect(page.getByTestId('request-form-submit')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect.poll(() => paramOf(page, 'new')).toBeNull();
+    await expect(page.getByTestId('desk-new')).toBeFocused();
+    await page.keyboard.press('k');
+    await expect.poll(() => activeRowId(page)).toBe(ids[0]);
+    await page.keyboard.press('Enter');
+    await expect.poll(() => paramOf(page, 'r')).toBe(ids[0]);
+    expect(paramOf(page, 'new')).toBeNull();
+    await expect(page.getByTestId('request-form-submit')).toHaveCount(0);
+
+    // Working in the open request keeps the focus there: J opens the next one, the pane's button stays focused.
+    await page.getByTestId('desk-close').focus();
+    await page.keyboard.press('j');
+    await expect.poll(() => paramOf(page, 'r')).toBe(ids[1]);
+    await expect(page.getByTestId('desk-close')).toBeFocused();
+  });
+
   test('the dashboard: a request opened over another still closes in one Esc', async ({ page }) => {
     await createRequests(page, 2);
     await page.goto('/?dashboard=1');

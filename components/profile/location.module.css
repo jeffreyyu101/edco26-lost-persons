@@ -109,7 +109,8 @@
   cursor: default;
 }
 
-/* The phone sheet: above the Undo bar (z-index 60), which waits behind the scrim until the sheet closes. */
+/* The phone sheet: above the Undo bar (z-index 60), which waits behind the scrim until the sheet closes (its
+   countdown held meanwhile: LocationEditor, store holdUndo). */
 :global(.rt-BaseDialogOverlay):has([data-location-sheet]) {
   z-index: 61;
 }

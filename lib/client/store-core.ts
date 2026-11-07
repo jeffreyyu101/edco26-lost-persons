@@ -348,6 +348,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const chains = new Map<string, Promise<unknown>>();
   const undoRecords = new Map<string, UndoRecord>();
   let snackTimer: ReturnType<typeof setTimeout> | undefined;
+  /** holdUndo() calls not released yet: while any is held, the Undo on screen doesn't run out. */
+  let undoHolds = 0;
   const toastTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Alert toasts on screen, by toast id. */
   const alertToasts = new Map<string, AlertToastMeta>();
@@ -1202,11 +1204,36 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     const snackId = uuid();
     undoRecords.set(snackId, { id: row.id, to: back, version: row.rowVersion });
     set({ snackbar: { id: snackId, message: `${formatCaseNumber(row.caseNumber)} · ${statusMeta(to).shortLabel}`, expiresAt: now() + UNDO_MS } });
+    // Held (the location sheet covers the bar): the countdown starts when the hold is released.
+    if (undoHolds === 0) armUndo(snackId);
+  };
+
+  /** The Undo `snackId` goes in UNDO_MS from now (replacing any countdown running). */
+  const armUndo = (snackId: string) => {
+    if (snackTimer) clearTimeout(snackTimer);
     snackTimer = setTimeout(() => {
       snackTimer = undefined;
       undoRecords.delete(snackId);
       if (state.snackbar?.id === snackId) set({ snackbar: null });
     }, UNDO_MS);
+  };
+
+  const holdUndo = (): (() => void) => {
+    undoHolds += 1;
+    if (snackTimer) clearTimeout(snackTimer);
+    snackTimer = undefined;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      undoHolds -= 1;
+      if (undoHolds > 0) return;
+      const snack = state.snackbar;
+      if (!snack || !undoRecords.has(snack.id)) return;
+      // A full window from the moment the bar is uncovered.
+      set({ snackbar: { ...snack, expiresAt: now() + UNDO_MS } });
+      armUndo(snack.id);
+    };
   };
 
   const runStatus = async (id: string, to: SettableStatus, kind: StatusKind, undoVersion: number | null): Promise<MutationResult> => {
@@ -2116,6 +2143,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     },
 
     dismissSnackbar: clearSnackbar,
+
+    holdUndo,
 
     create,
 

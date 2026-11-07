@@ -84,6 +84,9 @@ export const MAIN_SELECTOR = '[data-desk-main]';
 /** The layer a form renders into (DeskFrame sets it). */
 export const FORM_LAYER_SELECTOR = '[data-desk-form]';
 
+/** The open request beside the list (DeskFrame sets it). */
+export const PANE_SELECTOR = '[data-desk-pane]';
+
 interface ElementLike {
   tagName?: string;
   isContentEditable?: boolean;

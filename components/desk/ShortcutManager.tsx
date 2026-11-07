@@ -12,6 +12,7 @@ import {
   FORM_LAYER_SELECTOR,
   MAIN_SELECTOR,
   OVERLAY_SELECTOR,
+  PANE_SELECTOR,
   decideShortcut,
   describeTarget,
   mainRowId,
@@ -120,9 +121,12 @@ export function DeskKeys({ view, main }: DeskKeysProps) {
           cursor.current = target;
           const el = rowElement(target);
           if (open) openInPane(target);
-          // Focus follows unless it is somewhere else on purpose (a button in the pane, the sidebar).
+          // Focus follows, so Enter opens the row moved to and the row shows as selected. Only someone
+          // working in the open request (a button in the pane) keeps their place there. Focus left on the
+          // sidebar, the rail or the top bar (a click there, New request closed) follows too: kept there, the
+          // next Enter would re-run that control instead of opening the row.
           const active = document.activeElement;
-          if (el && (onRow !== null || !active || active === document.body)) focusRow(el);
+          if (el && !active?.closest(PANE_SELECTOR)) focusRow(el);
           return;
         }
       }

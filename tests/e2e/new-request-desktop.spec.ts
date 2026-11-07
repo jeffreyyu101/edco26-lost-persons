@@ -509,6 +509,59 @@ test.describe('iPad landscape, 1180 × 820', () => {
   });
 });
 
+// ---- Crossing 768 px: the form keeps what is typed --------------------------------------------------
+
+test.describe('crossing 768 px (iPad mini rotated, a window snapped to half a screen)', () => {
+  test.use({ viewport: { width: 1133, height: 744 }, isMobile: false, hasTouch: true });
+
+  test('unsaved Edit details survive the modal turning into the phone page and back; Save sends them', async ({ page }) => {
+    const name = uniqueName('rotate');
+    const row = await apiCreate(page.request, { name, clothing: 'TEST-form black tee', contactName: 'TEST-form Jo' });
+    const title = `Edit LP-${String(row.caseNumber).padStart(4, '0')}`;
+    const wearing = () => form(page).getByLabel('Wearing', { exact: true });
+    await page.goto(`/?r=${row.id}&edit=all`);
+    await expect(modal(page, title)).toBeVisible();
+    await wearing().fill('TEST-form EDITED rotation');
+
+    // Portrait: 744 px wide, the phone's full-screen page with the edit still in it.
+    await page.setViewportSize({ width: 744, height: 1133 });
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(form(page)).toBeVisible();
+    await expect(wearing()).toHaveValue('TEST-form EDITED rotation');
+    await expect(submit(page)).toBeEnabled();
+
+    // Back to landscape: the modal again, still edited.
+    await page.setViewportSize({ width: 1133, height: 744 });
+    await expect(modal(page, title)).toBeVisible();
+    await expect(wearing()).toHaveValue('TEST-form EDITED rotation');
+
+    const patch = page.waitForRequest((r) => r.method() === 'PATCH' && r.url().endsWith(`/api/requests/${row.id}`));
+    await submit(page).click();
+    expect((await patch).postDataJSON()).toEqual({ patch: { clothing: 'TEST-form EDITED rotation' }, expectedVersion: row.rowVersion });
+    await expect(form(page)).toHaveCount(0);
+    expect(await apiDetail(page.request, row.id)).toMatchObject({ clothing: 'TEST-form EDITED rotation' });
+  });
+
+  test('a new request keeps its fields across the switch too', async ({ page }) => {
+    await page.setViewportSize({ width: 744, height: 1133 });
+    await page.goto('/?new=1');
+    await expect(form(page)).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    const name = uniqueName('rotate-new');
+    await personName(page).fill(name);
+    await page.setViewportSize({ width: 1133, height: 744 });
+    await expect(modal(page)).toBeVisible();
+    await expect(personName(page)).toHaveValue(name);
+    await page.setViewportSize({ width: 744, height: 1133 });
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(personName(page)).toHaveValue(name);
+    // Discard, so no draft is left for the next test.
+    await page.getByRole('button', { name: 'Cancel' }).first().click();
+    await page.getByRole('button', { name: 'Discard' }).click();
+    await expect(form(page)).toHaveCount(0);
+  });
+});
+
 // ---- Phone: unchanged ------------------------------------------------------------------------------
 
 test('under 768 px New request is still the full-screen page', async ({ page }) => {

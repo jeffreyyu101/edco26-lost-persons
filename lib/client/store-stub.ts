@@ -144,13 +144,22 @@ export function createStubStore(options: StubOptions): AppStore {
         const snackId = nextId('undo');
         undoable.set(snackId, { id, status: back as SettableStatus, version: next.rowVersion });
         set({ snackbar: { id: snackId, message: `${formatCaseNumber(row.caseNumber)} · ${statusMeta(to).shortLabel}`, expiresAt: Date.now() + UNDO_MS } });
-        setTimeout(() => {
-          if (state.snackbar?.id === snackId) set({ snackbar: null });
-          undoable.delete(snackId);
-        }, UNDO_MS);
+        if (undoHolds === 0) armUndo(snackId);
       }
     }
     return { ok: true, changed: true, request: next };
+  };
+
+  // The Undo countdown, paused while something covers the bar (holdUndo, as the real store).
+  let snackTimer: ReturnType<typeof setTimeout> | undefined;
+  let undoHolds = 0;
+  const armUndo = (snackId: string) => {
+    if (snackTimer) clearTimeout(snackTimer);
+    snackTimer = setTimeout(() => {
+      snackTimer = undefined;
+      if (state.snackbar?.id === snackId) set({ snackbar: null });
+      undoable.delete(snackId);
+    }, UNDO_MS);
   };
 
   const actions: StoreActions = {
@@ -170,6 +179,21 @@ export function createStubStore(options: StubOptions): AppStore {
     },
     dismissSnackbar() {
       set({ snackbar: null });
+    },
+    holdUndo() {
+      undoHolds += 1;
+      if (snackTimer) clearTimeout(snackTimer);
+      snackTimer = undefined;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        undoHolds -= 1;
+        const snack = state.snackbar;
+        if (undoHolds > 0 || !snack || !undoable.has(snack.id)) return;
+        set({ snackbar: { ...snack, expiresAt: Date.now() + UNDO_MS } });
+        armUndo(snack.id);
+      };
     },
     async create(input: CreateInput): Promise<CreateResult> {
       const body = toCreateBody(input.values, input.clientMutationId);
