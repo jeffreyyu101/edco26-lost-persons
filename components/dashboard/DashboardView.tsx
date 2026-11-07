@@ -26,7 +26,8 @@ import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { Stats } from '@/lib/api-types';
 import { goBack, navigate } from '@/lib/client/nav';
 import { useConnection, useNow, useRequests, useStats } from '@/lib/client/store-contract';
-import { STATUS, postFilterKey, postFilterLabel, stageLook, stagePhrase, statusMeta, toneColorVar } from '@/lib/domain';
+import { STATUS, postFilterKey, postFilterLabel, statusMeta, toneColorVar } from '@/lib/domain';
+import { stageLook, stagePhrase } from '@/lib/stages';
 import {
   NO_VALUE,
   agoPhrase,

@@ -174,6 +174,10 @@ test('Not in medical is closed and grey, and keeps exactly its actions: Change a
   const origin = baseURL as string;
   const row = await createRequest(page, origin);
   await page.goto(`/?r=${row.id}`);
+  // (F5) The first Not found puts it on a "Not found yet" hold, still Waiting for check; the second is final.
+  await page.getByRole('button', { name: 'Not in medical', exact: true }).click();
+  await expect(statusBlock(page).getByTestId('recheck-row')).toBeVisible();
+  await expect(profileStatus(page, 'Added')).toBeVisible();
   await page.getByRole('button', { name: 'Not in medical', exact: true }).click();
   await expect(profileStatus(page, 'Checked – Not Found')).toBeVisible();
 
@@ -358,12 +362,14 @@ test('the Not in medical button on the profile offers Undo too', async ({ page, 
   const origin = baseURL as string;
   const row = await createRequest(page, origin);
   await page.goto(`/?r=${row.id}`);
-  const lp = await page.getByTestId('profile-case').innerText();
+  // (F5) The first Not found puts it on hold ("Not in medical · recheck 4:40"); Undo takes the hold away.
   await page.getByRole('button', { name: 'Not in medical', exact: true }).click();
-  await expect(profileStatus(page, 'Checked – Not Found')).toBeVisible();
-  await expect(page.getByText(`${lp} · Not in medical`)).toBeVisible();
+  await expect(statusBlock(page).getByTestId('recheck-row')).toBeVisible();
+  await expect(page.getByText(/^Not in medical · recheck \d{1,2}:\d\d$/)).toBeVisible();
   await undoButton(page).click();
+  await expect(statusBlock(page).getByTestId('recheck-row')).toHaveCount(0);
   await expect(profileStatus(page, 'Added')).toBeVisible();
+  await expect(statusBlock(page)).toContainText('Waiting for check');
   await expect(auditItems(page).first()).toContainText('Undo');
 });
 

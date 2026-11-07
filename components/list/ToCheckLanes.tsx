@@ -4,11 +4,13 @@
 // (hourglass) over compact rows of held requests not due yet: initials, age / sex, and the recheck time. A
 // Later row opens the request. The phone's Pending tab and the desk's To check column both render this.
 import { Hourglass, RefreshCw } from 'lucide-react';
-import { memo } from 'react';
+import { memo, useEffect, useState } from 'react';
 import type { RequestSummary } from '@/lib/api-types';
-import type { ToCheckLanes } from '@/lib/client/selectors';
+import { nextRecheckAt, type ToCheckLanes } from '@/lib/client/lanes';
+import { useNow } from '@/lib/client/store-contract';
 import { navigate } from '@/lib/client/nav';
-import { STAGE_META, ageGender } from '@/lib/domain';
+import { ageGender } from '@/lib/domain';
+import { STAGE_META } from '@/lib/stages';
 import { formatCaseNumber, formatClockAmPm } from '@/lib/format';
 import { CheckCard, type CheckCardProps } from './cards';
 import { displayName, whoPhrase } from './list-helpers';
@@ -62,15 +64,11 @@ export const LaterRow = memo(function LaterRow({ row, timeZone }: { row: Request
   const at = row.recheckAt ? formatClockAmPm(row.recheckAt, timeZone) : '';
   const ag = ageGender(row.age, row.gender);
   const label = `${whoPhrase(row)}. ${STAGE_META.notFoundYet.label}, recheck at ${at}. ${row.postShort} · ${formatCaseNumber(row.caseNumber)}.`;
+  // Named by its content, one sentence for screen readers (the visible cells are hidden from them), as the log's
+  // rows are: an aria-label would not contain the visible "4:40 PM" in order (WCAG 2.5.3).
   return (
-    <button
-      type="button"
-      className={s.crow}
-      data-request-id={row.id}
-      data-testid="later-row"
-      aria-label={label}
-      onClick={() => navigate({ r: row.id })}
-    >
+    <button type="button" className={s.crow} data-request-id={row.id} data-testid="later-row" onClick={() => navigate({ r: row.id })}>
+      <span className={s.vh}>{label}</span>
       <span className={s.crowNm} aria-hidden>
         {displayName(row.name)}
       </span>
@@ -86,3 +84,20 @@ export const LaterRow = memo(function LaterRow({ row, timeZone }: { row: Request
     </button>
   );
 });
+
+/**
+ * (F5) useNow(), plus a re-render the moment the next "Not found yet" hold among `rows` becomes due, so a held
+ * request moves from Later to the top of To check on time (not up to 15 s late), with no refetch.
+ */
+export function useRecheckNow(rows: readonly RequestSummary[]): number {
+  const tick = useNow();
+  const [bumped, setBumped] = useState(0);
+  const now = Math.max(tick, bumped);
+  const next = nextRecheckAt(rows, now);
+  useEffect(() => {
+    if (next === null) return;
+    const timer = setTimeout(() => setBumped(Date.now()), Math.max(0, next - Date.now()) + 50);
+    return () => clearTimeout(timer);
+  }, [next]);
+  return now;
+}

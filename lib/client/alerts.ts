@@ -7,7 +7,7 @@
 //     closes once the row is in another status (alertStillCurrent), so a sticky "is in medical" never
 //     outlives a changed or undone answer.
 import type { RequestSummary } from '../api-types';
-import { STAGE_META, STATUS, ageGender, initials, isHeld, isInMedical, sameStaff, statusMeta } from '../domain';
+import { NOT_FOUND_YET_LABEL, STATUS, ageGender, initials, isHeld, isInMedical, sameStaff, statusMeta } from '../domain';
 import { formatCaseNumber } from '../format';
 import type { AlertEvent, ToastItem } from './store-contract';
 
@@ -47,7 +47,7 @@ export function statusAlert(row: RequestSummary): AlertEvent {
 
 /** (F5) "LP-1004 · S.L. — not found yet": the first Not found, which put the request on hold. */
 export function holdAlert(row: RequestSummary): AlertEvent {
-  return { kind: 'status_changed', requestId: row.id, title: `${subject(row)} — ${STAGE_META.notFoundYet.label.toLowerCase()}`, count: 1 };
+  return { kind: 'status_changed', requestId: row.id, title: `${subject(row)} — ${NOT_FOUND_YET_LABEL.toLowerCase()}`, count: 1 };
 }
 
 export function newRequestAlert(row: RequestSummary): AlertEvent {

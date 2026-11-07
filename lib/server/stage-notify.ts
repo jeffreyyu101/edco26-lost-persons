@@ -5,7 +5,8 @@
 // renamed label flows through). Nouns only: never a name, phone number or id. Server only.
 import 'server-only';
 import type { RequestSummary } from '../api-types';
-import { STAGE_META, STATUS, canonStaff, isHeld, statusMeta } from '../domain';
+import { STATUS, canonStaff, isHeld, statusMeta } from '../domain';
+import { STAGE_META } from '../stages';
 import { formatClockAmPm } from '../format';
 import { eventTimezone } from './env';
 import { involvedStaff } from './involved';

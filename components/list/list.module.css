@@ -533,7 +533,7 @@ button.lr:focus-visible {
   color: var(--red-11);
 }
 
-/* (F5) The stages (lib/domain STAGE_META, design/screens/colors-1.png): amber Needs info (front of house's turn),
+/* (F5) The stages (lib/stages STAGE_META, design/screens/colors-1.png): amber Needs info (front of house's turn),
    violet Not found yet (on hold), teal Friend en route (on the move); Friend arrived is green. */
 .stc[data-tone='amber'] {
   color: var(--amber-11);
@@ -1236,7 +1236,7 @@ button.lr:focus-visible {
 .stageRow {
   display: flex;
   min-width: 0;
-  margin-top: 8px;
+  margin: 12px 0 14px;
 }
 
 /* "⌛ Later 2 ———": the held requests that are not due yet. */
@@ -1282,6 +1282,7 @@ button.lr:focus-visible {
 
 /* A held request: one 52 px row, the whole row opens it. */
 .crow {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;

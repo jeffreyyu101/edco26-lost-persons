@@ -17,7 +17,7 @@ import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { navigate } from '@/lib/client/nav';
 import type { SearchHit } from '@/lib/client/selectors';
-import { stageLook, type DisplayStage } from '@/lib/domain';
+import { stageLook, type DisplayStage } from '@/lib/stages';
 import { NOT_UPDATED } from '@/lib/format';
 import { archivedFoldLabel, highlightParts, isClosed, logNumber, logNumberRanges, type Ranges } from '@/components/list/list-helpers';
 import {
@@ -161,7 +161,7 @@ export interface TableRowProps {
   /** The request open in the pane. */
   selected: boolean;
   /**
-   * (F5) The row's stage at the views' clock (lib/domain displayStage): label and what follows it ("Friend en
+   * (F5) The row's stage at the views' clock (lib/stages displayStage): label and what follows it ("Friend en
    * route · ~4 min"). Without it, the stage's label alone.
    */
   stage?: DisplayStage;

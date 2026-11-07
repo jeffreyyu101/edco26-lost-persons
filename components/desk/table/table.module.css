@@ -232,7 +232,7 @@ button.row:focus-visible {
   color: var(--red-11);
 }
 
-/* (F5) The stages: amber Needs info, violet Not found yet, teal Friend en route (lib/domain STAGE_META). */
+/* (F5) The stages: amber Needs info, violet Not found yet, teal Friend en route (lib/stages STAGE_META). */
 .st[data-tone='amber'] {
   color: var(--amber-11);
 }

@@ -6,7 +6,8 @@
 // Post and Logged by show only from 1280 px with nothing open (the CSS decides); the row's sentence always
 // says them. Times reuse F1's log helpers (lib/format.ts), so the desk and the phone never disagree.
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
-import { ageGender, canonicalTeam, parseStaff, postFilterLabel, stagePhrase, teamShort, type TeamValue } from '@/lib/domain';
+import { ageGender, canonicalTeam, parseStaff, postFilterLabel, teamShort, type TeamValue } from '@/lib/domain';
+import { stagePhrase } from '@/lib/stages';
 import { formatAuditTime, formatCaseNumber, formatCreatedTime, formatUpdatedAgo, updatedPhrase, wasUpdated } from '@/lib/format';
 import { displayName, outboxDisplay, outboxRowLabel, updatedSince, whoPhrase } from '@/components/list/list-helpers';
 

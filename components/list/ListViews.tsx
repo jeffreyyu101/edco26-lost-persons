@@ -26,7 +26,8 @@ import { PendingBoard } from '@/components/desk/PendingBoard';
 import { LocationEditor, anchorFor, type LocationTarget, type Measurable } from '@/components/profile/LocationEditor';
 import type { RequestSummary } from '@/lib/api-types';
 import { goBack, navigate } from '@/lib/client/nav';
-import { splitOpenClosed, toCheckLanes } from '@/lib/client/selectors';
+import { toCheckLanes } from '@/lib/client/lanes';
+import { splitOpenClosed } from '@/lib/client/selectors';
 import {
   useActions,
   useAllRows,
@@ -38,7 +39,6 @@ import {
   useNow,
   useOutbox,
   usePending,
-  useRecheckNow,
   usePrefs,
   useSearch,
   useSession,
@@ -52,7 +52,7 @@ import { useInDesk } from '@/components/desk/desk-context';
 import { AppHeader } from './AppHeader';
 import { BrandCard } from './BrandCard';
 import { ComingCard, MineCard, OutboxCard } from './cards';
-import { ToCheckList } from './ToCheckLanes';
+import { ToCheckList, useRecheckNow } from './ToCheckLanes';
 import { displayName } from './list-helpers';
 import { PendingTabs, pendingTabIds, usePendingTab } from './PendingTabs';
 import { primeKeyboard, useDelayedFlag, useScrollMemory, useStatusTap, useStickyHeight } from './hooks';

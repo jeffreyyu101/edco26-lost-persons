@@ -71,6 +71,18 @@ file production needs. The other files in that folder are the local chain: the b
   has every `lp_*` function and a text `age`. `lp_stats` is `create or replace`, and step 1b prints
   `patients.age: already text, unchanged.` on a second run.
 
+- **The "Not found yet" hold (F5, `feat/stages`) needs the file applied again too, before that build
+  deploys.** It adds two columns (`patients.recheck_at`, nullable, and `patients.not_found_checks`, smallint
+  default 0, both `add column if not exists`: no table rewrite), the function `lp_stages_recheck_minutes()`,
+  and recreates `lp_row` (two extra keys), `lp_set_status` (a first Not found keeps the request Waiting for
+  check, on hold for 20 minutes) and `lp_stats` (a hold counts as Waiting). **The build that is live now keeps
+  working on it**: its server calls `lp_set_status` exactly as before and maps `lp_row` through its
+  allowlist, so its first Not found comes back Waiting for check and stays in its queue (a second Not found
+  closes it, as on the new build), and its Undo clears the hold. Check after the commit:
+  `select lp_stages_recheck_minutes();` returns `20`, and
+  `select column_name from information_schema.columns where table_name = 'patients' and column_name in ('recheck_at', 'not_found_checks');`
+  returns both. A second paste keeps every hold.
+
 By hand, in the Supabase dashboard:
 
 1. Supabase dashboard → SQL Editor, as the default `postgres` role.
@@ -135,6 +147,9 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 - [ ] The re-run of the migration on production **before** this build deploys (lp_stats + age → text): dry
       run, then commit (see above).
 - [ ] Several staff sign in at once behind the venue Wi-Fi (one shared IP).
+- [ ] The "Not found yet" hold on real phones: medical taps Not found → the card moves under Later with
+      "Not found · recheck" and Undo; 20 minutes later (phone clock) it is back on top as Recheck; the second
+      Not found closes it. Front of house's My requests shows the violet chip and the recheck time meanwhile.
 
 ## Known limits
 

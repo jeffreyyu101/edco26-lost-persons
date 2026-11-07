@@ -26,7 +26,7 @@ import type {
   Stats,
   SyncResponse,
 } from '../api-types';
-import { SETTABLE_STATUSES, STATUS, canonStaff, isUuid, sameStaff, statusMeta, staffString, undoTarget, type SettableStatus, type StatusKind } from '../domain';
+import { SETTABLE_STATUSES, STATUS, canonStaff, isHeld, isUuid, sameStaff, statusMeta, staffString, undoTarget, type SettableStatus, type StatusKind } from '../domain';
 import { formatCaseNumber } from '../format';
 import { syncPath } from './api-paths';
 import {
@@ -1212,13 +1212,18 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     }, UNDO_MS);
   };
 
-  const runStatus = async (id: string, to: SettableStatus, kind: StatusKind, undoVersion: number | null): Promise<MutationResult> => {
+  const runStatus = async (id: string, to: SettableStatus, kind: StatusKind, undoVersion: number | null, tapHeld?: boolean): Promise<MutationResult> => {
     const gen = ownerGen();
     const row = state.confirmed.get(id);
     if (!row) return fail('not_found', COPY.notFound);
     const from = row.status;
     // A queued second tap that the first one already satisfied.
     if (undoVersion === null && from === to) return { ok: true, changed: false, request: row };
+    // (F5) A Not found tapped on a request that was not on hold, queued behind one that has put it on hold (a
+    // double tap): already satisfied. Sent, it would be the final answer.
+    if (undoVersion === null && to === STATUS.notInMedical && kind === 'answer' && tapHeld === false && isHeld(row)) {
+      return { ok: true, changed: false, request: row };
+    }
     // (F5) A first Not found keeps the status and goes on hold (lib/client/hold.ts predicts it).
     setOverlay(id, { mutationId: uuid(), kind: 'status', fields: statusOverlayFields(row, to, kind, now()), startedAt: now() });
     let res: HttpResult<ChangeResponse> = await postStatus(id, to, undoVersion ?? row.rowVersion, kind);
@@ -2098,7 +2103,11 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 
     async setStatus(id, status, kind) {
       if (offlineNow()) return refuseOffline();
-      return serialize(id, async () => (await writeGate(false)) ?? runStatus(id, status, kind, null));
+      // (F5) Whether the request was on hold, as the server last said, when tapped (see runStatus). Not the
+      // overlay: a double tap lands while the first tap's predicted hold is on screen, and must stay a repeat.
+      const confirmedRow = state.confirmed.get(id);
+      const tapHeld = confirmedRow ? isHeld(confirmedRow) : false;
+      return serialize(id, async () => (await writeGate(false)) ?? runStatus(id, status, kind, null, tapHeld));
     },
 
     async undo(snackbarId) {

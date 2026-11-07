@@ -12,7 +12,8 @@ import { RecheckChip as RecheckTimeChip, StageChip, hasStageChip } from './Stage
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { photoPath } from '@/lib/client/api-paths';
 import { navigate } from '@/lib/client/nav';
-import { STATUS, actionLabel, ageGender, displayStage, holdAnsweredAt, waitTone, type StageTone } from '@/lib/domain';
+import { STATUS, actionLabel, ageGender, statusMeta, waitTone } from '@/lib/domain';
+import { displayStage, holdAnsweredAt, type StageTone } from '@/lib/stages';
 import { formatCaseNumber, formatClock, formatClockAmPm, formatDuration, minutesSince } from '@/lib/format';
 import {
   cardDescription,
@@ -23,7 +24,6 @@ import {
   minutesPhrase,
   outboxDisplay,
   queuedStepper,
-  statusPhrase,
   statusSince,
   stepperModel,
   whoPhrase,
@@ -411,7 +411,7 @@ export const MineCard = memo(function MineCard({
   // (F5) The stage: a chip in the corner for Needs info and Not found yet, the stage's glyph and label otherwise.
   const stage = displayStage(row, { now, ...(timeZone ? { timeZone } : {}) });
   const chip = hasStageChip(stage);
-  const said = stage.key === 'notFoundYet' || stage.key === 'needsInfo' ? stage.said : statusPhrase(row.status);
+  const said = stage.key === 'notFoundYet' || stage.key === 'needsInfo' ? stage.said : statusMeta(row.status).label;
   const label = `${whoPhrase(row)}. ${sub}. ${said}${waiting ? `, waiting ${minutesPhrase(minutes)}` : `, ${minutesPhrase(minutes)} ago`}.`;
   return (
     <Card

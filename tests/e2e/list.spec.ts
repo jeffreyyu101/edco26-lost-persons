@@ -53,6 +53,12 @@ async function setStatus(page: Page, r: RequestSummary, status: string, kind: st
   return ((await res.json()) as { request: RequestSummary }).request;
 }
 
+/** (F5) Not in medical, final: the first Not found only puts it on a "Not found yet" hold; the second closes it. */
+async function notFound(page: Page, r: RequestSummary): Promise<RequestSummary> {
+  const held = await setStatus(page, r, 'Checked – Not Found', 'answer');
+  return setStatus(page, held, 'Checked – Not Found', 'answer');
+}
+
 const row = (page: Page, id: string) => page.locator(`[data-request-id="${id}"]`);
 const cell = (page: Page, id: string, col: string) => row(page, id).locator(`[data-col="${col}"]`);
 const checkCard = (page: Page, id: string) => page.locator(`[data-testid="check-card"]:has([data-request-id="${id}"])`);
@@ -342,7 +348,7 @@ test('All rows: Created with AM/PM in the event timezone, Updated "—" until it
 
 test('All (option B): closed requests fold into "Archived N"; the fold opens in place, greyed, and stays open this session', async ({ page }) => {
   const openRow = await createRequest(page);
-  const notIn = await setStatus(page, await createRequest(page), 'Checked – Not Found', 'answer');
+  const notIn = await notFound(page, await createRequest(page));
   await page.goto('/');
   await expect(row(page, openRow.id)).toBeVisible({ timeout: 10_000 });
 
@@ -439,7 +445,7 @@ test('at 375 px after midnight the name keeps at least 80 px; numbers and times 
   await page.clock.setFixedTime(later);
   await page.setViewportSize({ width: 375, height: 812 });
   const r = await createRequest(page, { name: `${TAG} Kayla Alexandra Martinez-Rodriguez` });
-  const notIn = await setStatus(page, await createRequest(page), 'Checked – Not Found', 'answer');
+  const notIn = await notFound(page, await createRequest(page));
   await page.goto('/');
   await expect(row(page, r.id)).toBeVisible({ timeout: 10_000 });
   const created = formatCreatedTime(r.createdAt, later, TZ);
@@ -574,6 +580,11 @@ test('Not in medical leaves Pending; ?status= shows a filter chip that clears to
   await expect(checkCard(page, r.id)).toBeVisible({ timeout: 10_000 });
   await checkCard(page, r.id).getByRole('button', { name: 'Not in medical' }).click();
   await expect(checkCard(page, r.id)).toHaveCount(0);
+  // (F5) The first Not found holds it under Later; the second (from the request, here through the API) closes it.
+  await expect(page.locator(`[data-testid="later-row"][data-request-id="${r.id}"]`)).toBeVisible();
+  const held = (await (await page.request.get(`/api/requests/${r.id}`)).json()) as RequestSummary;
+  await setStatus(page, held, 'Checked – Not Found', 'answer');
+  await expect(page.locator(`[data-testid="later-row"][data-request-id="${r.id}"]`)).toHaveCount(0, { timeout: 15_000 });
 
   await page.goto(`/?status=${encodeURIComponent('Checked – Not Found')}`);
   const chip = page.getByTestId('status-chip');

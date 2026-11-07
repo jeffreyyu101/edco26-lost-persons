@@ -1,4 +1,4 @@
-// F5: the stage system (lib/domain displayStage + STAGE_META) and the "Not found yet" hold on the client: every
+// F5: the stage system (lib/stages displayStage + STAGE_META) and the "Not found yet" hold on the client: every
 // status × Needs info × hold (none / held / due) × en route, the colours' contrast in light and dark, the one
 // 20-minute constant shared with SQL, Pending's To check lanes and Later group, the labels (read from
 // STATUS_META and the action definitions, so the "Not found in medical" rename flows through), the optimistic
@@ -19,29 +19,13 @@ import { buildAuditTrail, holdOrigin } from '@/components/profile/audit-trail';
 import type { AuditEvent, RequestSummary } from '@/lib/api-types';
 import { diffAlerts, holdAlert, type AlertContext } from '@/lib/client/alerts';
 import { holdChanged, holdSnackMessage, holdsOnNotFound, statusOverlayFields } from '@/lib/client/hold';
-import { nextRecheckAt, pendingGroups, toCheckLanes, viewCounts } from '@/lib/client/selectors';
+import { nextRecheckAt, toCheckLanes } from '@/lib/client/lanes';
+import { pendingGroups, viewCounts } from '@/lib/client/selectors';
 import { StoreContext, type AppStore, type StoreState } from '@/lib/client/store-contract';
 import { createStubStore } from '@/lib/client/store-stub';
 import { STUB_SESSION, stubRows } from '@/lib/client/stub-data';
-import {
-  RECHECK_MINUTES,
-  STAGE_META,
-  STATUS,
-  STATUS_META,
-  actionLabel,
-  displayStage,
-  etaText,
-  holdAnsweredAt,
-  isHeld,
-  isMedicalTeam,
-  isRecheckDue,
-  primaryActions,
-  shortStaffName,
-  stageLook,
-  stagePhrase,
-  type StageKey,
-  type StageSource,
-} from '@/lib/domain';
+import { RECHECK_MINUTES, STATUS, STATUS_META, actionLabel, isHeld, isRecheckDue, primaryActions } from '@/lib/domain';
+import { STAGE_META, displayStage, etaText, holdAnsweredAt, isMedicalTeam, shortStaffName, stageLook, stagePhrase, type StageKey, type StageSource } from '@/lib/stages';
 import { formatClock, formatClockAmPm } from '@/lib/format';
 import { mapAudit, mapRow } from '@/lib/server/mappers';
 import { notFoundDetail } from '@/lib/server/stage-notify';
@@ -603,11 +587,18 @@ describe('renders', () => {
   });
 
   it('My requests: the violet "Not found yet" chip in the corner and the outline "Recheck 4:40 PM"', () => {
-    const store = heldStore();
-    const mine = [...store.getState().confirmed.values()].filter((r) => isHeld(r) && r.createdBy === STUB_SESSION.staff);
+    // One of this phone's own requests, put on hold.
+    const store = storeWith((all) => {
+      const mineId = all.find((r) => r.createdBy === STUB_SESSION.staff && r.status !== STATUS.cancelled)!.id;
+      return all.map((r) => (r.id === mineId ? { ...r, status: STATUS.waiting, recheckAt: soon(12), notFoundChecks: 1, closedAt: null } : r));
+    });
+    const held = [...store.getState().confirmed.values()].find((r) => isHeld(r))!;
     const html = render(store, <MineView />);
-    if (mine.length === 0) return; // the stub's first Waiting rows are logged by someone else
-    expect(html).toContain('data-testid="stage-chip"');
-    expect(html).toContain('data-testid="recheck-time-chip"');
+    const i = html.indexOf(`data-request-id="${held.id}"`);
+    const card = html.slice(html.lastIndexOf('data-testid="mine-card"', i), html.indexOf('data-testid="mine-card"', i + 1) > 0 ? html.indexOf('data-testid="mine-card"', i + 1) : undefined);
+    expect(card).toMatch(/data-testid="stage-chip"[^>]*>.*Not found yet/);
+    expect(card).toContain('data-tone="violet"');
+    expect(card).toContain(`Recheck ${formatClockAmPm(held.recheckAt!, TZ)}`);
+    expect(card).toMatch(/aria-label="[^"]*Not found yet, recheck at /);
   });
 });

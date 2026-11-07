@@ -37,7 +37,8 @@ import {
   useStoreSelector,
   type StoreState,
 } from '@/lib/client/store-contract';
-import { displayStage, parsePostFilterKey, postFilterLabel, statusMeta } from '@/lib/domain';
+import { parsePostFilterKey, postFilterLabel, statusMeta } from '@/lib/domain';
+import { displayStage } from '@/lib/stages';
 import { formatCreatedTime } from '@/lib/format';
 import { ArchivedFold, ArchivedRows, DeskTable, GroupHeader, OutboxRow, SearchRow, TableRow, TableSkeleton } from './DeskTable';
 import { rowTimes } from './table-model';

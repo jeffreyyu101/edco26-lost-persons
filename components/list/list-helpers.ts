@@ -2,17 +2,8 @@
 // everything here is unit-tested in tests/unit/list-helpers.test.ts.
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import type { SearchHit } from '@/lib/client/selectors';
-import {
-  STATUS,
-  ageGender,
-  isInMedical,
-  postShort,
-  sameStaff,
-  stagePhrase,
-  statusMeta,
-  type StageSource,
-  type StatusTone,
-} from '@/lib/domain';
+import { STATUS, ageGender, isInMedical, postShort, sameStaff, statusMeta, type StatusTone } from '@/lib/domain';
+import { stagePhrase, type StageSource } from '@/lib/stages';
 import { formatCaseNumber } from '@/lib/format';
 
 /** Shown where a request has no name (a photo or description alone is a valid request). */

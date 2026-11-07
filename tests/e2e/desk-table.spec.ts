@@ -61,12 +61,16 @@ async function createRequests(page: Page, n: number, tag: string): Promise<Reque
 }
 
 async function notInMedical(page: Page, row: RequestSummary): Promise<RequestSummary> {
-  const { request } = await api<ChangeResponse>(page.request, 'POST', `/api/requests/${row.id}/status`, {
-    status: NOT_IN_MEDICAL,
-    expectedVersion: row.rowVersion,
-    kind: 'answer',
-  });
-  return request;
+  // (F5) The first Not found only puts the request on hold (still Waiting for check); the second closes it.
+  let current = row;
+  for (let i = 0; i < 2; i += 1) {
+    ({ request: current } = await api<ChangeResponse>(page.request, 'POST', `/api/requests/${row.id}/status`, {
+      status: NOT_IN_MEDICAL,
+      expectedVersion: current.rowVersion,
+      kind: 'answer',
+    }));
+  }
+  return current;
 }
 
 test.afterEach(async () => {
@@ -140,7 +144,8 @@ test.describe('desktop 1440 × 900', () => {
     await expect(cell(page, b!.id, 'number')).toHaveText(String(b!.caseNumber));
     await expect(cell(page, b!.id, 'friend')).toContainText(b!.name);
     await expect(cell(page, b!.id, 'friend')).toContainText('22 F');
-    await expect(cell(page, b!.id, 'status')).toHaveText('Waiting for check');
+    // (F5) The stage, then the minutes waiting (design/screens/colors-6.png).
+    await expect(cell(page, b!.id, 'status')).toHaveText(/^Waiting for check· (now|\d+m|\d+h)$/);
     await expect(cell(page, b!.id, 'post')).toHaveText('FA 3 – Kinetic');
     await expect(cell(page, b!.id, 'created')).toHaveText(/^(\w{3} )?\d{1,2}:\d\d (AM|PM)$/);
     await expect(cell(page, b!.id, 'updated')).toHaveText('—');
@@ -175,7 +180,8 @@ test.describe('desktop 1440 × 900', () => {
     await expect(main(page).getByTestId('closed-rows')).toBeVisible();
     await expect(row(page, closed.id)).toBeVisible();
     await expect(row(page, closed.id)).toHaveAttribute('data-closed', '');
-    await expect(cell(page, closed.id, 'status')).toHaveText('Not in medical');
+    // (F5) Final after its hold: two checks.
+    await expect(cell(page, closed.id, 'status')).toHaveText('Not in medical· 2 checks');
     expect(await order()).toMatchObject({ openFirst: true, closedAfter: true });
     await page.reload();
     await expect(row(page, closed.id)).toBeVisible({ timeout: 15_000 });
@@ -225,7 +231,10 @@ test.describe('desktop 1440 × 900', () => {
     const statusChip = main(page).getByTestId('status-chip');
     await expect(statusChip).toHaveAccessibleName(/^Waiting for check \d+ shown\. Clear this filter$/);
     await expect(fold(page)).toHaveCount(0);
-    expect(new Set(await main(page).locator('[data-request-id] [data-col="status"]').allTextContents())).toEqual(new Set(['Waiting for check']));
+    // (F5) The label, before what follows it ("· 9m").
+    expect(new Set((await main(page).locator('[data-request-id] [data-col="status"]').allTextContents()).map((t) => t.replace(/·.*$/, '')))).toEqual(
+      new Set(['Waiting for check']),
+    );
     const shown = await main(page).locator('[data-request-id]').count();
     await expect(statusChip).toHaveAccessibleName(`Waiting for check ${shown} shown. Clear this filter`);
     await statusChip.click();

@@ -29,7 +29,6 @@ import {
   filterAll,
   mergedRows,
   mineRows,
-  nextRecheckAt,
   pendingGroups,
   searchRequests,
   sortNewestFirst,
@@ -605,23 +604,6 @@ const readClock = () => clock.now;
  */
 export function useNow(): number {
   return useSyncExternalStore(subscribeClock, readClock, readClock);
-}
-
-/**
- * (F5) useNow(), plus a re-render the moment the next "Not found yet" hold among `rows` becomes due, so a held
- * request moves from Later to the top of To check on time (not up to 15 s late), with no refetch.
- */
-export function useRecheckNow(rows: readonly RequestSummary[]): number {
-  const tick = useNow();
-  const [bumped, setBumped] = useState(0);
-  const now = Math.max(tick, bumped);
-  const next = nextRecheckAt(rows, now);
-  useEffect(() => {
-    if (next === null) return;
-    const timer = setTimeout(() => setBumped(Date.now()), Math.max(0, next - Date.now()) + 50);
-    return () => clearTimeout(timer);
-  }, [next]);
-  return now;
 }
 
 export interface DetailState {

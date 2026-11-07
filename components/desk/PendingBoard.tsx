@@ -10,7 +10,7 @@ import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { RequestSummary } from '@/lib/api-types';
 import { ComingCard, type CheckCardProps, type ComingCardProps } from '@/components/list/cards';
 import { LaterGroup, ToCheckList } from '@/components/list/ToCheckLanes';
-import type { ToCheckLanes } from '@/lib/client/selectors';
+import type { ToCheckLanes } from '@/lib/client/lanes';
 import { PendingTabs, pendingTabIds, type PendingTab } from '@/components/list/PendingTabs';
 import b from './pending-board.module.css';
 

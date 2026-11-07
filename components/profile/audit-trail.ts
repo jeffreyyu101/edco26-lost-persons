@@ -13,21 +13,8 @@
 //   other                          → the raw action, humanised (never dropped)
 // Who = "name · short team"; when = "Nov 6, 11:10 PM" in the event timezone.
 import type { AuditEvent } from '@/lib/api-types';
-import {
-  PHOTO_TIMING_LABEL,
-  STAGE_META,
-  STATUS,
-  canonStaff,
-  displayChanges,
-  isInMedical,
-  parseStaff,
-  postFull,
-  statusMeta,
-  type PhotoTimingAny,
-  type StageGlyphKind,
-  type StageTone,
-  type StatusValue,
-} from '@/lib/domain';
+import { PHOTO_TIMING_LABEL, STATUS, canonStaff, displayChanges, isInMedical, parseStaff, postFull, statusMeta, type PhotoTimingAny, type StatusValue } from '@/lib/domain';
+import { STAGE_META, type StageGlyphKind, type StageTone } from '@/lib/stages';
 import { formatAuditTime, formatClockAmPm } from '@/lib/format';
 
 /** Edit values longer than this are cut with "…" in the trail (the full value is in the details above). */

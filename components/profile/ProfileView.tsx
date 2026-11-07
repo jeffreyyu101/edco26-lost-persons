@@ -45,31 +45,8 @@ import {
   useSession,
   type MutationResult,
 } from '@/lib/client/store-contract';
-import {
-  FIELD_LABELS,
-  MAX_PHOTOS,
-  PHOTO_TIMING_LABEL,
-  STATUS,
-  canCancel,
-  displayStage,
-  holdAnsweredAt,
-  isHeld,
-  isInMedical,
-  isMedicalTeam,
-  isStatus,
-  menuActions,
-  parseStaff,
-  postFull,
-  primaryActions,
-  sameStaff,
-  statusMeta,
-  telHref,
-  waitTone,
-  type PhotoTiming,
-  type SettableStatus,
-  type StatusAction,
-  type StatusKind,
-} from '@/lib/domain';
+import { FIELD_LABELS, MAX_PHOTOS, PHOTO_TIMING_LABEL, STATUS, canCancel, isHeld, isInMedical, isStatus, menuActions, parseStaff, postFull, primaryActions, sameStaff, statusMeta, telHref, waitTone, type PhotoTiming, type SettableStatus, type StatusAction, type StatusKind } from '@/lib/domain';
+import { displayStage, holdAnsweredAt, isMedicalTeam } from '@/lib/stages';
 import { formatCaseNumber, formatDuration, formatListTime, minutesSince } from '@/lib/format';
 import { AddPhotosSheet, type PhotoPick } from './AddPhotos';
 import { AuditTrail, AuditTrailSkeleton } from './AuditTrail';
@@ -643,7 +620,7 @@ function StatusBlock({
   /** (F3) The en route row goes here, under the location row. */
   enrouteSlot?: ReactNode;
 }) {
-  // (F5) The stage (lib/domain displayStage): Needs info, Not found yet, … over the stored status. The block
+  // (F5) The stage (lib/stages displayStage): Needs info, Not found yet, … over the stored status. The block
   // keeps In medical's look while a friend is en route or has arrived: F3's en route row says that under it.
   const shown = displayStage(row, { now, timeZone });
   const stage = shown.key === 'enroute' || shown.key === 'arrived' ? displayStage({ ...row, enroute: null }, { now, timeZone }) : shown;

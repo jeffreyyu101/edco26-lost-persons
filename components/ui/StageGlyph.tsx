@@ -1,11 +1,12 @@
-// (F5) A stage's glyph (lib/domain STAGE_META; design/screens/colors-1.png). Bare outline glyphs, never on a
+// (F5) A stage's glyph (lib/stages STAGE_META; design/screens/colors-1.png). Bare outline glyphs, never on a
 // circle background: the status rings are StatusGlyph's (ring, ring with a ¾ pie, filled ×, filled ✓), and the
 // new stages add a ring with "?" (Needs info, amber), an hourglass (Not found yet, violet), a walking figure
 // (Friend en route, teal) and a plain check (Friend arrived, green). The rings use step 9 of their colour, the
 // line glyphs and the "?" ring step 11 (amber 9 is under 3:1 on white). Decorative unless `label` is set.
 import type { CSSProperties } from 'react';
 import { Check, Hourglass } from 'lucide-react';
-import type { GlyphKind, StageGlyphKind } from '@/lib/domain';
+import type { GlyphKind } from '@/lib/domain';
+import type { StageGlyphKind } from '@/lib/stages';
 import { StatusGlyph } from './StatusGlyph';
 
 export interface StageGlyphProps {

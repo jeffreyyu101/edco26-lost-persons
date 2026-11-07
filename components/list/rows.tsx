@@ -12,7 +12,7 @@ import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { navigate } from '@/lib/client/nav';
 import type { SearchHit } from '@/lib/client/selectors';
-import { stageLook } from '@/lib/domain';
+import { stageLook } from '@/lib/stages';
 import { NOT_UPDATED } from '@/lib/format';
 import {
   archivedFoldLabel,

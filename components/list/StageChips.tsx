@@ -4,7 +4,7 @@
 // violet "Recheck 4:40 PM" while held. Every other stage keeps the card's usual corner. One line, never wrapped.
 import { RefreshCw } from 'lucide-react';
 import { StageGlyph } from '@/components/ui/StageGlyph';
-import type { DisplayStage } from '@/lib/domain';
+import type { DisplayStage } from '@/lib/stages';
 import s from './list.module.css';
 
 /** The stages that get a chip in the card's corner. */
