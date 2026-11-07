@@ -1,4 +1,4 @@
-import { expect, type APIRequestContext } from '@playwright/test';
+import { expect, type APIRequestContext, type Page } from '@playwright/test';
 
 interface SyncPage<Row> {
   rows: Row[];
@@ -27,4 +27,16 @@ export async function syncRows<Row>(request: APIRequestContext): Promise<Row[]> 
     after = body.next;
   }
   throw new Error('GET /api/sync: too many pages');
+}
+
+/**
+ * Taps an answer and waits for the server's answer to its POST /api/requests/<id>/status. A second Not found
+ * tapped before then (within 500 ms of the hold showing) is the other half of a double tap, and the store drops
+ * it (store-core setStatus); a test that taps both answers must let the first one land.
+ */
+export async function answerSaved(page: Page, id: string, tap: () => Promise<void>): Promise<void> {
+  const path = `/api/requests/${id}/status`;
+  const saved = page.waitForResponse((res) => new URL(res.url()).pathname === path && res.request().method() === 'POST', { timeout: 20_000 });
+  await tap();
+  expect((await saved).ok(), `POST ${path}`).toBe(true);
 }

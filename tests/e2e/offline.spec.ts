@@ -114,9 +114,24 @@ let errors: string[];
 // Signed in once through POST /api/session (A17).
 signedInAs(STAFF);
 
-test.beforeEach(async ({ page }) => {
+/**
+ * (F6 follow-up) Not a page error: WebKit logs one of this app's own /api requests that a navigation or reload cuts
+ * off on its way (the session check the `online` event starts, a sync, the Alerts read) as the script error "Fetch
+ * API cannot load …/api/… due to access control checks.", and Playwright reports every such log as a page error.
+ * The request itself is caught (lib/client/http.ts never throws), and aborting it on pagehide is too late: WebKit
+ * cuts it off first. Same-origin /api only, so a real cross-origin failure still counts.
+ */
+const cutOffByNavigation = (e: Error, origin: string) => {
+  const logged = (e.stack ?? '').split('\n')[0] ?? '';
+  return logged.startsWith(`Fetch API cannot load ${origin}/api/`) && logged.endsWith(' due to access control checks.');
+};
+
+test.beforeEach(async ({ page, baseURL, browserName }) => {
   errors = [];
-  page.on('pageerror', (e) => errors.push(String(e)));
+  const origin = new URL(baseURL as string).origin;
+  page.on('pageerror', (e) => {
+    if (browserName !== 'webkit' || !cutOffByNavigation(e, origin)) errors.push(String(e));
+  });
   page.on('console', (msg) => {
     const text = msg.text();
     if (/Content Security Policy|Refused to/i.test(text)) errors.push(text);

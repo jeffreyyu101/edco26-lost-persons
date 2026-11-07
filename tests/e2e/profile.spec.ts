@@ -4,6 +4,7 @@ import type { CreateResponse, ChangeResponse, RequestDetail, RequestSummary } fr
 import { STATUS, STATUS_META, initials } from '../../lib/domain';
 import { axeViolations, smallTargets } from './helpers/a11y';
 import { newSignedInContext, signedInAs } from './helpers/session';
+import { answerSaved } from './helpers/sync';
 
 // Profile (spec §8 Profile, §9.4): answer, change answer (its menu: the other answer or Back to Waiting for
 // check, DECISIONS v2.2), Undo for 10 s on every answer, Reunited, Discharged and Reopen from the profile;
@@ -181,8 +182,9 @@ test('Not found in medical is closed and grey, and keeps exactly its actions: Ch
   await page.goto(`/?r=${row.id}`);
   // (F5) The first Not found puts it on a "Not found yet" hold, still Waiting for check; the second is final.
   // (Pending v9.1) The button says which: "Not found yet", then "Not found".
+  // The second waits for the first to be saved (sooner it is a double tap).
   await expect(notFoundAnswer(page)).toHaveText('Not found yet');
-  await notFoundAnswer(page).click();
+  await answerSaved(page, row.id, () => notFoundAnswer(page).click());
   await expect(statusBlock(page).getByTestId('recheck-row')).toBeVisible();
   await expect(profileStatus(page, 'Added')).toBeVisible();
   await expect(notFoundAnswer(page)).toHaveText('Not found');

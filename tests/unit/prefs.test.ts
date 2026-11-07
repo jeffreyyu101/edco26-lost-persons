@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  BELL_FROM_SERVER_KEY,
   DEFAULT_PREFS,
   PREF_STORAGE_KEYS,
   SESSION_PREF_KEYS,
   clearRememberedIdentity,
+  forgetBell,
+  forgetBellForOtherStaff,
+  markBellFromServer,
+  readOldBell,
   readPrefs,
   setBell,
   setBellIntroSeen,
@@ -117,6 +122,46 @@ describe('prefs (remembered on this phone)', () => {
       setBell(false);
       expect(readPrefs().bell).toBe(false);
       expect(browser.data.has(PREF_STORAGE_KEYS.bell)).toBe(false);
+    });
+
+    it('F6 follow-up: the bell is an old bell until the server has taken it; a copy of the switch never is', () => {
+      expect(readOldBell()).toBe(false);
+      // Set on this phone by a build from before the server switch: sent as the default of New requests.
+      setBell(true);
+      setBellIntroSeen(true);
+      expect(readOldBell()).toBe(true);
+      // The server answered (it took that bell): from now on the bell only copies the signed-in staff member's switch.
+      markBellFromServer();
+      expect(browser.data.get(BELL_FROM_SERVER_KEY)).toBe('1');
+      expect(readOldBell()).toBe(false);
+      expect(readPrefs()).toMatchObject({ bell: true, bellIntroSeen: true });
+      // Sign-out: the bell, its intro and where it came from all go.
+      forgetBell();
+      expect(readPrefs()).toMatchObject({ bell: false, bellIntroSeen: false });
+      expect([PREF_STORAGE_KEYS.bell, PREF_STORAGE_KEYS.bellIntroSeen, BELL_FROM_SERVER_KEY].filter((k) => browser.data.has(k))).toEqual([]);
+    });
+
+    it('F6 follow-up: a sign-in by anyone but the remembered staff member (or after Change) forgets the bell', () => {
+      const bellOn = () => {
+        setBell(true);
+        setBellIntroSeen(true);
+        markBellFromServer();
+      };
+      writeRememberedIdentity('Rae Chen', 'Medical');
+      bellOn();
+      // The same staff member (any spacing or case, a team alias): theirs, kept.
+      forgetBellForOtherStaff('  rae  chen ', 'medical');
+      expect(readPrefs()).toMatchObject({ bell: true, bellIntroSeen: true });
+      expect(browser.data.get(BELL_FROM_SERVER_KEY)).toBe('1');
+      // Someone else on this phone: gone.
+      forgetBellForOtherStaff('Kai Ode', 'Medical');
+      expect(readPrefs()).toMatchObject({ bell: false, bellIntroSeen: false });
+      expect(browser.data.has(BELL_FROM_SERVER_KEY)).toBe(false);
+      // "Change" cleared the remembered identity: nobody to compare with, so it goes too.
+      bellOn();
+      clearRememberedIdentity();
+      forgetBellForOtherStaff('Rae Chen', 'Medical');
+      expect(readPrefs().bell).toBe(false);
     });
 
     it('theme: one source of truth shared with the pre-paint script, applied on write', () => {

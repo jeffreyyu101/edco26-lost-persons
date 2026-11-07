@@ -4,7 +4,7 @@
 // subscribes again; permission revoked later brings the banner back; sign-out removes it on the server and, once
 // confirmed, in the browser (a sign-out that fails keeps it working); a 401 removes it in the browser; push off
 // on the server → no banner; covers() follows the switches and the kinds the server pushes. Synthetic values only.
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPushClient, keyBytes, pushCovers, pushHooksFor, sameKey, type PushClient, type PushHost, type SubscriptionLike } from '@/lib/client/push-client';
 import type { Permission } from '@/lib/client/alerts-platform';
 import { apiRequest } from '@/lib/client/http';
@@ -294,6 +294,58 @@ describe('switches and the test alert', () => {
     expect(await client.setPrefs({ newRequests: true })).toBe(true);
     expect(client.getState().prefs).toEqual({ newRequests: true, myUpdates: true });
     expect(host.posts('/api/push/prefs').at(-1)?.body).toEqual({ newRequests: true });
+  });
+
+  it("F6 follow-up: the phone's own old bell goes once; the server's switch copied into the bell is never sent back", async () => {
+    // A shared phone: localStorage is the page's (lib/client/prefs.ts).
+    const local = new Map<string, string>();
+    vi.stubGlobal('window', {
+      localStorage: { getItem: (k: string) => local.get(k) ?? null, setItem: (k: string, v: string) => void local.set(k, v), removeItem: (k: string) => void local.delete(k) },
+    });
+    try {
+      // The bell was turned on here by a build from before the server switch: Rae's first answer takes it.
+      local.set('lp-bell', '1');
+      host.perm = 'granted';
+      const rae = createPushClient(host);
+      rae.start(RAE);
+      await settle();
+      expect(host.posts('/api/push/prefs')[0]?.body).toEqual({ bell: true });
+      expect(local.get('lp-bell-server')).toBe('1');
+      // The subscription that follows does not send it again: the server has it.
+      expect(host.posts('/api/push/subscribe')[0]?.body).toMatchObject({ bell: false });
+      // From now on the bell is a copy of whoever's switch it shows (ActivityHost): Dana, next on this phone
+      // (a session that ran out, no sign-out), never gets Rae's switch as an old bell.
+      host.calls = [];
+      const dana = createPushClient(host);
+      dana.start(DANA);
+      await settle();
+      expect(host.posts('/api/push/prefs')[0]?.body).toEqual({ bell: false });
+      expect(host.posts('/api/push/subscribe')[0]?.body).toMatchObject({ bell: false });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('F6 follow-up: an answer that never came leaves the old bell to send next time', async () => {
+    const local = new Map<string, string>([['lp-bell', '1']]);
+    vi.stubGlobal('window', {
+      localStorage: { getItem: (k: string) => local.get(k) ?? null, setItem: (k: string, v: string) => void local.set(k, v), removeItem: (k: string) => void local.delete(k) },
+    });
+    try {
+      host.offline = true;
+      const client = createPushClient(host);
+      client.start(DANA);
+      await settle();
+      expect(host.posts('/api/push/prefs')[0]?.body).toEqual({ bell: true });
+      expect(local.has('lp-bell-server')).toBe(false);
+      host.offline = false;
+      client.recheck();
+      await settle();
+      expect(host.posts('/api/push/prefs').at(-1)?.body).toEqual({ bell: true });
+      expect(local.get('lp-bell-server')).toBe('1');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('sends a test alert to this device only', async () => {

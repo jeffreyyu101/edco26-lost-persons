@@ -18,6 +18,10 @@
 //     staff member. afterSignOut(false), a sign-out that did not happen (offline, 5xx), keeps it and tells the
 //     server again, so the device never silently loses its alerts. onSessionEnded() (a 401): the browser
 //     drops it. Both clear the app icon badge.
+//   * `bell` (the old "Alerts" bell, the default of New requests) is sent only while it is one this phone set
+//     itself (prefs readOldBell): once the server has answered, the bell is a copy of the signed-in staff
+//     member's switch (markBellFromServer), and a copy sent back would turn New requests on for the next
+//     staff member on a shared phone (F6 follow-up).
 //   * The store reaches the page's client through lib/client/f4-bridge.ts (pushHooksFor): whether the push
 //     carries an alert (no double alerts, A54), and sign-out / 401, bounded and never rejecting.
 // Never logs anything.
@@ -31,7 +35,7 @@ import {
   type Permission,
   type Platform,
 } from './alerts-platform';
-import { readPrefs } from './prefs';
+import { markBellFromServer, readOldBell } from './prefs';
 import { registerPushHooks, type ApiRequest, type PushHooks } from './f4-bridge';
 import type { AlertEvent } from './store-contract';
 import { viaStore } from './via-store';
@@ -226,10 +230,12 @@ export function createPushClient(host: PushHost): PushClient {
         endpoint: json.endpoint,
         keys: { p256dh: keys.p256dh, auth: keys.auth },
         ...(old && old !== json.endpoint ? { oldEndpoint: old } : {}),
-        bell: readPrefs().bell,
+        bell: readOldBell(),
       },
       timeoutMs: TIMEOUT_MS,
     });
+    // (Push on: the route synced the switches.) The server took the old bell, if any: never sent again.
+    if (res.ok && res.data.enabled === true) markBellFromServer();
     if (gen !== epoch) return false;
     if (!res.ok) {
       if (res.kind === 'http' && res.status === 422) {
@@ -294,9 +300,11 @@ export function createPushClient(host: PushHost): PushClient {
   const loadConfig = async (gen: number): Promise<void> => {
     const res = await host.request<PushConfigResponse>('/api/push/prefs', {
       method: 'POST',
-      json: { bell: readPrefs().bell },
+      json: { bell: readOldBell() },
       timeoutMs: TIMEOUT_MS,
     });
+    // The server took the old bell (if any) as the switch's default: from here the bell only copies the switch.
+    if (res.ok) markBellFromServer();
     if (gen !== epoch || !res.ok) return;
     const prefs = applyConfig(res.data);
     compute({ prefs });
