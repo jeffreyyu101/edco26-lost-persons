@@ -4,8 +4,8 @@
 // exclusive: picking a card clears the text, typing a team clears the card.
 // From 768 px (desktop-sign-in.html): ↵ on Continue and Enter continues from anywhere but a text field or
 // another button; 1–4 pick a team (cap in each card's corner) unless focus is in a text field.
-// With a team join link (J1) the screen is the same; Continue signs in itself (`submitting`, `message`), and
-// only screen readers hear that it uses the link.
+// With a team join link (J1) the screen is the same; Continue signs in itself (`submitting`, `message`,
+// `locked` after a 429), and only screen readers hear that it uses the link.
 import { Button, Flex, RadioCards, Text, TextField, VisuallyHidden } from '@radix-ui/themes';
 import { Ambulance, Cross, House, Radio, UserRound, type LucideIcon } from 'lucide-react';
 import { useId, useRef, type FormEvent, type KeyboardEvent } from 'react';
@@ -32,13 +32,15 @@ export interface WhoStepProps {
   autoFocus: boolean;
   /** Continue is signing in (a team join link): it shows a spinner and ignores presses. */
   submitting?: boolean;
-  /** Why the last sign-in with the link didn't go through (signal, server), above Continue. */
+  /** Why the last sign-in with the link didn't go through (signal, server, too many attempts), above Continue. */
   message?: string | null;
+  /** Too many attempts with the link: Continue stays disabled until the lock passes. */
+  locked?: boolean;
   /** Screen-reader description of Continue (a team join link signs in with it). */
   continueHint?: string | null;
 }
 
-export function WhoStep({ draft, onDraft, onContinue, autoFocus, submitting = false, message = null, continueHint = null }: WhoStepProps) {
+export function WhoStep({ draft, onDraft, onContinue, autoFocus, submitting = false, message = null, locked = false, continueHint = null }: WhoStepProps) {
   const check = checkWho(draft);
   const teamLabelId = useId();
   const nameErrorId = useId();
@@ -51,7 +53,7 @@ export function WhoStep({ draft, onDraft, onContinue, autoFocus, submitting = fa
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (check.identity && !submitting) onContinue(check.identity);
+    if (check.identity && !submitting && !locked) onContinue(check.identity);
   };
 
   const pickTeam = (value: TeamValue) => onDraft({ ...draft, team: value, otherTeam: '' });
@@ -176,7 +178,7 @@ export function WhoStep({ draft, onDraft, onContinue, autoFocus, submitting = fa
             highContrast
             loading={submitting}
             // Radix only defaults `disabled` to `loading` when no disabled prop is given: say both.
-            disabled={!check.identity || submitting}
+            disabled={!check.identity || submitting || locked}
             className={styles.submit}
             aria-keyshortcuts={wide ? 'Enter' : undefined}
             aria-describedby={[continueHint ? hintId : null, message ? messageId : null].filter(Boolean).join(' ') || undefined}

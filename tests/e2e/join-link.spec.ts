@@ -6,7 +6,11 @@
 //   * a remembered name and team: step 1 prefilled (not step 2), Continue → the app.
 //   * a bad code: Continue → the password step, with no message; the password works as always.
 //   * no signal: the code is kept and Continue tries again.
-//   * signed in already: the link just opens the app, fragment removed, nothing kept.
+//   * too many attempts (429): the code is kept, step 1 stays with the lock above Continue, then it signs in.
+//   * the link opened in a tab already on /signin (only the fragment changes, no reload), from step 1 and from
+//     a remembered step 2: the fragment still goes and the link still signs in.
+//   * signed in already: the link just opens the app, fragment removed, nothing kept; also in a tab already
+//     on the app.
 // Each test sends its own fake client IP and synthetic name, so login limits never leak between tests.
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { TEST_INVITE_CODE, loadTestEnv } from '../../scripts/test-env.mjs';
@@ -182,6 +186,79 @@ test.describe('team join link, signed out', () => {
     ]);
   });
 
+  test('same tab, already on /signin: only the fragment changes; it still goes, and step 1 → the app', async ({ page }) => {
+    await watchForPasswordStep(page);
+    const bodies = sessionBodies(page);
+    const name = `TEST-B join same tab ${uniq()}`;
+    await page.goto('/signin');
+    await hydrated(page);
+    await page.goto(`/signin#join=${CODE}`);
+    await expect.poll(() => page.url()).not.toContain('#');
+    expect(page.url()).not.toContain(CODE);
+    expect(await kept(page)).toMatchObject({ session: CODE, hash: '', inLocal: false, inCookie: false });
+    await expect(continueButton(page)).toHaveAccessibleDescription('Signs you in with the team link, no password needed');
+
+    await nameField(page).fill(name);
+    await page.getByRole('radio', { name: 'Medical' }).click();
+    await continueButton(page).click();
+    await expect(page).toHaveURL(APP_URL);
+    expect(bodies).toEqual([{ staffName: name, team: 'Medical', invite: CODE }]);
+    expect(await sawPasswordStep(page)).toBe(false);
+  });
+
+  test('same tab, a remembered step 2 on screen: the link opens step 1 prefilled, Continue → the app', async ({ page }) => {
+    const bodies = sessionBodies(page);
+    const name = `TEST-B join same tab remembered ${uniq()}`;
+    await page.goto('/signin');
+    await hydrated(page);
+    await page.evaluate((n) => localStorage.setItem('lp-identity', JSON.stringify({ name: n, team: 'GC/HX - Dispatch' })), name);
+    await page.reload();
+    await hydrated(page);
+    await expect(stepTwoHeading(page)).toBeVisible();
+
+    await page.goto(`/signin#join=${CODE}`);
+    await expect.poll(() => page.url()).not.toContain('#');
+    await expect(stepTwoHeading(page)).toHaveCount(0);
+    await expect(nameField(page)).toHaveValue(name);
+    await expect(page.getByRole('radio', { name: 'Dispatch' })).toHaveAttribute('aria-checked', 'true');
+    await continueButton(page).click();
+    await expect(page).toHaveURL(APP_URL);
+    expect(bodies).toEqual([{ staffName: name, team: 'GC/HX - Dispatch', invite: CODE }]);
+  });
+
+  test('too many attempts: the code is kept, step 1 shows the lock and waits, then Continue → the app', async ({ page }) => {
+    await watchForPasswordStep(page);
+    let limited = true;
+    await page.route('**/api/session', async (route) => {
+      if (route.request().method() === 'POST' && limited) {
+        limited = false;
+        return route.fulfill({
+          status: 429,
+          contentType: 'application/json',
+          headers: { 'Retry-After': '2' },
+          body: JSON.stringify({ error: { code: 'rate_limited', message: 'Too many attempts', retryAfterSeconds: 2 } }),
+        });
+      }
+      return route.fallback();
+    });
+    await page.goto(`/signin#join=${CODE}`);
+    await hydrated(page);
+    await nameField(page).fill(`TEST-B join limited ${uniq()}`);
+    await page.getByRole('radio', { name: 'Medical' }).click();
+    await continueButton(page).click();
+    await expect(alertLine(page)).toHaveText('Too many attempts. Try again in 1 min');
+    await expect(continueButton(page)).toBeDisabled();
+    await expect(stepTwoHeading(page)).toHaveCount(0);
+    expect(await kept(page)).toMatchObject({ session: CODE });
+
+    // The lock passes (the countdown re-checks every 5 s): the message goes and Continue signs in.
+    await expect(continueButton(page)).toBeEnabled({ timeout: 15_000 });
+    await expect(alertLine(page)).toHaveCount(0);
+    await continueButton(page).click();
+    await expect(page).toHaveURL(APP_URL);
+    expect(await sawPasswordStep(page)).toBe(false);
+  });
+
   test('no signal: the code is kept, the usual message shows, and Continue tries again', async ({ page }) => {
     let failNext = true;
     await page.route('**/api/session', async (route) => {
@@ -219,5 +296,16 @@ test.describe('team join link, signed in already', () => {
     await hydrated(page);
     await expect(page).toHaveURL(/\/\?view=mine$/);
     expect(await kept(page)).toMatchObject({ session: null, hash: '' });
+  });
+
+  test('same tab, already on the app: only the fragment changes; it still goes, nothing kept', async ({ page }) => {
+    await page.goto('/');
+    await hydrated(page);
+    await expect(page.getByTestId('request-list')).toBeVisible();
+    await page.goto(`/#join=${CODE}`);
+    await expect.poll(() => page.url()).not.toContain('#');
+    await expect(page).toHaveURL(APP_URL);
+    expect(await kept(page)).toMatchObject({ session: null, hash: '', inLocal: false });
+    await expect(page.getByTestId('request-list')).toBeVisible();
   });
 });

@@ -172,8 +172,10 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 ## Team join link
 
 `https://<host>/signin#join=<code>` (or `https://<host>/#join=<code>`) opens sign-in, keeps the code for that
-tab only (sessionStorage) and takes it out of the address bar at once; name and team then sign straight in.
-A wrong, expired or switched-off code just shows the password step. Anyone with the link can sign in until it
+tab only (sessionStorage) and takes it out of the address bar and the tab's back / forward history at once;
+name and team then sign straight in. The browser's own History list still keeps the link (Known limits).
+A wrong, expired or switched-off code just shows the password step; too many attempts keeps the code and
+shows the lock on step 1. Anyone with the link can sign in until it
 expires, so share it like the password (the staff group chat, never a public post or a screenshot).
 
 - **Variables** (Production, server-only, mark them Sensitive). Both optional; with either unset the link is
@@ -235,6 +237,8 @@ expires, so share it like the password (the staff group chat, never a public pos
 - [ ] Several staff sign in at once behind the venue Wi-Fi (one shared IP).
 - [ ] Team join link (once its variables are set): tapped in iMessage on an iPhone, it opens Safari on
       sign-in with no `#join=…` in the address bar; name + team open the app. A wrong code shows the password step.
+- [ ] After the event (or once the link expires), clear Safari History on shared iPads that opened the team
+      join link (Settings → Apps → Safari → Clear History and Website Data).
 
 ## Known limits
 
@@ -257,6 +261,12 @@ expires, so share it like the password (the staff group chat, never a public pos
   A team join link tapped in Messages opens Safari, so it signs in the Safari tab, not the Home Screen app.
 - **A team join link is as strong as the password.** Anyone holding it can sign in until `INVITE_EXPIRES_AT`
   or until it is rotated; the name and team are still self-declared.
+- **A device that opened the team join link keeps it in its browser History.** The page clears the address
+  bar and the tab's back / forward history, but the browser saved the visited link (code included) first,
+  and no page can remove that. The History list and address-bar suggestions offer it until it expires, also
+  after sign-out, and Safari iCloud History or Chrome Sync copy it to the user's other devices. A lost or
+  shared device can sign in again from History until `INVITE_EXPIRES_AT`: rotate the code if one goes missing,
+  and keep the expiry short (the first link: `2026-11-09T12:00:00Z`).
 - **There is no export in the app.** The end-of-event files come from `docs/export.sql`. They hold names and
   phone numbers: don't leave them on shared devices.
 - **Up to three photos per request.** Photos from Jeffrey's app with no timing show "Timing unknown".

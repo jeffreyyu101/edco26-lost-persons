@@ -1,6 +1,7 @@
 // Team join link, client side (lib/join-link.ts, J1): the pre-paint JOIN_LINK_SCRIPT and captureJoinCode()
 // take `#join=<code>` out of the address bar on every page, keep the code in sessionStorage on /signin
-// only, and never touch localStorage, cookies or the URL otherwise. Both run against the same cases.
+// only, and never touch localStorage, cookies or the URL otherwise. Both run against the same cases. The
+// script also handles a fragment-only navigation (the link opened in a tab already on that page): `hashchange`.
 import { describe, expect, it } from 'vitest';
 import { JOIN_CODE_MAX, JOIN_LINK_SCRIPT, JOIN_STORAGE_KEY, captureJoinCode, forgetJoinCode, readJoinCode, type JoinWindow } from '@/lib/join-link';
 
@@ -33,6 +34,8 @@ class MemoryStorage implements Storage {
 interface Fake extends JoinWindow {
   replaced: Array<{ state: unknown; url: string | null | undefined }>;
   sessionStorage: MemoryStorage;
+  /** Listeners the script registered, by event type. */
+  listeners: Map<string, Array<() => void>>;
 }
 
 function fakeWindow(href: string, { blocked = false, state = null as unknown } = {}): Fake {
@@ -51,16 +54,28 @@ function fakeWindow(href: string, { blocked = false, state = null as unknown } =
     } as JoinWindow['history'],
     sessionStorage: new MemoryStorage(blocked),
     replaced,
+    listeners: new Map(),
   };
+}
+
+/** The address bar moves to `href` without a reload (only the fragment changed), then `hashchange` fires. */
+function navigateFragment(win: Fake, href: string): void {
+  const u = new URL(href, 'https://lp.example');
+  Object.assign(win.location, { pathname: u.pathname, search: u.search, hash: u.hash });
+  for (const listener of win.listeners.get('hashchange') ?? []) listener();
 }
 
 /** Runs the inlined pre-paint script against a fake window (the names it reads are its globals). */
 function runScript(win: Fake): void {
-  new Function('location', 'history', 'sessionStorage', 'URLSearchParams', JOIN_LINK_SCRIPT)(
+  const addEventListener = (type: string, listener: () => void) => {
+    win.listeners.set(type, [...(win.listeners.get(type) ?? []), listener]);
+  };
+  new Function('location', 'history', 'sessionStorage', 'URLSearchParams', 'addEventListener', JOIN_LINK_SCRIPT)(
     win.location,
     win.history,
     win.sessionStorage,
     URLSearchParams,
+    addEventListener,
   );
 }
 
@@ -120,6 +135,44 @@ describe.each(RUNNERS)('%s', (_name, run) => {
     run(win);
     expect(stored(win)).toBe('abc');
     expect(win.replaced).toHaveLength(1);
+  });
+});
+
+describe('JOIN_LINK_SCRIPT, the link opened in a tab already on the page (no reload, only hashchange)', () => {
+  it.each(CASES)('%s', (_label, href, kept, url) => {
+    const page = new URL(href, 'https://lp.example');
+    const win = fakeWindow(page.pathname + page.search);
+    runScript(win);
+    expect(win.replaced).toHaveLength(0);
+    navigateFragment(win, href);
+    expect(stored(win)).toBe(kept);
+    if (url === null) expect(win.replaced).toHaveLength(0);
+    else {
+      expect(win.replaced.map((r) => r.url)).toEqual([url]);
+      expect(win.location.hash).toBe('');
+    }
+  });
+
+  it('a second link in the same tab replaces the kept code', () => {
+    const win = fakeWindow('/signin#join=first');
+    runScript(win);
+    navigateFragment(win, '/signin#join=second');
+    expect(stored(win)).toBe('second');
+    expect(win.replaced.map((r) => r.url)).toEqual(['/signin', '/signin']);
+    expect(captureJoinCode(win)).toBe('second');
+  });
+
+  it('a page without addEventListener still runs the first pass', () => {
+    const win = fakeWindow('/signin#join=abc');
+    new Function('location', 'history', 'sessionStorage', 'URLSearchParams', 'addEventListener', JOIN_LINK_SCRIPT)(
+      win.location,
+      win.history,
+      win.sessionStorage,
+      URLSearchParams,
+      undefined,
+    );
+    expect(stored(win)).toBe('abc');
+    expect(win.location.hash).toBe('');
   });
 });
 

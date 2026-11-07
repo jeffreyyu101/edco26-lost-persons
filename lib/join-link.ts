@@ -4,11 +4,15 @@
 //                                         /signin, and the browser keeps the fragment across the redirect)
 //
 // The code rides in the URL fragment, which never reaches a server (not in the request line, the logs or a
-// Referer). Before first paint JOIN_LINK_SCRIPT (inlined with the theme script in app/layout.tsx):
+// Referer). Before first paint JOIN_LINK_SCRIPT (inlined with the theme script in app/layout.tsx), and again
+// on every `hashchange` (the link opened in a tab already showing that page only changes the fragment, with
+// no reload):
 //   * on /signin keeps the code in sessionStorage (this tab only; never localStorage, a cookie or the URL);
 //   * anywhere else drops it (the page rendered, so the visitor is already signed in: they just get the app);
-//   * always removes the fragment from the address bar (history.replaceState), so it is in no history entry,
-//     screenshot or re-shared link.
+//   * always removes the fragment from the address bar (history.replaceState), so it is in no back / forward
+//     entry of the tab, later screenshot or re-shared link. The browser's own History list (and address-bar
+//     suggestions, and History sync) already saved the visited link, code included, before any script ran:
+//     nothing on the page can remove that (HANDOFF "Known limits").
 // captureJoinCode() does the same from the sign-in flow (a page reached without the script, e.g. a copy
 // cached before this build), then returns the kept code. The flow forgets it once the server answers.
 // Imports nothing: the server layout and the client sign-in share it.
@@ -22,10 +26,11 @@ export const JOIN_CODE_MAX = 200;
 export const SIGNIN_PATH = '/signin';
 
 /**
- * Tiny, dependency-free, runs before first paint. Keep in sync with captureJoinCode() (both are tested on
- * the same cases in tests/unit/join-link.test.ts). Blocked storage: the fragment is still removed.
+ * Tiny, dependency-free, runs before first paint and on every later `hashchange` (registered here, so before
+ * any listener React adds). Keep in sync with captureJoinCode() (both are tested on the same cases in
+ * tests/unit/join-link.test.ts). Blocked storage: the fragment is still removed.
  */
-export const JOIN_LINK_SCRIPT = `(function(){try{var l=location,h=l.hash;if(!h||h.length<2)return;var p=new URLSearchParams(h.slice(1));if(!p.has(${JSON.stringify(JOIN_PARAM)}))return;var c=(p.get(${JSON.stringify(JOIN_PARAM)})||'').trim();if(l.pathname===${JSON.stringify(SIGNIN_PATH)}&&c&&c.length<=${JOIN_CODE_MAX}){try{sessionStorage.setItem(${JSON.stringify(JOIN_STORAGE_KEY)},c)}catch(e){}}history.replaceState(history.state,'',l.pathname+l.search)}catch(e){}})();`;
+export const JOIN_LINK_SCRIPT = `(function(){function f(){try{var l=location,h=l.hash;if(!h||h.length<2)return;var p=new URLSearchParams(h.slice(1));if(!p.has(${JSON.stringify(JOIN_PARAM)}))return;var c=(p.get(${JSON.stringify(JOIN_PARAM)})||'').trim();if(l.pathname===${JSON.stringify(SIGNIN_PATH)}&&c&&c.length<=${JOIN_CODE_MAX}){try{sessionStorage.setItem(${JSON.stringify(JOIN_STORAGE_KEY)},c)}catch(e){}}history.replaceState(history.state,'',l.pathname+l.search)}catch(e){}}f();try{addEventListener('hashchange',f)}catch(e){}})();`;
 
 /** The parts of `window` the join link touches (a fake one in unit tests). */
 export interface JoinWindow {
