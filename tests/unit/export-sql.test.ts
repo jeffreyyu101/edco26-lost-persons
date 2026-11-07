@@ -1,5 +1,5 @@
-// docs/export.sql (v2.5, A50) must stay safe to paste into the production SQL editor: comments aside, it is
-// exactly two read-only SELECT statements (WITH … SELECT), with no statement or function that writes, locks,
+// docs/export.sql (v2.5, A50; F3 adds Query 3) must stay safe to paste into the production SQL editor: comments
+// aside, it is exactly three read-only SELECT statements (WITH … SELECT), with no statement or function that writes, locks,
 // changes a setting or reads files. The top comment gives Jeffrey the steps. Reads the file only; the
 // integration suite (tests/integration/export-sql.test.ts) runs it on the local database.
 import { readFileSync } from 'node:fs';
@@ -114,8 +114,8 @@ const FORBIDDEN = [
 ];
 
 describe('docs/export.sql', () => {
-  it('parses as exactly two statements, each a WITH … SELECT', () => {
-    expect(parsed.statements).toHaveLength(2);
+  it('parses as exactly three statements, each a WITH … SELECT', () => {
+    expect(parsed.statements).toHaveLength(3);
     for (const statement of parsed.statements) {
       expect(statement).toMatch(/^with\s+settings\s+as\s*\(\s*select\b/i);
       expect(statement).toMatch(/\)\s*select\b[\s\S]+\bfrom\b/i);
@@ -133,14 +133,17 @@ describe('docs/export.sql', () => {
     expect(sql).not.toMatch(/^\s*\\/m);
   });
 
-  it('reads only the requests and the audit trail', () => {
-    const [requests, audit] = parsed.statements as [string, string];
+  it('reads only the requests, the audit trail and the messages', () => {
+    const [requests, audit, thread] = parsed.statements as [string, string, string];
     expect(requests).toMatch(/\bfrom public\.patients p\b/);
     expect(requests).toMatch(/order by p\.case_number\s*$/);
     expect(audit).toMatch(/\bfrom public\.audit_events e\b/);
     expect(audit).toMatch(/\bjoin public\.patients p on p\.id = e\.patient_id\b/);
+    expect(thread).toMatch(/\bfrom public\.lp_messages m\b/);
+    expect(thread).toMatch(/\bfrom public\.audit_events e\b/);
+    expect(thread).toMatch(/order by p\.case_number nulls last, ev\.at\s*$/);
     const tables = [...parsed.statements.join(' ').matchAll(/\b(?:from|join)\s+([a-z_.]+)/gi)].map((m) => m[1]);
-    expect(new Set(tables)).toEqual(new Set(['public.patients', 'public.audit_events', 'settings']));
+    expect(new Set(tables)).toEqual(new Set(['public.patients', 'public.audit_events', 'public.lp_messages', 'settings', 'events']));
   });
 
   it('Query 1 has every field the old CSV had, with New York times', () => {
@@ -152,7 +155,7 @@ describe('docs/export.sql', () => {
     ]) {
       expect(parsed.identifiers, label).toContain(label);
     }
-    expect(parsed.literals.filter((l) => l === 'America/New_York')).toHaveLength(2);
+    expect(parsed.literals.filter((l) => l === 'America/New_York')).toHaveLength(3);
   });
 
   it('guards free-text age and gender like the other text columns', () => {

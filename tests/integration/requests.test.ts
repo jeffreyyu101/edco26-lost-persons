@@ -2,6 +2,7 @@
 // cancel (creator only), plus validation 422s, 409 on a stale version, auth and Origin.
 import { describe, expect, it } from 'vitest';
 import type { AuditEvent, RequestDetail, RequestSummary } from '@/lib/api-types';
+import { ACTIVITY_KEYS } from '@/lib/messaging';
 import { REQUEST_SUMMARY_KEYS } from '@/lib/server/mappers';
 import {
   admin,
@@ -175,7 +176,8 @@ describe('GET /api/requests/:id', () => {
     const created = lp997.audit[0] as Extract<AuditEvent, { action: 'created' }>;
     expect(created.next).toEqual({ reportingLocation: 'Other', otherLocation: 'Info booth' });
     // Legacy columns never leak through the allowlist.
-    expect(Object.keys(lp997).sort()).toEqual([...REQUEST_SUMMARY_KEYS, 'audit', 'photos'].sort());
+    // F3: plus the caller's activity and the thread's latest page (spec §18 A55).
+    expect(Object.keys(lp997).sort()).toEqual([...REQUEST_SUMMARY_KEYS, ...ACTIVITY_KEYS, 'audit', 'photos', 'thread'].sort());
 
     const lp996 = (await api(`/api/requests/5eed0000-0000-4000-8000-000000000996`, { cookie })).body as RequestDetail;
     // The inactive photo is never shown; the legacy one reads 'unsure' with no thumbnail.
