@@ -5,7 +5,10 @@
 //   * The routes notify (after the response): In medical reaches the logger (Activity row + push, initials as
 //     the title, no ids or contact details), never the actor; a Not in medical answer sends NOTHING (F5 owns
 //     it); new requests reach whoever has New requests on; the location completes the answer or moves it.
-//   * GET /api/activity, POST /api/activity/read | unread, and sync's activityUnread.
+//   * GET /api/activity, GET /api/activity/unread, POST /api/activity/read | unread, and sync's activityUnread
+//     and activityKey (no ids on a poll; the key moves with every change).
+//   * Nobody can remove another person's device (DELETE, oldEndpoint); New requests is never lost to whichever
+//     device of a staff member came first; an edit's event is its own author's.
 //   * A hanging push service never slows the API response.
 // Synthetic data only; every request is closed afterwards.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -88,6 +91,33 @@ describe('POST /api/push/prefs', () => {
     expect((await api('/api/push/prefs', { json: { bell: false }, cookie })).body).toMatchObject({ newRequests: true, myUpdates: false });
   });
 
+  it('regression: a device with the old bell ON is never turned off by another device of theirs (bell off) that came first', async () => {
+    const staff = newStaff();
+    const desk = await cookieFor(staff);
+    const phone = await cookieFor(staff);
+    expect((await api('/api/push/prefs', { json: { bell: false }, cookie: desk })).body).toMatchObject({ newRequests: false });
+    expect((await api('/api/push/prefs', { json: { bell: true }, cookie: phone })).body).toMatchObject({ newRequests: true });
+    // …and the desk (bell off) loading again does not take it away.
+    expect((await api('/api/push/prefs', { json: { bell: false }, cookie: desk })).body).toMatchObject({ newRequests: true });
+    // The same through subscribe (the device's first push subscription).
+    const other = newStaff();
+    const d1 = push.device();
+    const d2 = push.device();
+    expect(await subscribe(other, d1, { bell: false })).toMatchObject({ newRequests: false });
+    expect(await subscribe(other, d2, { bell: true })).toMatchObject({ newRequests: true });
+    expect(await subRow(d1.endpoint)).toMatchObject({ new_requests: true });
+  });
+
+  it('…but once the staff member sets New requests in the Alerts sheet, that choice stays', async () => {
+    const staff = newStaff();
+    const cookie = await cookieFor(staff);
+    await api('/api/push/prefs', { json: { bell: true }, cookie });
+    expect((await api('/api/push/prefs', { json: { newRequests: false }, cookie })).body).toMatchObject({ newRequests: false });
+    expect((await api('/api/push/prefs', { json: { bell: true }, cookie })).body).toMatchObject({ newRequests: false });
+    expect((await api('/api/push/prefs', { json: { newRequests: true }, cookie })).body).toMatchObject({ newRequests: true });
+    expect((await api('/api/push/prefs', { json: { bell: false }, cookie })).body).toMatchObject({ newRequests: true });
+  });
+
   it('refuses unknown fields', async () => {
     expect((await api('/api/push/prefs', { json: { newRequests: 'yes' }, cookie: await cookieFor(newStaff()) })).status).toBe(422);
     expect((await api('/api/push/prefs', { json: { other: true }, cookie: await cookieFor(newStaff()) })).status).toBe(422);
@@ -121,8 +151,10 @@ describe('POST / DELETE /api/push/subscribe', () => {
     await api('/api/push/prefs', { json: { newRequests: true }, cookie: await cookieFor(rae) });
     await subscribe(rae, d);
     expect(await subRow(d.endpoint)).toMatchObject({ staff: canon(rae), new_requests: true });
-    const { count } = await admin().from('lp_push_subscriptions').select('*', { count: 'exact', head: true }).eq('endpoint', d.endpoint);
-    expect(count).toBe(1);
+    // (A GET, not a HEAD count: a HEAD through the local gateway can leave its upstream connection to PostgREST
+    // reset for whichever request reuses it next, which is then the server's call: a 502 the app answers 503.)
+    const { data: same } = await admin().from('lp_push_subscriptions').select('id').eq('endpoint', d.endpoint);
+    expect(same).toHaveLength(1);
     const rotated = push.device();
     await subscribe(rae, rotated, { oldEndpoint: d.endpoint });
     expect(await subRow(d.endpoint)).toBeNull();
@@ -138,6 +170,19 @@ describe('POST / DELETE /api/push/subscribe', () => {
     expect(res.body).toEqual({ removed: true });
     expect(res.headers.getSetCookie()).toEqual([]);
     expect(await subRow(d.endpoint)).toBeNull();
+  });
+
+  it("regression: nobody can remove another person's device (DELETE, or a made-up oldEndpoint)", async () => {
+    const owner = newStaff();
+    const other = newStaff();
+    const d = push.device();
+    await subscribe(owner, d);
+    const res = await api('/api/push/subscribe', { method: 'DELETE', json: { endpoint: d.endpoint }, cookie: await cookieFor(other) });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ removed: false });
+    expect(await subRow(d.endpoint)).toMatchObject({ staff: canon(owner) });
+    await subscribe(other, push.device(), { oldEndpoint: d.endpoint });
+    expect(await subRow(d.endpoint)).toMatchObject({ staff: canon(owner) });
   });
 });
 
@@ -211,8 +256,8 @@ describe('the routes notify (contract D)', () => {
     const moved = await eventually(() => activityOf(dana, r.id).then((a) => a?.kind === 'moved' && a));
     expect(moved.detail).toBe('Chair 9 → Bed 3');
     // Still ONE row for the request.
-    const { count } = await admin().from('lp_activity').select('*', { count: 'exact', head: true }).eq('staff', canon(dana)).eq('request_id', r.id);
-    expect(count).toBe(1);
+    const { data: one } = await admin().from('lp_activity').select('request_id').eq('staff', canon(dana)).eq('request_id', r.id);
+    expect(one).toHaveLength(1);
     await eventually(() => danaPhone.deliveries.length === 3);
     expect(danaPhone.deliveries.map((d) => d.payload.body)).toEqual(['In medical', 'In medical · Chair 9', 'Chair 9 → Bed 3']);
   });
@@ -325,9 +370,32 @@ describe('Activity routes', () => {
     expect(rows.map((r) => r.requestId)).toEqual([b.id, a.id]);
     expect(rows[0]).toMatchObject({ title: 'B.W.', detail: 'In medical', kind: 'in_medical', read: false });
     expect(JSON.stringify(res.body)).not.toContain('TEST-S');
-    const sync = (await api('/api/sync', { cookie })).body as SyncResponse;
+    const sync = (await api('/api/sync', { cookie })).body as SyncResponse & Record<string, unknown>;
     expect(sync.activityUnread).toBe(2);
-    expect(sync.activityUnreadIds).toEqual([b.id, a.id]);
+    expect(sync.activityKey).toMatch(/^[0-9a-f]{16}$/);
+    const unread = await api('/api/activity/unread', { cookie });
+    expect(unread.status).toBe(200);
+    expect(unread.body).toEqual({ count: 2, ids: [b.id, a.id], key: sync.activityKey });
+  });
+
+  it('regression: a poll never carries the unread ids (data use); the key moves with every change, read or not', async () => {
+    const { a, dana, rae, cookie } = await seeded();
+    const first = (await api('/api/sync', { cookie })).body as SyncResponse & Record<string, unknown>;
+    expect(first).not.toHaveProperty('activityUnreadIds');
+    const again = (await api('/api/sync', { cookie })).body as SyncResponse;
+    expect(again.activityKey).toBe(first.activityKey);
+    // Medical sets the location of A: A stays unread (same unread set), but the key moves.
+    const row = ((await api(`/api/sync?ids=${a.id}`, { cookie })).body as SyncResponse).rows[0] as RequestSummary;
+    const patched = await api(`/api/requests/${a.id}`, { method: 'PATCH', json: { patch: { medicalLocation: 'Bed 3' }, expectedVersion: row.rowVersion }, cookie: await cookieFor(rae) });
+    expect(patched.status).toBe(200);
+    await eventually(async () => (await activityOf(dana, a.id))?.detail === 'In medical · Bed 3' || null);
+    const moved = (await api('/api/sync', { cookie })).body as SyncResponse;
+    expect(moved.activityUnread).toBe(2);
+    expect(moved.activityKey).not.toBe(first.activityKey);
+    await api('/api/activity/read', { json: { requestId: a.id }, cookie });
+    const read = (await api('/api/sync', { cookie })).body as SyncResponse;
+    expect(read.activityUnread).toBe(1);
+    expect(read.activityKey).not.toBe(moved.activityKey);
   });
 
   it('read one (the request was opened), then Mark all read and Undo', async () => {
@@ -336,10 +404,12 @@ describe('Activity routes', () => {
     expect((await api('/api/activity/read', { json: { requestId: a.id }, cookie })).body).toEqual({ count: 0, ids: [] });
     const all = await api('/api/activity/read', { json: { all: true }, cookie });
     expect(all.body).toEqual({ count: 1, ids: [b.id] });
-    expect(((await api('/api/sync', { cookie })).body as SyncResponse).activityUnread).toBe(0);
+    const none = (await api('/api/sync', { cookie })).body as SyncResponse;
+    expect(none.activityUnread).toBe(0);
+    // Nothing unread: the count alone (the empty delta stays small).
+    expect(none).not.toHaveProperty('activityKey');
     expect((await api('/api/activity/unread', { json: { requestIds: all.body.ids }, cookie })).body).toEqual({ count: 1 });
-    const sync = (await api('/api/sync', { cookie })).body as SyncResponse;
-    expect(sync.activityUnreadIds).toEqual([b.id]);
+    expect((await api('/api/activity/unread', { cookie })).body).toMatchObject({ count: 1, ids: [b.id] });
   });
 
   it("only ever touches the signed-in staff member's rows", async () => {

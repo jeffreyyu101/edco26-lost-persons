@@ -4,16 +4,21 @@
 //
 // The step chips are each device's CURRENT UI, from the vendors' own help pages (read 2026-11-06; HANDOFF.md
 // says which were also seen on a screen):
-//   * iPhone Safari, iOS 27: Page Menu → Share → Add to Home Screen → Open as Web App ("Turn a website into an
-//     app in Safari on iPhone", iOS 27). iOS 26: the More button (⋯) → Share → … (same article, iOS 26).
-//     iOS 17 / 18: Share → Add to Home Screen ("Bookmark a website", iOS 17 and 18). Those are the default
-//     Compact tab layout's taps; with the Bottom or Top layout Share is on the toolbar.
-//   * iPad Safari: iPadOS 27 Share → View More → Add to Home Screen → Open as Web App; iPadOS 26 Share → More
-//     (⋯) → …; 17 / 18 Share → Add to Home Screen ("Turn a website into an app in Safari on iPad").
+//   * iPhone Safari, iOS 27: Page Menu → Share → Add to Home Screen → Add ("Turn a website into an app in
+//     Safari on iPhone", iOS 27: "Turn on Open as Web App", then "Tap Add"). Open as Web App is on by default
+//     on iOS 26+ (WebKit, "WebKit Features in Safari 26.0"), so it is not a tap: a chip for it would make
+//     people switch it off and add a Safari bookmark, which never gets push. The screen-reader sentence says
+//     to keep it on. iOS 26: the More button (⋯) → Share → … (same article, iOS 26). iOS 17 / 18: Share →
+//     Add to Home Screen → Add ("Bookmark a website", iOS 17 and 18). Those are the default Compact tab
+//     layout's taps; with the Bottom or Top layout Share is on the toolbar.
+//   * iPad Safari: iPadOS 27 Share → View More → Add to Home Screen → Add; iPadOS 26 Share → More (⋯) → …;
+//     17 / 18 Share → Add to Home Screen → Add ("Turn a website into an app in Safari on iPad").
 //   * Safari on iOS 26+ freezes the OS in its user agent ("iPhone OS 18_6"): its "Version/26.x" token is the
 //     real major (WebKit, "WebKit Features in Safari 26.0").
 //   * A Home Screen app whose alerts were refused, iOS 17 through 27: Settings → Notifications → the app →
-//     Allow Notifications ("Change notification settings on iPhone").
+//     Allow Notifications ("Change notification settings on iPhone"). Settings lists the app under its Home
+//     Screen name, HOME_SCREEN_NAME ("In medical?", the manifest's short_name), as does Android's list of
+//     installed apps; the Mac's Dock app keeps the full APP_NAME.
 //   * Android Chrome: ⋮ More → Site controls → Permissions → Notifications → Allow (Google, "Use
 //     notifications to get alerts", Android). An installed app: Settings → Notifications → App notifications
 //     → the app (Google, "Control notifications on Android").
@@ -24,6 +29,12 @@
 //     (the site permissions panel) → Send Notifications → × (clear the block, so the page can ask again from
 //     Turn on; Mozilla, "Web Push notifications in Firefox").
 import { APP_NAME } from '../activity';
+
+/**
+ * The installed app's name on a Home Screen and in the phone's notification settings: the manifest's
+ * short_name and app/layout.tsx appleWebApp.title (a unit test keeps the three equal).
+ */
+export const HOME_SCREEN_NAME = 'In medical?';
 
 export type Os = 'ios' | 'android' | 'macos' | 'windows' | 'linux' | 'chromeos' | 'other';
 export type Browser = 'safari' | 'chrome' | 'edge' | 'firefox' | 'samsung' | 'opera' | 'other';
@@ -94,6 +105,8 @@ export type StepIcon = 'more-h' | 'more-v' | 'page-menu' | 'share' | 'square-plu
 export interface Step {
   icon?: StepIcon;
   label: string;
+  /** What a screen reader hears for this step instead of the label (the sentence, stepsSentence). */
+  spoken?: string;
 }
 
 /** The taps that put the app on the Home Screen (an iPhone or iPad browser tab). */
@@ -101,25 +114,27 @@ export function installSteps(p: Platform): Step[] {
   const v = p.iosVersion ?? 0;
   const share: Step = { icon: 'share', label: 'Share' };
   const add: Step = { icon: 'square-plus', label: 'Add to Home Screen' };
-  const webApp: Step = { label: 'Open as Web App' };
-  if (p.browser !== 'safari') return [share, add];
+  const confirm: Step = { label: 'Add' };
+  // iOS 26+: Open as Web App is on already; the last tap is Add (never switch it off: a bookmark gets no push).
+  const confirmWebApp: Step = { label: 'Add', spoken: 'keep Open as Web App on, then Add' };
+  if (p.browser !== 'safari') return [share, add, confirm];
   if (p.ipad) {
-    if (v >= 27) return [share, { label: 'View More' }, add, webApp];
-    if (v >= 26) return [share, { icon: 'more-h', label: 'More' }, add, webApp];
-    return [share, add];
+    if (v >= 27) return [share, { label: 'View More' }, add, confirmWebApp];
+    if (v >= 26) return [share, { icon: 'more-h', label: 'More' }, add, confirmWebApp];
+    return [share, add, confirm];
   }
-  if (v >= 27) return [{ icon: 'page-menu', label: 'Menu' }, share, add, webApp];
-  if (v >= 26) return [{ icon: 'more-h', label: 'More' }, share, add, webApp];
-  return [share, add];
+  if (v >= 27) return [{ icon: 'page-menu', label: 'Menu' }, share, add, confirmWebApp];
+  if (v >= 26) return [{ icon: 'more-h', label: 'More' }, share, add, confirmWebApp];
+  return [share, add, confirm];
 }
 
 /** Where this device turns blocked notifications back on. */
 export function blockedSteps(p: Platform): Step[] {
   if (p.os === 'ios') {
-    return [{ icon: 'settings', label: 'Settings' }, { label: 'Notifications' }, { label: APP_NAME }, { label: 'Allow Notifications' }];
+    return [{ icon: 'settings', label: 'Settings' }, { label: 'Notifications' }, { label: HOME_SCREEN_NAME }, { label: 'Allow Notifications' }];
   }
   if (p.os === 'android') {
-    if (p.standalone) return [{ icon: 'settings', label: 'Settings' }, { label: 'Notifications' }, { label: 'App notifications' }, { label: APP_NAME }];
+    if (p.standalone) return [{ icon: 'settings', label: 'Settings' }, { label: 'Notifications' }, { label: 'App notifications' }, { label: HOME_SCREEN_NAME }];
     if (p.browser === 'chrome') return [{ icon: 'more-v', label: 'More' }, { label: 'Site controls' }, { label: 'Permissions' }, { label: 'Notifications' }, { label: 'Allow' }];
     return [{ icon: 'lock', label: 'Icon left of the address' }, { label: 'Permissions' }, { label: 'Notifications' }, { label: 'Allow' }];
   }
@@ -136,7 +151,7 @@ export function blockedSteps(p: Platform): Step[] {
 
 /** The steps as one sentence for screen readers: "Tap More, then Site controls, then …". */
 export function stepsSentence(lead: string, steps: readonly Step[]): string {
-  return `${lead} ${steps.map((s) => s.label).join(', then ')}.`;
+  return `${lead} ${steps.map((s) => s.spoken ?? s.label).join(', then ')}.`;
 }
 
 // ---------------------------------------------------------------------------------------------------

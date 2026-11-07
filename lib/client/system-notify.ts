@@ -113,6 +113,15 @@ export function inFront(win: WindowInfo): boolean {
   return !win.hidden && (win.focused || !win.desktop);
 }
 
+/** This browser window, as inFront reads it (also what the page answers the worker for a push, F4). */
+export function browserWindow(): WindowInfo {
+  return {
+    hidden: document.visibilityState === 'hidden',
+    focused: typeof document.hasFocus === 'function' ? document.hasFocus() : true,
+    desktop: window.matchMedia?.('(hover: hover) and (pointer: fine)').matches === true,
+  };
+}
+
 /**
  * Where an alert raised now goes: the in-app toast + chime while this window is in front; else a system
  * notification, or nothing when another app tab of this browser is in front (`otherTabInFront`): that tab
@@ -628,11 +637,7 @@ export function browserNotifyHost(): NotifyHost {
         standalone: nav.standalone === true || window.matchMedia?.('(display-mode: standalone)').matches === true,
       };
     },
-    window: () => ({
-      hidden: document.visibilityState === 'hidden',
-      focused: typeof document.hasFocus === 'function' ? document.hasFocus() : true,
-      desktop: window.matchMedia?.('(hover: hover) and (pointer: fine)').matches === true,
-    }),
+    window: browserWindow,
     watch(onChange) {
       const offs: Array<() => void> = [];
       const on = (target: EventTarget, type: string, event: HostEvent) => {

@@ -3,10 +3,13 @@
 // main view, with a monochrome count (hidden at 0, then 1–9, "9+"); "Activity, 3 unread" for screen readers.
 //   * Phone (< 768 px, place "phone", in the list header): opens a full-height sheet (Radix Dialog).
 //   * Desk (place "desk", in the top bar): a Popover anchored to the bell, 380 wide, at most 480 tall. The
-//     sidebar's Activity item (ActivityNavItem) and the rail's (ActivityRailItem) open the same popover.
+//     sidebar's Activity item (ActivityNavItem) and the rail's (DeskRailActivity) open the same popover.
+//     Opened from any of them, focus moves into the popover (it is portalled to the end of the page, so Tab
+//     would never reach it otherwise): Tab goes on to Mark all read and the rows; Escape gives focus back to
+//     whatever opened it.
 // The open state is shared (lib/client/activity-client.ts), so the bell and the sidebar item are one control.
 import { Dialog, IconButton, Popover, VisuallyHidden } from '@radix-ui/themes';
-import { useEffect, type ComponentPropsWithRef } from 'react';
+import { useEffect, useRef, type ComponentPropsWithRef } from 'react';
 import { useInDesk } from '@/components/desk/desk-context';
 import { badgeText } from '@/lib/activity';
 import { activityClient, useActivity } from '@/lib/client/activity-client';
@@ -86,6 +89,10 @@ export function ActivityBell({ place }: ActivityBellProps) {
   const activity = useActivity();
   const inDesk = useInDesk();
   const client = activityClient();
+  /** What had focus when the popover opened (the bell, the sidebar or the rail item): Escape returns there. */
+  const opener = useRef<HTMLElement | null>(null);
+  /** It closed because of a click or focus outside: focus stays where the person put it. */
+  const outside = useRef(false);
   // In the desk the list header is hidden phone chrome: the top bar's bell is the one.
   if (place === 'phone' && inDesk) return null;
   if (place === 'phone') {
@@ -107,7 +114,25 @@ export function ActivityBell({ place }: ActivityBellProps) {
         className={s.popover}
         aria-label="Activity"
         data-testid="activity-popover"
-        onOpenAutoFocus={(e) => e.preventDefault()}
+        onOpenAutoFocus={(e) => {
+          // The panel itself takes focus (not Mark all read: its tooltip would show), so the next Tab reaches
+          // Mark all read and the rows.
+          e.preventDefault();
+          outside.current = false;
+          opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          (e.currentTarget as HTMLElement | null)?.focus({ preventScroll: true });
+        }}
+        onInteractOutside={() => {
+          outside.current = true;
+        }}
+        onCloseAutoFocus={(e) => {
+          const back = opener.current;
+          opener.current = null;
+          if (!outside.current && back && back.isConnected && back !== document.body) {
+            e.preventDefault();
+            back.focus({ preventScroll: true });
+          }
+        }}
       >
         <ActivityPanel
           variant="popover"

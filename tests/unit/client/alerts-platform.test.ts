@@ -1,8 +1,11 @@
 // lib/client/alerts-platform.ts (F4, spec §18 A58): device + version detection from the user agent and the
 // display mode, the step chips for each device's CURRENT UI (from Apple's, Google's, Microsoft's and
 // Mozilla's help pages), and the banner's state machine.
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { APP_NAME } from '@/lib/activity';
 import {
+  HOME_SCREEN_NAME,
   alertsStatus,
   bannerVisible,
   blockedSteps,
@@ -83,43 +86,62 @@ describe('detectPlatform', () => {
 const labels = (steps: { label: string }[]) => steps.map((s) => s.label);
 
 describe('installSteps (an iPhone or iPad Safari tab)', () => {
-  it('iOS 27: Page Menu → Share → Add to Home Screen → Open as Web App', () => {
+  // iOS / iPadOS 26+: Open as Web App is already on; the last tap is Add. A chip for the switch would make
+  // people turn it off and add a Safari bookmark, which never gets push.
+  it('regression: iOS 27: Page Menu → Share → Add to Home Screen → Add (Open as Web App is not a tap)', () => {
     const steps = installSteps(detectPlatform(dev(UA.iphone27)));
-    expect(labels(steps)).toEqual(['Menu', 'Share', 'Add to Home Screen', 'Open as Web App']);
+    expect(labels(steps)).toEqual(['Menu', 'Share', 'Add to Home Screen', 'Add']);
     expect(steps[0]?.icon).toBe('page-menu');
+    expect(stepsSentence('Add this app to your Home Screen: tap', steps)).toBe(
+      'Add this app to your Home Screen: tap Menu, then Share, then Add to Home Screen, then keep Open as Web App on, then Add.',
+    );
   });
   it('iOS 26: Share sits behind ⋯ (More)', () => {
     const steps = installSteps(detectPlatform(dev(UA.iphone26)));
-    expect(labels(steps)).toEqual(['More', 'Share', 'Add to Home Screen', 'Open as Web App']);
+    expect(labels(steps)).toEqual(['More', 'Share', 'Add to Home Screen', 'Add']);
     expect(steps[0]?.icon).toBe('more-h');
+    expect(stepsSentence('tap', steps)).toContain('keep Open as Web App on, then Add.');
   });
-  it('iOS 17 and 18: Share → Add to Home Screen', () => {
-    expect(labels(installSteps(detectPlatform(dev(UA.iphone18))))).toEqual(['Share', 'Add to Home Screen']);
-    expect(labels(installSteps(detectPlatform(dev(UA.iphone17))))).toEqual(['Share', 'Add to Home Screen']);
+  it('iOS 17 and 18: Share → Add to Home Screen → Add (no web app switch there)', () => {
+    expect(labels(installSteps(detectPlatform(dev(UA.iphone18))))).toEqual(['Share', 'Add to Home Screen', 'Add']);
+    expect(labels(installSteps(detectPlatform(dev(UA.iphone17))))).toEqual(['Share', 'Add to Home Screen', 'Add']);
+    expect(stepsSentence('tap', installSteps(detectPlatform(dev(UA.iphone18))))).toBe('tap Share, then Add to Home Screen, then Add.');
   });
-  it('iPad: 27 View More, 26 More, 18 Share → Add to Home Screen', () => {
+  it('iPad: 27 View More, 26 More, 18 Share → Add to Home Screen → Add', () => {
     expect(labels(installSteps(detectPlatform(dev(UA.ipadDesktop, { platform: 'MacIntel', maxTouchPoints: 5 }))))).toEqual([
       'Share',
       'View More',
       'Add to Home Screen',
-      'Open as Web App',
+      'Add',
     ]);
-    expect(labels(installSteps(detectPlatform(dev(UA.ipad26))))).toEqual(['Share', 'More', 'Add to Home Screen', 'Open as Web App']);
-    expect(labels(installSteps(detectPlatform(dev(UA.ipad18))))).toEqual(['Share', 'Add to Home Screen']);
+    expect(labels(installSteps(detectPlatform(dev(UA.ipad26))))).toEqual(['Share', 'More', 'Add to Home Screen', 'Add']);
+    expect(labels(installSteps(detectPlatform(dev(UA.ipad18))))).toEqual(['Share', 'Add to Home Screen', 'Add']);
   });
-  it('another iPhone browser: Share → Add to Home Screen', () => {
-    expect(labels(installSteps(detectPlatform(dev(UA.iphoneChrome))))).toEqual(['Share', 'Add to Home Screen']);
+  it('no step is ever "Open as Web App"', () => {
+    for (const ua of [UA.iphone27, UA.iphone26, UA.iphone18, UA.ipad26, UA.iphoneChrome]) {
+      expect(labels(installSteps(detectPlatform(dev(ua))))).not.toContain('Open as Web App');
+    }
+  });
+  it('another iPhone browser: Share → Add to Home Screen → Add', () => {
+    expect(labels(installSteps(detectPlatform(dev(UA.iphoneChrome))))).toEqual(['Share', 'Add to Home Screen', 'Add']);
   });
 });
 
 describe('blockedSteps (the exact path to allow alerts again)', () => {
-  it('iPhone / iPad Home Screen app: Settings → Notifications → the app → Allow Notifications', () => {
+  it('regression: iPhone / iPad Home Screen app: Settings → Notifications → the app by its Home Screen name → Allow Notifications', () => {
     expect(labels(blockedSteps(detectPlatform(dev(UA.iphoneApp, { standalone: true }))))).toEqual([
       'Settings',
       'Notifications',
-      'Is my friend in medical?',
+      'In medical?',
       'Allow Notifications',
     ]);
+  });
+  it('the Home Screen name is the manifest short_name and the iPhone web app title', () => {
+    const manifest = JSON.parse(readFileSync(new URL('../../../public/manifest.webmanifest', import.meta.url), 'utf8')) as { name: string; short_name: string };
+    const layout = readFileSync(new URL('../../../app/layout.tsx', import.meta.url), 'utf8');
+    expect(manifest.short_name).toBe(HOME_SCREEN_NAME);
+    expect(layout).toContain(`appleWebApp: { capable: true, title: '${HOME_SCREEN_NAME}'`);
+    expect(manifest.name).toBe(APP_NAME);
   });
   it('Android Chrome: ⋮ More → Site controls → Permissions → Notifications → Allow', () => {
     expect(labels(blockedSteps(detectPlatform(dev(UA.androidChrome))))).toEqual(['More', 'Site controls', 'Permissions', 'Notifications', 'Allow']);
@@ -129,7 +151,7 @@ describe('blockedSteps (the exact path to allow alerts again)', () => {
       'Settings',
       'Notifications',
       'App notifications',
-      'Is my friend in medical?',
+      'In medical?',
     ]);
   });
   it('desktop Chrome: the icon left of the address → Notifications → On', () => {

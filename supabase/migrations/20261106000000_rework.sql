@@ -1543,7 +1543,9 @@ grant execute on function public.lp_detail(uuid) to service_role;
 --    lp_push_prefs          one row per staff member (canonical staff string, lp_canon_staff of
 --                           "Name · Team"): the Alerts sheet's "New requests" and "Updates on my requests".
 --                           Created on first use with New requests as the phone's old "Alerts" bell was (off
---                           unless it was on) and Updates on my requests on.
+--                           unless it was on) and Updates on my requests on. Until the staff member sets New
+--                           requests in the Alerts sheet (new_requests_set), any of their devices whose old
+--                           bell was on turns it on: no phone loses the new-request alerts it had.
 --    lp_push_subscriptions  one row per device (the push endpoint is unique): its keys, whose it is, and the
 --                           two switches (copied from lp_push_prefs, which is the source). A different staff
 --                           signing in on the same phone re-binds the row. Deleted on 404 / 410 from the push
@@ -1563,6 +1565,8 @@ create table if not exists public.lp_push_prefs (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+-- (A table made by an earlier draft of this section gets the column too.)
+alter table public.lp_push_prefs add column if not exists new_requests_set boolean not null default false;
 alter table public.lp_push_prefs enable row level security;
 
 create table if not exists public.lp_push_subscriptions (
@@ -1622,9 +1626,10 @@ end
 $f4drop$;
 
 -- lp_push_prefs_sync: the staff member's switches, created with the defaults on first use. Non-null
--- arguments change a switch (and every device of theirs follows). p_default_new_requests is only a default
--- for a new row (the phone's old "Alerts" bell); without it, New requests starts off.
--- Returns {newRequests, myUpdates}.
+-- arguments change a switch (and every device of theirs follows); a New requests set this way is the staff
+-- member's own choice (new_requests_set) and stays. p_default_new_requests is a device's old "Alerts" bell:
+-- until that choice is made, a device whose bell was on turns New requests on (OR), whichever device came
+-- first; without it, New requests starts off. Returns {newRequests, myUpdates}.
 create function public.lp_push_prefs_sync(
   p_staff text, p_team text, p_new_requests boolean, p_my_updates boolean, p_default_new_requests boolean)
 returns jsonb
@@ -1643,14 +1648,20 @@ begin
   perform public.lp_require_staff(p_staff);
   v_staff := public.lp_canon_staff(p_staff);
 
-  insert into public.lp_push_prefs as pr (staff, team, new_requests, my_updates)
+  insert into public.lp_push_prefs as pr (staff, team, new_requests, my_updates, new_requests_set)
   values (
     v_staff, v_team,
     coalesce(p_new_requests, p_default_new_requests, false),
-    coalesce(p_my_updates, true))
+    coalesce(p_my_updates, true),
+    p_new_requests is not null)
   on conflict (staff) do update set
     team = excluded.team,
-    new_requests = coalesce(p_new_requests, pr.new_requests),
+    new_requests = case
+      when p_new_requests is not null then p_new_requests
+      when pr.new_requests_set then pr.new_requests
+      else pr.new_requests or coalesce(p_default_new_requests, false)
+    end,
+    new_requests_set = pr.new_requests_set or p_new_requests is not null,
     my_updates = coalesce(p_my_updates, pr.my_updates),
     updated_at = case when p_new_requests is null and p_my_updates is null then pr.updated_at else now() end
   returning * into v_row;
@@ -1665,8 +1676,9 @@ $fn$;
 
 -- lp_push_subscribe: stores (or re-binds) this device's subscription for p_staff, with the staff member's
 -- switches. One row per endpoint, so one subscription per device; a different staff on the same phone takes
--- the row over. p_old_endpoint (the browser rotated the subscription): that row goes. At most 10 devices per
--- staff member (the least recently confirmed go). Returns {newRequests, myUpdates}.
+-- the row over. p_old_endpoint (the browser rotated the subscription): that row goes, only when it is this
+-- staff member's. At most 10 devices per staff member (the least recently confirmed go).
+-- Returns {newRequests, myUpdates}.
 create function public.lp_push_subscribe(
   p_endpoint text, p_p256dh text, p_auth text, p_staff text, p_team text, p_user_agent text,
   p_old_endpoint text, p_default_new_requests boolean)
@@ -1696,7 +1708,7 @@ begin
   v_prefs := public.lp_push_prefs_sync(p_staff, p_team, null, null, p_default_new_requests);
 
   if p_old_endpoint is not null and p_old_endpoint <> p_endpoint then
-    delete from public.lp_push_subscriptions where endpoint = p_old_endpoint;
+    delete from public.lp_push_subscriptions where endpoint = p_old_endpoint and staff = v_staff;
   end if;
 
   insert into public.lp_push_subscriptions as s (endpoint, p256dh, auth, staff, team, user_agent, new_requests, my_updates)
@@ -1726,8 +1738,9 @@ begin
 end
 $fn$;
 
--- lp_push_unsubscribe: this device stops getting pushes (sign-out). Returns whether a row went.
-create function public.lp_push_unsubscribe(p_endpoint text)
+-- lp_push_unsubscribe: this device stops getting pushes (sign-out), only when the subscription is p_staff's
+-- (nobody can switch off another person's device). Returns whether a row went.
+create function public.lp_push_unsubscribe(p_endpoint text, p_staff text)
 returns boolean
 language plpgsql
 volatile
@@ -1739,10 +1752,11 @@ as $fn$
 declare
   v_count integer;
 begin
+  perform public.lp_require_staff(p_staff);
   if p_endpoint is null then
     return false;
   end if;
-  delete from public.lp_push_subscriptions where endpoint = p_endpoint;
+  delete from public.lp_push_subscriptions where endpoint = p_endpoint and staff = public.lp_canon_staff(p_staff);
   get diagnostics v_count = row_count;
   return v_count > 0;
 end
@@ -1992,8 +2006,10 @@ begin
 end
 $fn$;
 
--- lp_activity_unread: what the bell counts (unread requests, newest first, in the 3-day window). Returns
--- {count, ids}.
+-- lp_activity_unread: what the bell counts (unread requests, newest first, in the 3-day window), and a
+-- fingerprint of the staff member's Activity (16 hex characters) that moves whenever a row is added, changed
+-- or read: sync carries {count, key} only, and the client asks for the ids and the list when the key moves.
+-- Returns {count, ids, key}.
 create function public.lp_activity_unread(p_staff text)
 returns jsonb
 language plpgsql
@@ -2003,22 +2019,31 @@ set search_path = public, pg_temp
 set statement_timeout = '4s'
 as $fn$
 declare
+  v_staff text;
   v_ids uuid[];
+  v_key text;
 begin
   perform public.lp_require_staff(p_staff);
+  v_staff := public.lp_canon_staff(p_staff);
   select coalesce(pg_catalog.array_agg(t.request_id order by t.at desc, t.request_id), '{}'::uuid[]) into v_ids
   from (
     select a.request_id, a.at from public.lp_activity a
-    where a.staff = public.lp_canon_staff(p_staff) and a.read_at is null and a.at >= now() - interval '3 days'
+    where a.staff = v_staff and a.read_at is null and a.at >= now() - interval '3 days'
     order by a.at desc, a.request_id
     limit 100) t;
-  return pg_catalog.jsonb_build_object('count', pg_catalog.cardinality(v_ids), 'ids', pg_catalog.to_jsonb(v_ids));
+  select pg_catalog.left(pg_catalog.md5(coalesce(pg_catalog.string_agg(
+           a.request_id::text || ':' || extract(epoch from a.at)::text || ':' || (a.read_at is null)::text,
+           ',' order by a.request_id), '')), 16)
+    into v_key
+  from public.lp_activity a
+  where a.staff = v_staff and a.at >= now() - interval '3 days';
+  return pg_catalog.jsonb_build_object('count', pg_catalog.cardinality(v_ids), 'ids', pg_catalog.to_jsonb(v_ids), 'key', v_key);
 end
 $fn$;
 
 revoke all on function public.lp_push_prefs_sync(text, text, boolean, boolean, boolean) from public, anon, authenticated;
 revoke all on function public.lp_push_subscribe(text, text, text, text, text, text, text, boolean) from public, anon, authenticated;
-revoke all on function public.lp_push_unsubscribe(text) from public, anon, authenticated;
+revoke all on function public.lp_push_unsubscribe(text, text) from public, anon, authenticated;
 revoke all on function public.lp_push_test_target(text, text) from public, anon, authenticated;
 revoke all on function public.lp_push_result(text[], text[], text[]) from public, anon, authenticated;
 revoke all on function public.lp_push_new_request_staff() from public, anon, authenticated;
@@ -2031,7 +2056,7 @@ revoke all on function public.lp_activity_unread(text) from public, anon, authen
 
 grant execute on function public.lp_push_prefs_sync(text, text, boolean, boolean, boolean) to service_role;
 grant execute on function public.lp_push_subscribe(text, text, text, text, text, text, text, boolean) to service_role;
-grant execute on function public.lp_push_unsubscribe(text) to service_role;
+grant execute on function public.lp_push_unsubscribe(text, text) to service_role;
 grant execute on function public.lp_push_test_target(text, text) to service_role;
 grant execute on function public.lp_push_result(text[], text[], text[]) to service_role;
 grant execute on function public.lp_push_new_request_staff() to service_role;

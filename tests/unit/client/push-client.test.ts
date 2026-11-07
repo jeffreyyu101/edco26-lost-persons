@@ -1,10 +1,11 @@
 // lib/client/push-client.ts (F4, spec §18 A54, A55, A58): the subscription lifecycle with a fake browser:
 // subscribe once permission is granted, from the tap; one subscription per device, told to the server once per
 // page load and staff member (a different staff signing in re-binds it); a changed key or a rotated endpoint
-// subscribes again; permission revoked later brings the banner back; sign-out removes it on the server and in
-// the browser; a 401 removes it in the browser; push off on the server → no banner. Synthetic values only.
+// subscribes again; permission revoked later brings the banner back; sign-out removes it on the server and, once
+// confirmed, in the browser (a sign-out that fails keeps it working); a 401 removes it in the browser; push off
+// on the server → no banner; covers() follows the switches and the kinds the server pushes. Synthetic values only.
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createPushClient, keyBytes, pushHooksFor, sameKey, type PushClient, type PushHost, type SubscriptionLike } from '@/lib/client/push-client';
+import { createPushClient, keyBytes, pushCovers, pushHooksFor, sameKey, type PushClient, type PushHost, type SubscriptionLike } from '@/lib/client/push-client';
 import type { Permission } from '@/lib/client/alerts-platform';
 import { apiRequest } from '@/lib/client/http';
 
@@ -58,6 +59,8 @@ class FakeHost implements PushHost {
   badges: number[] = [];
   store = new Map<string, string>();
   workerPush = true;
+  /** fetch fails as with no signal. */
+  offline = false;
   private onChange: (() => void) | null = null;
   private seq = 0;
 
@@ -90,6 +93,7 @@ class FakeHost implements PushHost {
   fetch = async (input: string, init?: RequestInit) => {
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
     this.calls.push({ path: input, method: init?.method ?? 'GET', body });
+    if (this.offline) throw new TypeError('Failed to fetch');
     const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
     if (input === '/api/push/prefs') {
       if (body && typeof body.newRequests === 'boolean') this.prefs.newRequests = body.newRequests;
@@ -304,19 +308,75 @@ describe('switches and the test alert', () => {
 });
 
 describe('lifecycle', () => {
-  it('sign-out: the server forgets it, the browser drops it, the badge clears', async () => {
+  it('sign-out: the server forgets it first; once confirmed the browser drops it and the badge clears', async () => {
     host.perm = 'granted';
     const client = createPushClient(host);
     client.start(DANA);
     await settle();
     const sub = host.sub;
-    await client.onSignOut();
+    await client.beforeSignOut();
     expect(host.posts('/api/push/subscribe', 'DELETE')[0]?.body).toEqual({ endpoint: sub?.endpoint });
+    // Not yet confirmed: the browser keeps it.
+    expect(sub?.unsubscribed).toBe(false);
+    await client.afterSignOut(true);
     expect(sub?.unsubscribed).toBe(true);
     expect(client.getState()).toMatchObject({ subscribed: false, status: 'checking' });
     expect(host.badges.at(-1)).toBe(0);
     expect(pushHooksFor(() => client).covers('in_medical')).toBe(false);
     expect(host.store.size).toBe(0);
+  });
+
+  it('regression: an offline sign-out (it fails) leaves the subscription and lock-screen alerts as they were', async () => {
+    host.perm = 'granted';
+    const client = createPushClient(host);
+    client.start(DANA);
+    await settle();
+    const sub = host.sub;
+    const posts = host.posts('/api/push/subscribe').length;
+    host.offline = true;
+    await client.beforeSignOut();
+    await client.afterSignOut(false);
+    expect(sub?.unsubscribed).toBe(false);
+    expect(host.sub).toBe(sub);
+    expect(client.getState()).toMatchObject({ status: 'on', subscribed: true });
+    expect(pushHooksFor(() => client).covers('in_medical')).toBe(true);
+    // The DELETE never left: nothing to tell the server again.
+    host.offline = false;
+    await settle();
+    expect(host.posts('/api/push/subscribe').length).toBe(posts);
+  });
+
+  it('regression: a sign-out the server refused after the DELETE went through: the device tells the server again', async () => {
+    host.perm = 'granted';
+    const client = createPushClient(host);
+    client.start(DANA);
+    await settle();
+    const sub = host.sub;
+    const posts = host.posts('/api/push/subscribe').length;
+    await client.beforeSignOut();
+    await client.afterSignOut(false);
+    await settle();
+    expect(sub?.unsubscribed).toBe(false);
+    expect(host.posts('/api/push/subscribe').length).toBe(posts + 1);
+    expect(host.posts('/api/push/subscribe').at(-1)?.body).toMatchObject({ endpoint: sub?.endpoint });
+    expect(client.getState()).toMatchObject({ status: 'on', subscribed: true });
+  });
+
+  it('…and if telling it again fails, the page notifies on its own until focus or the signal brings it back', async () => {
+    host.perm = 'granted';
+    const client = createPushClient(host);
+    client.start(DANA);
+    await settle();
+    await client.beforeSignOut();
+    host.offline = true;
+    await client.afterSignOut(false);
+    await settle();
+    expect(client.getState().subscribed).toBe(false);
+    expect(pushHooksFor(() => client).covers('in_medical')).toBe(false);
+    host.offline = false;
+    host.fire(); // online / focus
+    await settle();
+    expect(client.getState()).toMatchObject({ status: 'on', subscribed: true });
   });
 
   it('a 401: the browser drops it (the server cannot be told without a session)', async () => {
@@ -337,16 +397,49 @@ describe('lifecycle', () => {
 
   it('the store’s hooks never reject, and a sign-out goes on after the wait however the server answers', async () => {
     const stuck = {
-      getState: () => ({ subscribed: true }),
-      onSignOut: () => new Promise<void>(() => undefined),
+      getState: () => ({ subscribed: true, prefs: { newRequests: true, myUpdates: true } }),
+      beforeSignOut: () => new Promise<void>(() => undefined),
+      afterSignOut: () => new Promise<void>(() => undefined),
       onSessionEnded: () => Promise.reject(new Error('gone')),
     } as unknown as PushClient;
     const hooks = pushHooksFor(() => stuck, 20);
     const started = Date.now();
-    await expect(hooks.onSignOut()).resolves.toBeUndefined();
-    expect(Date.now() - started).toBeGreaterThanOrEqual(15);
+    await expect(hooks.beforeSignOut()).resolves.toBeUndefined();
+    await expect(hooks.afterSignOut(true)).resolves.toBeUndefined();
+    expect(Date.now() - started).toBeGreaterThanOrEqual(30);
     expect(() => hooks.onSessionEnded()).not.toThrow();
-    const failing = { ...stuck, onSignOut: () => Promise.reject(new Error('offline')) } as unknown as PushClient;
-    await expect(pushHooksFor(() => failing, 1_000).onSignOut()).resolves.toBeUndefined();
+    const failing = { ...stuck, beforeSignOut: () => Promise.reject(new Error('offline')), afterSignOut: () => Promise.reject(new Error('x')) } as unknown as PushClient;
+    await expect(pushHooksFor(() => failing, 1_000).beforeSignOut()).resolves.toBeUndefined();
+    await expect(pushHooksFor(() => failing, 1_000).afterSignOut(false)).resolves.toBeUndefined();
+  });
+});
+
+describe('covers: the page stands down only for what the push carries', () => {
+  const on = { subscribed: true, prefs: { newRequests: true, myUpdates: true } };
+  it('subscribed, switches on: every kind the server pushes', () => {
+    for (const kind of ['in_medical', 'reunited', 'new_request', 'status_changed'] as const) expect(pushCovers(on, kind)).toBe(true);
+    expect(pushCovers(on, 'combined')).toBe(false);
+    expect(pushCovers({ ...on, subscribed: false }, 'in_medical')).toBe(false);
+  });
+  it('regression: Not in medical is not pushed in this build (F5 pushes it), so the page still notifies', () => {
+    expect(pushCovers(on, 'not_in_medical')).toBe(false);
+  });
+  it('regression: a switch that is off means no push, so the page still notifies', () => {
+    expect(pushCovers({ subscribed: true, prefs: { newRequests: true, myUpdates: false } }, 'in_medical')).toBe(false);
+    expect(pushCovers({ subscribed: true, prefs: { newRequests: true, myUpdates: false } }, 'new_request')).toBe(true);
+    expect(pushCovers({ subscribed: true, prefs: { newRequests: false, myUpdates: true } }, 'new_request')).toBe(false);
+    expect(pushCovers({ subscribed: true, prefs: null }, 'in_medical')).toBe(false);
+  });
+  it('the client’s own state drives the store’s hook', async () => {
+    host.perm = 'granted';
+    host.prefs = { newRequests: false, myUpdates: true };
+    const client = createPushClient(host);
+    client.start(DANA);
+    await settle();
+    const hooks = pushHooksFor(() => client);
+    expect(hooks.covers('in_medical')).toBe(true);
+    expect(hooks.covers('new_request')).toBe(false);
+    await client.setPrefs({ myUpdates: false });
+    expect(hooks.covers('in_medical')).toBe(false);
   });
 });

@@ -1,9 +1,11 @@
 // public/sw.js Web Push (F4, spec §18 A54): a push shows its notification (title, body, tag "lp-<id>", the
-// app icon, renotify for messages) and sets the app icon badge; while a window of the app is visible AND
-// focused it shows nothing and tells the window to sync (never a toast and a notification), except on WebKit,
-// which revokes silent pushes: there it is shown silently and closed at once. A malformed push still shows
-// something. pushsubscriptionchange re-subscribes and tells the server with the old endpoint. A click on a
-// push opens the request. Synthetic ids only.
+// app icon, renotify for messages) and sets the app icon badge; every visible app window is asked whether it
+// is in front by the page's own rule, and when one is, the worker shows nothing and the window takes the event
+// in the app (never a toast and a notification), except on WebKit, which revokes silent pushes: there it is
+// shown silently and closed at once. A window that does not answer counts as in front when visible and
+// focused. "Send a test alert" always shows. A malformed push still shows something. pushsubscriptionchange
+// re-subscribes and tells the server with the old endpoint. A click on a push opens the request. Synthetic ids
+// only.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { FakeCacheStorage, FakeNetwork, ORIGIN, loadWorker, type PageClient, type Worker } from './harness';
 
@@ -25,21 +27,35 @@ const payload = (over: Record<string, unknown> = {}) => ({
 
 interface Win extends PageClient {
   messages: unknown[];
+  /** How many times it was asked (a port came with the message). */
+  asked: number;
 }
 
-function win(id: string, opts: { focused?: boolean; visible?: boolean; path?: string } = {}): Win {
+/**
+ * A window of the app. `front`: what the page answers when asked (its own rule: visible, and on a computer
+ * focused); undefined answers by visible + focused; null never answers (a page of an older build).
+ */
+function win(id: string, opts: { focused?: boolean; visible?: boolean; path?: string; front?: boolean | null } = {}): Win {
   const w: Win = {
     id,
     url: `${ORIGIN}${opts.path ?? '/'}`,
     focused: opts.focused ?? false,
     visibilityState: opts.visible === false ? 'hidden' : 'visible',
     messages: [],
-    postMessage: (m: unknown) => {
+    asked: 0,
+    postMessage: (m: unknown, transfer?: unknown[]) => {
       w.messages.push(m);
+      const port = transfer?.[0] as { postMessage(v: unknown): void } | undefined;
+      if (!port) return;
+      w.asked += 1;
+      if (opts.front === null) return;
+      port.postMessage({ front: opts.front ?? (opts.visible !== false && opts.focused === true) });
     },
   };
   return w;
 }
+
+const told = (kind = 'in_medical', body = 'In medical · Chair 9') => ({ type: 'lp-push', kind, requestId: ID, title: 'J.D.', body });
 
 let pages: PageClient[];
 let worker: Worker;
@@ -67,13 +83,22 @@ describe('push (no window in front)', () => {
     expect(worker.notifications[0]?.options).toMatchObject({ body: 'Rae C.: Bring 1 person only', renotify: true });
   });
 
-  it('a hidden or unfocused window does not stop it, and hears about it', async () => {
+  it('a hidden window, or a visible one that says it is not in front (a computer, unfocused), does not stop it', async () => {
     const hidden = win('a', { focused: false, visible: false });
-    const unfocused = win('b', { focused: false, visible: true });
+    const unfocused = win('b', { focused: false, visible: true, front: false });
     pages.push(hidden, unfocused);
     await worker.push(payload());
     expect(worker.notifications).toHaveLength(1);
-    expect(hidden.messages).toEqual([{ type: 'lp-push', kind: 'in_medical', requestId: ID }]);
+    // Every window hears about it (it syncs); only the visible one is asked.
+    expect(hidden.messages).toEqual([told()]);
+    expect(hidden.asked).toBe(0);
+    expect(unfocused.asked).toBe(1);
+  });
+
+  it('a visible, focused window whose page says it is not in front: shown (the page will not toast it)', async () => {
+    pages.push(win('a', { focused: true, visible: true, front: false }));
+    await worker.push(payload());
+    expect(worker.notifications).toHaveLength(1);
   });
 
   it('a malformed or empty push still shows something (WebKit revokes silent pushes)', async () => {
@@ -106,9 +131,36 @@ describe('push while the app is in front (never both)', () => {
     pages.push(front);
     await worker.push(payload());
     expect(worker.shownLog).toHaveLength(0);
-    expect(front.messages).toEqual([{ type: 'lp-push', kind: 'in_medical', requestId: ID }]);
+    expect(front.messages).toEqual([told()]);
     // The badge still follows the unread count.
     expect(worker.badge()).toBe(3);
+  });
+
+  it('regression: a visible window that is not focused but says it is in front (iPad split view, Android multi-window): nothing shown, its toast carries it', async () => {
+    pages.push(win('split', { focused: false, visible: true, front: true }));
+    await worker.push(payload());
+    expect(worker.shownLog).toHaveLength(0);
+  });
+
+  it('a window of an older build that never answers: in front when visible and focused (no wait forever)', async () => {
+    pages.push(win('old', { focused: true, visible: true, front: null }));
+    await worker.push(payload());
+    expect(worker.shownLog).toHaveLength(0);
+    const w = loadWorker({ version: 'p7', caches: new FakeCacheStorage(), network: new FakeNetwork(), active: 'p7', pages: [win('old2', { focused: false, visible: true, front: null })] });
+    await w.push(payload());
+    expect(w.notifications).toHaveLength(1);
+  });
+
+  it('regression: "Send a test alert" (tapped inside the app) shows with the app in front, on every engine', async () => {
+    const test = { v: 1, title: 'Is my friend in medical?', body: 'Test alert', tag: 'lp-test', url: '/', kind: 'test', requestId: null, renotify: true, badge: null };
+    pages.push(win('front', { focused: true, visible: true }));
+    await worker.push(test);
+    expect(worker.notifications).toHaveLength(1);
+    expect(worker.notifications[0]).toMatchObject({ title: 'Is my friend in medical?', options: { body: 'Test alert', tag: 'lp-test', silent: false } });
+    const webkit = loadWorker({ version: 'p8', caches: new FakeCacheStorage(), network: new FakeNetwork(), active: 'p8', pages, userAgent: IPHONE_APP });
+    await webkit.push(test);
+    expect(webkit.notifications).toHaveLength(1);
+    expect(webkit.notifications[0]?.options.silent).toBe(false);
   });
 
   it('WebKit (an iPhone Home Screen app): shown silently and closed at once, so the subscription survives', async () => {

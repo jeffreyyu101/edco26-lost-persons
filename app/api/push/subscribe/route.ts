@@ -4,8 +4,10 @@
 //   * Push off on the server (no VAPID keys): POST stores nothing and answers {enabled: false}.
 //   * An endpoint that is not a known push service: 422 (the server never posts to an address a client
 //     made up).
-//   * oldEndpoint: the browser rotated the subscription (pushsubscriptionchange); that row goes.
-//   * DELETE never re-issues the session cookie (it runs right before sign-out clears it).
+//   * oldEndpoint: the browser rotated the subscription (pushsubscriptionchange); that row goes when it is the
+//     signed-in staff member's.
+//   * DELETE removes the subscription only when it is the signed-in staff member's (nobody can switch off
+//     another person's device), and never re-issues the session cookie (it runs right before sign-out).
 import type { PushConfigResponse } from '@/lib/activity';
 import { ApiFailure } from '@/lib/server/errors';
 import { json, readJson } from '@/lib/server/http';
@@ -44,8 +46,8 @@ export const POST = authedRoute('POST /api/push/subscribe', {}, async ({ request
   return json(out);
 });
 
-export const DELETE = authedRoute('DELETE /api/push/subscribe', { refresh: false }, async ({ request }) => {
+export const DELETE = authedRoute('DELETE /api/push/subscribe', { refresh: false }, async ({ request, session }) => {
   const body = await readJson(request, pushEndpointSchema);
-  const removed = await rpc<unknown>('lp_push_unsubscribe', { p_endpoint: body.endpoint });
+  const removed = await rpc<unknown>('lp_push_unsubscribe', { p_endpoint: body.endpoint, p_staff: session.staff });
   return json({ removed: removed === true });
 });

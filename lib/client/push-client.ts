@@ -13,8 +13,11 @@
 //     tap (it asks for permission where needed; iPhone and Safari only ask from a tap).
 //   * The permission is read again on focus and visibilitychange (and the Permissions API change event):
 //     revoked later → not subscribed → the banner returns.
-//   * onSignOut(): the server forgets the subscription (DELETE, before the session is cleared), the browser
-//     drops it. onSessionEnded() (a 401): the browser drops it. Both clear the app icon badge.
+//   * Sign-out: beforeSignOut() has the server forget the subscription (DELETE, while the session still says
+//     whose it is); afterSignOut(true), once the sign-out is confirmed, drops it in the browser and forgets the
+//     staff member. afterSignOut(false), a sign-out that did not happen (offline, 5xx), keeps it and tells the
+//     server again, so the device never silently loses its alerts. onSessionEnded() (a 401): the browser
+//     drops it. Both clear the app icon badge.
 //   * The store reaches the page's client through lib/client/f4-bridge.ts (pushHooksFor): whether the push
 //     carries an alert (no double alerts, A54), and sign-out / 401, bounded and never rejecting.
 // Never logs anything.
@@ -30,6 +33,7 @@ import {
 } from './alerts-platform';
 import { readPrefs } from './prefs';
 import { registerPushHooks, type ApiRequest, type PushHooks } from './f4-bridge';
+import type { AlertEvent } from './store-contract';
 import { viaStore } from './via-store';
 
 export interface SubscriptionLike {
@@ -142,7 +146,10 @@ export interface PushClient {
   recheck(): void;
   setPrefs(change: Partial<AlertPrefs>): Promise<boolean>;
   sendTest(): Promise<boolean>;
-  onSignOut(): Promise<void>;
+  /** Before a sign-out (the session is still there): the server forgets this device. */
+  beforeSignOut(): Promise<void>;
+  /** Confirmed: the browser drops the subscription. Not confirmed: the server is told about it again. */
+  afterSignOut(confirmed: boolean): Promise<void>;
   onSessionEnded(): Promise<void>;
 }
 
@@ -159,6 +166,8 @@ export function createPushClient(host: PushHost): PushClient {
   let telling: Promise<void> | null = null;
   let unwatch: (() => void) | null = null;
   let endpointRefused = false;
+  /** beforeSignOut's DELETE may have reached the server (the sign-out may still fail). */
+  let forgotten = false;
 
   const platform = (): Platform => detectPlatform(host.device());
 
@@ -318,7 +327,7 @@ export function createPushClient(host: PushHost): PushClient {
     // Allowed again in the site settings, or the worker updated since: try again.
     if (configured === null) void loadConfig(epoch).then(() => runEnsure(epoch));
     else if (workerReady !== true) void loadWorker(epoch).then(() => runEnsure(epoch));
-    else if (permission === 'granted' && !state.subscribed) void runEnsure(epoch);
+    else if (permission === 'granted' && !endpointRefused && (!state.subscribed || !told)) void runEnsure(epoch);
   };
 
   const reset = () => {
@@ -333,16 +342,17 @@ export function createPushClient(host: PushHost): PushClient {
     for (const l of [...listeners]) l();
   };
 
-  const dropBrowserSubscription = async (tellServer: boolean) => {
+  const browserSubscription = async (): Promise<SubscriptionLike | null> => {
     let reg = registration;
     if (!reg) {
       const ready = host.ready();
       reg = ready ? await withTimeout(ready, 1_500) : null;
     }
-    const sub = reg ? await host.getSubscription(reg).catch(() => null) : null;
-    if (sub && tellServer) {
-      await host.request('/api/push/subscribe', { method: 'DELETE', json: { endpoint: sub.endpoint }, timeoutMs: 2_500 });
-    }
+    return reg ? await host.getSubscription(reg).catch(() => null) : null;
+  };
+
+  const dropBrowserSubscription = async () => {
+    const sub = await browserSubscription();
     if (sub) await sub.unsubscribe().catch(() => false);
     storeEndpoint(null);
   };
@@ -431,17 +441,37 @@ export function createPushClient(host: PushHost): PushClient {
       }
       return sent;
     },
-    async onSignOut() {
-      const had = staff !== null;
-      try {
-        await dropBrowserSubscription(true);
-      } finally {
-        if (had || state.subscribed) reset();
+    async beforeSignOut() {
+      forgotten = false;
+      const sub = await browserSubscription();
+      if (!sub) return;
+      const res = await host.request('/api/push/subscribe', { method: 'DELETE', json: { endpoint: sub.endpoint }, timeoutMs: 2_500 });
+      // Only a request that never left (offline) certainly changed nothing on the server.
+      forgotten = res.ok || res.kind !== 'network';
+    },
+    async afterSignOut(confirmed) {
+      if (confirmed) {
+        forgotten = false;
+        try {
+          await dropBrowserSubscription();
+        } finally {
+          reset();
+        }
+        return;
       }
+      // The session goes on: so do this device's alerts. The server is told again where it may have forgotten
+      // them; if that fails too, the device counts as not subscribed (the page's own notifications stand in,
+      // covers() is false) until focus / online / visibility tries again (recheck).
+      if (!forgotten || !staff) return;
+      forgotten = false;
+      told = false;
+      const gen = epoch;
+      await runEnsure(gen);
+      if (gen === epoch && !told) compute({ subscribed: false });
     },
     async onSessionEnded() {
       try {
-        await dropBrowserSubscription(false);
+        await dropBrowserSubscription();
       } finally {
         reset();
       }
@@ -557,13 +587,33 @@ export function pushClient(): PushClient {
 /** How long a sign-out waits for this device to stop its pushes before it goes on regardless. */
 export const SIGN_OUT_WAIT_MS = 3_000;
 
+/**
+ * The page's own alert kinds whose events the server pushes in this build (F4: every answer and status change
+ * but Not in medical, which the Not found yet release, F5, pushes). When F5 is merged, the integrator adds
+ * 'not_in_medical' here (HANDOFF.md, F4 integrator notes); until then a device with push still gets the page's
+ * own notification for it. A combined alert ("3 new requests") is split before it is asked.
+ */
+export const PUSHED_ALERT_KINDS: ReadonlySet<AlertEvent['kind']> = new Set<AlertEvent['kind']>(['in_medical', 'reunited', 'new_request', 'status_changed']);
+
+/**
+ * The push carries this alert on this device: subscribed (the server confirmed it), the server pushes the
+ * kind, and the staff member's switch for it is on ("New requests" for a new request, "Updates on my
+ * requests" for the rest). Otherwise the page notifies as before (v2.5 A52).
+ */
+export function pushCovers(state: Pick<AlertsState, 'subscribed' | 'prefs'>, kind: AlertEvent['kind']): boolean {
+  if (!state.subscribed || !state.prefs || !PUSHED_ALERT_KINDS.has(kind)) return false;
+  return kind === 'new_request' ? state.prefs.newRequests : state.prefs.myUpdates;
+}
+
+const bounded = (work: Promise<void>, waitMs: number): Promise<void> =>
+  Promise.race([work.catch(() => undefined), new Promise<void>((resolve) => setTimeout(resolve, waitMs))]);
+
 /** What the store asks of a push client (lib/client/f4-bridge.ts), never rejecting and bounded in time. */
 export function pushHooksFor(client: () => PushClient, waitMs = SIGN_OUT_WAIT_MS): PushHooks {
   return {
-    // A combined alert ("3 new requests") is split before it is asked: its parts are covered one by one.
-    covers: (kind) => client().getState().subscribed && kind !== 'combined',
-    onSignOut: () =>
-      Promise.race([client().onSignOut().catch(() => undefined), new Promise<void>((resolve) => setTimeout(resolve, waitMs))]),
+    covers: (kind) => pushCovers(client().getState(), kind),
+    beforeSignOut: () => bounded(client().beforeSignOut(), waitMs),
+    afterSignOut: (confirmed) => bounded(client().afterSignOut(confirmed), waitMs),
     onSessionEnded: () => void client().onSessionEnded().catch(() => undefined),
   };
 }

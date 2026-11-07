@@ -39,11 +39,13 @@
  *
  * Web Push (F4, spec §18 A54): a push shows its notification (title, body, tag "lp-<id>", the app icon;
  * messages sound again when they replace one) and sets the app icon badge to the recipient's unread
- * Activity count. Never both a toast and a notification: while a window of the app is visible AND focused,
- * that window gets {type: 'lp-push'} and syncs at once (its toast and bell carry the event) and nothing is
- * shown, except on WebKit (Safari, every iPhone browser), which revokes a subscription after three pushes
- * that show nothing: there the notification is shown silently and closed at once. A click opens the request
- * (the handler above). pushsubscriptionchange re-subscribes with the same key and tells the server, which
+ * Activity count. Never both a toast and a notification: every visible window of the app is asked
+ * ({type: 'lp-push'} with a port) whether it is in front by the page's own rule (visible, and on a computer
+ * focused), and one that is takes the event in the app (it syncs, and toasts it) while nothing is shown,
+ * except on WebKit (Safari, every iPhone browser), which revokes a subscription after three pushes that show
+ * nothing: there the notification is shown silently and closed at once. A window that does not answer in
+ * time (an older build) counts as in front when it is visible and focused. "Send a test alert" (kind
+ * 'test') always shows: it is tapped inside the app. A click opens the request (the handler above). pushsubscriptionchange re-subscribes with the same key and tells the server, which
  * drops the old endpoint. The worker answers {type: 'lp-caps'} with {push: true} too: a page subscribes
  * only once the active worker can show pushes.
  */
@@ -596,6 +598,8 @@ self.addEventListener('notificationclick', (event) => {
 
 const PUSH_MESSAGE = 'lp-push';
 const PUSH_ICON = '/icons/icon-192.png';
+/** How long a push waits for a visible app window to say whether it is in front. */
+const FRONT_ASK_MS = 600;
 const APP_NAME = 'Is my friend in medical?';
 
 /** WebKit (Safari on a Mac, every browser on an iPhone or iPad) revokes push after silent pushes. */
@@ -650,20 +654,77 @@ function showPush(data, silent) {
   });
 }
 
+/**
+ * Tells a visible app window about the push and resolves whether it is in front, by its own answer
+ * ({front}); without one in time, visible and focused counts as in front.
+ */
+function askFront(client, message) {
+  const fallback = client.visibilityState === 'visible' && client.focused === true;
+  return new Promise((resolve) => {
+    let channel = null;
+    try {
+      channel = new MessageChannel();
+    } catch (e) {
+      channel = null;
+    }
+    if (!channel) {
+      try {
+        client.postMessage(message);
+      } catch (e) {
+        // that window is going away
+      }
+      resolve(fallback);
+      return;
+    }
+    const port = channel.port1;
+    let timer = null;
+    const done = (front) => {
+      if (timer === null) return;
+      clearTimeout(timer);
+      timer = null;
+      port.onmessage = null;
+      try {
+        port.close();
+      } catch (e) {
+        // closed already
+      }
+      resolve(front);
+    };
+    timer = setTimeout(() => done(fallback), FRONT_ASK_MS);
+    port.onmessage = (event) => done(!!(event.data && event.data.front === true));
+    try {
+      client.postMessage(message, [channel.port2]);
+    } catch (e) {
+      done(fallback);
+    }
+  });
+}
+
 async function handlePush(event) {
   const data = pushData(event);
+  await setBadge(data.badge);
+  // "Send a test alert" is tapped inside the app: it shows in front too (that is what it tests).
+  if (data.kind === 'test') {
+    await showPush(data, false);
+    return;
+  }
   const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
   const app = windows.filter((c) => windowPath(c) !== null);
-  // The app is in front: its own sync shows the toast and the bell (never both).
-  const front = app.some((c) => c.visibilityState === 'visible' && c.focused);
-  for (const c of app) {
-    try {
-      c.postMessage({ type: PUSH_MESSAGE, kind: data.kind, requestId: data.requestId });
-    } catch (e) {
-      // that window is going away
-    }
-  }
-  await setBadge(data.badge);
+  // Every app window hears about it (it syncs); a visible one says whether it is in front, and then takes
+  // the event in the app (its toast and bell): never both.
+  const message = { type: PUSH_MESSAGE, kind: data.kind, requestId: data.requestId, title: data.title, body: data.body };
+  const answers = await Promise.all(
+    app.map((c) => {
+      if (c.visibilityState === 'visible') return askFront(c, message);
+      try {
+        c.postMessage(message);
+      } catch (e) {
+        // that window is going away
+      }
+      return false;
+    }),
+  );
+  const front = answers.some(Boolean);
   if (!front) {
     await showPush(data, false);
     return;

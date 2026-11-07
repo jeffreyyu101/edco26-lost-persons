@@ -1,6 +1,6 @@
 // A fake Web Push for e2e (F4): Notification.permission and requestPermission, PushManager.subscribe /
 // getSubscription (a fake subscription whose endpoint is a dead local port the test server accepts because
-// .env.test sets LP_PUSH_ALLOW_LOCAL=1), and the Home Screen display mode. The real service worker of this
+// .env.test.push sets LP_PUSH_ALLOW_LOCAL=1), and the Home Screen display mode. The real service worker of this
 // build still answers lp-caps (push: true), so the app's own checks run unchanged.
 import type { BrowserContext, Page } from '@playwright/test';
 

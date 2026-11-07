@@ -32,6 +32,7 @@ vi.mock('web-push', () => ({
 
 const { notifyStaff, NOTIFY_WAIT_MS } = await import('@/lib/server/notify');
 const { involvedStaff, fallbackStaff } = await import('@/lib/server/involved');
+const { editEventFor } = await import('@/lib/server/activity-events');
 
 withTestServer();
 
@@ -169,5 +170,27 @@ describe('involvedStaff (contract C)', () => {
     expect(list).toContain(canon(dana));
     expect(list).toContain(canon(rae));
     expect((await fallbackStaff(r.id)).map((s) => s.toLowerCase()).sort()).toEqual([canon(dana), canon(rae)].sort());
+  });
+});
+
+describe('the edit event (PATCH, built after the response)', () => {
+  it("regression: two people editing the same request at once: each event is its own author's change", async () => {
+    const dana = newStaff();
+    const rae = newStaff('Medical');
+    const r = await createRequest(dana);
+    const answered = await api(`/api/requests/${r.id}/status`, {
+      json: { status: 'Found – Awaiting Reunion', expectedVersion: (r as RequestSummary).rowVersion, kind: 'answer' },
+      cookie: await cookieFor(rae),
+    });
+    const v1 = (answered.body as { request: RequestSummary }).request.rowVersion;
+    // Rae sets where medical has them; right after, Dana edits the clothing (before Rae's event is built).
+    const located = await api(`/api/requests/${r.id}`, { method: 'PATCH', json: { patch: { medicalLocation: 'Chair 9' }, expectedVersion: v1 }, cookie: await cookieFor(rae) });
+    expect(located.status).toBe(200);
+    const v2 = (located.body as { request: RequestSummary }).request.rowVersion;
+    const edited = await api(`/api/requests/${r.id}`, { method: 'PATCH', json: { patch: { clothing: 'Blue TEST-S hoodie' }, expectedVersion: v2 }, cookie: await cookieFor(dana) });
+    expect(edited.status).toBe(200);
+    const status = (edited.body as { request: RequestSummary }).request.status;
+    expect(await editEventFor(r.id, staffOf(rae), status)).toMatchObject({ kind: 'in_medical', detail: 'In medical · Chair 9', actor: staffOf(rae) });
+    expect(await editEventFor(r.id, staffOf(dana), status)).toMatchObject({ kind: 'edited', detail: 'Details changed', actor: staffOf(dana) });
   });
 });

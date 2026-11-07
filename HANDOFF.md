@@ -66,6 +66,24 @@ screenshots.
   request, newest first; opening the request marks it read; Mark all read with Undo; the app icon badge.
 - Not in this release: messages, en route and the Not in medical / Not found yet notifications (the
   Messages and Not found yet releases send those through the same inbox and pushes).
+- **Review fixes (2026-11-07, DECISIONS F4 rows 15–23, BUILD_SPEC A60):** a sign-out that fails (offline)
+  keeps the device's lock-screen alerts; "Send a test alert" shows with the app open; the open app decides
+  whether it is in front (iPad split view, Android multi-window) and toasts pushed events it would not toast
+  itself; a desk with the old bell off can't switch a phone's "New requests" off; the iPhone Home Screen
+  chips end with "Add" (Open as Web App is already on); the blocked path names the app "In medical?" as
+  Settings lists it; the desk Activity popover works with the keyboard; a poll no longer carries the unread
+  ids; nobody can remove another person's device.
+
+#### F4 integrator notes
+
+- **When the Not found yet release (F5) is merged:** add `'not_in_medical'` to `PUSHED_ALERT_KINDS` in
+  `lib/client/push-client.ts` (and its test in `tests/unit/client/push-client.test.ts`). Until then a device
+  with push keeps the page's own notification for a Not in medical answer, because F4 does not push it; with
+  F5's push and without this line, that device would get both. **F4 must not ship without F5 unless this
+  line stays out** (it is out on this branch).
+- **Test keys:** the local VAPID pair and `LP_PUSH_ALLOW_LOCAL=1` are in the tracked `.env.test.push` (loaded
+  by `scripts/test-env.mjs` under `.env.test`). `.env.test` itself is unchanged from the base, so the stack
+  scripts (`use.sh`) need nothing new.
 
 #### F4 in production
 
@@ -74,7 +92,9 @@ screenshots.
    nothing the live build uses changes, and a second run keeps every row. Dry run (ending in `rollback;`),
    then commit, as below. Check:
    `select count(*) from pg_proc where proname like 'lp\_push\_%' or proname like 'lp\_activity\_%';`
-   returns `12`, and `select to_regclass('public.lp_activity') is not null;` returns `true`.
+   returns `12`, `select to_regclass('public.lp_activity') is not null;` returns `true`, and
+   `select count(*) from information_schema.columns where table_name = 'lp_push_prefs' and column_name = 'new_requests_set';`
+   returns `1`.
 2. **Environment.** `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` are already set in production
    (keep them; `VAPID_SUBJECT` must be `mailto:` or `https:`). `NEXT_PUBLIC_VAPID_PUBLIC_KEY` is optional
    (the app reads the key from the server). If the keys are missing or invalid, push is simply off: no banner,
@@ -89,18 +109,20 @@ screenshots.
 
 | What | How it was checked |
 |---|---|
-| iPhone Safari, iOS 27: Menu → Share → Add to Home Screen → Open as Web App | Researched: Apple, "Turn a website into an app in Safari on iPhone" (iOS 27 page; the button is "the Page Menu button"). Re-read 2026-11-06 20:30 (iOS 27 page: "the Page Menu button"; iOS 26 page: "the More button"). Not seen on a device: this Mac has Xcode but no iOS Simulator runtime (`xcrun simctl list runtimes` is empty; the T3 device tools list no devices; checked again 2026-11-07 01:10, unchanged). |
+| iPhone Safari, iOS 27: Menu → Share → Add to Home Screen → Add (Open as Web App is on already, so it is not a chip; VoiceOver hears "keep Open as Web App on") | Researched: Apple, "Turn a website into an app in Safari on iPhone" (steps: "Tap Add to Home Screen", "Turn on Open as Web App", "Tap Add"); WebKit, "WebKit Features in Safari 26.0" ("By default, every website added to the Home Screen opens as a web app"); re-checked 2026-11-07. Apple's iOS 27 page: the button is "the Page Menu button". Re-read 2026-11-06 20:30 (iOS 27 page: "the Page Menu button"; iOS 26 page: "the More button"). Not seen on a device: this Mac has Xcode but no iOS Simulator runtime (`xcrun simctl list runtimes` is empty; the T3 device tools list no devices; checked again 2026-11-07 01:10, unchanged). |
 | iPhone Safari, iOS 26: More (⋯) → Share → … | Researched: the same Apple article, iOS 26 version ("the More button"). |
-| iPhone Safari, iOS 17 / 18: Share → Add to Home Screen | Researched: Apple, "Bookmark a website in Safari on iPhone", iOS 17 and 18. |
+| iPhone Safari, iOS 17 / 18: Share → Add to Home Screen → Add | Researched: Apple, "Bookmark a website in Safari on iPhone", iOS 17 and 18 (the Add button of the sheet that opens). |
 | iPad Safari 27 / 26 / 18 | Researched: Apple, "Turn a website into an app in Safari on iPad" (27: View More; 26: the More button). |
 | iOS 26+ Safari's frozen user agent (iPhone OS 18_6 + Version/26.x) | Researched: WebKit, "WebKit Features in Safari 26.0". Unit-tested with those strings. |
-| Home Screen app blocked: Settings → Notifications → the app → Allow Notifications | Researched: Apple, "Change notification settings on iPhone", iOS 17, 18, 26 and 27 pages (all give "Settings → Notifications, then tap an app below Notification Style … Allow Notifications"; re-read 2026-11-06 20:30 for 26 and 27, and 2026-11-07 for 26: "Go to the Settings app … Tap Notifications, then tap an app below Notification Style"). The brief's "Settings → Apps → the app → Notifications" (18+) is not on Apple's page; WebKit, "Web Push for Web Apps on iOS and iPadOS": a web app's permission is managed "in Notifications Settings — just like any other app". |
+| Home Screen app blocked: Settings → Notifications → In medical? (the Home Screen name, `apple-mobile-web-app-title` / manifest `short_name`) → Allow Notifications; Android installed app likewise "In medical?" | Researched: Apple, "Change notification settings on iPhone", iOS 17, 18, 26 and 27 pages (all give "Settings → Notifications, then tap an app below Notification Style … Allow Notifications"; re-read 2026-11-06 20:30 for 26 and 27, and 2026-11-07 for 26: "Go to the Settings app … Tap Notifications, then tap an app below Notification Style"). The brief's "Settings → Apps → the app → Notifications" (18+) is not on Apple's page; WebKit, "Web Push for Web Apps on iOS and iPadOS": a web app's permission is managed "in Notifications Settings — just like any other app". |
 | Android Chrome: More → Site controls → Permissions → Notifications → Allow | Researched: Google, "Use notifications to get alerts" (Android; re-read 2026-11-06 20:30: "Tap More → Site controls → Permissions"). No Android emulator on this machine (no Android SDK). |
 | Android installed app: Settings → Notifications → App notifications → the app | Researched: Google, "Control notifications on Android". |
 | Desktop Chrome: View site information → Notifications | Researched: Google, "Use notifications to get alerts" (computer; re-read 2026-11-06 20:30: "Click View site information. To allow notifications, turn on Notifications"). Verified in Playwright Chromium (headless): the banner states, Turn on, revoke → blocked, re-check, overflow at 820 / 1180 / 1440 px. |
 | Edge, Firefox, Safari on a Mac | Researched: Microsoft, "Manage website notifications in Microsoft Edge" (View site information → Permissions for this site → Notifications); Mozilla, "Web Push notifications in Firefox" (the Permissions icon in the address bar opens the site's permissions; a block is cleared with ×, then the page asks again); Apple, "Customize website notifications in Safari on Mac". Not run. |
 | WebKit revokes push after silent pushes | Researched: Apple docs / WebKit blog quoted in WebKit and Firebase issues (3 silent pushes). The worker never leaves a push silent on WebKit (unit-tested). |
 | A push while the app is in front shows nothing; the page syncs | Verified in Playwright Chromium: a push event dispatched inside this build's real service worker (`worker.evaluate`; the DevTools protocol's push delivery, and `setAppBadge` in a worker, crash the headless Chromium shell). The background path (shown, tag, badge, silent-and-closed on WebKit) is unit-tested against `public/sw.js`. |
+| "Send a test alert" shows with the app in front; a page that says it is in front (iPad split view) gets no notification | Verified in Playwright Chromium (the worker's own `showNotification` calls, recorded) and unit-tested against `public/sw.js` with Chromium and WebKit user agents. Not seen on a real iPad. |
+| The desk Activity popover by keyboard (Enter on the bell or the sidebar item, Tab to Mark all read and the rows, Escape back) | Verified in Playwright Chromium (`tests/e2e/activity.spec.ts`). |
 | Encryption and delivery to a push service | Verified in the integration tests: `web-push` 3.6.7 sends to a fake HTTPS push service on 127.0.0.1 that decrypts every payload (aes128gcm) and answers 201, 410, 500 or never (deletion, failure counting and the timeout). |
 | The banner and the sheet on an iPhone layout | Verified in Playwright WebKit (iPhone 14 profile) with a faked PushManager, permission and Home Screen mode: install, off, blocked, on. Not a real iPhone. |
 | Real delivery to a phone's lock screen | Not verified here (needs a real device and the production keys): morning checklist below. |
@@ -175,7 +197,11 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
       opens with "On for this phone"; "Send a test alert" shows a notification on the lock screen within a few
       seconds with "Is my friend in medical?" / "Test alert"; tapping it opens the app.
 - [ ] **F4, iPhone Safari tab:** the banner shows this phone's Home Screen taps and they match the screen
-      (on iOS 26+, the Compact tab layout; with Bottom / Top, Share is on the toolbar).
+      (on iOS 26+, the Compact tab layout; with Bottom / Top, Share is on the toolbar), and "Open as Web App"
+      is already on when the Add sheet opens. With alerts blocked, Settings → Notifications lists the app as
+      "In medical?".
+- [ ] **F4, sign-out offline:** on a phone with alerts on, airplane mode → sign out (it fails) → back online:
+      the Alerts sheet still says "On for this phone" and "Send a test alert" arrives.
 - [ ] **F4, Android Chrome and a desktop browser:** Turn on, then "Send a test alert"; then with the screen
       locked (or the browser closed), an In medical answer on one of your requests arrives as "J.D." /
       "In medical" and opens that request. With the app in front, only the toast shows.

@@ -227,6 +227,59 @@ test.describe('desk', () => {
   });
 });
 
+test.describe('desk keyboard', () => {
+  test.skip(({ browserName }) => browserName !== 'chromium', 'The desk is checked in Chromium.');
+
+  test('regression: the popover opened with Enter (bell or sidebar item) takes focus; Tab reaches Mark all read and the rows; Escape goes back', async ({ browser }) => {
+    test.slow();
+    const ctx = await desk(browser);
+    const liaison = await newSignedInContext(browser, LIAISON, { baseURL: BASE });
+    const created: RequestSummary[] = [];
+    try {
+      await clearActivity(ctx);
+      const page = await ctx.newPage();
+      await openApp(page);
+      const r = await log(ctx, 'Gus Hale', created);
+      await answer(liaison, r);
+      const top = page.getByTestId('desk-topbar').getByTestId('activity-bell');
+      await expect(top).toHaveAccessibleName('Activity, 1 unread', { timeout: 20_000 });
+      const pop = page.getByTestId('activity-popover');
+      const inPopover = () => page.evaluate(() => !!document.activeElement?.closest('[data-testid="activity-popover"]'));
+      const focusedName = () => page.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent ?? '');
+
+      await top.focus();
+      await page.keyboard.press('Enter');
+      await expect(pop).toBeVisible();
+      await expect.poll(inPopover).toBe(true);
+      await page.keyboard.press('Tab');
+      expect(await focusedName()).toBe('Mark all read');
+      await page.keyboard.press('Tab');
+      expect(await inPopover()).toBe(true);
+      expect(await page.evaluate(() => document.activeElement?.getAttribute('data-testid'))).toBe('activity-row');
+      await page.keyboard.press('Escape');
+      await expect(pop).toHaveCount(0);
+      expect(await page.evaluate(() => document.activeElement?.getAttribute('data-testid'))).toBe('activity-bell');
+
+      // From the sidebar item: focus goes in too, and comes back to the item.
+      const side = page.getByTestId('desk-activity');
+      await side.focus();
+      await page.keyboard.press('Enter');
+      await expect(pop).toBeVisible();
+      await expect.poll(inPopover).toBe(true);
+      await page.keyboard.press('Tab');
+      await page.keyboard.press('Tab');
+      expect(await page.evaluate(() => document.activeElement?.getAttribute('data-testid'))).toBe('activity-row');
+      await page.keyboard.press('Enter');
+      await expect(pop).toHaveCount(0);
+      await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(r.id);
+    } finally {
+      await closeAll(liaison, created);
+      await liaison.close();
+      await ctx.close();
+    }
+  });
+});
+
 test.describe('overflow: the Activity sheet and popover at every width', () => {
   test.skip(({ browserName }) => browserName !== 'chromium', 'Layout is checked once, in Chromium.');
 

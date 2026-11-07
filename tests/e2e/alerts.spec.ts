@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { devices, expect, test, type Browser, type BrowserContext, type BrowserContextOptions, type Page } from '@playwright/test';
+import { devices, expect, test, type Browser, type BrowserContext, type BrowserContextOptions, type Page, type Worker } from '@playwright/test';
 import type { RequestSummary } from '../../lib/api-types';
 import { testBaseUrl } from '../../scripts/test-env.mjs';
 import { fakePush, fakePushState, workerReady, type FakePushOptions } from './helpers/push';
@@ -28,6 +28,45 @@ async function openApp(page: Page, path = '/'): Promise<void> {
 
 const banner = (page: Page) => page.getByTestId('alerts-banner').filter({ visible: true });
 
+/**
+ * Runs this build's worker push handler on `payload` (a PushEvent dispatched in the worker: headless Chromium
+ * has no push service) and answers the notifications it showed ({title, tag, silent}), recorded from
+ * registration.showNotification itself (the headless shell keeps none to list).
+ */
+async function dispatchPush(worker: Worker, payload: Record<string, unknown>): Promise<Array<{ title: string; tag: string; silent: boolean }>> {
+  return worker.evaluate(async (data) => {
+    const sw = self as unknown as {
+      dispatchEvent(e: Event): boolean;
+      registration: { showNotification(title: string, options?: { tag?: string; silent?: boolean }): Promise<void> };
+    };
+    const shown: Array<{ title: string; tag: string; silent: boolean }> = [];
+    const real = sw.registration.showNotification;
+    sw.registration.showNotification = function (title, options) {
+      shown.push({ title, tag: options?.tag ?? '', silent: options?.silent === true });
+      return real.call(this, title, options).catch(() => undefined);
+    };
+    try {
+      const PushEventCtor = (self as unknown as { PushEvent: new (type: string, init: { data: string }) => Event }).PushEvent;
+      const waits: Promise<unknown>[] = [];
+      const event = new PushEventCtor('push', { data: JSON.stringify(data) });
+      const extend = (event as unknown as { waitUntil(p: Promise<unknown>): void }).waitUntil.bind(event);
+      (event as unknown as { waitUntil(p: Promise<unknown>): void }).waitUntil = (p: Promise<unknown>) => {
+        waits.push(p);
+        try {
+          extend(p);
+        } catch {
+          // a synthetic event may not be extendable
+        }
+      };
+      sw.dispatchEvent(event);
+      await Promise.all(waits);
+    } finally {
+      sw.registration.showNotification = real;
+    }
+    return shown;
+  }, payload);
+}
+
 async function context(browser: Browser, staff: typeof PHONE, kind: 'iphone' | 'desktop' | 'ipad', push: FakePushOptions, extra: BrowserContextOptions = {}): Promise<BrowserContext> {
   const d = kind === 'iphone' ? devices['iPhone 14'] : kind === 'ipad' ? devices['iPad Pro 11'] : devices['Desktop Chrome'];
   const ctx = await newSignedInContext(browser, staff, {
@@ -51,11 +90,12 @@ test.describe('the banner, by device', () => {
     await expect(b).toBeVisible({ timeout: 15_000 });
     await expect(b).toContainText('Get alerts on your lock screen');
     const chips = b.getByTestId('step-chip');
-    // Playwright's iPhone 14 is Safari 27 (Version/27.2): Page Menu → Share → Add to Home Screen → Open as Web App.
-    await expect(chips).toHaveText(['Menu', 'Share', 'Add to Home Screen', 'Open as Web App']);
+    // Playwright's iPhone 14 is Safari 27 (Version/27.2): Page Menu → Share → Add to Home Screen → Add. Open as
+    // Web App is already on there (iOS 26+): never a chip, or people switch it off and get a bookmark.
+    await expect(chips).toHaveText(['Menu', 'Share', 'Add to Home Screen', 'Add']);
     // Not dismissible; screen readers hear the path as one sentence.
     await expect(b.getByRole('button')).toHaveCount(0);
-    await expect(b).toContainText('Add this app to your Home Screen: tap Menu, then Share, then Add to Home Screen, then Open as Web App.');
+    await expect(b).toContainText('Add this app to your Home Screen: tap Menu, then Share, then Add to Home Screen, then keep Open as Web App on, then Add.');
     await openApp(page, '/?view=pending');
     await expect(banner(page)).toBeVisible();
     await openApp(page, '/?view=mine');
@@ -111,7 +151,8 @@ test.describe('the banner, by device', () => {
       await openApp(page);
       const b = banner(page);
       await expect(b).toContainText('Alerts are blocked', { timeout: 20_000 });
-      await expect(b.getByTestId('step-chip')).toHaveText(['Settings', 'Notifications', 'Is my friend in medical?', 'Allow Notifications']);
+      // Settings lists the Home Screen app under its Home Screen name (the manifest's short_name).
+      await expect(b.getByTestId('step-chip')).toHaveText(['Settings', 'Notifications', 'In medical?', 'Allow Notifications']);
       await expect(b.getByTestId('alerts-recheck')).toHaveCount(0);
     } finally {
       await ctx.close();
@@ -202,29 +243,13 @@ test.describe('no double alerts (F4 + system notifications)', () => {
       const worker = ctx.serviceWorkers().find((w) => w.url().startsWith(`${BASE}/sw.js`)) ?? (await ctx.waitForEvent('serviceworker'));
       const id = randomUUID();
       const synced = page.waitForRequest((r) => r.url().includes('/api/sync'), { timeout: 10_000 });
-      const shown = await worker.evaluate(async (payload) => {
-        const sw = self as unknown as {
-          dispatchEvent(e: Event): boolean;
-          registration: { getNotifications(): Promise<unknown[]> };
-        };
-        const PushEventCtor = (self as unknown as { PushEvent: new (type: string, init: { data: string }) => Event }).PushEvent;
-        const waits: Promise<unknown>[] = [];
-        const event = new PushEventCtor('push', { data: JSON.stringify(payload) });
-        const real = (event as unknown as { waitUntil(p: Promise<unknown>): void }).waitUntil.bind(event);
-        (event as unknown as { waitUntil(p: Promise<unknown>): void }).waitUntil = (p: Promise<unknown>) => {
-          waits.push(p);
-          try {
-            real(p);
-          } catch {
-            // a synthetic event may not be extendable
-          }
-        };
-        sw.dispatchEvent(event);
-        await Promise.all(waits);
-        return (await sw.registration.getNotifications()).length;
-      }, { v: 1, title: 'J.D.', body: 'In medical', tag: `lp-${id}`, url: `/?r=${id}`, kind: 'in_medical', requestId: id, renotify: false, badge: null });
-      expect(shown).toBe(0);
+      const shown = await dispatchPush(worker, { v: 1, title: 'J.D.', body: 'In medical', tag: `lp-${id}`, url: `/?r=${id}`, kind: 'in_medical', requestId: id, renotify: false, badge: null });
+      expect(shown).toEqual([]);
       await synced;
+
+      // "Send a test alert" is tapped inside the app, so the app is always in front then: it still shows.
+      const testShown = await dispatchPush(worker, { v: 1, title: 'Is my friend in medical?', body: 'Test alert', tag: 'lp-test', url: '/', kind: 'test', requestId: null, renotify: true, badge: null });
+      expect(testShown).toEqual([{ title: 'Is my friend in medical?', tag: 'lp-test', silent: false }]);
 
       // In the background, a new request by someone else: the push carries it, so the page shows nothing.
       await page.evaluate(() => {

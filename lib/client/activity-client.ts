@@ -2,16 +2,19 @@
 // all read with Undo, and the app icon badge. Loaded with import() (the bell and the Activity host), so it
 // costs nothing on the first load.
 //
-//   * The unread count rides on every sync (lib/client/f4-bridge.ts): live at the sync cadence.
-//   * The list (GET /api/activity) loads when the sheet or popover opens, and again whenever the unread set
-//     changes while it is open.
+//   * The unread count and a fingerprint of the staff member's Activity (activityKey) ride on every sync
+//     (lib/client/f4-bridge.ts): live at the sync cadence, and a poll stays small. When the key moves (a row
+//     added, changed or read), the unread ids are fetched (GET /api/activity/unread), or, with the sheet or
+//     popover open, the list itself (GET /api/activity), so an open list follows every new event.
+//   * The list loads when the sheet or popover opens.
 //   * Read state belongs to the request: opening it from anywhere (Activity, a list, a deep link, a push
 //     click) marks its row read (markRead); opening the sheet marks nothing.
 //   * Mark all read answers the ids it changed; Undo (5 s) sends them back.
-//   * The app icon badge (navigator.setAppBadge) is the unread count.
+//   * The app icon badge (navigator.setAppBadge) is the unread count, set from the first sync after start
+//     too (a badge an earlier push left on the icon is cleared when nothing is unread).
 // Never logs anything.
 import { useSyncExternalStore } from 'react';
-import type { ActivityListResponse, ActivityReadResponse, ActivityRow } from '../activity';
+import type { ActivityListResponse, ActivityReadResponse, ActivityRow, ActivityUnreadIdsResponse } from '../activity';
 import { subscribeSyncExtras, type ActivityUnread, type ApiRequest } from './f4-bridge';
 import { viaStore } from './via-store';
 
@@ -61,14 +64,17 @@ export interface ActivityClient {
 
 const TIMEOUT_MS = 10_000;
 
-const sameIds = (a: ReadonlySet<string>, b: readonly string[]) => a.size === b.length && b.every((id) => a.has(id));
-
 export function createActivityClient(host: ActivityHost): ActivityClient {
   let state: ActivityState = INITIAL_ACTIVITY;
   const listeners = new Set<() => void>();
   let started = false;
   let epoch = 0;
   let fetchSeq = 0;
+  let unreadSeq = 0;
+  /** The activityKey the ids / list were last fetched for (null: fetch at the next sync). */
+  let lastKey: string | null = null;
+  /** The badge was set from a sync since start / reset. */
+  let synced = false;
   /** Requests marked read here whose POST is on its way: a sync that still lists them doesn't bring them back. */
   const pendingRead = new Set<string>();
 
@@ -79,14 +85,45 @@ export function createActivityClient(host: ActivityHost): ActivityClient {
     for (const l of [...listeners]) l();
   };
 
+  /** The unread ids (the key moved while the list is closed). */
+  const loadUnread = async (): Promise<void> => {
+    const seq = ++unreadSeq;
+    const gen = epoch;
+    const res = await host.request<ActivityUnreadIdsResponse>('/api/activity/unread', { timeoutMs: TIMEOUT_MS });
+    if (seq !== unreadSeq || gen !== epoch) return;
+    if (!res.ok || !Array.isArray(res.data.ids)) {
+      lastKey = null; // the next sync tries again
+      return;
+    }
+    const ids = res.data.ids.filter((x): x is string => typeof x === 'string' && !pendingRead.has(x));
+    set({ unread: ids.length, unreadIds: new Set(ids) });
+  };
+
   const applyUnread = (u: ActivityUnread) => {
-    const all = Array.isArray(u.ids) ? u.ids : [];
-    const ids = all.filter((id) => !pendingRead.has(id));
-    const changed = !sameIds(state.unreadIds, ids);
-    const unread = Math.max(0, u.count - (all.length - ids.length));
-    if (!changed && unread === state.unread) return;
-    set({ unread, unreadIds: new Set(ids) });
-    if (state.open && changed) void refresh();
+    const first = !synced;
+    synced = true;
+    const before = state.unread;
+    if (u.key === null) {
+      // No key: nothing is unread (the poll leaves the key out then), or a server without one (the count only).
+      lastKey = null;
+      if (u.count <= 0) {
+        if (state.unread !== 0 || state.unreadIds.size > 0) {
+          set({ unread: 0, unreadIds: new Set() });
+          // Read on another device while this list is open: its rows turn read too.
+          if (state.open) void refresh();
+        }
+      } else if (pendingRead.size === 0 && u.count !== state.unread) {
+        set({ unread: u.count });
+      }
+    } else if (u.key !== lastKey) {
+      // The count at once (the bell is live), unless a read of this page is still on its way (the fetch below
+      // then settles it); then the ids, or the open list.
+      lastKey = u.key;
+      if (pendingRead.size === 0 && u.count !== state.unread) set({ unread: Math.max(0, u.count) });
+      if (state.open) void refresh();
+      else void loadUnread();
+    }
+    if (first && state.unread === before) host.setBadge(state.unread);
   };
 
   const refresh = async (): Promise<void> => {
@@ -96,9 +133,11 @@ export function createActivityClient(host: ActivityHost): ActivityClient {
     const res = await host.request<ActivityListResponse>('/api/activity', { timeoutMs: TIMEOUT_MS });
     if (seq !== fetchSeq || gen !== epoch) return;
     if (!res.ok || !Array.isArray(res.data.rows)) {
+      lastKey = null; // the next sync tries again
       set({ loading: false, failed: state.rows === null });
       return;
     }
+    unreadSeq += 1; // an ids fetch still on its way is older than this list
     const rows = res.data.rows.map((r) => (pendingRead.has(r.requestId) ? { ...r, read: true } : r));
     const unreadIds = rows.filter((r) => !r.read).map((r) => r.requestId);
     set({ rows, loading: false, failed: false, unread: unreadIds.length, unreadIds: new Set(unreadIds) });
@@ -163,6 +202,9 @@ export function createActivityClient(host: ActivityHost): ActivityClient {
     reset() {
       epoch += 1;
       fetchSeq += 1;
+      unreadSeq += 1;
+      lastKey = null;
+      synced = false;
       pendingRead.clear();
       set({ ...INITIAL_ACTIVITY, unreadIds: new Set(), open: false });
       host.setBadge(0);

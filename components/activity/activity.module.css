@@ -44,6 +44,9 @@
   min-height: 0;
   position: relative;
 }
+.panel[data-variant='sheet'] {
+  flex: 1 0 auto;
+}
 .head {
   display: flex;
   align-items: center;
@@ -220,11 +223,12 @@
   color: var(--gray-11);
 }
 
-/* "3 marked read · Undo" (f34-v2-3): 5 s, at the bottom of the panel. */
+/* "3 marked read · Undo" (f34-v2-3): 5 s, docked at the bottom of the sheet (the panel fills it; a list
+   longer than the sheet scrolls under it). */
 .undo {
   position: sticky;
   bottom: 12px;
-  margin: 8px 12px 0;
+  margin: auto 12px 0;
   display: flex;
   align-items: center;
   gap: 10px;

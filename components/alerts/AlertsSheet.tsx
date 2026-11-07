@@ -47,7 +47,8 @@ function DeviceBlock() {
           </span>
           <div className={s.deviceBody}>
             <span className={s.deviceTitle}>On for this {noun}</span>
-            <span className={s.deviceSub}>Lock screen + sound</span>
+            {/* A computer has no lock screen to show it on. */}
+            {noun === 'computer' ? null : <span className={s.deviceSub}>Lock screen + sound</span>}
           </div>
         </div>
       );

@@ -97,6 +97,13 @@ export interface ActivityUnreadResponse {
   count: number;
 }
 
+/** GET /api/activity/unread: the requests the bell counts (newest first, ≤ 100) and the Activity fingerprint. */
+export interface ActivityUnreadIdsResponse {
+  count: number;
+  ids: string[];
+  key: string | null;
+}
+
 /** POST /api/push/prefs and /api/push/subscribe. */
 export interface PushConfigResponse {
   /** The server has VAPID keys: Web Push works. Without them, no banner and no push anywhere. */

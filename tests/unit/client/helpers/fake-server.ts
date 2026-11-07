@@ -90,7 +90,7 @@ export class FakeServer {
   /** How many seq units each delta repeats (the 30 s overlap). */
   overlap = 2;
   override: Override | null = null;
-  /** Extra fields of every sync response (F4: activityUnread / activityUnreadIds). */
+  /** Extra fields of every sync response (F4: activityUnread / activityKey). */
   syncExtras: Record<string, unknown> | null = null;
   private seq = 0;
   private nextCase = 2000;

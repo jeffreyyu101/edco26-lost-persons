@@ -1,8 +1,8 @@
 // GET /api/sync (spec §6, A7, A37). Delta / full / paged / reconcile, or ?ids= for specific rows (≤ 200).
 // Cursors (serverTime, next.at) are returned verbatim from the database clock; no ETag / 304.
 // The first page of a poll also carries the signed-in staff member's unread Activity (F4, spec §18 A56,
-// additive: activityUnread, activityUnreadIds), read in parallel; when it can't be read the fields are left
-// out and the rows still sync.
+// additive: activityUnread and the fingerprint activityKey, about 50 bytes; the ids are fetched only when the
+// key moves), read in parallel; when it can't be read the fields are left out and the rows still sync.
 import type { SyncResponse } from '@/lib/api-types';
 import { json, parseQuery } from '@/lib/server/http';
 import { mapSync } from '@/lib/server/mappers';
@@ -15,14 +15,15 @@ export const dynamic = 'force-dynamic';
 
 const DEFAULT_PAGE = 500;
 
-type ActivityPart = Pick<SyncResponse, 'activityUnread' | 'activityUnreadIds'>;
+type ActivityPart = Pick<SyncResponse, 'activityUnread' | 'activityKey'>;
 
 async function unreadActivity(staff: string): Promise<ActivityPart> {
   try {
-    const data = await rpc<{ ids?: unknown } | null>('lp_activity_unread', { p_staff: staff });
-    const ids = Array.isArray(data?.ids) ? data.ids.filter((x): x is string => typeof x === 'string') : [];
-    // The empty delta stays about 100 bytes (spec §7 Data use): no ids list when nothing is unread.
-    return ids.length > 0 ? { activityUnread: ids.length, activityUnreadIds: ids } : { activityUnread: 0 };
+    const data = await rpc<{ count?: unknown; key?: unknown } | null>('lp_activity_unread', { p_staff: staff });
+    if (typeof data?.count !== 'number') return {};
+    // The poll stays small (spec §7 Data use): the count and the key, never the ids; with nothing unread the
+    // count alone (the empty delta stays about 100 bytes; a 0 says everything is read).
+    return { activityUnread: data.count, ...(data.count > 0 && typeof data.key === 'string' ? { activityKey: data.key } : {}) };
   } catch {
     return {};
   }

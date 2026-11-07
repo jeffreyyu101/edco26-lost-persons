@@ -88,8 +88,13 @@ function localSupabaseKeys(expectedUrl) {
  * `{ keys: false }` skips the keys, for checks that never touch the database (unit tests in CI, where no local
  * stack runs).
  */
+// Web Push test keys (F4): a separate tracked file, so .env.test (rewritten per worktree for its local stack)
+// never has to carry them. .env.test wins where both set a key.
+const PUSH_TEST_FILE = join(ROOT, '.env.test.push');
+
 export function loadTestEnv({ keys = true } = {}) {
-  const env = parseEnv(readFileSync(join(ROOT, '.env.test'), 'utf8'));
+  const push = existsSync(PUSH_TEST_FILE) ? parseEnv(readFileSync(PUSH_TEST_FILE, 'utf8')) : {};
+  const env = { ...push, ...parseEnv(readFileSync(join(ROOT, '.env.test'), 'utf8')) };
   if (keys && !env.SUPABASE_SECRET_KEY) Object.assign(env, localSupabaseKeys(env.NEXT_PUBLIC_SUPABASE_URL));
   assertLocalUrl('.env.test NEXT_PUBLIC_SUPABASE_URL', env.NEXT_PUBLIC_SUPABASE_URL);
   for (const [key, value] of Object.entries(env)) {

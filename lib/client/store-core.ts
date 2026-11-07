@@ -67,7 +67,7 @@ import {
   type StoredStaff,
 } from './persist';
 import { readPrefs, subscribePrefs, writePref } from './prefs';
-import { provideApi, publishSyncExtras, pushHooks } from './f4-bridge';
+import { dropBrowserPush, provideApi, publishSyncExtras, pushHooks } from './f4-bridge';
 import { SESSION_CHANNEL, clearLogoutPending, readLogoutPending, writeLogoutPending, type LogoutPending } from './session-signals';
 import { startServiceWorker, type SwController } from './sw-client';
 import type { AlertNotifier, AlertPlan } from './system-notify';
@@ -1993,9 +1993,10 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const runSignOut = async (discard: boolean): Promise<SignOutResult> => {
     const e = requireEnv();
     const storage = e.localStorage();
-    // F4: this device stops getting pushes first, while the session can still say whose they were (the
-    // server forgets it, the browser drops it; bounded and never rejects, lib/client/push-client.ts).
-    await pushHooks()?.onSignOut();
+    // F4: the server forgets this device's push subscription first, while the session can still say whose it
+    // is (bounded, never rejects, lib/client/push-client.ts). The browser keeps it until the sign-out is
+    // confirmed below.
+    await pushHooks()?.beforeSignOut();
     signingOut = true;
     resumeSignOut = null;
     writeLogoutPending(storage, { at: now(), discard });
@@ -2010,11 +2011,13 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       clearLogoutPending(storage);
       signingOut = false;
       broadcast({ type: 'signout-failed' });
-      // Back to normal: polling and the outbox resume (the session was never given up locally).
+      // Back to normal: polling and the outbox resume (the session was never given up locally), and so do this
+      // device's lock-screen alerts (F4: it tells the server about its subscription again).
       if (running && state.session.status !== 'signed_out') {
         schedulePoll(0);
         kickOutbox();
       }
+      void pushHooks()?.afterSignOut(false);
       return { ok: false, reason: 'failed', message: COPY.signOutFailed };
     }
     set({ generation: state.generation + 1 });
@@ -2022,6 +2025,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     haltRuntime();
     abortInflight();
     broadcast({ type: 'logout', generation: state.generation });
+    // F4: signed out for sure: the browser drops the push subscription (also when the push client is not
+    // loaded yet, as in a sign-out resumed at load).
+    await (pushHooks()?.afterSignOut(true) ?? dropBrowserPush());
     await clearLocalData(discard);
     set({ session: { status: 'signed_out', staffName: null, team: null, staff: null, expiresAt: null } });
     clearLogoutPending(storage);
