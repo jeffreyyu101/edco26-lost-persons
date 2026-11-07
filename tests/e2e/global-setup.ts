@@ -89,7 +89,17 @@ export async function acquireLock(dir: string = LOCK_DIR, waitMs = WAIT_MS, poll
   }
 }
 
+/**
+ * scripts/with-e2e-lock.mjs already holds the lock for this run (and re-applied the branch's migration under
+ * it): LP_E2E_LOCK_OWNER names its pid, which the lock must record and which must be alive.
+ */
+export function lockHeldForUs(dir: string = LOCK_DIR, owner = process.env.LP_E2E_LOCK_OWNER): boolean {
+  const pid = Number(owner);
+  return Number.isInteger(pid) && pid > 0 && ownerPid(dir) === pid && pidAlive(pid);
+}
+
 export default async function globalSetup(): Promise<void> {
   loadTestEnv();
+  if (lockHeldForUs()) return;
   await acquireLock();
 }

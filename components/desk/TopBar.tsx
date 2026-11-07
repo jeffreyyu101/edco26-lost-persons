@@ -12,6 +12,7 @@
 import { IconButton } from '@radix-ui/themes';
 import { Plus, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { ActivityBellSlot } from '@/components/activity/slots';
 import { useDashboardLive } from '@/components/dashboard/connection-signal';
 import { LiveIndicator } from '@/components/ui/LiveIndicator';
 import { goBack, navigate } from '@/lib/client/nav';
@@ -65,6 +66,8 @@ export function DeskTop({ main }: DeskTopProps) {
         <span className={d.newShort}>New</span>
         <Kbd className={d.newKbd}>N</Kbd>
       </button>
+      {/* F4: the Activity bell, its popover anchored here (the sidebar's Activity item opens the same one). */}
+      <ActivityBellSlot place="desk" />
     </div>
   );
 }

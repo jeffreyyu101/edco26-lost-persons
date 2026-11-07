@@ -27,6 +27,8 @@
 --   6. The lp_* functions the app calls. Only service_role may execute them.
 --   7. Messages and en route (2026-11-06 evening): lp_messages, lp_message_reads, lp_enroute, their
 --      functions and the trigger that clears en route when a request leaves In medical. Additive.
+--   8. Web Push and the Activity inbox (F4): lp_push_prefs, lp_push_subscriptions, lp_activity and the
+--      lp_push_* / lp_activity_* functions. Additive.
 -- =====================================================================================================
 
 begin;
@@ -1671,7 +1673,7 @@ grant execute on function public.lp_stats() to service_role;
 grant execute on function public.lp_detail(uuid) to service_role;
 
 -- -----------------------------------------------------------------------------------------------------
--- 7. Messages and en route (F3, 2026-11-06 evening; spec §18 A53-A58, design/DECISIONS.md "Messages and en
+-- 7. Messages and en route (F3, 2026-11-06 evening; spec §21 A73-A80, design/DECISIONS.md "Messages and en
 --    route"). Additive only: three new tables, two indexes on existing tables (one partial), an AFTER UPDATE
 --    OF status trigger on patients and new functions. No existing column, constraint or function changes, so
 --    the build that is live now keeps working on a migrated database (it never calls them; the trigger only
@@ -1910,9 +1912,11 @@ end
 $fn$;
 
 -- lp_involved_staff (contract C): everyone a change to this request concerns (canonical staff, distinct): the
--- logger, whoever answered In medical / Not in medical (legacy answers too), whoever set the location,
--- everyone who messaged, everyone who was ever en route on it (from the audit trail, so it still holds after a
--- status change cleared them) and anyone en route now. F4's notifications call it right after a change.
+-- logger, whoever answered In medical / Not in medical (legacy answers too), whoever gave the first Not found
+-- that put it on a "Not found yet" hold (F5: the status stays 'Added' and the audit row says answer
+-- 'not_found'; added by the F3 + F4 release), whoever set the location, everyone who messaged, everyone who was
+-- ever en route on it (from the audit trail, so it still holds after a status change cleared them) and anyone
+-- en route now. F4's notifications call it right after a change.
 create function public.lp_involved_staff(p_request uuid)
 returns setof text
 language plpgsql
@@ -1936,6 +1940,7 @@ begin
       and (
         (e.action_type in ('status_changed', 'check_completed')
           and e.new_value ->> 'status' in ('Found – Awaiting Reunion', 'Checked – Not Found', 'Bring friend to medical'))
+        or (e.action_type = 'status_changed' and e.new_value ->> 'answer' = 'not_found')
         or e.action_type in ('medical_search', 'medical_search_found')
         or (e.action_type = 'patient_updated' and e.new_value ? 'medical_location')
         or (e.action_type = 'enroute' and e.new_value ->> 'state' in ('enroute', 'changed', 'arrived'))
@@ -2535,6 +2540,542 @@ grant execute on function public.lp_set_enroute(uuid, text, integer, timestamptz
 grant execute on function public.lp_messages_thread(uuid, text, timestamptz, uuid, integer) to service_role;
 grant execute on function public.lp_messages_sync(text, uuid[], timestamptz, boolean) to service_role;
 grant execute on function public.lp_enroute_stats() to service_role;
+
+-- -----------------------------------------------------------------------------------------------------
+-- 8. F4 · Web Push, the Alerts switches and the Activity inbox (2026-11-06 evening; spec §22 A81–A88).
+--    ADDITIVE ONLY: three new tables and new lp_push_* / lp_activity_* functions. Nothing above changes, so
+--    the build that is live now keeps working on a database that has this, and a re-run keeps every
+--    subscription, switch and Activity row (create table if not exists; functions are dropped by name and
+--    recreated, every overload of these F4 names included, so an older draft can never leave an ambiguous
+--    overload behind).
+--
+--    lp_push_prefs          one row per staff member (canonical staff string, lp_canon_staff of
+--                           "Name · Team"): the Alerts sheet's "New requests" and "Updates on my requests".
+--                           Created on first use with New requests as the phone's old "Alerts" bell was (off
+--                           unless it was on) and Updates on my requests on. Until the staff member sets New
+--                           requests in the Alerts sheet (new_requests_set), any of their devices whose old
+--                           bell was on turns it on: no phone loses the new-request alerts it had.
+--    lp_push_subscriptions  one row per device (the push endpoint is unique): its keys, whose it is, and the
+--                           two switches (copied from lp_push_prefs, which is the source). A different staff
+--                           signing in on the same phone re-binds the row. Deleted on 404 / 410 from the push
+--                           service, and after 5 failures in a row.
+--    lp_activity            ONE row per (staff, request): the latest event about that request for that staff
+--                           member. A new event rewrites it (kind, actor, detail, at = now) and makes it
+--                           unread again. Kept 3 days, at most 100 per staff member.
+--
+--    RLS on, no policies, service_role only, like every other app table. Notification text never holds a
+--    phone number, contact details or a request id (LP-####): `detail` is built by the server (contract B).
+-- -----------------------------------------------------------------------------------------------------
+create table if not exists public.lp_push_prefs (
+  staff text primary key,
+  team text not null default '',
+  new_requests boolean not null default false,
+  my_updates boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+-- (A table made by an earlier draft of this section gets the column too.)
+alter table public.lp_push_prefs add column if not exists new_requests_set boolean not null default false;
+alter table public.lp_push_prefs enable row level security;
+
+create table if not exists public.lp_push_subscriptions (
+  id bigserial primary key,
+  endpoint text not null unique,
+  p256dh text not null,
+  auth text not null,
+  staff text not null,
+  team text not null default '',
+  user_agent text,
+  new_requests boolean not null default false,
+  my_updates boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  last_ok_at timestamptz,
+  failures integer not null default 0
+);
+create index if not exists lp_push_subscriptions_staff_idx on public.lp_push_subscriptions (staff);
+alter table public.lp_push_subscriptions enable row level security;
+
+create table if not exists public.lp_activity (
+  staff text not null,
+  request_id uuid not null references public.patients (id) on delete cascade,
+  kind text not null,
+  actor text not null default '',
+  detail text not null default '',
+  at timestamptz not null default now(),
+  read_at timestamptz,
+  primary key (staff, request_id)
+);
+create index if not exists lp_activity_staff_at_idx on public.lp_activity (staff, at desc);
+alter table public.lp_activity enable row level security;
+
+revoke all on table public.lp_push_prefs, public.lp_push_subscriptions, public.lp_activity from public, anon, authenticated;
+revoke all on sequence public.lp_push_subscriptions_id_seq from public, anon, authenticated;
+grant select, insert, update, delete on table public.lp_push_prefs to service_role;
+grant select, insert, update, delete on table public.lp_push_subscriptions to service_role;
+grant select, insert, update, delete on table public.lp_activity to service_role;
+grant usage, select on sequence public.lp_push_subscriptions_id_seq to service_role;
+
+-- Every overload of the F4 function names goes first (a re-run, or an older draft with other arguments).
+do $f4drop$
+declare
+  v record;
+begin
+  for v in
+    select p.oid::regprocedure as sig
+    from pg_catalog.pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname in ('lp_push_prefs_sync', 'lp_push_subscribe', 'lp_push_unsubscribe', 'lp_push_test_target',
+                        'lp_push_result', 'lp_push_new_request_staff', 'lp_activity_record', 'lp_activity_list',
+                        'lp_activity_mark_read', 'lp_activity_unmark', 'lp_activity_unread', 'lp_activity_fallback_staff')
+  loop
+    execute pg_catalog.format('drop function %s', v.sig);
+  end loop;
+end
+$f4drop$;
+
+-- lp_push_prefs_sync: the staff member's switches, created with the defaults on first use. Non-null
+-- arguments change a switch (and every device of theirs follows); a New requests set this way is the staff
+-- member's own choice (new_requests_set) and stays. p_default_new_requests is a device's old "Alerts" bell:
+-- until that choice is made, a device whose bell was on turns New requests on (OR), whichever device came
+-- first; without it, New requests starts off. Returns {newRequests, myUpdates}.
+create function public.lp_push_prefs_sync(
+  p_staff text, p_team text, p_new_requests boolean, p_my_updates boolean, p_default_new_requests boolean)
+returns jsonb
+language plpgsql
+volatile
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_staff text;
+  v_team text := pg_catalog.left(pg_catalog.btrim(coalesce(p_team, '')), 120);
+  v_row public.lp_push_prefs;
+begin
+  perform public.lp_require_staff(p_staff);
+  v_staff := public.lp_canon_staff(p_staff);
+
+  insert into public.lp_push_prefs as pr (staff, team, new_requests, my_updates, new_requests_set)
+  values (
+    v_staff, v_team,
+    coalesce(p_new_requests, p_default_new_requests, false),
+    coalesce(p_my_updates, true),
+    p_new_requests is not null)
+  on conflict (staff) do update set
+    team = excluded.team,
+    new_requests = case
+      when p_new_requests is not null then p_new_requests
+      when pr.new_requests_set then pr.new_requests
+      else pr.new_requests or coalesce(p_default_new_requests, false)
+    end,
+    new_requests_set = pr.new_requests_set or p_new_requests is not null,
+    my_updates = coalesce(p_my_updates, pr.my_updates),
+    updated_at = case when p_new_requests is null and p_my_updates is null then pr.updated_at else now() end
+  returning * into v_row;
+
+  update public.lp_push_subscriptions
+     set new_requests = v_row.new_requests, my_updates = v_row.my_updates
+   where staff = v_staff and (new_requests is distinct from v_row.new_requests or my_updates is distinct from v_row.my_updates);
+
+  return pg_catalog.jsonb_build_object('newRequests', v_row.new_requests, 'myUpdates', v_row.my_updates);
+end
+$fn$;
+
+-- lp_push_subscribe: stores (or re-binds) this device's subscription for p_staff, with the staff member's
+-- switches. One row per endpoint, so one subscription per device; a different staff on the same phone takes
+-- the row over. p_old_endpoint (the browser rotated the subscription): that row goes, only when it is this
+-- staff member's. At most 10 devices per staff member (the least recently confirmed go).
+-- Returns {newRequests, myUpdates}.
+create function public.lp_push_subscribe(
+  p_endpoint text, p_p256dh text, p_auth text, p_staff text, p_team text, p_user_agent text,
+  p_old_endpoint text, p_default_new_requests boolean)
+returns jsonb
+language plpgsql
+volatile
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_staff text;
+  v_prefs jsonb;
+begin
+  perform public.lp_require_staff(p_staff);
+  if p_endpoint is null or pg_catalog.char_length(p_endpoint) not between 12 and 1024 then
+    raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:endpoint';
+  end if;
+  if p_p256dh is null or pg_catalog.char_length(p_p256dh) not between 16 and 200 then
+    raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:p256dh';
+  end if;
+  if p_auth is null or pg_catalog.char_length(p_auth) not between 8 and 100 then
+    raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:auth';
+  end if;
+  v_staff := public.lp_canon_staff(p_staff);
+  v_prefs := public.lp_push_prefs_sync(p_staff, p_team, null, null, p_default_new_requests);
+
+  if p_old_endpoint is not null and p_old_endpoint <> p_endpoint then
+    delete from public.lp_push_subscriptions where endpoint = p_old_endpoint and staff = v_staff;
+  end if;
+
+  insert into public.lp_push_subscriptions as s (endpoint, p256dh, auth, staff, team, user_agent, new_requests, my_updates)
+  values (
+    p_endpoint, p_p256dh, p_auth, v_staff, pg_catalog.left(pg_catalog.btrim(coalesce(p_team, '')), 120),
+    pg_catalog.left(p_user_agent, 300), (v_prefs ->> 'newRequests')::boolean, (v_prefs ->> 'myUpdates')::boolean)
+  on conflict (endpoint) do update set
+    p256dh = excluded.p256dh,
+    auth = excluded.auth,
+    staff = excluded.staff,
+    team = excluded.team,
+    user_agent = excluded.user_agent,
+    new_requests = excluded.new_requests,
+    my_updates = excluded.my_updates,
+    updated_at = now(),
+    failures = 0;
+
+  delete from public.lp_push_subscriptions
+  where staff = v_staff
+    and id not in (
+      select s.id from public.lp_push_subscriptions s
+      where s.staff = v_staff
+      order by coalesce(s.last_ok_at, s.updated_at) desc, s.id desc
+      limit 10);
+
+  return v_prefs;
+end
+$fn$;
+
+-- lp_push_unsubscribe: this device stops getting pushes (sign-out), only when the subscription is p_staff's
+-- (nobody can switch off another person's device). Returns whether a row went.
+create function public.lp_push_unsubscribe(p_endpoint text, p_staff text)
+returns boolean
+language plpgsql
+volatile
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_count integer;
+begin
+  perform public.lp_require_staff(p_staff);
+  if p_endpoint is null then
+    return false;
+  end if;
+  delete from public.lp_push_subscriptions where endpoint = p_endpoint and staff = public.lp_canon_staff(p_staff);
+  get diagnostics v_count = row_count;
+  return v_count > 0;
+end
+$fn$;
+
+-- lp_push_test_target: "Send a test alert". The subscription of this endpoint, only when it belongs to
+-- p_staff (else null). Returns {endpoint, p256dh, auth, staff} or null.
+create function public.lp_push_test_target(p_endpoint text, p_staff text)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+as $fn$
+declare
+  v_row public.lp_push_subscriptions;
+begin
+  perform public.lp_require_staff(p_staff);
+  select * into v_row from public.lp_push_subscriptions
+  where endpoint = p_endpoint and staff = public.lp_canon_staff(p_staff);
+  if v_row.id is null then
+    return null;
+  end if;
+  return pg_catalog.jsonb_build_object('endpoint', v_row.endpoint, 'p256dh', v_row.p256dh, 'auth', v_row.auth, 'staff', v_row.staff);
+end
+$fn$;
+
+-- lp_push_result: what the push services answered. ok → last_ok_at, failures reset; gone (404 / 410) →
+-- deleted; failed (timeout, 5xx, 429, …) → failures + 1, deleted at 5 in a row.
+create function public.lp_push_result(p_ok text[], p_gone text[], p_failed text[])
+returns void
+language plpgsql
+volatile
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+begin
+  if p_ok is not null and pg_catalog.cardinality(p_ok) > 0 then
+    update public.lp_push_subscriptions set last_ok_at = now(), failures = 0 where endpoint = any (p_ok);
+  end if;
+  if p_gone is not null and pg_catalog.cardinality(p_gone) > 0 then
+    delete from public.lp_push_subscriptions where endpoint = any (p_gone);
+  end if;
+  if p_failed is not null and pg_catalog.cardinality(p_failed) > 0 then
+    update public.lp_push_subscriptions set failures = failures + 1 where endpoint = any (p_failed);
+    delete from public.lp_push_subscriptions where endpoint = any (p_failed) and failures >= 5;
+  end if;
+end
+$fn$;
+
+-- lp_push_new_request_staff: everyone whose "New requests" switch is on (canonical staff strings).
+create function public.lp_push_new_request_staff()
+returns text[]
+language plpgsql
+stable
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+as $fn$
+begin
+  return coalesce((select pg_catalog.array_agg(pr.staff order by pr.staff) from public.lp_push_prefs pr where pr.new_requests), '{}'::text[]);
+end
+$fn$;
+
+-- lp_activity_fallback_staff: who is involved in a request when lp_involved_staff (the Messages release)
+-- is not there: whoever logged it and whoever answered In medical or Not in medical (attribution strings).
+create function public.lp_activity_fallback_staff(p_request uuid)
+returns text[]
+language plpgsql
+stable
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+as $fn$
+declare
+  v_out text[];
+begin
+  select pg_catalog.array_agg(distinct x.staff) into v_out
+  from (
+    select p.created_by as staff from public.patients p where p.id = p_request
+    union all
+    select e.staff_name from public.audit_events e
+    where e.patient_id = p_request
+      and (
+        (e.action_type = 'status_changed'
+          and e.new_value ->> 'status' in ('Found – Awaiting Reunion', 'Checked – Not Found', 'Bring friend to medical'))
+        or (e.action_type = 'status_changed' and e.new_value ->> 'answer' = 'not_found')
+        or e.action_type in ('medical_search', 'medical_search_found', 'check_completed'))
+  ) x
+  where x.staff is not null and pg_catalog.btrim(x.staff) <> '';
+  return coalesce(v_out, '{}'::text[]);
+end
+$fn$;
+
+-- lp_activity_record: one event about a request for p_recipients (attribution or canonical strings). The
+-- actor and duplicates are dropped; each remaining staff member's row for the request becomes this event,
+-- unread, at now() (it moves to the top). Their rows older than 3 days, and beyond their newest 100, go.
+-- Returns {written: [staff], targets: [{endpoint, p256dh, auth, staff}] (devices whose switch for this kind
+-- is on), unread: {staff: count}, firstName, lastName} (the request's name, for the push title's initials).
+create function public.lp_activity_record(p_recipients text[], p_request uuid, p_kind text, p_actor text, p_detail text)
+returns jsonb
+language plpgsql
+volatile
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_actor text := public.lp_canon_staff(coalesce(p_actor, ''));
+  v_staff text[];
+  v_patient public.patients;
+  v_targets jsonb;
+  v_unread jsonb;
+begin
+  if p_kind is null or p_kind not in ('message', 'enroute', 'enroute_changed', 'enroute_cancelled', 'arrived', 'new_request',
+      'in_medical', 'not_in_medical', 'back_to_waiting', 'moved', 'reunited', 'discharged', 'cancelled', 'edited') then
+    raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:kind';
+  end if;
+  select * into v_patient from public.patients where id = p_request;
+  if v_patient.id is null then
+    return pg_catalog.jsonb_build_object('written', '[]'::jsonb, 'targets', '[]'::jsonb, 'unread', '{}'::jsonb);
+  end if;
+
+  select coalesce(pg_catalog.array_agg(distinct c.s), '{}'::text[]) into v_staff
+  from (select public.lp_canon_staff(r) as s from pg_catalog.unnest(coalesce(p_recipients, '{}'::text[])) r) c
+  where c.s is not null and c.s <> '' and pg_catalog.char_length(c.s) <= 200 and c.s is distinct from v_actor;
+
+  if pg_catalog.cardinality(v_staff) = 0 then
+    return pg_catalog.jsonb_build_object('written', '[]'::jsonb, 'targets', '[]'::jsonb, 'unread', '{}'::jsonb,
+      'firstName', v_patient.first_name, 'lastName', v_patient.last_name);
+  end if;
+
+  insert into public.lp_activity as a (staff, request_id, kind, actor, detail, at, read_at)
+  select s, p_request, p_kind, pg_catalog.left(coalesce(p_actor, ''), 200), pg_catalog.left(coalesce(p_detail, ''), 200), now(), null
+  from pg_catalog.unnest(v_staff) s
+  on conflict (staff, request_id) do update set
+    kind = excluded.kind, actor = excluded.actor, detail = excluded.detail, at = excluded.at, read_at = null;
+
+  delete from public.lp_activity a
+  where a.staff = any (v_staff)
+    and (a.at < now() - interval '3 days'
+      or (a.staff, a.request_id) not in (
+        select b.staff, b.request_id from (
+          select x.staff, x.request_id, pg_catalog.row_number() over (partition by x.staff order by x.at desc, x.request_id) as n
+          from public.lp_activity x where x.staff = any (v_staff)) b
+        where b.n <= 100));
+
+  select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+           'endpoint', s.endpoint, 'p256dh', s.p256dh, 'auth', s.auth, 'staff', s.staff) order by s.id), '[]'::jsonb)
+    into v_targets
+  from public.lp_push_subscriptions s
+  where s.staff = any (v_staff)
+    and case when p_kind = 'new_request' then s.new_requests else s.my_updates end;
+
+  select coalesce(pg_catalog.jsonb_object_agg(u.staff, u.n), '{}'::jsonb) into v_unread
+  from (
+    select a.staff, pg_catalog.count(*) as n from public.lp_activity a
+    where a.staff = any (v_staff) and a.read_at is null and a.at >= now() - interval '3 days'
+    group by a.staff) u;
+
+  return pg_catalog.jsonb_build_object('written', pg_catalog.to_jsonb(v_staff), 'targets', v_targets, 'unread', v_unread,
+    'firstName', v_patient.first_name, 'lastName', v_patient.last_name);
+end
+$fn$;
+
+-- lp_activity_list: the staff member's Activity, newest first (the latest 100 of the last 3 days), with each
+-- request's name (line 1 shows its initials) and status. Returns {serverTime, rows: [...]}.
+create function public.lp_activity_list(p_staff text)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+as $fn$
+declare
+  v_rows jsonb;
+begin
+  perform public.lp_require_staff(p_staff);
+  select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+           'request_id', t.request_id, 'kind', t.kind, 'detail', t.detail, 'at', t.at, 'read_at', t.read_at,
+           'first_name', t.first_name, 'last_name', t.last_name, 'status', t.status) order by t.at desc, t.request_id), '[]'::jsonb)
+    into v_rows
+  from (
+    select a.request_id, a.kind, a.detail, a.at, a.read_at, p.first_name, p.last_name, p.status
+    from public.lp_activity a
+    join public.patients p on p.id = a.request_id
+    where a.staff = public.lp_canon_staff(p_staff) and a.at >= now() - interval '3 days'
+    order by a.at desc, a.request_id
+    limit 100) t;
+  return pg_catalog.jsonb_build_object('serverTime', pg_catalog.clock_timestamp(), 'rows', v_rows);
+end
+$fn$;
+
+-- lp_activity_mark_read: the request was opened (p_request), or Mark all read (p_request null). Returns
+-- {count, ids}: the rows that turned read (Undo sends them back to lp_activity_unmark).
+create function public.lp_activity_mark_read(p_staff text, p_request uuid)
+returns jsonb
+language plpgsql
+volatile
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_ids uuid[];
+begin
+  perform public.lp_require_staff(p_staff);
+  with done as (
+    update public.lp_activity a
+       set read_at = now()
+     where a.staff = public.lp_canon_staff(p_staff)
+       and a.read_at is null
+       and (p_request is null or a.request_id = p_request)
+    returning a.request_id)
+  select coalesce(pg_catalog.array_agg(request_id), '{}'::uuid[]) into v_ids from done;
+  return pg_catalog.jsonb_build_object('count', pg_catalog.cardinality(v_ids), 'ids', pg_catalog.to_jsonb(v_ids));
+end
+$fn$;
+
+-- lp_activity_unmark: Undo of Mark all read. Those rows are unread again (a row a newer event already made
+-- unread is left as it is). Returns how many changed.
+create function public.lp_activity_unmark(p_staff text, p_requests uuid[])
+returns integer
+language plpgsql
+volatile
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_count integer;
+begin
+  perform public.lp_require_staff(p_staff);
+  update public.lp_activity a
+     set read_at = null
+   where a.staff = public.lp_canon_staff(p_staff)
+     and a.request_id = any (coalesce(p_requests, '{}'::uuid[]))
+     and a.read_at is not null;
+  get diagnostics v_count = row_count;
+  return v_count;
+end
+$fn$;
+
+-- lp_activity_unread: what the bell counts (unread requests, newest first, in the 3-day window), and a
+-- fingerprint of the staff member's Activity (16 hex characters) that moves whenever a row is added, changed
+-- or read: sync carries {count, key} only, and the client asks for the ids and the list when the key moves.
+-- Returns {count, ids, key}.
+create function public.lp_activity_unread(p_staff text)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+as $fn$
+declare
+  v_staff text;
+  v_ids uuid[];
+  v_key text;
+begin
+  perform public.lp_require_staff(p_staff);
+  v_staff := public.lp_canon_staff(p_staff);
+  select coalesce(pg_catalog.array_agg(t.request_id order by t.at desc, t.request_id), '{}'::uuid[]) into v_ids
+  from (
+    select a.request_id, a.at from public.lp_activity a
+    where a.staff = v_staff and a.read_at is null and a.at >= now() - interval '3 days'
+    order by a.at desc, a.request_id
+    limit 100) t;
+  select pg_catalog.left(pg_catalog.md5(coalesce(pg_catalog.string_agg(
+           a.request_id::text || ':' || extract(epoch from a.at)::text || ':' || (a.read_at is null)::text,
+           ',' order by a.request_id), '')), 16)
+    into v_key
+  from public.lp_activity a
+  where a.staff = v_staff and a.at >= now() - interval '3 days';
+  return pg_catalog.jsonb_build_object('count', pg_catalog.cardinality(v_ids), 'ids', pg_catalog.to_jsonb(v_ids), 'key', v_key);
+end
+$fn$;
+
+revoke all on function public.lp_push_prefs_sync(text, text, boolean, boolean, boolean) from public, anon, authenticated;
+revoke all on function public.lp_push_subscribe(text, text, text, text, text, text, text, boolean) from public, anon, authenticated;
+revoke all on function public.lp_push_unsubscribe(text, text) from public, anon, authenticated;
+revoke all on function public.lp_push_test_target(text, text) from public, anon, authenticated;
+revoke all on function public.lp_push_result(text[], text[], text[]) from public, anon, authenticated;
+revoke all on function public.lp_push_new_request_staff() from public, anon, authenticated;
+revoke all on function public.lp_activity_fallback_staff(uuid) from public, anon, authenticated;
+revoke all on function public.lp_activity_record(text[], uuid, text, text, text) from public, anon, authenticated;
+revoke all on function public.lp_activity_list(text) from public, anon, authenticated;
+revoke all on function public.lp_activity_mark_read(text, uuid) from public, anon, authenticated;
+revoke all on function public.lp_activity_unmark(text, uuid[]) from public, anon, authenticated;
+revoke all on function public.lp_activity_unread(text) from public, anon, authenticated;
+
+grant execute on function public.lp_push_prefs_sync(text, text, boolean, boolean, boolean) to service_role;
+grant execute on function public.lp_push_subscribe(text, text, text, text, text, text, text, boolean) to service_role;
+grant execute on function public.lp_push_unsubscribe(text, text) to service_role;
+grant execute on function public.lp_push_test_target(text, text) to service_role;
+grant execute on function public.lp_push_result(text[], text[], text[]) to service_role;
+grant execute on function public.lp_push_new_request_staff() to service_role;
+grant execute on function public.lp_activity_fallback_staff(uuid) to service_role;
+grant execute on function public.lp_activity_record(text[], uuid, text, text, text) to service_role;
+grant execute on function public.lp_activity_list(text) to service_role;
+grant execute on function public.lp_activity_mark_read(text, uuid) to service_role;
+grant execute on function public.lp_activity_unmark(text, uuid[]) to service_role;
+grant execute on function public.lp_activity_unread(text) to service_role;
 
 notify pgrst, 'reload schema';
 

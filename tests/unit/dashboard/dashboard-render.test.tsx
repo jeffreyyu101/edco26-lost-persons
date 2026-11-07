@@ -217,7 +217,8 @@ describe('dashboard render', () => {
     for (const id of ['perf-longest-wait', 'perf-answer', 'perf-reunite']) {
       expect(html).toMatch(new RegExp(`data-testid="${id}-value"><span[^>]*>None</span></span>`));
     }
-    expect(html).not.toMatch(/-value"><span[^>]*>—</);
+    // Performance never shows "—" for a known-empty value (the F3 Friends en route tile's "—" is "not available").
+    expect(html).not.toMatch(/perf-[a-z-]+-value"><span[^>]*>—</);
     // Nothing to open without a waiting request.
     expect(html).toMatch(/<div[^>]*data-testid="perf-longest-wait"/);
     expect(html).toContain('No one is waiting for a check.');

@@ -307,6 +307,16 @@ export interface SyncResponse {
   next: { at: IsoDateTime; id: string } | null;
   /** With reconcile=1: [id, rowVersion] for every row. */
   versions?: Array<[string, number]>;
+  /**
+   * (F4, additive.) On the first page of a poll: how many requests have an unread Activity row for the
+   * signed-in staff member (never their own actions), and a short fingerprint of their Activity (16 hex
+   * characters) that moves whenever a row is added, changed or read, left out when nothing is unread (the
+   * empty delta stays about 100 bytes). The client fetches the unread ids (GET /api/activity/unread) and,
+   * with the inbox open, the list only when it moves, so a poll stays small. Absent when it could not be read
+   * (the rows still sync) and from a server before F4.
+   */
+  activityUnread?: number;
+  activityKey?: string;
 }
 
 // ---------------------------------------------------------------------------------------------------

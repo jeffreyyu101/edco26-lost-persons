@@ -1,8 +1,12 @@
 // POST /api/requests/:id/cancel (lp_cancel): creator only (403), only while Waiting (422), version-checked
-// (409). Repeating a cancel that already happened → 200 {changed: false}.
+// (409). Repeating a cancel that already happened → 200 {changed: false}. A real cancel tells everyone else
+// involved (Activity + Web Push, F4 spec §18 A57), after the response.
+import { closedDetail } from '@/lib/activity';
 import type { ChangeResponse } from '@/lib/api-types';
 import { idParam, json, readJson } from '@/lib/server/http';
+import { involvedStaff } from '@/lib/server/involved';
 import { mapRow } from '@/lib/server/mappers';
+import { notifyLater } from '@/lib/server/notify';
 import { withReclassify } from '@/lib/server/reclassify';
 import { authedRoute } from '@/lib/server/route';
 import { rpc } from '@/lib/server/supabase';
@@ -22,5 +26,8 @@ export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/cancel'
     }),
   );
   const out: ChangeResponse = { changed: data.changed === true, request: mapRow(data.row) };
+  if (out.changed) {
+    await notifyLater(() => involvedStaff(id), () => ({ requestId: id, kind: 'cancelled', actor: session.staff, detail: closedDetail('cancelled') }));
+  }
   return json(out);
 });

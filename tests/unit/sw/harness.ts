@@ -203,6 +203,8 @@ export interface PageClient {
   /** Window clients (notification clicks): the page's URL, focus state and WindowClient methods. */
   url?: string;
   focused?: boolean;
+  /** 'visible' | 'hidden' (Web Push: a focused, visible window means the app is in front). */
+  visibilityState?: string;
   focus?: () => Promise<PageClient | null>;
   navigate?: (url: string) => Promise<PageClient | null>;
   postMessage?: (message: unknown, transfer?: unknown[]) => void;
@@ -225,6 +227,23 @@ export interface Worker {
   notificationClick(data: unknown): Promise<{ closed: boolean }>;
   /** URLs passed to clients.openWindow, in order. */
   opened: string[];
+  /** Web Push (F4): a push event carrying `payload` (JSON-encoded unless a string). Resolves once every waitUntil settled. */
+  push(payload: unknown): Promise<void>;
+  /** pushsubscriptionchange with these subscriptions. */
+  pushSubscriptionChange(event: { oldSubscription?: unknown; newSubscription?: unknown }): Promise<void>;
+  /** Notifications shown through registration.showNotification and still open (close() removes them). */
+  notifications: ShownNotification[];
+  /** Every showNotification call, in order (closed ones too). */
+  shownLog: ShownNotification[];
+  /** The app icon badge (navigator.setAppBadge / clearAppBadge), or null when never set. */
+  badge(): number | null;
+}
+
+export interface ShownNotification {
+  title: string;
+  options: Record<string, unknown>;
+  data: Record<string, unknown> | undefined;
+  close(): void;
 }
 
 export function scriptUrl(version: string): string {
@@ -240,11 +259,49 @@ export function loadWorker(options: {
   waiting?: string | null;
   installing?: string | null;
   pages?: PageClient[];
+  /** The worker's navigator.userAgent (Web Push: WebKit shows every push). Default: desktop Chrome. */
+  userAgent?: string;
+  /** pushManager.subscribe for pushsubscriptionchange. */
+  subscribe?: (options: { userVisibleOnly: boolean; applicationServerKey: unknown }) => Promise<unknown>;
 }): Worker {
   const listeners = new Map<string, Listener[]>();
   const pages = options.pages ?? [];
   const worker = (v: string | null | undefined) => (v ? { scriptURL: scriptUrl(v) } : null);
-  const registration = { active: worker(options.active), waiting: worker(options.waiting), installing: worker(options.installing) };
+  const notifications: ShownNotification[] = [];
+  const shownLog: ShownNotification[] = [];
+  let badge: number | null = null;
+  const registration = {
+    active: worker(options.active),
+    waiting: worker(options.waiting),
+    installing: worker(options.installing),
+    showNotification: async (title: string, opts: Record<string, unknown> = {}) => {
+      const tag = typeof opts.tag === 'string' ? opts.tag : '';
+      for (const n of notifications.filter((x) => tag && x.options.tag === tag)) notifications.splice(notifications.indexOf(n), 1);
+      const n: ShownNotification = {
+        title,
+        options: opts,
+        data: opts.data as Record<string, unknown> | undefined,
+        close: () => {
+          const i = notifications.indexOf(n);
+          if (i >= 0) notifications.splice(i, 1);
+        },
+      };
+      notifications.push(n);
+      shownLog.push(n);
+    },
+    getNotifications: async (filter?: { tag?: string }) =>
+      notifications.filter((n) => !filter?.tag || n.options.tag === filter.tag).map((n) => ({ data: n.data, close: n.close })),
+    pushManager: { subscribe: options.subscribe ?? (async () => null) },
+  };
+  const navigatorLike = {
+    userAgent: options.userAgent ?? 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
+    setAppBadge: async (n: number) => {
+      badge = n;
+    },
+    clearAppBadge: async () => {
+      badge = 0;
+    },
+  };
   let skipped = 0;
   const opened: string[] = [];
   const self = {
@@ -262,6 +319,7 @@ export function loadWorker(options: {
     skipWaiting: async () => {
       skipped += 1;
     },
+    navigator: navigatorLike,
     addEventListener: (type: string, fn: Listener) => {
       listeners.set(type, [...(listeners.get(type) ?? []), fn]);
     },
@@ -325,6 +383,24 @@ export function loadWorker(options: {
       return { closed };
     },
     opened,
+    push: async (payload) => {
+      const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
+      await dispatch('push', {
+        data:
+          payload === undefined
+            ? null
+            : {
+                text: () => text,
+                json: () => JSON.parse(text) as unknown,
+              },
+      });
+    },
+    pushSubscriptionChange: async (event) => {
+      await dispatch('pushsubscriptionchange', { oldSubscription: event.oldSubscription ?? null, newSubscription: event.newSubscription ?? null });
+    },
+    notifications,
+    shownLog,
+    badge: () => badge,
   };
 }
 

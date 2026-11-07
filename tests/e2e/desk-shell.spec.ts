@@ -222,7 +222,9 @@ test.describe('desktop 1440 × 900', () => {
     for (const name of [/^All requests \d+$/, /^Pending \d+( Unread messages)?$/, /^My requests \d+$/, /^Dashboard$/]) {
       await expect(sidebar.getByRole('link', { name })).toBeVisible();
     }
-    await expect(sidebar.getByRole('switch', { name: 'Alerts' })).toBeVisible();
+    // F4: Alerts opens the Alerts sheet (named by what it shows, "Alerts Off"); Activity sits under the views.
+    await expect(sidebar.getByRole('button', { name: /^Alerts/ })).toBeVisible();
+    await expect(sidebar.getByTestId('desk-activity')).toBeVisible();
     await expect(page.getByRole('heading', { level: 1, name: 'Search' })).toBeVisible();
     await expect(page.getByRole('searchbox', { name: 'Search requests' })).toHaveValue(tag);
     await expect(page.getByRole('button', { name: /^New request/ })).toHaveCount(1);
@@ -430,13 +432,13 @@ test.describe('desktop 1440 × 900', () => {
     await expect(page.getByTestId('dashboard')).toBeVisible();
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
 
-    // Alerts (the phone's bell) and the account menu (the phone's avatar menu).
-    const alerts = page.getByTestId('desk-sidebar').getByRole('switch', { name: 'Alerts' });
-    await expect(alerts).toHaveAttribute('aria-checked', 'false');
-    await alerts.click();
-    await expect(alerts).toHaveAttribute('aria-checked', 'true');
-    await expect(page.getByRole('dialog', { name: 'Alerts are on' })).toBeVisible();
-    await page.getByRole('button', { name: 'Got it' }).click();
+    // Alerts (F4: it opens the Alerts sheet) and the account menu (the phone's avatar menu).
+    await page.getByTestId('desk-sidebar').getByTestId('desk-alerts').click();
+    const alertsSheet = page.getByRole('dialog', { name: 'Alerts' });
+    await expect(alertsSheet).toBeVisible();
+    await expect(alertsSheet.getByRole('switch', { name: /New requests/ })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(alertsSheet).toHaveCount(0);
     await page.getByTestId('desk-sidebar').getByTestId('account-trigger').click();
     const menu = page.getByRole('dialog', { name: 'Account' });
     await expect(menu).toBeVisible();

@@ -16,13 +16,14 @@
 //     one tab or across the tabs and windows of the browser (createPeerBoard): a background tab shows
 //     nothing while another app tab is in front (that tab toasts it from its own sync), and an alert
 //     another tab already delivered is not delivered again the other way.
-//   * One notification per request (tag = request id): a later alert for it replaces the earlier one, and
+//   * One notification per request (tag "lp-<request id>", the same as Web Push, F4): a later alert for it
+//     replaces the earlier one, and
 //     the store closes one whose alert is out of date (alerts.ts alertStillCurrent). 3+ at once are one
 //     notification ("3 new requests"), like the toast.
-//   * Content: the LP number, "New request" or the status, initials and the post. Never a phone number or
-//     any other contact detail: it lands on the lock screen and in the notification centre. (F5) A request
-//     going on hold reads as contract B and recheck-6.png, with no LP number: "K.T." / "Not found yet ·
-//     recheck 4:40 PM" (the alert's own words, alerts.ts holdAlert).
+//   * Content: the initials and the status, or "New request"; the post. Never a request id (LP-####, F4:
+//     like the Web Push), a phone number or any other contact detail: it lands on the lock screen and in
+//     the notification centre. (F5) A request going on hold reads as contract B and recheck-6.png: "K.T." /
+//     "Not found yet · recheck 4:40 PM" (the alert's own words, alerts.ts holdAlert).
 //   * Click: public/sw.js focuses an app window and posts {type: 'lp-open', url}; this page opens that view
 //     in place (no reload, so an open form or sheet is not lost) and answers {ok}. A page that does not
 //     answer (a sign-in page, an older build) is navigated by the worker instead.
@@ -32,7 +33,6 @@
 import { useSyncExternalStore } from 'react';
 import type { RequestSummary } from '../api-types';
 import { initials, isHeld, statusMeta } from '../domain';
-import { formatCaseNumber } from '../format';
 import { alertKey } from './alerts';
 import { hrefFor, navigate, parseView, viewToParams } from './nav';
 import type { AlertEvent } from './store-contract';
@@ -51,11 +51,16 @@ export interface NotifyState {
 /** The server render, and every device without system notifications. */
 export const NO_NOTIFY: Readonly<NotifyState> = Object.freeze({ supported: false, permission: 'default' });
 
+/** The tag of one request's notifications: the page's and Web Push's alike, so the OS replaces, never stacks. */
+export const requestTag = (id: string) => `lp-${id}`;
+
 /** Tag of a combined notification ("3 new requests"): the next burst replaces it. */
 export const COMBINED_TAG = 'lp-alerts';
 const ICON = '/icons/icon-192.png';
 /** LP numbers listed in a combined notification before "+N". */
 const MAX_LISTED = 4;
+/** A request without a name (photo only); lib/activity.ts NO_NAME, kept here so this chunk stays small. */
+const NO_NAME = 'No name';
 
 // ---------------------------------------------------------------------------------------------------
 // Decisions (pure)
@@ -109,6 +114,15 @@ export function inFront(win: WindowInfo): boolean {
   return !win.hidden && (win.focused || !win.desktop);
 }
 
+/** This browser window, as inFront reads it (also what the page answers the worker for a push, F4). */
+export function browserWindow(): WindowInfo {
+  return {
+    hidden: document.visibilityState === 'hidden',
+    focused: typeof document.hasFocus === 'function' ? document.hasFocus() : true,
+    desktop: window.matchMedia?.('(hover: hover) and (pointer: fine)').matches === true,
+  };
+}
+
 /**
  * Where an alert raised now goes: the in-app toast + chime while this window is in front; else a system
  * notification, or nothing when another app tab of this browser is in front (`otherTabInFront`): that tab
@@ -123,7 +137,7 @@ export function routeAlert(state: NotifyState, win: WindowInfo, otherTabInFront 
 export interface SystemNotice {
   title: string;
   body: string;
-  /** The request id (one notification per request), or COMBINED_TAG. */
+  /** "lp-<request id>" (one notification per request; Web Push uses the same tag, F4), or COMBINED_TAG. */
   tag: string;
   /** Path + query a click opens: "/?r=<id>", or "/" for a combined one. */
   url: string;
@@ -149,11 +163,12 @@ export function systemNotice(
 ): SystemNotice {
   if (alert.kind === 'combined' || !alert.requestId) {
     const allNew = sources.length > 0 && sources.every((a) => a.kind === 'new_request');
-    const lps = sources.flatMap((a) => {
+    // The requests' initials, never their LP numbers (F4: no request ids in notifications).
+    const names = sources.flatMap((a) => {
       const row = a.requestId ? rowOf(a.requestId) : undefined;
-      return row ? [formatCaseNumber(row.caseNumber)] : [];
+      return row ? [initials(row.name) || NO_NAME] : [];
     });
-    const listed = lps.length > MAX_LISTED ? [...lps.slice(0, MAX_LISTED), `+${lps.length - MAX_LISTED}`] : lps;
+    const listed = names.length > MAX_LISTED ? [...names.slice(0, MAX_LISTED), `+${names.length - MAX_LISTED}`] : names;
     return {
       title: `${alert.count} ${allNew ? 'new requests' : 'updates'}`,
       body: listed.join(', '),
@@ -167,15 +182,18 @@ export function systemNotice(
   const row = rowOf(id);
   const url = hrefFor({ r: id });
   const requireInteraction = alert.kind === 'in_medical';
-  if (!row) return { title: alert.title, body: '', tag: id, url, key: null, requireInteraction };
+  const tag = requestTag(id);
+  if (!row) return { title: alert.kind === 'new_request' ? 'New request' : alert.title, body: '', tag, url, key: null, requireInteraction };
   // (F5) A request on hold: the hold alert's own words, initials and "Not found yet · recheck 4:40 PM" (no LP).
   if (alert.kind === 'status_changed' && isHeld(row)) {
-    return { title: alert.title, body: alert.subtitle ?? '', tag: id, url, key: alertKey(row), requireInteraction };
+    return { title: alert.title, body: alert.subtitle ?? '', tag, url, key: alertKey(row), requireInteraction };
   }
-  const lp = formatCaseNumber(row.caseNumber);
-  const title = alert.kind === 'new_request' ? `New request · ${lp}` : `${lp} · ${statusMeta(row.status).shortLabel}`;
-  const body = alert.kind === 'in_medical' ? [who(row), 'Bring the friend to Main Med'].filter(Boolean).join('\n') : who(row);
-  return { title, body, tag: id, url, key: alertKey(row), requireInteraction };
+  // F4: no LP number (the Web Push for the same request reads the same way: initials, then the news).
+  const name = initials(row.name) || NO_NAME;
+  const title = alert.kind === 'new_request' ? 'New request' : `${name} · ${statusMeta(row.status).shortLabel}`;
+  const where = alert.kind === 'new_request' ? who(row) : row.postShort;
+  const body = alert.kind === 'in_medical' ? [where, 'Bring the friend to Main Med'].filter(Boolean).join('\n') : where;
+  return { title, body, tag, url, key: alertKey(row), requireInteraction };
 }
 
 /** registration.showNotification options. `renotify`: every alert sounds, as its toast would have chimed. */
@@ -273,8 +291,8 @@ export interface AlertNotifier {
    * alerts a combined one stands for). False when it could not be shown: the store then toasts it.
    */
   show(alert: AlertEvent, rowOf: (id: string) => RequestSummary | undefined, sources: readonly AlertEvent[]): Promise<boolean>;
-  /** Closes the notification with this tag (only the one of `key`, when given). */
-  close(tag: string, key?: string | null): void;
+  /** Closes this request's notification (tag requestTag(id); only the one of `key`, when given). */
+  close(requestId: string, key?: string | null): void;
   /** Closes every notification of the app (sign-out, another staff signed in), and forgets the board. */
   closeAll(): void;
   /**
@@ -570,8 +588,8 @@ export function createNotifySystem(host: NotifyHost): NotifySystem {
     // The notice is built before anything is awaited, from the rows the store holds at this moment.
     show: (alert, rowOf, sources) => showNotice(systemNotice(alert, rowOf, sources)),
     showNotice,
-    close(tag, key) {
-      closeWhere({ tag }, (n) => key === undefined || key === null || keyOf(n) === key);
+    close(requestId, key) {
+      closeWhere({ tag: requestTag(requestId) }, (n) => key === undefined || key === null || keyOf(n) === key);
     },
     closeAll() {
       closeWhere(undefined, () => true);
@@ -624,11 +642,7 @@ export function browserNotifyHost(): NotifyHost {
         standalone: nav.standalone === true || window.matchMedia?.('(display-mode: standalone)').matches === true,
       };
     },
-    window: () => ({
-      hidden: document.visibilityState === 'hidden',
-      focused: typeof document.hasFocus === 'function' ? document.hasFocus() : true,
-      desktop: window.matchMedia?.('(hover: hover) and (pointer: fine)').matches === true,
-    }),
+    window: browserWindow,
     watch(onChange) {
       const offs: Array<() => void> = [];
       const on = (target: EventTarget, type: string, event: HostEvent) => {

@@ -144,6 +144,17 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* F4: the header also holds the Activity bell now. On a phone 400 px wide or less the title and its count step
+   down to 24 px, so "All requests 758 ⌄" still fits beside search, the bell and the avatar (28 px would cut
+   it to "All requ…"). */
+@media (max-width: 400px) {
+  .ttx,
+  .tcount {
+    font-size: 24px;
+    line-height: 30px;
+  }
+}
+
 .tchev {
   flex: none;
   align-self: center;

@@ -20,6 +20,7 @@
 // The choice is the phone toggle's, per view on this device (lib/client/view-prefs.ts).
 import { MapPin, X } from 'lucide-react';
 import { useDeferredValue, useId, useMemo, type ReactNode } from 'react';
+import { AlertsBannerSlot as AlertsBanner } from '@/components/activity/slots';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
@@ -78,6 +79,8 @@ function Frame({ view, chips = null, skeleton = <TableSkeleton />, children }: F
   );
   return (
     <div className={t.root} data-desk-view={view} data-testid="desk-table-view">
+      {/* F4: until lock-screen alerts work on this computer (All and My requests; Pending draws its own). */}
+      {view === 'search' ? null : <AlertsBanner />}
       {loading ? null : (
         <div className={t.banner}>
           <ConnectionBanner />

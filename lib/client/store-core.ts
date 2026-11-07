@@ -86,6 +86,7 @@ import {
   type StoredStaff,
 } from './persist';
 import { readPrefs, subscribePrefs, writePref } from './prefs';
+import { dropBrowserPush, provideApi, publishSyncExtras, pushHooks } from './f4-bridge';
 import { SESSION_CHANNEL, clearLogoutPending, readLogoutPending, writeLogoutPending, type LogoutPending } from './session-signals';
 import { startServiceWorker, type SwController } from './sw-client';
 import type { AlertNotifier, AlertPlan } from './system-notify';
@@ -198,7 +199,7 @@ function lazyNotifier(): AlertNotifier {
   return {
     plan: (keys) => real?.plan(keys) ?? TOAST_PLAN,
     show: (alert, rowOf, sources) => real?.show(alert, rowOf, sources) ?? Promise.resolve(false),
-    close: (tag, key) => real?.close(tag, key),
+    close: (requestId, key) => real?.close(requestId, key),
     closeAll: () => real?.closeAll(),
     setActive: (on) => {
       active = on;
@@ -696,8 +697,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       dismissAlertToastsFor(r.alert.requestId);
       if (route !== 'system') closeSystemAlert(r.alert.requestId);
     }
-    // Combined ("3 new requests") only counts what this tab shows.
-    const shown = route === 'none' ? [] : current.filter((r) => !plan.skip.has(r.key));
+    // Combined ("3 new requests") only counts what this tab shows. A device with Web Push (F4) leaves the
+    // system notification to the push: never both (lib/client/f4-bridge.ts).
+    const shown = route === 'none' ? [] : current.filter((r) => !plan.skip.has(r.key) && !(route === 'system' && pushHooks()?.covers(r.alert.kind)));
     const raisedBy = new Map(shown.map((r) => [r.alert, r]));
     const sources = shown.map((r) => r.alert);
     for (const alert of coalesceAlerts(sources)) {
@@ -997,6 +999,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const sessionExpired = () => {
     if (state.session.status === 'expired' || signingOut) return;
     set({ session: { ...state.session, status: 'expired' } });
+    // F4: a device whose session ended gets no more pushes (the browser drops its subscription; the server
+    // learns on the next push; it subscribes again after sign-in). Registered by lib/client/push-client.ts.
+    pushHooks()?.onSessionEnded();
     if (pollTimer) clearTimeout(pollTimer);
     pollTimer = undefined;
     pollAbort?.abort();
@@ -1154,7 +1159,11 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       if (!res.ok) return failureOutcome(res);
       const body = res.data;
       if (typeof body.serverTime !== 'string' || !Array.isArray(body.rows)) return 'http5xx';
-      if (page === 0) firstServerTime = body.serverTime;
+      if (page === 0) {
+        firstServerTime = body.serverTime;
+        // F4: the Activity unread count rides on the first page (lib/client/f4-bridge.ts).
+        publishSyncExtras(body);
+      }
       if (Array.isArray(body.versions)) versions = [...(versions ?? []), ...body.versions];
       if (full) fullRows.push(...body.rows.filter(isRow));
       else ingest(body.rows, true);
@@ -2060,6 +2069,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     cacheStaff = null;
     setArmed(false);
     alertBacklog = [];
+    publishSyncExtras(null);
     rowsDirty = false;
     if (rowsTimer) clearTimeout(rowsTimer);
     rowsTimer = undefined;
@@ -2131,6 +2141,10 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const runSignOut = async (discard: boolean): Promise<SignOutResult> => {
     const e = requireEnv();
     const storage = e.localStorage();
+    // F4: the server forgets this device's push subscription first, while the session can still say whose it
+    // is (bounded, never rejects, lib/client/push-client.ts). The browser keeps it until the sign-out is
+    // confirmed below.
+    await pushHooks()?.beforeSignOut();
     signingOut = true;
     resumeSignOut = null;
     writeLogoutPending(storage, { at: now(), discard });
@@ -2145,11 +2159,13 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       clearLogoutPending(storage);
       signingOut = false;
       broadcast({ type: 'signout-failed' });
-      // Back to normal: polling and the outbox resume (the session was never given up locally).
+      // Back to normal: polling and the outbox resume (the session was never given up locally), and so do this
+      // device's lock-screen alerts (F4: it tells the server about its subscription again).
       if (running && state.session.status !== 'signed_out') {
         schedulePoll(0);
         kickOutbox();
       }
+      void pushHooks()?.afterSignOut(false);
       return { ok: false, reason: 'failed', message: COPY.signOutFailed };
     }
     set({ generation: state.generation + 1 });
@@ -2157,6 +2173,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     haltRuntime();
     abortInflight();
     broadcast({ type: 'logout', generation: state.generation });
+    // F4: signed out for sure: the browser drops the push subscription (also when the push client is not
+    // loaded yet, as in a sign-out resumed at load).
+    await (pushHooks()?.afterSignOut(true) ?? dropBrowserPush());
     await clearLocalData(discard);
     set({ session: { status: 'signed_out', staffName: null, team: null, staff: null, expiresAt: null } });
     clearLogoutPending(storage);
@@ -2640,6 +2659,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     if (running) return stop;
     const e = requireEnv();
     running = true;
+    // F4's clients send through this store (lib/client/f4-bridge.ts).
+    provideApi(call);
     runId += 1;
     const id = runId;
     if (signingOut && !resumeSignOut) return stop;

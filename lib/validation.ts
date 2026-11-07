@@ -287,6 +287,53 @@ export const statusFilterSchema = z.enum([
   STATUS.legacyBringFriend,
 ]);
 
+// ---------------------------------------------------------------------------------------------------
+// Web Push and Activity (F4, spec §18 A54–A57)
+// ---------------------------------------------------------------------------------------------------
+
+const base64Url = (min: number, max: number) =>
+  z
+    .string()
+    .min(min)
+    .max(max)
+    .regex(/^[A-Za-z0-9_-]+={0,2}$/, { message: 'Must be base64url' });
+
+/** A push endpoint: https, at most 1024 characters (which push services are allowed is the server's call). */
+export const pushEndpointField = z
+  .string()
+  .max(1024)
+  .refine((s) => s.startsWith('https://'), { message: 'Must be an https URL' })
+  .pipe(z.url({ protocol: /^https$/ }));
+
+/** POST /api/push/subscribe: this device's PushSubscription (its toJSON()), and the endpoint it replaces. */
+export const pushSubscribeSchema = z.strictObject({
+  endpoint: pushEndpointField,
+  keys: z.strictObject({ p256dh: base64Url(16, 200), auth: base64Url(8, 100) }),
+  oldEndpoint: pushEndpointField.nullable().optional(),
+  /** The phone's old "Alerts" bell: the default for New requests when the staff member has no switches yet. */
+  bell: z.boolean().optional(),
+});
+export type PushSubscribeBody = z.input<typeof pushSubscribeSchema>;
+
+/** DELETE /api/push/subscribe and POST /api/push/test. */
+export const pushEndpointSchema = z.strictObject({ endpoint: pushEndpointField });
+
+/** POST /api/push/prefs: change a switch (or none: read them, created with the defaults on first use). */
+export const pushPrefsSchema = z.strictObject({
+  newRequests: z.boolean().optional(),
+  myUpdates: z.boolean().optional(),
+  bell: z.boolean().optional(),
+});
+export type PushPrefsBody = z.input<typeof pushPrefsSchema>;
+
+/** POST /api/activity/read: one request (it was opened), or Mark all read. */
+export const activityReadSchema = z.union([z.strictObject({ requestId: uuidSchema }), z.strictObject({ all: z.literal(true) })]);
+export type ActivityReadBody = z.input<typeof activityReadSchema>;
+
+/** POST /api/activity/unread: Undo of Mark all read. */
+export const activityUnreadSchema = z.strictObject({ requestIds: z.array(uuidSchema).min(1).max(100) });
+export type ActivityUnreadBody = z.input<typeof activityUnreadSchema>;
+
 /** Converts a URLSearchParams to a plain object for the query schemas (repeated keys: last wins). */
 export function searchParamsToObject(params: URLSearchParams): Record<string, string> {
   const out: Record<string, string> = {};

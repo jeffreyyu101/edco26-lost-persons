@@ -257,13 +257,15 @@ test('brand row on All only: one compact row with the logos, the title and the d
   await expect(page.getByTestId('status-chip')).toBeVisible();
   await expect(brand(page)).toBeVisible();
 
-  // Pending and My requests start at their large title (Pending v8), at the top of the page; Search keeps its
-  // own bar.
+  // Pending and My requests start at their large title (Pending v8), at the top of the page — under the
+  // alerts reminder while alerts don't work on this phone yet (F4: here, a Safari tab). Search keeps its own bar.
   for (const url of ['/?view=pending', '/?view=mine']) {
     await page.goto(url);
     await expect(page.getByTestId('view-switcher')).toBeVisible();
     await expect(brand(page), url).toHaveCount(0);
-    expect((await page.getByTestId('view-switcher').boundingBox())!.y, url).toBeLessThan(40);
+    const reminder = page.getByTestId('alerts-banner');
+    const top = (await reminder.count()) ? (await reminder.boundingBox())!.y + (await reminder.boundingBox())!.height : 0;
+    expect((await page.getByTestId('view-switcher').boundingBox())!.y - top, url).toBeLessThan(40);
   }
   await page.goto('/?q=');
   await expect(page.getByRole('searchbox', { name: 'Search requests' })).toBeVisible();
@@ -760,33 +762,39 @@ test('view switcher: Pending and My requests with counts, the same large title, 
   await expect(card).toContainText('Logged');
 });
 
-test('Alerts live in the avatar menu: On / Off, and "Alerts are on" the first time', async ({ page }) => {
+test('Alerts live in the avatar menu: it opens the Alerts sheet, whose New requests is the phone bell and server-side (F4)', async ({ page }) => {
+  // Start from off on the server (the switch is server-side and this identity is reused across runs).
+  const setNewRequests = async (on: boolean) =>
+    expect((await page.request.post('/api/push/prefs', { headers: { origin: BASE }, data: { newRequests: on } })).status()).toBe(200);
+  await setNewRequests(false);
   await page.goto('/');
   await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('account-trigger').click();
   const menu = page.getByRole('dialog', { name: 'Account' });
-  const alerts = menu.getByRole('switch', { name: 'Alerts' });
-  await expect(alerts).toHaveAttribute('aria-checked', 'false');
-  await expect(alerts).toContainText('Off');
   await expect(menu.getByText('Export CSV')).toHaveCount(0);
-
-  await alerts.click();
-  const sheet = page.getByRole('dialog', { name: 'Alerts are on' });
+  await menu.getByTestId('alerts-menu').click();
+  const sheet = page.getByRole('dialog', { name: 'Alerts' });
   await expect(sheet).toBeVisible();
-  await expect(sheet).toHaveAccessibleDescription('New requests alert you while this app is open.');
-  expect(await page.evaluate(() => localStorage.getItem('lp-bell'))).toBe('1');
-  await sheet.getByRole('button', { name: 'Got it' }).click();
-
-  // Once seen, switching it off and on again just flips it.
-  await page.getByTestId('account-trigger').click();
-  await expect(alerts).toHaveAttribute('aria-checked', 'true');
-  await expect(alerts).toContainText('On');
-  await alerts.click();
-  await expect(alerts).toHaveAttribute('aria-checked', 'false');
-  expect(await page.evaluate(() => localStorage.getItem('lp-bell'))).toBeNull();
-  await alerts.click();
-  await expect(alerts).toHaveAttribute('aria-checked', 'true');
+  const newRequests = sheet.getByRole('switch', { name: /New requests/ });
+  await expect(newRequests).toHaveAttribute('aria-checked', 'false');
+  await newRequests.click();
+  await expect(newRequests).toHaveAttribute('aria-checked', 'true');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('lp-bell'))).toBe('1');
+  // No "Alerts are on" intro on top of the sheet.
   await expect(page.getByRole('dialog', { name: 'Alerts are on' })).toHaveCount(0);
+  await newRequests.click();
+  await expect(newRequests).toHaveAttribute('aria-checked', 'false');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('lp-bell'))).toBeNull();
+  // Server-side: a reload reads it back.
+  await newRequests.click();
+  await expect(newRequests).toHaveAttribute('aria-checked', 'true');
+  await page.keyboard.press('Escape');
+  await page.reload();
+  await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('account-trigger').click();
+  await page.getByRole('dialog', { name: 'Account' }).getByTestId('alerts-menu').click();
+  await expect(page.getByRole('dialog', { name: 'Alerts' }).getByRole('switch', { name: /New requests/ })).toHaveAttribute('aria-checked', 'true');
+  await setNewRequests(false);
 });
 
 test('Pending: In medical → Friend coming, Undo, then Reunited closes it (greyed under Archived in All)', async ({ page }) => {
