@@ -13,19 +13,9 @@
 //   other                          → the raw action, humanised (never dropped)
 // Who = "name · short team"; when = "Nov 6, 11:10 PM" in the event timezone.
 import type { AuditEvent } from '@/lib/api-types';
-import {
-  PHOTO_TIMING_LABEL,
-  STATUS,
-  canonStaff,
-  displayChanges,
-  isInMedical,
-  parseStaff,
-  postFull,
-  statusMeta,
-  type PhotoTimingAny,
-  type StatusValue,
-} from '@/lib/domain';
-import { formatAuditTime } from '@/lib/format';
+import { PHOTO_TIMING_LABEL, STATUS, canonStaff, displayChanges, isInMedical, parseStaff, postFull, statusMeta, type PhotoTimingAny, type StatusValue } from '@/lib/domain';
+import { STAGE_META, type StageGlyphKind, type StageTone } from '@/lib/stages';
+import { formatAuditTime, formatClockAmPm } from '@/lib/format';
 
 /** Edit values longer than this are cut with "…" in the trail (the full value is in the details above). */
 export const AUDIT_VALUE_MAX = 160;
@@ -38,6 +28,10 @@ export interface AuditStatusChange {
   fromLabel: string | null;
   to: StatusValue;
   toLabel: string;
+  /** (F5) Set when a side is a "Not found yet" hold rather than its plain status: the stage's glyph and tone. */
+  fromGlyph?: StageGlyphKind;
+  toGlyph?: StageGlyphKind;
+  toTone?: StageTone;
 }
 
 export interface AuditChangeRow {
@@ -165,14 +159,25 @@ export function buildAuditTrail(audit: readonly AuditEvent[], timeZone: string):
         items.push({ ...common, ...plain, title: 'Request logged', note: post || null });
         break;
       }
-      case 'status':
-        items.push({
-          ...common,
-          ...plain,
-          status: statusChange(event.previous.status, event.next.status),
-          note: (event.next.kind && KIND_NOTE[event.next.kind]) || null,
-        });
+      case 'status': {
+        // (F5) The "Not found yet" hold: its first Not found (held), and changes from or back to a hold.
+        const change = statusChange(event.previous.status, event.next.status);
+        const held = STAGE_META.notFoundYet;
+        if (event.previous.hold && event.previous.status === STATUS.waiting) {
+          change.fromLabel = held.label;
+          change.fromGlyph = held.glyph;
+        }
+        const toHold = event.next.status === STATUS.waiting ? event.next.hold : undefined;
+        if (toHold) {
+          change.toLabel = held.label;
+          change.toGlyph = held.glyph;
+          change.toTone = held.tone;
+        }
+        const kindNote = (event.next.kind && KIND_NOTE[event.next.kind]) || null;
+        const recheck = toHold && event.next.held ? `Recheck ${formatClockAmPm(toHold.recheckAt, timeZone)}` : null;
+        items.push({ ...common, ...plain, status: change, note: recheck ?? kindNote });
         break;
+      }
       case 'cancelled':
         items.push({ ...common, ...plain, status: statusChange(event.previous.status, STATUS.cancelled) });
         break;
@@ -218,6 +223,19 @@ export function buildAuditTrail(audit: readonly AuditEvent[], timeZone: string):
 export interface StatusOrigin {
   staffName: string;
   at: string;
+}
+
+/**
+ * (F5) Who gave the first Not found that put the request on its current "Not found yet" hold, and when: the
+ * newest status event marked held. Null when the trail has none.
+ */
+export function holdOrigin(audit: readonly AuditEvent[]): StatusOrigin | null {
+  const events = chronological(audit);
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const e = events[i];
+    if (e?.action === 'status' && e.next.held) return { staffName: parseStaff(e.staff).name, at: e.at };
+  }
+  return null;
 }
 
 /**

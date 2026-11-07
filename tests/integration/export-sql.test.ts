@@ -174,22 +174,34 @@ describe('docs/export.sql', () => {
     const created = await api('/api/requests', { json: createBody({ name: pii(`TEST-core-${uniq()}`) }), cookie: await cookieFor(staff) });
     expect(created.status).toBe(201);
     const r = created.body.request;
+    const medical = await cookieFor(newStaff('Medical'));
     const answered = await api(`/api/requests/${r.id}/status`, {
       json: { status: STATUS.notInMedical, expectedVersion: r.rowVersion, kind: 'answer' },
-      cookie: await cookieFor(newStaff('Medical')),
+      cookie: medical,
     });
     expect(answered.status).toBe(200);
+    // (F5) The first Not found holds the request (still Waiting for check); the second is final.
+    const final = await api(`/api/requests/${r.id}/status`, {
+      json: { status: STATUS.notInMedical, expectedVersion: answered.body.request.rowVersion, kind: 'answer' },
+      cookie: medical,
+    });
+    expect(final.body.request.status).toBe(STATUS.notInMedical);
 
     const { header, rows } = runReadOnly(QUERY_2);
     expect(rows.every((row) => row.length === AUDIT_COLUMNS.length)).toBe(true);
     const mine = rows.filter((row) => row[0] === lp(r.caseNumber));
     expect(mine).toHaveLength(Number(psql(`select count(*) from public.audit_events where patient_id = '${r.id}'`)));
     const col = (row: string[], name: string) => row[header.indexOf(name)];
-    expect(mine.map((row) => col(row, 'Action'))).toEqual(['patient_created', 'status_changed']);
+    expect(mine.map((row) => col(row, 'Action'))).toEqual(['patient_created', 'status_changed', 'status_changed']);
     expect(mine.map((row) => col(row, 'When'))).toEqual([...mine.map((row) => col(row, 'When'))].sort());
+    // The hold: Waiting → Waiting, kind answer, and its raw value says held, not found, and when to recheck.
     expect(col(mine[1] as string[], 'From status')).toBe(STATUS.waiting);
-    expect(col(mine[1] as string[], 'To status')).toBe(STATUS.notInMedical);
+    expect(col(mine[1] as string[], 'To status')).toBe(STATUS.waiting);
     expect(col(mine[1] as string[], 'Kind')).toBe('answer');
+    expect(JSON.parse(col(mine[1] as string[], 'New value') as string)).toMatchObject({ held: true, answer: 'not_found', not_found_checks: 1 });
+    expect(col(mine[2] as string[], 'From status')).toBe(STATUS.waiting);
+    expect(col(mine[2] as string[], 'To status')).toBe(STATUS.notInMedical);
+    expect(col(mine[2] as string[], 'Kind')).toBe('answer');
     expect(col(mine[0] as string[], 'Staff')).toBe(staffOf(staff));
     expect(JSON.parse(col(mine[0] as string[], 'New value') as string)).toMatchObject({ reporting_location: 'FA 3 – Kinetic' });
 

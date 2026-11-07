@@ -7,8 +7,9 @@
 // on a table 1040 px or wider (the CSS decides); the row's sentence always says them. Times reuse F1's log helpers (lib/format.ts), so the desk and the phone never disagree.
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { ageGender, canonicalTeam, parseStaff, postFilterLabel, teamShort, type TeamValue } from '@/lib/domain';
+import { stagePhrase } from '@/lib/stages';
 import { formatAuditTime, formatCaseNumber, formatCreatedTime, formatUpdatedAgo, updatedPhrase, wasUpdated } from '@/lib/format';
-import { displayName, outboxDisplay, outboxRowLabel, statusPhrase, updatedSince, whoPhrase } from '@/components/list/list-helpers';
+import { displayName, outboxDisplay, outboxRowLabel, updatedSince, whoPhrase } from '@/components/list/list-helpers';
 
 /** The columns, in order. `wide` ones drop out when a request docks beside the table (table.module.css). */
 export const TABLE_COLUMNS = [
@@ -94,12 +95,13 @@ export function rowTimes(row: RequestSummary, now: number, timeZone: string): Ro
  * Park, GCHX Base". It starts like the phone log's sentence (number, name, status), then says the columns a
  * desk adds.
  */
-export function tableRowLabel(row: RequestSummary, times: Pick<RowTimes, 'created' | 'updatedSaid'>): string {
+export function tableRowLabel(row: RequestSummary, times: Pick<RowTimes, 'created' | 'updatedSaid'>, timeZone?: string): string {
   const by = loggedByPhrase(row.createdBy);
   return [
     formatCaseNumber(row.caseNumber),
     whoPhrase(row),
-    statusPhrase(row.status),
+    // (F5) The stage, not just the status ("Not found yet, recheck at 4:40 PM").
+    stagePhrase(row, timeZone),
     `created ${times.created}`,
     times.updatedSaid,
     postCell(row),
@@ -110,8 +112,8 @@ export function tableRowLabel(row: RequestSummary, times: Pick<RowTimes, 'create
 }
 
 /** A search result's sentence: the row's, then the matched text when the match is not the name or number. */
-export function searchRowLabel(row: RequestSummary, times: Pick<RowTimes, 'created' | 'updatedSaid'>, line: string): string {
-  return `${tableRowLabel(row, times)}.${line ? ` ${line}` : ''}`;
+export function searchRowLabel(row: RequestSummary, times: Pick<RowTimes, 'created' | 'updatedSaid'>, line: string, timeZone?: string): string {
+  return `${tableRowLabel(row, times, timeZone)}.${line ? ` ${line}` : ''}`;
 }
 
 export interface OutboxRowModel {

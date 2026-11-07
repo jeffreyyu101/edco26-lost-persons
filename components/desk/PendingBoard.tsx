@@ -8,12 +8,18 @@
 import type { ReactNode } from 'react';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { RequestSummary } from '@/lib/api-types';
-import { CheckCard, ComingCard, type CheckCardProps, type ComingCardProps } from '@/components/list/cards';
+import { ComingCard, type CheckCardProps, type ComingCardProps } from '@/components/list/cards';
+import { LaterGroup, ToCheckList } from '@/components/list/ToCheckLanes';
+import type { ToCheckLanes } from '@/lib/client/lanes';
 import { PendingTabs, pendingTabIds, type PendingTab } from '@/components/list/PendingTabs';
 import b from './pending-board.module.css';
 
 export interface PendingBoardProps {
   waiting: readonly RequestSummary[];
+  /** (F5) To check's lanes (due rechecks, the queue, Later). Without them, `waiting` as one queue. */
+  lanes?: ToCheckLanes;
+  /** (F5) The event timezone, for the recheck times. */
+  timeZone?: string;
   friendComing: readonly RequestSummary[];
   now: number;
   offline: boolean;
@@ -30,14 +36,29 @@ export interface PendingBoardProps {
 
 export function PendingBoard(props: PendingBoardProps) {
   const { waiting, friendComing, now, offline, tab, onTab, idBase } = props;
+  const lanes: ToCheckLanes = props.lanes ?? { due: [], queue: [...waiting], later: [] };
+  const checkCount = lanes.due.length + lanes.queue.length;
   return (
     <div className={b.board} data-testid="pending-board" data-tab={tab}>
-      <PendingTabs className={b.tabs} tab={tab} onChange={onTab} counts={{ check: waiting.length, coming: friendComing.length }} idBase={idBase} />
+      <PendingTabs className={b.tabs} tab={tab} onChange={onTab} counts={{ check: checkCount, coming: friendComing.length }} idBase={idBase} />
       <div className={b.cols}>
-        <Column id="check" idBase={idBase} active={tab === 'check'} label="To check" count={waiting.length} empty="Nothing to check">
-          {waiting.map((row) => (
-            <CheckCard key={row.id} row={row} now={now} offline={offline} onNotInMedical={props.onNotInMedical} onInMedical={props.onInMedical} />
-          ))}
+        <Column
+          id="check"
+          idBase={idBase}
+          active={tab === 'check'}
+          label="To check"
+          count={checkCount}
+          empty="Nothing to check"
+          after={lanes.later.length > 0 ? <LaterGroup rows={lanes.later} timeZone={props.timeZone} /> : null}
+        >
+          <ToCheckList
+            lanes={{ ...lanes, later: [] }}
+            now={now}
+            timeZone={props.timeZone}
+            offline={offline}
+            onNotInMedical={props.onNotInMedical}
+            onInMedical={props.onInMedical}
+          />
         </Column>
         <Column id="coming" idBase={idBase} active={tab === 'coming'} label="Friend coming" count={friendComing.length} empty="No friends coming">
           {friendComing.map((row) => (
@@ -57,6 +78,7 @@ function Column({
   count,
   empty,
   children,
+  after = null,
 }: {
   id: PendingTab;
   idBase: string;
@@ -65,6 +87,8 @@ function Column({
   count: number;
   empty: string;
   children: ReactNode;
+  /** (F5) Under the cards, or under the empty note: To check's Later group. */
+  after?: ReactNode;
 }) {
   const ids = pendingTabIds(idBase, id);
   const headingId = `${ids.panel}-h`;
@@ -83,6 +107,7 @@ function Column({
         <span className={b.n}>{count}</span>
       </h2>
       {count > 0 ? <div className={b.cards}>{children}</div> : <p className={b.empty}>{empty}</p>}
+      {after}
     </section>
   );
 }

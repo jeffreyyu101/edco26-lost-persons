@@ -26,7 +26,7 @@ import type {
   Stats,
   SyncResponse,
 } from '../api-types';
-import { SETTABLE_STATUSES, STATUS, canonStaff, isUuid, sameStaff, statusMeta, staffString, undoTarget, type SettableStatus, type StatusKind } from '../domain';
+import { SETTABLE_STATUSES, STATUS, canonStaff, isHeld, isUuid, sameStaff, statusMeta, staffString, undoTarget, type SettableStatus, type StatusKind } from '../domain';
 import { formatCaseNumber } from '../format';
 import { syncPath } from './api-paths';
 import {
@@ -88,6 +88,7 @@ import {
   type ToastItem,
 } from './store-contract';
 import { chunk, isRow, mergeRows, overlayForPatch, replaceAll, staleIds, summaryOf } from './sync-merge';
+import { holdChanged, holdSnackMessage, statusOverlayFields } from './hold';
 import { uuid } from './uuid';
 
 // ---------------------------------------------------------------------------------------------------
@@ -1203,7 +1204,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     clearSnackbar();
     const snackId = uuid();
     undoRecords.set(snackId, { id: row.id, to: back, version: row.rowVersion });
-    set({ snackbar: { id: snackId, message: `${formatCaseNumber(row.caseNumber)} · ${statusMeta(to).shortLabel}`, expiresAt: now() + UNDO_MS } });
+    // (F5) The first Not found puts the request on hold: "Not found · recheck 4:40".
+    const message = holdSnackMessage(row, to, state.eventTimezone) ?? `${formatCaseNumber(row.caseNumber)} · ${statusMeta(to).shortLabel}`;
+    set({ snackbar: { id: snackId, message, expiresAt: now() + UNDO_MS } });
     // Held (the location sheet covers the bar): the countdown starts when the hold is released.
     if (undoHolds === 0) armUndo(snackId);
   };
@@ -1236,21 +1239,29 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     };
   };
 
-  const runStatus = async (id: string, to: SettableStatus, kind: StatusKind, undoVersion: number | null): Promise<MutationResult> => {
+  const runStatus = async (id: string, to: SettableStatus, kind: StatusKind, undoVersion: number | null, tapHeld?: boolean): Promise<MutationResult> => {
     const gen = ownerGen();
     const row = state.confirmed.get(id);
     if (!row) return fail('not_found', COPY.notFound);
     const from = row.status;
     // A queued second tap that the first one already satisfied.
     if (undoVersion === null && from === to) return { ok: true, changed: false, request: row };
-    setOverlay(id, { mutationId: uuid(), kind: 'status', fields: { status: to }, startedAt: now() });
+    // (F5) A Not found tapped on a request that was not on hold, queued behind one that has put it on hold (a
+    // double tap): already satisfied. Sent, it would be the final answer.
+    if (undoVersion === null && to === STATUS.notInMedical && kind === 'answer' && tapHeld === false && isHeld(row)) {
+      return { ok: true, changed: false, request: row };
+    }
+    // (F5) A first Not found keeps the status and goes on hold (lib/client/hold.ts predicts it).
+    setOverlay(id, { mutationId: uuid(), kind: 'status', fields: statusOverlayFields(row, to, kind, now()), startedAt: now() });
     let res: HttpResult<ChangeResponse> = await postStatus(id, to, undoVersion ?? row.rowVersion, kind);
     if (gen !== state.generation) return fail('failed', COPY.failed);
     if (!res.ok && res.kind === 'http' && res.status === 409 && kind !== 'undo') {
       // A12: only fields or photos changed (same status as the tap started from) → resend once.
       const latest = await fetchRow(id);
       if (gen !== state.generation) return fail('failed', COPY.failed);
-      if (latest && latest.status === from) {
+      // (F5) Not a Not found when the hold moved: a request someone else just put on hold must not be closed by
+      // the resend (the same tap, meant as the first Not found, would be the final one now).
+      if (latest && latest.status === from && !(to === STATUS.notInMedical && holdChanged(row, latest))) {
         res = await postStatus(id, to, latest.rowVersion, kind);
         if (gen !== state.generation) return fail('failed', COPY.failed);
       } else {
@@ -2120,7 +2131,11 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 
     async setStatus(id, status, kind) {
       if (offlineNow()) return refuseOffline();
-      return serialize(id, async () => (await writeGate(false)) ?? runStatus(id, status, kind, null));
+      // (F5) Whether the request was on hold, as the server last said, when tapped (see runStatus). Not the
+      // overlay: a double tap lands while the first tap's predicted hold is on screen, and must stay a repeat.
+      const confirmedRow = state.confirmed.get(id);
+      const tapHeld = confirmedRow ? isHeld(confirmedRow) : false;
+      return serialize(id, async () => (await writeGate(false)) ?? runStatus(id, status, kind, null, tapHeld));
     },
 
     async undo(snackbarId) {

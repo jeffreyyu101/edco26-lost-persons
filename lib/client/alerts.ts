@@ -7,7 +7,7 @@
 //     closes once the row is in another status (alertStillCurrent), so a sticky "is in medical" never
 //     outlives a changed or undone answer.
 import type { RequestSummary } from '../api-types';
-import { STATUS, ageGender, initials, isInMedical, sameStaff, statusMeta } from '../domain';
+import { NOT_FOUND_YET_LABEL, STATUS, ageGender, initials, isHeld, isInMedical, sameStaff, statusMeta } from '../domain';
 import { formatCaseNumber } from '../format';
 import type { AlertEvent, ToastItem } from './store-contract';
 
@@ -47,6 +47,11 @@ export function statusAlert(row: RequestSummary): AlertEvent {
   return { kind: 'status_changed', requestId: row.id, title: `${s} — ${statusMeta(row.status).shortLabel.toLowerCase()}`, count: 1 };
 }
 
+/** (F5) "LP-1004 · S.L. — not found yet": the first Not found, which put the request on hold. */
+export function holdAlert(row: RequestSummary): AlertEvent {
+  return { kind: 'status_changed', requestId: row.id, title: `${subject(row)} — ${NOT_FOUND_YET_LABEL.toLowerCase()}`, count: 1 };
+}
+
 export function newRequestAlert(row: RequestSummary): AlertEvent {
   const who = [initials(row.name), ageGender(row.age, row.gender)].filter(Boolean).join(' ');
   const subtitle = [who, row.postShort].filter(Boolean).join(' · ');
@@ -72,7 +77,15 @@ export function diffAlerts(
     // A change by the same person (another of their phones) is not "someone else".
     const byMe = sameStaff(row.updatedBy, ctx.sessionStaff);
     if (before) {
-      if (before.status === row.status || !mine || byMe) continue;
+      if (!mine || byMe) continue;
+      if (before.status === row.status) {
+        // (F5) The first Not found keeps the request Waiting for check: going on hold is the change.
+        if (isHeld(row) && !isHeld(before)) {
+          ctx.seen.add(key);
+          out.push(holdAlert(row));
+        }
+        continue;
+      }
       ctx.seen.add(key);
       out.push(statusAlert(row));
     } else {

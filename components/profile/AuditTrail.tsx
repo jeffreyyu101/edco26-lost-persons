@@ -2,18 +2,19 @@
 // The audit trail list (profile.html `.tl`): newest first, a status glyph (or a dot) on the timeline, the
 // change, then "who · when". Items come from buildAuditTrail() (audit-trail.ts).
 import { Skeleton, Text, VisuallyHidden } from '@radix-ui/themes';
+import { StageGlyph } from '@/components/ui/StageGlyph';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import { statusMeta } from '@/lib/domain';
 import type { AuditItem } from './audit-trail';
 import s from './profile.module.css';
 
 function StatusLine({ change }: { change: NonNullable<AuditItem['status']> }) {
-  const tone = statusMeta(change.to).tone;
+  const tone = change.toTone ?? statusMeta(change.to).tone;
   return (
     <div className={s.chg}>
       {change.from ? (
         <>
-          <StatusGlyph status={change.from} size={12} />
+          {change.fromGlyph ? <StageGlyph glyph={change.fromGlyph} size={12} /> : <StatusGlyph status={change.from} size={12} />}
           <Text size="2" weight="medium">
             {change.fromLabel}
           </Text>
@@ -23,7 +24,7 @@ function StatusLine({ change }: { change: NonNullable<AuditItem['status']> }) {
           <VisuallyHidden>to</VisuallyHidden>
         </>
       ) : null}
-      <StatusGlyph status={change.to} size={12} />
+      {change.toGlyph ? <StageGlyph glyph={change.toGlyph} size={12} /> : <StatusGlyph status={change.to} size={12} />}
       <Text size="2" weight="medium" color={tone}>
         {change.toLabel}
       </Text>
@@ -35,7 +36,17 @@ function Item({ item }: { item: AuditItem }) {
   const byline = [item.who, item.when].filter(Boolean).join(' · ');
   return (
     <li data-testid="audit-item">
-      <span className={s.d}>{item.status ? <StatusGlyph status={item.status.to} /> : <span className={s.pt} />}</span>
+      <span className={s.d}>
+        {item.status ? (
+          item.status.toGlyph ? (
+            <StageGlyph glyph={item.status.toGlyph} />
+          ) : (
+            <StatusGlyph status={item.status.to} />
+          )
+        ) : (
+          <span className={s.pt} />
+        )}
+      </span>
       <div className={s.tt}>
         {item.status ? (
           <StatusLine change={item.status} />

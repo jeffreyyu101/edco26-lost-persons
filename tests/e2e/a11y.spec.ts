@@ -139,7 +139,9 @@ for (const theme of ['light', 'dark'] as const) {
         const waiting = await createRequest(page);
         const answerMe = await createRequest(page);
         const coming = await setStatus(page, await createRequest(page), 'Found – Awaiting Reunion', 'answer');
-        await setStatus(page, await createRequest(page), 'Checked – Not Found', 'answer');
+        // (F5) One request on a "Not found yet" hold, and one answered Not found twice (final, closed).
+        const held = await setStatus(page, await createRequest(page), 'Checked – Not Found', 'answer');
+        await setStatus(page, await setStatus(page, await createRequest(page), 'Checked – Not Found', 'answer'), 'Checked – Not Found', 'answer');
         await setStatus(page, await setStatus(page, await createRequest(page), 'Found – Awaiting Reunion', 'answer'), 'Reunited – Closed', 'reunite');
         const other = await createRequest(page, { reportingLocation: 'Other', otherLocation: 'Base' });
         // A photo, so the profile's portrait is a button (its name must start with the count it shows).
@@ -249,6 +251,7 @@ for (const theme of ['light', 'dark'] as const) {
         results.push(await audit(page, 'cancel confirm'));
         await page.getByRole('button', { name: 'Keep' }).click();
         await visit(`/?r=${coming.id}`, 'Profile (in medical)', () => expect(page.getByTestId('audit-item').first()).toBeVisible());
+        await visit(`/?r=${held.id}`, 'Profile (not found yet)', () => expect(page.getByTestId('recheck-row')).toBeVisible());
         await visit(`/?r=${waiting.id}&edit=all`, 'Edit', () => expect(page.getByTestId('request-form-submit')).toBeVisible());
         await visit('/?dashboard=1', 'Dashboard', () => expect(page.getByTestId('open-count')).toBeVisible());
 

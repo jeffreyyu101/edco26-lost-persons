@@ -22,9 +22,12 @@
   box-sizing: border-box;
 }
 
-/* Nothing docked: Post shows (desktop-new-tablet.html .rail.wideT, iPad portrait 820 × 1180). */
+/* Nothing docked: Post shows (desktop-new-tablet.html .rail.wideT, iPad portrait 820 × 1180).
+   (F5) The status column fits the longest stage with what follows it ("Not found in medical · 2 checks",
+   "Friend en route · ~4 min", design/screens/colors-6.png) where there is room; where there is less, only
+   what follows the label gives way (.stx). */
 .table {
-  --tbl-cols: 56px minmax(0, 1fr) 160px 120px 88px 64px;
+  --tbl-cols: 56px minmax(0, 1fr) 180px 120px 88px 64px;
   --tbl-gap: 10px;
   --tbl-pad-l: 24px;
   --tbl-pad-r: calc(20px + env(safe-area-inset-right));
@@ -40,7 +43,7 @@
 /* A wide table: Logged by too (desktop-log.html .tbl). */
 @container (min-width: 1040px) {
   .table {
-    --tbl-cols: 64px minmax(0, 1fr) 170px 128px 104px 76px 150px;
+    --tbl-cols: 64px minmax(0, 1fr) 240px 128px 104px 76px 150px;
     --tbl-gap: 12px;
   }
   .cBy {
@@ -51,7 +54,7 @@
 /* A request docked beside the table: five columns (desktop-log.html .withPanel .tbl). */
 @media (min-width: 1024px) {
   [data-pane] .table {
-    --tbl-cols: 56px minmax(0, 1fr) 160px 96px 72px;
+    --tbl-cols: 56px minmax(0, 1fr) 180px 96px 72px;
     --tbl-gap: 12px;
   }
   [data-pane] .cPost,
@@ -61,10 +64,11 @@
 }
 
 /* Docked at 1024–1279, the main column is 544–799 px: the same five, tighter. The status column still takes
-   "Not found in medical" on one line, uncut (the longest status, F2); the name gives way. */
+   "Not found in medical" on one line, uncut (the longest status, F2); what follows it (F5 .stx) and then the
+   name give way. */
 @media (min-width: 1024px) and (max-width: 1279.98px) {
   [data-pane] .table {
-    --tbl-cols: 48px minmax(0, 1fr) 154px 88px 56px;
+    --tbl-cols: 48px minmax(0, 1fr) 172px 88px 56px;
     --tbl-gap: 10px;
     --tbl-pad-l: 20px;
     --tbl-pad-r: 16px;
@@ -241,10 +245,33 @@ button.row:focus-visible {
   color: var(--red-11);
 }
 
+/* (F5) The stages: amber Needs info, violet Not found yet, teal Friend en route (lib/stages STAGE_META). */
+.st[data-tone='amber'] {
+  color: var(--amber-11);
+}
+
+.st[data-tone='violet'] {
+  color: var(--violet-11);
+}
+
+.st[data-tone='teal'] {
+  color: var(--teal-11);
+}
+
+/* The label keeps its words; what follows it ("· 4:40 PM", "· Bed 3", "· 2 checks") gives way first. */
 .stl {
   min-width: 0;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.stx {
+  min-width: 0;
+  flex: 0 1000 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
 }
 
 .glyph {

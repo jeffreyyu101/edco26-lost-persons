@@ -17,6 +17,8 @@
 --   1b. patients.age becomes free text ("mid-20s"), only while it is not text yet: its CHECK is dropped and
 --      every value is kept as its text (24 → '24').
 --   1c. patients.medical_location (nullable text): where medical has the patient ("Chair 14"). Additive.
+--   1d. patients.recheck_at (nullable) and patients.not_found_checks (smallint, default 0): the "Not found
+--      yet" hold. Additive.
 --   2. Replaces the reporting_location / status CHECK only when it lacks a needed value (or a value rows
 --      already hold), NOT VALID. Values already in the table stay allowed, so legacy rows stay editable.
 --   3. lp_touch() BEFORE UPDATE trigger: updated_at = clock_timestamp(), row_version + 1.
@@ -161,6 +163,19 @@ $age$;
 --     so the extra key is ignored. A re-run keeps every value (add column if not exists).
 -- -----------------------------------------------------------------------------------------------------
 alter table public.patients add column if not exists medical_location text;
+
+-- -----------------------------------------------------------------------------------------------------
+-- 1d. The "Not found yet" hold (F5, Brian 2026-11-06 evening; design/screens/updates.html #recheck). The first
+--     Not found on a request that is Waiting for check keeps it open: the status STAYS 'Added' (so a build
+--     from before this keeps it in its queue), recheck_at = now() + lp_stages_recheck_minutes() and
+--     not_found_checks = 1. A Not found on a held request is the final 'Checked – Not Found' (closed). A due
+--     hold is never closed by itself: it waits for someone to answer. Additive and safe while the live build
+--     serves: a nullable column, and a NOT NULL column with a constant default (no table rewrite on
+--     PostgreSQL 11+); the live build never writes them and its server maps lp_row through an allowlist. A
+--     re-run keeps every value (add column if not exists).
+-- -----------------------------------------------------------------------------------------------------
+alter table public.patients add column if not exists recheck_at timestamptz;
+alter table public.patients add column if not exists not_found_checks smallint not null default 0;
 
 -- -----------------------------------------------------------------------------------------------------
 -- 2. Locations and statuses (in case 20261105_update_locations_and_statuses never ran in production).
@@ -462,6 +477,10 @@ begin
     'first_photo_id', v_first,
     'photo_count', v_count,
     'medical_location', p.medical_location
+  ) || pg_catalog.jsonb_build_object(
+    -- (F5) The "Not found yet" hold (step 1d): when the recheck is due, and how many Not found answers.
+    'recheck_at', p.recheck_at,
+    'not_found_checks', p.not_found_checks
   );
 end
 $fn$;
@@ -765,6 +784,18 @@ begin
 end
 $fn$;
 
+-- (F5) How long a "Not found yet" hold lasts before medical looks again: ONE constant for SQL and TypeScript
+-- (RECHECK_MINUTES in lib/domain.ts; a unit test compares them). Immutable, no timeouts.
+create or replace function public.lp_stages_recheck_minutes()
+returns integer
+language sql
+immutable
+security invoker
+set search_path = public, pg_temp
+as $fn$
+  select 20
+$fn$;
+
 -- lp_set_status: the only way a status changes (except cancel).
 --   Locks the row. Already at p_status → {changed: false, row}, no audit (two liaisons, same answer),
 --   for any current status including legacy ones; only then is p_status checked against the §4 values.
@@ -773,6 +804,26 @@ $fn$;
 --   found_at: set on the first entry into Found – Awaiting Reunion; never overwritten or cleared.
 --   reunion_started_at: now() on every entry into Found – Awaiting Reunion; cleared on → Added / Not found.
 --   closed_at: now() on entry into Reunited / Discharged / Cancelled; cleared on any other target.
+--
+--   (F5) The "Not found yet" hold (step 1d). The transitions are unchanged; what Not found STORES depends on
+--   the request:
+--   * Waiting for check with not_found_checks = 0 (and not an Undo) → the HOLD: the status stays 'Added',
+--     recheck_at = now() + lp_stages_recheck_minutes(), not_found_checks = 1, audit status_changed
+--     {status: 'Added', kind, held: true, answer: 'not_found', recheck_at, not_found_checks, row_version}. A
+--     build from before this calls the same function with the same arguments and gets the hold too: the row
+--     it gets back is still Waiting for check, so it keeps the request in its queue.
+--   * Any other Not found (a held request, due or not; Change answer from In medical) → the final
+--     'Checked – Not Found', recheck_at = null, not_found_checks + 1 (2 after a hold).
+--   * In medical clears recheck_at (any time). Back to Waiting for check (kind change) and Reopen clear both.
+--   * Undo restores the hold fields the undone change replaced (the previous_value of the latest
+--     status_changed, when that is the change being undone): Undo of the first Not found clears the hold
+--     (counter back to 0); Undo of the final Not found, or of In medical on a held request, puts the hold
+--     back. Undo of a cancel keeps them (lp_cancel never touches them).
+--   * Waiting for check → Waiting for check on a held request (Undo, or Back to Waiting) is a real change.
+--   * A Not found sent with the version from just before a hold, when that hold is the last write (two
+--     liaisons tapped Not found at once), is the idempotent repeat: {changed: false}, no audit. Without it
+--     the second phone's 409 retry would close the request at once.
+--   * A due hold never closes by itself: nothing here (or anywhere) runs on a timer.
 create function public.lp_set_status(p_id uuid, p_expected_version bigint, p_status text, p_staff text, p_kind text)
 returns jsonb
 language plpgsql
@@ -786,6 +837,11 @@ declare
   v_row public.patients;
   v_prev jsonb;
   v_allowed boolean;
+  v_held boolean;
+  v_last jsonb;
+  v_last_to text;
+  v_recheck timestamptz;
+  v_checks integer;
 begin
   perform public.lp_require_staff(p_staff);
 
@@ -807,10 +863,25 @@ begin
     raise exception using errcode = 'P0002', message = 'not_found';
   end if;
 
+  v_held := v_row.status = 'Added' and (v_row.recheck_at is not null or v_row.not_found_checks <> 0);
+
   -- Idempotent repeat (spec §4), checked BEFORE the target whitelist so it holds for every status the
   -- row can be in, legacy ones included ('Bring friend to medical' → 'Bring friend to medical' is
   -- {changed: false}, not invalid_field). Nothing is written, so no non-canonical value can get in.
-  if v_row.status = p_status then
+  -- (F5) Waiting for check → Waiting for check on a held request clears or restores the hold below.
+  if v_row.status = p_status and not (p_status = 'Added' and v_held) then
+    return pg_catalog.jsonb_build_object('changed', false, 'row', public.lp_row(v_row));
+  end if;
+
+  -- (F5) Two liaisons, the same first Not found at once: the hold is already the last write.
+  if p_status = 'Checked – Not Found' and p_kind = 'answer' and v_row.status = 'Added'
+     and v_row.recheck_at is not null and p_expected_version = v_row.row_version - 1
+     and exists (
+       select 1 from public.audit_events e
+       where e.patient_id = p_id and e.action_type = 'status_changed'
+         and e.new_value ->> 'held' = 'true'
+         and e.new_value ->> 'row_version' = v_row.row_version::text
+     ) then
     return pg_catalog.jsonb_build_object('changed', false, 'row', public.lp_row(v_row));
   end if;
 
@@ -836,6 +907,10 @@ begin
     -- TRANSITIONS:END
     else false
   end;
+  -- (F5) Waiting for check → Waiting for check is allowed only to clear or restore a hold (see above).
+  if v_row.status = 'Added' and p_status = 'Added' and v_held then
+    v_allowed := p_kind in ('undo', 'change');
+  end if;
   if not coalesce(v_allowed, false) then
     raise exception using errcode = 'P0422', message = 'illegal_transition', hint = v_row.status;
   end if;
@@ -850,7 +925,57 @@ begin
     'found_at', v_row.found_at,
     'reunion_started_at', v_row.reunion_started_at,
     'closed_at', v_row.closed_at
+  ) || pg_catalog.jsonb_build_object(
+    'recheck_at', v_row.recheck_at,
+    'not_found_checks', v_row.not_found_checks
   );
+
+  -- (F5) The first Not found on a request Waiting for check: the hold. The status stays 'Added'.
+  if p_status = 'Checked – Not Found' and v_row.status = 'Added' and v_row.not_found_checks = 0 and p_kind <> 'undo' then
+    update public.patients
+       set recheck_at = now() + pg_catalog.make_interval(mins => public.lp_stages_recheck_minutes()),
+           not_found_checks = 1,
+           updated_by = p_staff
+     where id = p_id
+    returning * into v_row;
+
+    insert into public.audit_events (patient_id, staff_name, action_type, previous_value, new_value)
+    values (p_id, p_staff, 'status_changed', v_prev,
+            pg_catalog.jsonb_build_object('status', 'Added', 'kind', p_kind, 'held', true, 'answer', 'not_found')
+            || pg_catalog.jsonb_build_object('recheck_at', v_row.recheck_at, 'not_found_checks', v_row.not_found_checks,
+                                             'row_version', v_row.row_version));
+
+    return pg_catalog.jsonb_build_object('changed', true, 'row', public.lp_row(v_row));
+  end if;
+
+  -- (F5) The hold fields after the change.
+  v_recheck := v_row.recheck_at;
+  v_checks := v_row.not_found_checks;
+  if p_status = 'Added' then
+    -- Back to Waiting for check and Reopen start afresh; an Undo of a cancel keeps them (cancel left them).
+    if not (p_kind = 'undo' and v_row.status = 'Cancelled') then
+      v_recheck := null;
+      v_checks := 0;
+    end if;
+  elsif p_status = 'Checked – Not Found' then
+    -- The final answer.
+    v_recheck := null;
+    v_checks := least(v_row.not_found_checks + 1, 99);
+  elsif p_status = 'Found – Awaiting Reunion' then
+    v_recheck := null;
+  end if;
+  -- Undo puts back what the undone change replaced, when the latest status change is that change.
+  if p_kind = 'undo' and v_row.status <> 'Cancelled' then
+    select e.previous_value, e.new_value ->> 'status' into v_last, v_last_to
+    from public.audit_events e
+    where e.patient_id = p_id and e.action_type = 'status_changed'
+    order by e.occurred_at desc, e.id desc
+    limit 1;
+    if v_last ->> 'status' = p_status and v_last_to = v_row.status then
+      v_recheck := (v_last ->> 'recheck_at')::timestamptz;
+      v_checks := coalesce((v_last ->> 'not_found_checks')::integer, 0);
+    end if;
+  end if;
 
   begin
     update public.patients
@@ -865,6 +990,8 @@ begin
              when p_status in ('Reunited – Closed', 'Found – Discharged', 'Cancelled') then now()
              else null
            end,
+           recheck_at = v_recheck,
+           not_found_checks = v_checks,
            updated_by = p_staff
      where id = p_id
     returning * into v_row;
@@ -874,7 +1001,8 @@ begin
 
   insert into public.audit_events (patient_id, staff_name, action_type, previous_value, new_value)
   values (p_id, p_staff, 'status_changed', v_prev,
-          pg_catalog.jsonb_build_object('status', p_status, 'kind', p_kind));
+          pg_catalog.jsonb_build_object('status', p_status, 'kind', p_kind)
+          || pg_catalog.jsonb_build_object('recheck_at', v_row.recheck_at, 'not_found_checks', v_row.not_found_checks));
 
   return pg_catalog.jsonb_build_object('changed', true, 'row', public.lp_row(v_row));
 end
@@ -1267,6 +1395,8 @@ end
 $fn$;
 
 -- lp_stats: everything the dashboard needs (spec §8 + A21 + A49). camelCase keys, passed through by the server.
+--   (F5) A request on a "Not found yet" hold is still 'Added': it counts as open.waiting, never as
+--   notInMedical (only the final Not found does); its first Not found counts as its first answer.
 --   open {waiting, inMedical (legacy Bring friend counts as In medical)}; notInMedical, reunited,
 --   discharged, cancelled and total over all rows; loggedLastHour (rows created in the last 60 minutes,
 --   any status); longestWait; avgAnswerMinutes; avgReuniteMinutes; byPost; recent.
@@ -1325,6 +1455,8 @@ begin
   ) into v_longest
   from public.patients p
   where p.status = 'Added'
+    -- (F5) A request on a "Not found yet" hold is not waiting for medical until its recheck is due.
+    and (p.recheck_at is null or p.recheck_at <= v_now)
   order by p.created_at asc, p.case_number asc
   limit 1;
 
@@ -1342,6 +1474,8 @@ begin
          and e.new_value ->> 'status' in ('Checked – Not Found', 'Found – Awaiting Reunion', 'Bring friend to medical'))
         or (e.action_type = 'medical_search' and e.new_value ->> 'outcome' = 'not_found')
         or e.action_type = 'medical_search_found'
+        -- (F5) The first Not found that put the request on hold (its status stayed 'Added') is an answer.
+        or (e.action_type = 'status_changed' and e.new_value ->> 'held' = 'true')
       )
   ), first_answer as (
     select distinct on (a.patient_id) a.patient_id, a.occurred_at
@@ -1508,6 +1642,7 @@ revoke all on function public.lp_require_staff(text) from public, anon, authenti
 revoke all on function public.lp_clean_fields(jsonb, boolean) from public, anon, authenticated;
 revoke all on function public.lp_sync(timestamptz, uuid[], boolean, timestamptz, uuid, integer) from public, anon, authenticated;
 revoke all on function public.lp_create_request(jsonb, text) from public, anon, authenticated;
+revoke all on function public.lp_stages_recheck_minutes() from public, anon, authenticated;
 revoke all on function public.lp_set_status(uuid, bigint, text, text, text) from public, anon, authenticated;
 revoke all on function public.lp_update_fields(uuid, jsonb, bigint, text) from public, anon, authenticated;
 revoke all on function public.lp_cancel(uuid, bigint, text) from public, anon, authenticated;
@@ -1523,6 +1658,7 @@ grant execute on function public.lp_require_staff(text) to service_role;
 grant execute on function public.lp_clean_fields(jsonb, boolean) to service_role;
 grant execute on function public.lp_sync(timestamptz, uuid[], boolean, timestamptz, uuid, integer) to service_role;
 grant execute on function public.lp_create_request(jsonb, text) to service_role;
+grant execute on function public.lp_stages_recheck_minutes() to service_role;
 grant execute on function public.lp_set_status(uuid, bigint, text, text, text) to service_role;
 grant execute on function public.lp_update_fields(uuid, jsonb, bigint, text) to service_role;
 grant execute on function public.lp_cancel(uuid, bigint, text) to service_role;

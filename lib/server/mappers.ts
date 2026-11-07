@@ -2,7 +2,7 @@
 // validated API bodies → the snake_case payloads the lp_* functions take. Every field is copied through
 // an EXPLICIT allowlist, so legacy columns never leak to the client. Pure (no I/O); server only.
 import 'server-only';
-import type { AuditEvent, AuditFieldValues, PhotoInfo, RequestDetail, RequestSummary, SyncResponse } from '../api-types';
+import type { AuditEvent, AuditFieldValues, AuditHold, PhotoInfo, RequestDetail, RequestSummary, SyncResponse } from '../api-types';
 import {
   FIELD_COLUMNS,
   STATUS,
@@ -77,6 +77,9 @@ export function mapRow(raw: unknown): RequestSummary {
     name: joinName(firstName, lastName),
     postShort: postShort(reportingLocation, otherLocation),
     medicalLocation: str(r.medical_location),
+    // (F5) The "Not found yet" hold. A database without step 1d sends neither: not held, no checks.
+    recheckAt: str(r.recheck_at),
+    notFoundChecks: reqNum(r.not_found_checks),
   };
 }
 
@@ -176,6 +179,12 @@ function kindOf(v: unknown): StatusKind | null {
   return typeof k === 'string' && (STATUS_KINDS as readonly string[]).includes(k) ? (k as StatusKind) : null;
 }
 
+/** (F5) The "Not found yet" hold a status_changed side records ({recheck_at, not_found_checks}), or null. */
+function holdOf(v: unknown): AuditHold | null {
+  if (!isObject(v) || typeof v.recheck_at !== 'string' || v.recheck_at === '') return null;
+  return { recheckAt: v.recheck_at, checks: reqNum(v.not_found_checks) };
+}
+
 /** One lp_detail event {id, action_type, staff_name, previous_value, new_value, notes, occurred_at} → AuditEvent. */
 export function mapAudit(raw: unknown): AuditEvent {
   const e = isObject(raw) ? raw : {};
@@ -198,7 +207,16 @@ export function mapAudit(raw: unknown): AuditEvent {
     case 'status_changed': {
       const to = statusOf(next);
       if (to === null) return other();
-      return { ...base, action: 'status', previous: { status: statusOf(prev) }, next: { status: to, kind: kindOf(next) } };
+      // (F5) Hold details only when there are any, so every older event maps exactly as before.
+      const before = holdOf(prev);
+      const after = holdOf(next);
+      const held = isObject(next) && next.held === true;
+      return {
+        ...base,
+        action: 'status',
+        previous: { status: statusOf(prev), ...(before ? { hold: before } : {}) },
+        next: { status: to, kind: kindOf(next), ...(held ? { held } : {}), ...(after ? { hold: after } : {}) },
+      };
     }
     case 'patient_updated': {
       const { previous, next: changedNext } = editChanges(prev, next);

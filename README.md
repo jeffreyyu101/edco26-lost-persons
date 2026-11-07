@@ -57,7 +57,7 @@ and `.env.test`, which holds local-only values that work against `127.0.0.1` and
 | `20261101000000_baseline_local_only.sql` | A copy of `supabase/schema.sql`, the production baseline. | **Never paste.** Already applied. |
 | `20261105000001_add_last_seen.sql` | Jeffrey's `last_seen` column. | Already applied (verified 2026-11-05). |
 | `20261105000002_update_locations_and_statuses.sql` | Jeffrey's location and status CHECK update. | Not needed: the rework covers it whether or not it ran. |
-| `20261106000000_rework.sql` | Row versions, the touch trigger, thumbnails, login limits, free-text `age` (text since 2026-11-06) and every `lp_*` function the app calls. | **The one file production needs.** Applied 2026-11-06; apply it again (the v2.5 `lp_stats` change and `age` → text) **before** deploying this build. See [`HANDOFF.md`](HANDOFF.md). |
+| `20261106000000_rework.sql` | Row versions, the touch trigger, thumbnails, login limits, free-text `age` (text since 2026-11-06), the "Not found yet" hold (`recheck_at`, `not_found_checks`) and every `lp_*` function the app calls. | **The one file production needs.** Applied 2026-11-06; apply it again (the v2.5 `lp_stats` change and `age` → text) **before** deploying this build. See [`HANDOFF.md`](HANDOFF.md). |
 
 Without `20261106000000_rework.sql`, every API route fails, because each one calls an `lp_*` function. The
 file is one transaction, is safe to run twice (also on a database that already has every `lp_*` function),
@@ -138,6 +138,11 @@ Pending.
   beside it (docked from 1024 px) and New request as a side sheet or a centred dialog. Pending is two
   columns, To check and Friend coming. All requests opens with the same compact brand row, its X and Show
   header.
+- **Not found yet.** The first Not found on a waiting request holds it for a recheck in 20 minutes (still open,
+  Waiting for check in the database, violet "Not found yet" on screen, under Pending's "Later"); when the time
+  comes it is back on top of To check as a Recheck, and it never closes by itself. The second Not found is the
+  final, closed Not found in medical. Lists show each request's stage: Needs info, Not found yet, Friend en route
+  and Friend arrived refine the stored status (`design/DECISIONS.md`, spec §19).
 - **Answers.** Not found, In medical, Reunited and Change answer each offer Undo for 10 s. Change answer
   is a menu: the other answer, or Back to Waiting for check. Two people giving the same answer is harmless.
   A change made by someone else shows as "Updated by someone else".
