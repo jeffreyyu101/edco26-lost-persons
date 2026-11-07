@@ -114,7 +114,7 @@ screenshots.
 ### 2026-11-07 (F3 + F4 release, `feat/f34`, ships after the join link)
 
 - **Messages and en route (F3)** and **lock-screen alerts, the Alerts sheet and Activity (F4)** on top of
-  production (F2, F5, Pending v9.1, the join link). Both are described below. **This needs the migration below
+  production (F2, F5, Pending v9.1, the join link, Hotfix F5.1). Both are described below. **This needs the migration below
   re-applied, before the deploy** ([F3 + F4 in production](#f3--f4-in-production)).
 - **Pending v9.1 stays as it is**, with F3's pieces added: the Friend coming section header gets the unread
   dot; Waiting for check cards get the last-message line and a Message button left of the answers (where the
@@ -125,7 +125,13 @@ screenshots.
   check". Whoever gave the first Not found is now involved in the request.
 - **On phones under 430 px wide** the log's status reads "Waiting" / "Not found" (was under 400 px), so an
   earlier day's time never cuts the full label at 400–429 px.
-- Decisions: `design/DECISIONS.md` "The F3 + F4 release"; spec: `docs/BUILD_SPEC.md` §23 (A90–A93).
+- **Cross-feature review fixes:** a locked iPhone with push never also toasts what the lock screen showed; every
+  lock-screen alert sounds when it replaces the request's earlier one, and In medical stays until dismissed on a
+  computer; the first message on a request a phone saved before the update alerts; Mark all read holds on a slow
+  network; the open request's Activity row turns read only while the app is on screen; Not found yet ends Needs info
+  at once. Client only, no migration.
+- **Hotfix F5.1 is in** (`main` 332c90a merged): the release ships on top of exactly what production runs.
+- Decisions: `design/DECISIONS.md` "The F3 + F4 release" (and its review fixes); spec: `docs/BUILD_SPEC.md` §23 (A90–A95).
 
 ### 2026-11-06 evening (F4: lock-screen alerts, the Alerts sheet and Activity)
 
@@ -207,7 +213,7 @@ screenshots.
 
 ### F3 + F4 in production
 
-Production has `main`'s file (99e2db6: F2, F5, the join link). This release's file is that file with two
+Production has `main`'s file (99e2db6: F2, F5, the join link; Hotfix F5.1, 332c90a, did not change it). This release's file is that file with two
 sections appended (7: messages and en route; 8: Web Push and Activity) and four header comment lines; no line
 of `main`'s file changes. **Order: migration first, then deploy.**
 

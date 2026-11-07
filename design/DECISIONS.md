@@ -452,7 +452,7 @@ Brian, 2026-11-06 ~17:00–18:15: alerts must reach a phone that is locked or a 
 
 ## The F3 + F4 release: messages, en route, lock-screen alerts and Activity on top of production (assembled 2026-11-07, `feat/f34`)
 
-What this release adds to production (`main` 99e2db6: F2, F5, Pending v9.1 and the team join link): F3 (`feat/messages` efb0af0) and F4 (`feat/web-push` 97165bf), merged in that order with `--no-ff`. Engineering detail: `docs/BUILD_SPEC.md` §23 (A90–A93). Where they met:
+What this release adds to production (`main` 332c90a: F2, F5, Pending v9.1, the team join link and Hotfix F5.1): F3 (`feat/messages` efb0af0) and F4 (`feat/web-push` 97165bf), merged in that order with `--no-ff`, then `main` merged in again for Hotfix F5.1. Engineering detail: `docs/BUILD_SPEC.md` §23 (A90–A95). Where they met:
 
 - **Pending v9.1 stays authoritative for Pending.** F3's unread dot sits on the **Friend coming section header** (after the count, phone and desk board), since v9.1 has no tabs. Waiting for check cards keep v9.1's two-state left answer ("⧗ Not found yet" → "× Not found") and its hold chip; F3's last-message line sits above the buttons and its 44 px Message button at their left. Friend coming cards: the location chip, then F3's en route row, then Message | Reunited.
 - **F5's status block and stage map stay.** F3's en route row goes into the block's en route slot under the location; F3's needsInfo and enroute fields feed F5's stages (Needs info, Friend en route, Friend arrived). Still no desk en route column.
@@ -464,3 +464,17 @@ What this release adds to production (`main` 99e2db6: F2, F5, Pending v9.1 and t
 - **The deferred F2 fix is in:** on phones under 430 px wide (not 400) the log's status cell reads "Waiting" and "Not found", so beside an earlier day's time ("Fri 11:02 PM") the full label is never cut at 400–429 px (Pixel, Galaxy, iPhone Pro / Plus widths). The row's sentence still says the whole status.
 - **Nothing is cut where the pieces meet.** On a Waiting for check card, Message and v9.1's two answers share one row while their labels fit; on a narrow phone or a narrow board column In medical moves to its own full-width row instead of cutting "⧗ Not found yet". On the desk, Pending's two columns still fit the window under F4's alerts banner. The phone header's bell never takes taps meant for the "⇅" toggle under it.
 - **First load: 232.7 KB (route-only 41.3 KB)**, within F3's raised budget of 234 / 42 KB (A80) and over the 230 KB the F5 release kept. Messages add 1.9 KB that the store needs at start; the rest loads after the first page. **Brian to confirm the 234 KB budget.**
+
+### The F3 + F4 release: cross-feature review fixes (2026-11-07)
+
+From the cross-feature review of the assembled release. Engineering detail: `docs/BUILD_SPEC.md` A95. These override anything above where they differ.
+
+| # | Decision | Why / who |
+|---|---|---|
+| 1 | **Never both, also after a locked iPhone.** On a device whose push carries an alert, a change (or a message) made while the app was hidden shows no toast or chime when the app is opened again: the lock screen already had it. Changes after it is opened toast as before; a device without push still toasts what happened while it was away. | F4 row 2 ("hidden page with a subscription means push only"); iPhones suspend a hidden web app, so the first sync back in front used to toast it again |
+| 2 | **Every lock-screen alert sounds when it replaces the request's earlier one** (one notification per request), as the app's own notification did (v2.2 row 10): a later In medical must never silently replace medical's question or the "Not found yet" hold in the tray. **In medical stays on screen until dismissed** on a computer, like its toast. | v2.5 A52 (spec: "a changed answer must not silently replace In medical"); review |
+| 3 | **The first message on a request this phone had saved before the update alerts** (toast and chime with the app in front). It used to be silent until that request changed, so a front-of-house phone could miss medical's first question after tonight's deploy. | Review; F3 (pre-found messages are the main use) |
+| 4 | **Mark all read holds.** Tapped before the list has loaded, or while a refresh is on its way, it is never undone by that older answer: the bell, the badge and the rows stay read, and Mark all read stays disabled for the Undo. | Review (seen on WebKit: the Undo window was used up) |
+| 5 | **My en route row is named by what it shows** ("Friend en route ~5 min" / "… late"), then says the full sentence and "Change or cancel yours." as its description, so voice control works by the visible words (WCAG 2.5.3). | Review; UI rules (screen-reader labels say everything) |
+| 6 | **Activity marks the open request read only while the app is on screen**, like the thread. A tab left in the background with a request open keeps its new event unread (bell, app icon badge) until someone looks. | Review |
+| 7 | **"Not found yet" on a Needs info card ends Needs info at once** on the answering phone (the server already did): the card reads "Not found yet", not "Needs info", without waiting for the next sync. | Review; F5 stage map |
