@@ -4,7 +4,7 @@
 // the list is empty), ONE row per request (its latest event), newest first, day labels only when the list
 // spans more than one day, and "Nothing new" when empty. Tapping a row opens the request (and marks it read);
 // the sheet or popover closes. Mark all read shows "3 marked read · Undo" for 5 s.
-import { IconButton } from '@radix-ui/themes';
+import { IconButton, VisuallyHidden } from '@radix-ui/themes';
 import { CheckCheck } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { activityAriaLabel, activityGlyph, activityLine2, activityTime, groupByDay, type ActivityRow } from '@/lib/activity';
@@ -25,6 +25,11 @@ export interface ActivityPanelProps {
   variant: 'sheet' | 'popover';
 }
 
+/**
+ * One row. Named by its own sentence (activityAriaLabel) in a VisuallyHidden span, the visible parts hidden from
+ * screen readers, rather than by aria-label: a message's line ("Rae C.: Bring 1 person only") beside a
+ * different aria-label failed axe's label-in-name check (WCAG 2.5.3; F3 + F4 release).
+ */
 function Row({ row, now, timeZone, onOpen }: { row: ActivityRow; now: number; timeZone: string; onOpen: (id: string) => void }) {
   const glyph = activityGlyph(row.kind, row.detail);
   return (
@@ -34,9 +39,9 @@ function Row({ row, now, timeZone, onOpen }: { row: ActivityRow; now: number; ti
       data-read={row.read ? '' : undefined}
       data-kind={row.kind}
       data-testid="activity-row"
-      aria-label={activityAriaLabel(row, now)}
       onClick={() => onOpen(row.requestId)}
     >
+      <VisuallyHidden>{activityAriaLabel(row, now)}</VisuallyHidden>
       {row.read ? null : <span className={s.dot} aria-hidden />}
       <span className={s.glyph} aria-hidden>
         <ActivityGlyphIcon icon={glyph.icon} tone={glyph.tone} size={18} />

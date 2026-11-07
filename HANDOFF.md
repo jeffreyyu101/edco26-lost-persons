@@ -1,7 +1,7 @@
 # Handoff: "Is my friend in medical?" rebuild
 
-Updated: 2026-11-06 (morning, v2.5). **Production is live at https://edco26-lost-persons.vercel.app**, deployed
-on 2026-11-06 from `main`.
+Updated: 2026-11-07 (the F3 + F4 release, `feat/f34`). **Production is live at
+https://edco26-lost-persons.vercel.app**, deployed from `main`.
 
 [`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md) is the engineering contract (§17 holds the 2026-11-06 morning
 amendments), and [`design/DECISIONS.md`](design/DECISIONS.md) holds the product decisions. Setup and checks are
@@ -111,6 +111,22 @@ screenshots.
   password, and the password keeps working. No database change. See [Team join link](#team-join-link) for
   the variables, and how to make, rotate and switch off a code.
 
+### 2026-11-07 (F3 + F4 release, `feat/f34`, ships after the join link)
+
+- **Messages and en route (F3)** and **lock-screen alerts, the Alerts sheet and Activity (F4)** on top of
+  production (F2, F5, Pending v9.1, the join link). Both are described below. **This needs the migration below
+  re-applied, before the deploy** ([F3 + F4 in production](#f3--f4-in-production)).
+- **Pending v9.1 stays as it is**, with F3's pieces added: the Friend coming section header gets the unread
+  dot; Waiting for check cards get the last-message line and a Message button left of the answers (where the
+  three don't fit on a narrow phone or a narrow board column, In medical moves to its own row; nothing is
+  cut); Friend coming cards get the en route row and Message | Reunited.
+- **Every event notifies once.** Both Not found answers ("Not found yet · recheck 4:40 PM", then "Not found in
+  medical") reach everyone involved as Activity rows and pushes; an Undo of either reads "Back to Waiting for
+  check". Whoever gave the first Not found is now involved in the request.
+- **On phones under 430 px wide** the log's status reads "Waiting" / "Not found" (was under 400 px), so an
+  earlier day's time never cuts the full label at 400–429 px.
+- Decisions: `design/DECISIONS.md` "The F3 + F4 release"; spec: `docs/BUILD_SPEC.md` §23 (A89–A92).
+
 ### 2026-11-06 evening (F4: lock-screen alerts, the Alerts sheet and Activity)
 
 - **Lock-screen alerts (Web Push).** Answers, location changes, Back to Waiting, Reunited, Discharged,
@@ -139,11 +155,8 @@ screenshots.
 
 #### F4 integrator notes
 
-- **When the Not found yet release (F5) is merged:** add `'not_in_medical'` to `PUSHED_ALERT_KINDS` in
-  `lib/client/push-client.ts` (and its test in `tests/unit/client/push-client.test.ts`). Until then a device
-  with push keeps the page's own notification for a Not in medical answer, because F4 does not push it; with
-  F5's push and without this line, that device would get both. **F4 must not ship without F5 unless this
-  line stays out** (it is out on this branch).
+- **Done in the F3 + F4 release:** `'not_in_medical'` is in `PUSHED_ALERT_KINDS` (`lib/client/push-client.ts`
+  and its test), now that F5's stage-notify pushes both Not found answers.
 - **Test keys:** the local VAPID pair and `LP_PUSH_ALLOW_LOCAL=1` are in the tracked `.env.test.push` (loaded
   by `scripts/test-env.mjs` under `.env.test`). `.env.test` itself is unchanged from the base, so the stack
   scripts (`use.sh`) need nothing new.
@@ -191,6 +204,37 @@ screenshots.
 | Real delivery to a phone's lock screen | Not verified here (needs a real device and the production keys): morning checklist below. |
 
 ## The production migration
+
+### F3 + F4 in production
+
+Production has `main`'s file (99e2db6: F2, F5, the join link). This release's file is that file with two
+sections appended (7: messages and en route; 8: Web Push and Activity) and four header comment lines; no line
+of `main`'s file changes. **Order: migration first, then deploy.**
+
+1. **Before:** `select public.lp_stages_recheck_minutes();` returns `20` (F5 is applied). If not, stop.
+2. **Dry run** (Supabase dashboard → SQL Editor, as `postgres`): paste the whole file, change the last line
+   `commit;` to `rollback;`, run. It must finish without an error. It takes locks for a moment only: the
+   new trigger on `patients`, the new index on `audit_events`. `lock_timeout` is 5 s, so behind a long live
+   write it stops with a lock timeout and changes nothing; run it again.
+3. **Commit:** paste the file again unchanged (ending in `commit;`) and run it.
+4. **Check:**
+   - `select count(*) from pg_proc where proname in ('lp_post_message','lp_mark_read','lp_set_enroute','lp_unsend_message','lp_involved_staff','lp_messages_thread','lp_messages_sync','lp_enroute_stats');` returns `8`;
+   - `select count(*) from pg_proc where proname like 'lp\_push\_%' or proname like 'lp\_activity\_%';` returns `12`;
+   - `select to_regclass('public.lp_messages') is not null, to_regclass('public.lp_enroute') is not null, to_regclass('public.lp_activity') is not null;` returns `true | true | true`;
+   - `select count(*) from pg_trigger where tgname = 'lp_enroute_clear';` returns `1`;
+   - `select count(*) from information_schema.columns where table_name = 'lp_push_prefs' and column_name = 'new_requests_set';` returns `1`.
+5. **Environment (Vercel):** `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` set and unchanged (see "F4
+   in production"). Missing keys only switch push off.
+6. **Deploy.** Then ask staff to tap "Update ready · Reload".
+
+The build that is live now keeps working on the migrated database: it never calls the new functions, and the
+trigger only deletes en route rows, which only this build writes. Phones with old cached rows ignore the new
+optional fields; their queued requests send as before (a queued new request then also notifies staff with
+"New requests" on). A second paste keeps every message, read cursor, en route row, subscription, switch and
+Activity row. To go back, redeploy the previous build; the SQL can stay. Proven locally: `main`'s file on a
+fresh stack with the seed, then this file twice, then the full integration and end-to-end suites.
+
+### Earlier runs
 
 [`supabase/migrations/20261106000000_rework.sql`](supabase/migrations/20261106000000_rework.sql) is the only
 file production needs. The other files in that folder are the local chain: the baseline and both
@@ -322,6 +366,15 @@ expires, so share it like the password (the staff group chat, never a public pos
   network, 100 per network, in 15 minutes).
 
 ## Morning checklist (things tests can't cover)
+
+- [ ] **F3 + F4, before the deploy:** the migration is applied on production ([F3 + F4 in
+      production](#f3--f4-in-production): dry run, commit, checks).
+- [ ] **F3 + F4, Not found on real phones:** front of house with alerts on locks the phone; medical taps "Not
+      found yet": the lock screen shows the initials and "Not found yet · recheck 4:40 PM" once; "× Not found"
+      replaces it with "Not found in medical"; Undo shows "Back to Waiting for check". With the app open, only
+      the toast shows.
+- [ ] **F3 + F4, messages:** a message from medical reaches a locked front-of-house phone as "J.D." / "Rae C.:
+      …"; with that request open on screen, no toast and no notification.
 
 - [ ] **F4, before the deploy:** the F4 migration section is applied on production (dry run, then commit;
       the checks under "F4 in production").
