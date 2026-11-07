@@ -713,6 +713,8 @@ describe('list views render', () => {
     expect(html).toContain('data-testid="status-chip"');
     expect(html).toContain('Not found in medical 2 shown. Clear this filter');
     expect(html).not.toContain('Waiting to send');
+    // Under 400 px the final status reads "Not found" (F2), also now that rows show stages (F5).
+    expect(narrow(html, 1009)).toBe('Not found');
   });
 
   it('skeletons only while there is no data; the error state once the empty cache is known and offline', () => {

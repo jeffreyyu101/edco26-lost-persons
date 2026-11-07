@@ -501,8 +501,6 @@ const pendingEqual = (a: PendingGroups, b: PendingGroups) =>
 const selectPending = (s: StoreState) => pendingGroups(selectMerged(s));
 const selectMine = (s: StoreState) => mineRows(selectMerged(s), s.myIds, s.session.staff);
 const selectOutbox = (s: StoreState) => visibleOutbox(s.outbox, s.confirmed);
-const selectCounts = (s: StoreState) =>
-  viewCounts(selectMerged(s), visibleOutbox(s.outbox, s.confirmed), s.myIds, s.session.staff);
 const selectConnection = (s: StoreState) => ({ connection: s.connection, syncing: s.syncing, lastSyncAt: s.lastSyncAt });
 const selectLiveSync = (s: StoreState) => ({ connection: s.connection, syncedAt: s.lastSyncLocalAt });
 const selectSession = (s: StoreState) => s.session;
@@ -556,7 +554,13 @@ export function useOutbox(): OutboxItem[] {
 }
 
 export function useCounts(): ViewCounts {
-  return useStoreSelector(selectCounts, shallowEqual);
+  // (F5) Pending leaves out held requests that are not due yet ("Later"), so the count follows the clock.
+  const now = useNow();
+  const selector = useCallback(
+    (s: StoreState) => viewCounts(selectMerged(s), visibleOutbox(s.outbox, s.confirmed), s.myIds, s.session.staff, now),
+    [now],
+  );
+  return useStoreSelector(selector, shallowEqual);
 }
 
 export function useSearch(query: string): SearchHit[] {

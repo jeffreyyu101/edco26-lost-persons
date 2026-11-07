@@ -74,6 +74,15 @@ export interface RequestSummary {
    * this field existed (and a server from before it) do not carry it: read it as `row.medicalLocation ?? null`.
    */
   medicalLocation?: string | null;
+  // Added 2026-11-06 evening (F5, the "Not found yet" hold; spec A59). Optional: rows cached before this build
+  // (and a server from before it) do not carry them; read as `row.recheckAt ?? null`, `row.notFoundChecks ?? 0`.
+  /**
+   * While Waiting for check after a first Not found: when medical looks again (database clock), else null.
+   * Due once it has passed; it never closes by itself. Clients flip held → due on their own clock.
+   */
+  recheckAt?: IsoDateTime | null;
+  /** Not found answers in this round: 0, 1 while held, 2 after the final Not found (shown as "2 checks"). */
+  notFoundChecks?: number;
 }
 
 export interface PhotoInfo {
@@ -128,8 +137,13 @@ export type AuditEvent =
     })
   | (AuditBase & {
       action: 'status';
-      previous: { status: StatusValue | null };
-      next: { status: StatusValue; kind: StatusKind | null };
+      /** (F5) `hold`: the request was on a "Not found yet" hold before this change. */
+      previous: { status: StatusValue | null; hold?: AuditHold };
+      /**
+       * (F5) `held: true`: the first Not found that put the request on hold (status stays Waiting for check).
+       * `hold`: the hold after this change (an Undo can put one back).
+       */
+      next: { status: StatusValue; kind: StatusKind | null; held?: boolean; hold?: AuditHold };
     })
   | (AuditBase & { action: 'edit'; previous: AuditFieldValues; next: AuditFieldValues })
   | (AuditBase & { action: 'photo'; previous: null; next: { photoId: string | null; timing: PhotoTimingAny | null } })
@@ -140,6 +154,12 @@ export type AuditEvent =
   | (AuditBase & { action: 'other'; previous: null; next: { actionType: string } });
 
 export type AuditAction = AuditEvent['action'];
+
+/** (F5) A "Not found yet" hold as an audit event records it: when the recheck is due, and the Not found count. */
+export interface AuditHold {
+  recheckAt: IsoDateTime;
+  checks: number;
+}
 
 /** GET /api/requests/:id. Photos and audit are both oldest first (the profile shows the audit newest first). */
 export interface RequestDetail extends RequestSummary {

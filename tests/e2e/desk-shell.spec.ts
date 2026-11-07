@@ -958,7 +958,8 @@ test.describe('iPad portrait 820 × 1180 (touch)', () => {
     const status = (await pane.getByTestId('status-block').boundingBox())!;
     expect((await actions.boundingBox())!.y).toBeGreaterThanOrEqual(status.y + status.height);
     await actions.getByRole('button', { name: 'Not found', exact: true }).click();
-    await expect(pane.getByTestId('status-block')).toContainText('Not found in medical');
+    // (F5) A first Not found puts the request on a "Not found yet" hold.
+    await expect(pane.getByTestId('status-block')).toContainText('Not found yet');
 
     // The list beside the sheet is too narrow for it: the bar sits at the foot of the sheet, inside it.
     const at = await snackPlacement(page);

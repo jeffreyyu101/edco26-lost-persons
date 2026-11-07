@@ -68,7 +68,10 @@ describe('legal transitions', () => {
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.changed).toBe(true);
     const row = res.body.request as RequestSummary;
-    expect(row.status).toBe(to);
+    // (F5) A first Not found on a request Waiting for check holds it: the status stays (tests/integration/hold.test.ts).
+    const held = from === STATUS.waiting && to === STATUS.notInMedical;
+    expect(row.status).toBe(held ? STATUS.waiting : to);
+    if (held) expect(row).toMatchObject({ notFoundChecks: 1, recheckAt: expect.any(String) });
     expect(row.rowVersion).toBe(version + 1);
     expect(row.updatedBy).toBe(staffOf(actor));
     // Timestamps (spec §4).

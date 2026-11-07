@@ -1,0 +1,104 @@
+1. Linear (iOS), Inbox
+   - Pattern (row anatomy): the actor's avatar carries a small event badge in its corner (a quote mark for a comment, @ for a mention). Line 1 is the item, "HBT-4: Design daily habit list UI", with the unread dot in front. Line 2 is grey: "{actor} commented: {excerpt} · now". Events with no person behind them replace the avatar with a plain glyph: a bell for "You asked to be reminded about this issue", a calendar for "Completed past due date". When a row is read, only its title turns grey.
+   - Image: https://mobbin.com/api/mcp/short/a3KYN6Ol
+   - System-event rows: https://mobbin.com/api/mcp/short/qLNYCWUg
+   - Screen: https://mobbin.com/screens/58a6ef8a-408a-4ce7-90d5-08033f7c5a47
+
+2. GitHub (iOS), Inbox
+   - Pattern (unread dot under a status icon): the icon on the left shows the item's current state (open, merged or closed pull request), not the event. The unread dot sits directly under it, so you scan state and unread in one column. Line 1 is grey context ("repo #11", with "4h" on the right). Line 2 is the bold title. Line 3 is a tiny avatar and "Closed #9."
+   - Image: https://mobbin.com/api/mcp/short/UeBPW4dQ
+   - Screen: https://mobbin.com/screens/8ebd7736-e90c-4b53-b776-0e9bd88e3235
+
+3. Slack (iOS), Activity
+   - Pattern (grouping by item): when several people act on one message, it stays one row: "jackdoe and jendoe1 reacted in # ux-workshop", the message shown once, and the reactions as count chips. Replies quote what they answer in one grey line ("replied to: Attaching great videos…") above the reply.
+   - Image: https://mobbin.com/api/mcp/short/G7gb81zI
+   - Screen: https://mobbin.com/screens/02cf9af7-bc01-4b61-857a-1e9e1e3e3215
+
+4. Height (web), Inbox (fills the Height/Plain slot)
+   - Pattern (unread treatment): a small black dot in a left margin outside the text column, so read and unread rows keep the same alignment. Tabs are plain text (Inbox / Unread / Mentions), and the date on the right is a short weekday ("Thu"). Opening a row clears its dot, and the sidebar count drops from 3 to 2.
+   - Image: https://mobbin.com/api/mcp/short/VUrtFz9W
+   - After opening one: https://mobbin.com/api/mcp/short/SPv2PsDb
+   - Screen: https://mobbin.com/screens/54588209-bd4f-40dd-864b-80cdbe11130a
+   - Plain: the Plain screens on Mobbin show its support thread queue (grouped by status, such as "Needs first response"), not a personal inbox, so Height takes this slot.
+
+5. Threads (iOS), Activity
+   - Pattern (event type as an avatar badge): a glyph on the actor's avatar shows the event (reply arrow, @, follow, heart), so the text barely needs a verb. A reply row is name + "4h", then the parent post in grey, then the reply in black. It never says "replied to".
+   - Image: https://mobbin.com/api/mcp/short/7Jr8oNSa
+   - Screen: https://mobbin.com/screens/cb296e3d-df9e-4c48-a030-0f08248197d5
+   - Instagram's version adds Today / Yesterday / Last 7 days headers and stacked avatars when several people act ("midcenturyhome, underwater and other accounts…"). A context menu covers part of that screenshot: https://mobbin.com/api/mcp/short/j0l6WHxZ
+
+6. Brex (iOS), Notifications sheet (iOS-native slot)
+   - Pattern (native page sheet): centred title with ✕ on the right, grey date bands (Today, then "December 17, 2024"), a dot before each unread row, and read rows faded to light grey instead of removed. Brex is a third-party app, but this was the closest native-styled list Mobbin returned.
+   - Image: https://mobbin.com/api/mcp/short/l6gSzcvI
+   - Screen: https://mobbin.com/screens/811e7662-e713-4dab-a57a-de98c702cce0
+
+7. Retro (iOS), Messages (stand-in for Apple Messages)
+   - Mobbin returned no Apple first-party screens for Messages. Retro's list is the closest match.
+   - Pattern (speaker-prefixed preview): line 2 is "Speaker: excerpt · 1m" under the thread name ("Jeremy, Jen" / "Jeremy: Meanwhile Snowball t… · 1m"). The time follows a middle dot instead of getting its own column, and the unread dot sits at the right edge. Read rows go grey ("left the chat · 2d").
+   - Image: https://mobbin.com/api/mcp/short/5XkqOXx4
+   - Screen: https://mobbin.com/screens/0a2b056f-0bb7-4192-8f99-849d380ef601
+
+8. Dovetail (web), Notifications panel
+   - Pattern (mark-all-read as an icon): the header is only "Notifications" plus two icon buttons, a double-check (mark all read) and a sliders icon, with no text button. Unread dots sit in a fixed column on the right edge. It opens as a centred panel, but the same header works on a popover anchored to the bell.
+   - Image: https://mobbin.com/api/mcp/short/JzACluno
+   - Screen: https://mobbin.com/screens/3d315db6-ea16-4346-9cd2-4fd025da5f70
+
+Rules for our Activity list
+
+1. Row anatomy has three slots.
+   - Left: a 32px actor avatar with a 14px type badge at the bottom right. Events with no person behind them show the type glyph in a grey-3 circle instead.
+   - Middle, two lines: the item name (one line, truncated), then a detail line in grey-11.
+   - Right: time in grey-10 at 12px.
+   - The unread dot goes in a 12px left margin outside the row, so text never shifts. Rows are 56px tall on desktop and 64px on phone.
+
+2. Copy: the badge carries the verb and the text carries the nouns. Each row is badge | line 1 | line 2:
+   - Reply on my thread: ↩ | {thread title} | {First name}: {first line of reply}
+   - Answer on my request: ✓ | {request title} | {First name}: {answer excerpt}
+   - En route: → | {request title} | {First name} → {destination}
+   - Location change: pin | {request title} | {old} → {new}
+   - New request: + | {request title} | {location} · {First name}
+   - Never write "replied to", "has", "ago" or a full sentence. Time reads now / 4m / 2h / Tue / 3 Nov.
+   - The aria-label carries the full sentence: "Dana replied on Bay 3 restock: two left. 4 minutes ago. Unread."
+
+3. Grouping: one row per item, not per event.
+   - A new event on an item already listed moves its row to the top, rewrites line 2 to the latest event, swaps in that event's badge and marks the row unread again.
+   - Multiple actors stack as two overlapping avatars and "Dana, Lee +2: {latest excerpt}".
+   - Use only two section labels: Today and Earlier.
+
+4. Unread is a dot plus font weight, nothing else.
+   - Unread: a grey-12 dot and a medium-weight title.
+   - Read: no dot and a regular-weight grey-11 title.
+   - No tinted background and no blue: in a monochrome UI the dot is the only accent.
+   - Read rows stay in the list, as in Brex and Linear, and drop off after 30 days.
+
+5. An item counts as read when you open it, from the list or any other route (deep link, the board, the thread itself).
+   - Read state belongs to the item, not the notification.
+   - Opening the list, scrolling or hovering marks nothing read.
+   - No separate "done" state in v1. GitHub's read-vs-done split is a power-user feature we don't need yet.
+
+6. The bell badge counts unread items, not events: five replies on one thread count as 1.
+   - It never counts your own actions.
+   - It is hidden at 0, shows 1–9, then "9+".
+   - It does not clear when the list opens. It drops by one as each item is opened (Height 3 → 2, Linear 7 → 5), or goes to 0 on mark-all-read.
+   - Screen-reader label: "Activity, 3 unread".
+
+7. Header, read-all and empty state.
+   - Header: "Activity" on the left. On the right, one double-check IconButton (tooltip "Mark all read"), disabled when nothing is unread.
+   - Mark-all-read shows an undo toast for about 5 seconds, like GitHub's "2 items marked as read".
+   - Filtering is an All / Unread SegmentedControl only. Five event types don't need Slack- or Threads-style filter chips.
+   - Empty state: one line-art glyph and "Nothing new" (as in Linear and Slack), with no subline or joke.
+
+8. Phone sheet vs desktop popover.
+   - Below 768px (Radix `sm`), the bell opens a full-height sheet like Brex's: centred title and ✕. Radix Themes has no sheet component, so build it on Dialog.
+   - At `sm` and up, use a Popover anchored to the bell, about 380px wide and at most 480px tall, scrolling inside.
+   - Tapping a row navigates and closes either one.
+   - Keep the popover. Move to a full Activity page with a Linear/Height-style list and detail split only if you add filters or multi-select.
+
+The image URLs are Mobbin short links that expire after 30 days; the screen URLs don't expire.
+
+---
+
+**Your Mobbin AI usage is high this month**
+
+Usage is unlimited during beta. If your usage stays at this level, you may need to purchase more credits once limits take effect. [View usage and plan options](https://mobbin.com/settings/billing-and-usage?utm_source=claude-code&utm_medium=ai-assistant&utm_source_platform=mcp)
+exit 0

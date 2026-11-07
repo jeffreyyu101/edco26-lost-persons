@@ -38,6 +38,7 @@ import {
   type StoreState,
 } from '@/lib/client/store-contract';
 import { parsePostFilterKey, postFilterLabel, statusMeta } from '@/lib/domain';
+import { displayStage } from '@/lib/stages';
 import { formatCreatedTime } from '@/lib/format';
 import { ArchivedFold, ArchivedRows, DeskTable, GroupHeader, OutboxRow, SearchRow, TableRow, TableSkeleton } from './DeskTable';
 import { rowTimes } from './table-model';
@@ -85,7 +86,14 @@ function Rows({ rows, now, tz, selected }: { rows: readonly RequestSummary[]; no
   return (
     <>
       {rows.map((row) => (
-        <TableRow key={row.id} row={row} times={rowTimes(row, now, tz)} selected={row.id === selected} />
+        <TableRow
+          key={row.id}
+          row={row}
+          times={rowTimes(row, now, tz)}
+          selected={row.id === selected}
+          stage={displayStage(row, { now, timeZone: tz })}
+          timeZone={tz}
+        />
       ))}
     </>
   );
@@ -284,6 +292,8 @@ export function DeskSearchTable({ q, selected = null }: { q: string; selected?: 
                 hit={hit}
                 times={rowTimes(hit.row, now, tz)}
                 selected={hit.row.id === selected}
+                stage={displayStage(hit.row, { now, timeZone: tz })}
+                timeZone={tz}
                 nameRanges={d.nameRanges}
                 caseRanges={d.caseRanges}
                 line={line}
