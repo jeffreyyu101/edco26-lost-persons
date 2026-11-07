@@ -1,5 +1,5 @@
 // POST /api/session (spec §6, A27). The only network call /signin makes. Never logs: the body holds the
-// staff name and the event password.
+// staff name and the event password or the team join link's code.
 import type { SignInBody } from '@/lib/validation';
 import { interpretSignInResponse, type SignInOutcome } from './logic';
 

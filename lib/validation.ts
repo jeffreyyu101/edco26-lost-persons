@@ -182,30 +182,39 @@ const staffText = (min: number, max: number, label: string) =>
     .refine((v) => !STAFF_FORBIDDEN_CHARS.test(v), { message: `${label}: remove the "·" character` })
     .refine(storable, { message: `${label}: ${UNSTORABLE.toLowerCase()}` });
 
+/** What POST /api/session signs in with: the event password, or the team join link's code (J1). */
+export type SignInCredential = { password: string } | { invite: string };
+
 /**
- * POST /api/session. `team` is a card value or "Other" with `otherTeam` (2–80 characters).
- * Output: {staffName, team, password}. `team` is always canonical (spec §4 "Data stores the canonical
- * value"): a card value as is, and the Other text through domain.canonicalTeam(), so a known alias typed
- * there ("dispatch", "gchx base", "prevent") becomes its canonical team; anything else stays as typed
- * (whitespace collapsed).
+ * POST /api/session. `team` is a card value or "Other" with `otherTeam` (2–80 characters), and exactly one
+ * of `password` (the event password) or `invite` (the team join link's code, J1).
+ * Output: {staffName, team, password} or {staffName, team, invite}. `team` is always canonical (spec §4
+ * "Data stores the canonical value"): a card value as is, and the Other text through domain.canonicalTeam(),
+ * so a known alias typed there ("dispatch", "gchx base", "prevent") becomes its canonical team; anything else
+ * stays as typed (whitespace collapsed).
  */
 export const signInSchema = z
   .strictObject({
     staffName: staffText(STAFF_NAME_MIN, STAFF_NAME_MAX, 'Name'),
     team: z.union([z.enum(TEAM_VALUES), z.literal(OTHER_TEAM)]),
     otherTeam: z.union([staffText(OTHER_TEAM_MIN, OTHER_TEAM_MAX, 'Team'), z.literal(''), z.null()]).optional(),
-    password: z.string().min(1).max(200),
+    password: z.string().min(1).max(200).optional(),
+    invite: z.string().min(1).max(200).optional(),
   })
   .superRefine((v, ctx) => {
     if (v.team === OTHER_TEAM && !v.otherTeam) {
       ctx.addIssue({ code: 'custom', path: ['otherTeam'], message: 'Enter your team' });
     }
+    if (v.password === undefined && v.invite === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['password'], message: 'Enter the event password' });
+    } else if (v.password !== undefined && v.invite !== undefined) {
+      ctx.addIssue({ code: 'custom', path: ['invite'], message: 'Send the password or the team link, not both' });
+    }
   })
-  .transform((v) => ({
-    staffName: v.staffName,
-    team: v.team === OTHER_TEAM ? canonicalTeam(v.otherTeam as string) : v.team,
-    password: v.password,
-  }));
+  .transform((v): { staffName: string; team: string } & SignInCredential => {
+    const identity = { staffName: v.staffName, team: v.team === OTHER_TEAM ? canonicalTeam(v.otherTeam as string) : v.team };
+    return v.invite !== undefined ? { ...identity, invite: v.invite } : { ...identity, password: v.password as string };
+  });
 export type SignInBody = z.input<typeof signInSchema>;
 export type SignInInput = z.output<typeof signInSchema>;
 
