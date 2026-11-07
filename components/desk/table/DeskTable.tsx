@@ -16,7 +16,7 @@
 // group header rows (glyph, label, count) sit over Waiting for check and Friend coming, and the closed ones fold
 // last. The header is then a one-row table of its own, so its column headers can carry aria-sort.
 import { Skeleton } from '@radix-ui/themes';
-import { ArrowDown, ArrowUpDown, ChevronDown, CircleAlert } from 'lucide-react';
+import { ArrowDown, ArrowUpDown, ChevronDown, ChevronRight, CircleAlert } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
 import { StageGlyph } from '@/components/ui/StageGlyph';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
@@ -394,8 +394,9 @@ export function OutboxRow({ item, created }: { item: OutboxItem; created: string
 }
 
 /**
- * "Archived  6  ⌄": every closed request folded into one row under the open ones, exactly as F1's phone
- * log (the same test ids, name and remembered open state, prefs.closedExpanded).
+ * "Archived  6  ›": every closed request folded into one row under the open ones, exactly as F1's phone
+ * log (the same test ids, name and remembered open state, prefs.closedExpanded). › while folded, ⌄ while open
+ * (Pending v9.1, pending-v9.html .arch).
  */
 export function ArchivedFold({
   count,
@@ -424,9 +425,7 @@ export function ArchivedFold({
     >
       <span className={t.foldLabel}>{label}</span> <span className={t.cap}>{count}</span>
       <span className={t.sp} />
-      <span className={t.chev} data-open={open ? '' : undefined}>
-        <ChevronDown size={16} strokeWidth={2.25} aria-hidden />
-      </span>
+      <span className={t.chev}>{open ? <ChevronDown size={16} strokeWidth={2} aria-hidden /> : <ChevronRight size={16} strokeWidth={2} aria-hidden />}</span>
     </button>
   );
 }

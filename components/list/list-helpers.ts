@@ -2,7 +2,7 @@
 // everything here is unit-tested in tests/unit/list-helpers.test.ts.
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import type { SearchHit } from '@/lib/client/selectors';
-import { STATUS, ageGender, isInMedical, postShort, sameStaff, statusMeta, type StatusTone } from '@/lib/domain';
+import { STATUS, ageGender, isInMedical, isRecheckDue, postShort, sameStaff, statusMeta, type StatusTone } from '@/lib/domain';
 import { stagePhrase, type StageSource } from '@/lib/stages';
 import { formatCaseNumber } from '@/lib/format';
 
@@ -288,6 +288,16 @@ export function logRowLabel(
 ): string {
   // (F5) The stage, not just the status: "Not found yet", "Recheck due", "Friend en route".
   return `${formatCaseNumber(row.caseNumber)}, ${displayName(row.name)}, ${stagePhrase(row, timeZone, now)}, created ${created}, ${updated}`;
+}
+
+/**
+ * (Pending v9.1) The clock a log row hands its stage (LogRow / SearchLogRow `now`). Only a hold reads it, to tell
+ * Not found yet from Recheck due: every other row, and a hold not due yet, gets 0; a due hold gets its own recheck
+ * time (due at that instant, and it never changes). A memoized row's props then change when its stage does, not on
+ * every clock tick.
+ */
+export function stageClock(row: Pick<RequestSummary, 'status' | 'recheckAt'>, now: number): number {
+  return isRecheckDue(row, now) ? Date.parse(row.recheckAt as string) : 0;
 }
 
 /** A search result in the log grid: the row's sentence, then the matched text when it is not the name. */

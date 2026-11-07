@@ -9,7 +9,9 @@ import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DeskTable, sortHeaderLabel } from '@/components/desk/table/DeskTable';
 import { CheckCard, ComingCard, holdState } from '@/components/list/cards';
-import { GroupDivider } from '@/components/list/rows';
+import { ArchivedFold as DeskArchivedFold } from '@/components/desk/table/DeskTable';
+import { logRowLabel, stageClock } from '@/components/list/list-helpers';
+import { ArchivedFold, GroupDivider } from '@/components/list/rows';
 import { QueueHeader } from '@/components/list/PendingQueues';
 import { SORT_WORDS, sortAnnouncement, sortToggleLabel } from '@/components/list/SortToggle';
 import type { RequestSummary } from '@/lib/api-types';
@@ -27,7 +29,7 @@ import {
 import { SORT_STORAGE_KEYS, readSortOrder, waitingShowsFolded, writeSortOrder } from '@/lib/client/view-prefs';
 import { stubRows } from '@/lib/client/stub-data';
 import { NOT_FOUND_YET_LABEL, RECHECK_MINUTES, STATUS, STATUS_META, notFoundHolds } from '@/lib/domain';
-import { NOT_FOUND_FINAL_LABEL, displayStage, notFoundAnswer } from '@/lib/stages';
+import { NOT_FOUND_FINAL_LABEL, displayStage, notFoundAnswer, stageLook } from '@/lib/stages';
 
 const NOW = Date.parse('2026-11-06T21:31:00Z'); // 4:31 PM in New York
 const at = (minutes: number) => new Date(NOW + minutes * 60_000).toISOString();
@@ -253,5 +255,35 @@ describe('the sort toggle and the desk header', () => {
     expect(empty).toContain('data-zero=""');
     expect(empty).not.toContain('<button');
     expect(empty).toContain('Waiting for check, no requests');
+  });
+});
+
+describe('review fixes', () => {
+  it("a log row's stage clock changes only when its stage does (memoized rows skip the 15 s ticks)", () => {
+    const ticks = [NOW, NOW + 15_000, NOW + 30_000, NOW + 45_000];
+    // Not held, or held and not due yet: 0 at every tick, so the row's props stay the same.
+    for (const r of [BW, JD, EN, PV, SO, MP, AL, RP, TN, LG]) expect(new Set(ticks.map((t) => stageClock(r, t)))).toEqual(new Set([0]));
+    // Due: its own recheck time, at every tick.
+    expect(new Set(ticks.map((t) => stageClock(MR, t)))).toEqual(new Set([Date.parse(MR.recheckAt!)]));
+    // And it reads exactly as the ticking clock would, before and after a hold comes due.
+    for (const t of [NOW, Date.parse(PV.recheckAt!) - 1, Date.parse(PV.recheckAt!), NOW + 60 * 60_000]) {
+      for (const r of shuffled) {
+        expect(stageLook(r, stageClock(r, t))).toEqual(stageLook(r, t));
+        expect(logRowLabel(r, '4:00 PM', 'updated 2 minutes ago', undefined, stageClock(r, t))).toBe(logRowLabel(r, '4:00 PM', 'updated 2 minutes ago', undefined, t));
+      }
+    }
+  });
+
+  it('the Archived / Closed folds: › while folded, ⌄ while open, never rotated (phone and desk)', () => {
+    for (const Fold of [ArchivedFold, DeskArchivedFold]) {
+      const folded = renderToString(<Fold count={3} open={false} controls="c" onToggle={() => {}} />);
+      expect(folded).toContain('lucide-chevron-right');
+      expect(folded).not.toContain('lucide-chevron-down');
+      expect(folded).not.toContain('data-open');
+      const open = renderToString(<Fold label="Closed" count={1} open controls="c" onToggle={() => {}} />);
+      expect(open).toContain('lucide-chevron-down');
+      expect(open).not.toContain('lucide-chevron-right');
+      expect(open).not.toContain('data-open');
+    }
   });
 });

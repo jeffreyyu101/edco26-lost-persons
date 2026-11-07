@@ -1,7 +1,9 @@
-/* Pending on the desk (Pending v9.1, design/screens/pending-v9.html .cols / .colsec, frames 4 and 5). The board
-   is a size container: two card columns from 720 px of main column, each scrolling on its own under the desk's
-   top bar; narrower (a request docked beside it), the two sections stack in one scrolling column. The column
-   headers are components/list/PendingQueues.tsx QueueHeader, pinned to the top of their column. */
+/* Pending on the desk (Pending v9.1, design/screens/pending-v9.html .cols / .colsec, frames 4 and 5). Two card
+   columns from 768 px, Waiting for check | Friend coming, each scrolling on its own under the desk's top bar
+   (SPEC rule 5: no stacked fallback, a request docked beside the board included). The board is a size
+   container for its gutters; each column is one for its cards (list.module.css tightens a card in a column
+   under 340 px). The column headers are components/list/PendingQueues.tsx QueueHeader, pinned to the top of
+   their column. */
 
 .board {
   container-type: inline-size;
@@ -10,31 +12,38 @@
 
 .cols {
   --qh-top: 0px;
-  /* The window under the desk's top bar: the columns scroll, the page does not. */
-  height: calc(100vh - var(--desk-top, 56px));
-  height: calc(100dvh - var(--desk-top, 56px));
+  /* The window under the desk's top bar and anything pinned above the board (the connection banner: the list
+     root's --lp-sticky-h, hooks.ts useStickyHeight): the columns scroll, the page does not. */
+  height: calc(100vh - var(--desk-top, 56px) - var(--lp-sticky-h, 0px));
+  height: calc(100dvh - var(--desk-top, 56px) - var(--lp-sticky-h, 0px));
+  box-sizing: border-box;
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  align-content: start;
-  gap: 0;
-  padding: 0 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+  /* The 6 px over the column headers is the board's, outside the scrolling columns: a column's own top padding
+     would inset its sticky header and leave a strip of scrolled cards showing above it. */
+  padding: 6px 24px 0;
+  overflow: hidden;
+}
+
+.col {
+  container-type: inline-size;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
   scrollbar-width: thin;
 }
 
-.col {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
 .col > * {
   flex-shrink: 0;
 }
 
-/* The column header (components/list/PendingQueues.tsx QueueHeader) lines up with the cards under it. */
+/* The column header (components/list/PendingQueues.tsx QueueHeader) lines up with the cards under it and pins to
+   the very top of its column. */
 .col > h2 {
   margin: 0;
 }
@@ -47,44 +56,30 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 2px 0 16px;
+  padding: 2px 0 24px;
 }
 
 .cards > * {
   flex-shrink: 0;
 }
 
-/* A card J / K moved to stays clear of its column's pinned header. */
+/* A card J / K moved to stays clear of its column's pinned header (44 px). */
 .cards [data-request-id] {
   scroll-margin-top: 52px;
   scroll-margin-bottom: 12px;
 }
 
-@container (min-width: 720px) {
+/* A narrower main column (an iPad in portrait, a request docked beside the board): tighter gutters. */
+@container (max-width: 899.98px) {
   .cols {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 20px;
-    padding: 0 24px;
-    overflow: hidden;
-  }
-
-  .col {
-    min-height: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
-    overscroll-behavior: contain;
-    scrollbar-width: thin;
-    padding-top: 6px;
-  }
-
-  .cards {
-    padding-bottom: 24px;
+    gap: 16px;
+    padding: 6px 16px 0;
   }
 }
 
-@container (min-width: 720px) and (max-width: 899.98px) {
+@container (max-width: 699.98px) {
   .cols {
-    gap: 16px;
-    padding: 0 16px;
+    gap: 12px;
+    padding: 6px 12px 0;
   }
 }

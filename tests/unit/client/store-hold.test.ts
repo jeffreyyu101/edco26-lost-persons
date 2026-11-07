@@ -76,6 +76,68 @@ describe('the hold in the store', () => {
     expect(s().confirmed.get(R1.id)?.status).toBe(STATUS.notInMedical);
   });
 
+  it('Undo of the final Not found brings the card back held at once ("Not found yet" + "× Not found"), and a "× Not found" tapped meanwhile is the final answer again', async () => {
+    const recheckAt = new Date(Date.now() + 5 * 60_000).toISOString();
+    const server = new FakeServer([makeRow(1, { recheckAt, notFoundChecks: 1, rowVersion: 2 })]);
+    const { a, s } = boot(server);
+    await ready();
+    const g = gate();
+    let undone: { recheckAt: string | null; notFoundChecks: number } | null = null;
+    // lp_set_status: the final Not found closes it; its Undo (held back by the gate) puts the hold back.
+    server.override = async (req: FakeRequest) => {
+      if (!req.path.endsWith('/status')) return undefined;
+      const id = req.path.split('/')[3] as string;
+      const cur = server.row(id);
+      const { status, expectedVersion, kind } = req.body as { status: string; expectedVersion: number; kind: string };
+      if (expectedVersion !== cur.rowVersion) return apiError(409, 'conflict', 'Updated by someone else', { currentStatus: cur.status });
+      if (status === STATUS.notInMedical && kind === 'answer') {
+        undone = { recheckAt: cur.recheckAt ?? null, notFoundChecks: cur.notFoundChecks ?? 0 };
+        return json(200, { changed: true, request: server.change(id, { status, recheckAt: null, notFoundChecks: (cur.notFoundChecks ?? 0) + 1 }) });
+      }
+      if (kind === 'undo') {
+        await g.wait();
+        return json(200, { changed: true, request: server.change(id, { status, ...undone }) });
+      }
+      return undefined;
+    };
+    expect(await finish(a.setStatus(R1.id, STATUS.notInMedical, 'answer'))).toMatchObject({ ok: true, changed: true });
+    expect(s().confirmed.get(R1.id)).toMatchObject({ status: STATUS.notInMedical, recheckAt: null, notFoundChecks: 2 });
+
+    const undo = a.undo(s().snackbar!.id);
+    await advance(0);
+    // While the Undo is on its way the card is back exactly as the server will restore it: held.
+    const shown = applyOverlay(s().confirmed.get(R1.id)!, s().pending.get(R1.id));
+    expect(shown).toMatchObject({ status: STATUS.waiting, recheckAt, notFoundChecks: 1 });
+    // The medic taps "× Not found" on that card: queued behind the Undo, then sent as the final answer.
+    const again = a.setStatus(R1.id, STATUS.notInMedical, 'answer');
+    g.open();
+    expect(await finish(undo)).toMatchObject({ ok: true, changed: true });
+    expect(await finish(again)).toMatchObject({ ok: true, changed: true });
+    expect(statusPosts(server).map((r) => (r.body as { kind: string }).kind)).toEqual(['answer', 'undo', 'answer']);
+    expect(s().confirmed.get(R1.id)).toMatchObject({ status: STATUS.notInMedical, recheckAt: null, notFoundChecks: 2 });
+  });
+
+  it('Undo of the first Not found drops the chip at once (the overlay clears the hold the server clears)', async () => {
+    const server = new FakeServer([R1]);
+    const { a, s } = boot(server);
+    await ready();
+    holdingServer(server);
+    await finish(a.setStatus(R1.id, STATUS.notInMedical, 'answer'));
+    expect(s().confirmed.get(R1.id)).toMatchObject({ status: STATUS.waiting, notFoundChecks: 1 });
+    const g = gate();
+    const base = server.override;
+    server.override = async (req: FakeRequest) => {
+      if ((req.body as { kind?: string } | undefined)?.kind === 'undo') await g.wait();
+      return base?.(req);
+    };
+    const undo = a.undo(s().snackbar!.id);
+    await advance(0);
+    const shown = applyOverlay(s().confirmed.get(R1.id)!, s().pending.get(R1.id));
+    expect(shown).toMatchObject({ status: STATUS.waiting, recheckAt: null, notFoundChecks: 0 });
+    g.open();
+    await finish(undo);
+  });
+
   it("A12's resend is skipped when someone else put it on hold meanwhile: a conflict, not a final answer", async () => {
     const server = new FakeServer([R1]);
     const { a, s } = boot(server);

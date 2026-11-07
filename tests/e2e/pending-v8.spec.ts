@@ -304,7 +304,7 @@ test.describe('desk 1440 × 900', () => {
     await expect.poll(async () => (await detail(page, waiting.id)).medicalLocation).toBe('Next to N');
   });
 
-  test('a docked request stacks the board into one column (no tabs); the pane edits the location in a popover', async ({ page }) => {
+  test('a docked request keeps the board in two columns (no tabs); the pane edits the location in a popover', async ({ page }) => {
     await page.setViewportSize({ width: 1180, height: 820 });
     const waiting = await createRequest(page);
     const coming = await inMedical(page, await createRequest(page));
@@ -318,13 +318,13 @@ test.describe('desk 1440 × 900', () => {
     await comingCard(page, coming.id).locator('[data-request-id]').click();
     const pane = page.getByTestId('profile');
     await expect(pane.getByTestId('location-row')).toBeVisible();
-    // Docked beside a 700 px main column (under the board's 720 px): both sections in one column, Waiting for
-    // check on top; no tabs.
+    // Docked beside a 700 px main column: still Waiting for check | Friend coming side by side (Pending v9.1
+    // SPEC rule 5: two columns from 768 px, no stacked fallback); no tabs.
     await expect(page.getByTestId('pending-tabs')).toHaveCount(0);
-    const top = (await page.getByTestId('pending-column-check').boundingBox())!;
-    const below = (await page.getByTestId('pending-column-coming').boundingBox())!;
-    expect(Math.abs(below.x - top.x)).toBeLessThan(2);
-    expect(below.y).toBeGreaterThanOrEqual(top.y + top.height - 1);
+    const left = (await page.getByTestId('pending-column-check').boundingBox())!;
+    const right = (await page.getByTestId('pending-column-coming').boundingBox())!;
+    expect(right.x).toBeGreaterThan(left.x + left.width);
+    expect(Math.abs(right.y - left.y)).toBeLessThan(2);
     await comingCard(page, coming.id).scrollIntoViewIfNeeded();
     await expect(comingCard(page, coming.id)).toBeVisible();
 

@@ -7,7 +7,7 @@
 // Queued requests (states.html Offline) and search results (states.html SRow) use the same grid. Sorted by
 // status (Pending v9.1, design/screens/pending-v9.html frame 6), thin pinned dividers name each group: glyph,
 // label, count.
-import { CircleAlert, ChevronDown } from 'lucide-react';
+import { CircleAlert, ChevronDown, ChevronRight } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
 import { StageGlyph } from '@/components/ui/StageGlyph';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
@@ -143,7 +143,11 @@ export interface LogRowProps {
   updatedSaid: string;
   /** (F5) The event timezone, for the stage in the row's sentence. */
   timeZone?: string;
-  /** (Pending v9.1) The views' clock: a hold whose recheck time has passed reads "Recheck due". */
+  /**
+   * (Pending v9.1) The clock the stage reads: a hold whose recheck time has passed reads "Recheck due". Pass
+   * list-helpers.stageClock(row, now), not the ticking clock: it changes only when the stage does, so the memo
+   * skips every other row on a tick.
+   */
   now?: number;
 }
 
@@ -260,8 +264,9 @@ export function OutboxLogRow({ item, created }: { item: OutboxItem; created: str
 }
 
 /**
- * "Archived  6  ⌄": every closed request (Not in medical, Reunited, Discharged, Cancelled) folded into one
+ * "Archived  6  ›": every closed request (Not in medical, Reunited, Discharged, Cancelled) folded into one
  * row under the open ones (log option B; named Archived by Brian, 2026-11-06). Tap to show them below, greyed.
+ * (Pending v9.1, pending-v9.html .arch) › while folded, ⌄ while open, gray-11: Pending's section headers' fold.
  */
 export function ArchivedFold({
   count,
@@ -294,9 +299,7 @@ export function ArchivedFold({
       <span className={s.foldLabel}>{label}</span>{' '}
       <span className={s.cap}>{count}</span>
       <span className={s.sp} />
-      <span className={s.foldChev} data-open={open ? '' : undefined}>
-        <ChevronDown size={16} strokeWidth={2.25} aria-hidden />
-      </span>
+      <span className={s.foldChev}>{open ? <ChevronDown size={16} strokeWidth={2} aria-hidden /> : <ChevronRight size={16} strokeWidth={2} aria-hidden />}</span>
     </button>
   );
 }
