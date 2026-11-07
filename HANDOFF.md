@@ -435,6 +435,9 @@ expires, so share it like the password (the staff group chat, never a public pos
       found"; 20 minutes later (phone clock) the chip reads "Recheck due" and nothing has moved; "× Not found"
       closes it ("B.W. closed · not found in medical", Undo). Front of house's My requests shows the chip (no
       recheck time) meanwhile.
+- [ ] Hotfix F5.1 on an iPhone (Safari tab and Home Screen app): In medical → the "Bed or chair" sheet sits right on the
+      keyboard, nothing undimmed between them, the list doesn't move; Done on the keyboard drops the sheet back down;
+      Skip leaves the list where it was. On All and My requests "⇅" stands clear of the avatar on the live line.
 - [ ] Pending v9.1 on a phone and an iPad: one page (Waiting for check, then Friend coming), each header folds
       its section; the board's columns scroll on their own; "⇅ Status" on All and My requests is remembered.
 - [ ] Team join link (once its variables are set): tapped in iMessage on an iPhone, it opens Safari on

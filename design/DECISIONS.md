@@ -369,6 +369,10 @@ Brian: "send a link with the password in the url so it auto logs them in … the
 - **Recorded exception:** `signInSchema` is in the frozen `lib/validation.ts`; the change is additive (a body with a password parses exactly as before).
 - Code: `lib/join-link.ts`, `components/signin/SignInFlow.tsx`, `lib/server/invite.ts`, `scripts/make-invite.mjs`. Spec: `docs/BUILD_SPEC.md` J1. Operations: `HANDOFF.md` "Team join link".
 
+## Hotfix F5.1 (Brian, 2026-11-07, from his iPhone) — `screens/hotfix-f5-1-*.png`
+
+- **The live line sits 12 px under the header's icons on every list view, with "⇅" centred on it at its right end, clear of the avatar (pending-v9.html frames 6, 7, 9), and every sheet with a field sits flush on the iPhone keyboard with the scrim over everything else and the page behind pinned.**
+
 ## Messages and en route (F3, Brian 2026-11-06 evening) — `screens/updates.html` (v7, `#edit`, `#clarify`, `#colors`), `screens/f34-states.html` 5–6
 
 Staff were still relaying "this pt is being worked up, only bring one" and "ok on my way with them" in WhatsApp. Each request now has its own thread, and front of house can say they are bringing the friend. The build is in `f3-*.png`; engineering detail in `docs/BUILD_SPEC.md` §21 (A74–A79; built as §18 A53–A58). These override anything above.
