@@ -1403,8 +1403,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       return { ok: true, changed: false, request: row };
     }
     // (F6 follow-up) A "× Not located" tapped on the hold this phone showed ahead of the server: the final answer only
-    // once that hold is the server's. The first tap failed or the request moved on: nothing is sent.
-    if (undoVersion === null && to === STATUS.notInMedical && kind === 'answer' && tapHeld === 'shown' && !isHeld(row)) {
+    // once that hold is the server's AND this phone's own first tap put it there (its committed row is in ownKeys).
+    // The first tap failed, lost a 409 to someone else's hold, or the request moved on: nothing is sent.
+    if (undoVersion === null && to === STATUS.notInMedical && kind === 'answer' && tapHeld === 'shown' && (!isHeld(row) || !ownKeys.has(alertKey(row)))) {
       return { ok: true, changed: false, request: row };
     }
     // (F5) A first Not found keeps the status and goes on hold (lib/client/hold-rules.ts predicts it); (Pending v9.1)

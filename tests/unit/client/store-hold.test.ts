@@ -114,6 +114,31 @@ describe('the hold in the store', () => {
     expect(s().confirmed.get(R1.id)?.recheckAt ?? null).toBeNull();
   });
 
+  it('F6 follow-up (review): that deliberate tap sends nothing when the first tap lost a 409 to someone else\'s hold', async () => {
+    const server = new FakeServer([R1]);
+    const { a, s } = boot(server);
+    await ready();
+    // Another liaison's first Not found landed just before ours; this phone has not synced it yet.
+    server.change(R1.id, { recheckAt: new Date(Date.now() + RECHECK_MINUTES * 60_000).toISOString(), notFoundChecks: 1 });
+    const g = gate();
+    server.override = async (req: FakeRequest) => {
+      if (!req.path.endsWith('/status')) return undefined;
+      await g.wait();
+      const cur = server.row(req.path.split('/')[3] as string);
+      const { expectedVersion } = req.body as { expectedVersion: number };
+      if (expectedVersion !== cur.rowVersion) return apiError(409, 'conflict', 'Updated by someone else', { currentStatus: cur.status });
+      return undefined;
+    };
+    const first = a.setStatus(R1.id, STATUS.notInMedical, 'answer');
+    await advance(800);
+    const meant = a.setStatus(R1.id, STATUS.notInMedical, 'answer');
+    g.open();
+    expect(await finish(first)).toMatchObject({ ok: false });
+    expect(await finish(meant)).toMatchObject({ ok: true, changed: false });
+    expect(statusPosts(server)).toHaveLength(1);
+    expect(s().confirmed.get(R1.id)).toMatchObject({ status: STATUS.waiting, notFoundChecks: 1 });
+  });
+
   it('a Not found on a request already on hold is the final answer', async () => {
     const server = new FakeServer([R1]);
     const { a, s } = boot(server);
