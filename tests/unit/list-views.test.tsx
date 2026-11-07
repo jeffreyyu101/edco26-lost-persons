@@ -751,9 +751,12 @@ describe('list views render', () => {
     expect(tag).toMatch(/dimCard/);
   });
 
-  it('Pending: Friend coming cards (friend, post, time) then Waiting for check cards with both answers', () => {
+  it('Pending: Waiting for check cards with both answers first, then Friend coming cards (friend, post, time)', () => {
     const html = render(storeWith((s) => s), <PendingView />);
-    expect(html.indexOf('Friend coming')).toBeLessThan(html.indexOf('Waiting for check'));
+    // Brian, 2026-11-06 19:40: waiting for check is the priority, so it comes first.
+    expect(html.indexOf('Waiting for check')).toBeGreaterThan(-1);
+    expect(html.indexOf('Waiting for check')).toBeLessThan(html.indexOf('Friend coming'));
+    expect(html.indexOf('data-testid="check-card"')).toBeLessThan(html.indexOf('data-testid="friend-coming-card"'));
     // (The stub's 3 minutes can read 2m: useNow's clock is read when the module loads.)
     expect(html).toMatch(/<span>Jess T\. · from FA 3 · [23]m<\/span>/);
     expect(html.match(/data-testid="check-card"/g)?.length).toBe(4);
