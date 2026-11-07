@@ -343,3 +343,9 @@ What the next release ships on top of the live F2 (`main` 85c9320): F5 (stages a
 - **F2 wins** for the rename ("Not found in medical"; the final answer reads "Not found", the same words), the brand row and the line under the title, the desk top bar fixes, the Created column and the photo fixes. On All and My requests the line and the "⇅" toggle share one row: "● Updated just now ⟳" at its left, the toggle at its right end.
 - **F5 wins** for the hold's SQL, the stage colours and the hold alerts. Its wider status column with a request docked stays (184–232 px; 176 px at least at 1024–1279, so the five columns still fit beside F2's 96 px Created column), and a closed row's "· 2 checks" still drops out where the column is narrow.
 - **The desk follows the open request on Pending**: its card is scrolled into view (the board has no tabs to switch any more).
+
+## Dashboard Performance windows and "None" (Brian, 2026-11-06 21:55–22:05)
+
+- **Every Performance row names its window**: Time to answer "last 2 hours" (was "avg, 2 h"), Time to reunite "last 2 hours" (was "avg"; lp_stats averages reunions over the last 2 hours too), Logged "last hour" (unchanged).
+- **An empty value reads "None"**, not "—": no one waiting (Longest wait), no answers or no reunions in the last 2 hours. Screen readers hear "No one is waiting for a check", "No answers in the last 2 hours", "No reunions in the last 2 hours". Logged is a count, so 0 stays "0".
+- **"—" only while the stats request fails** (the dashboard's Reconnecting): then an empty value is not known to be empty, and its sentence says "not available". Values that did load still show.

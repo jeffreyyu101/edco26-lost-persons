@@ -99,6 +99,8 @@ screenshots.
   section), two columns that scroll on their own from 768 px; no To check | Friend coming tabs, no Later lane.
 - **Sort by status** on All requests and My requests ("⇅ Newest" / "⇅ Updated" ↔ "⇅ Status" at the right end
   of the line under the title; the column header on the desk table).
+- **Dashboard Performance**: "last 2 hours" / "last hour" on each row, and "None" for an empty value ("—" only
+  while the dashboard can't reach the server).
 
 ## The production migration
 

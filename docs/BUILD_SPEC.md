@@ -1354,3 +1354,10 @@ Brian approved these with `design/screens/pending-v9.html` (v9.1 note first; fra
 - **Store** (`showUndo`): v9.1's `notFoundSnack` words and `said` with F2's `armUndo` / `holdUndo` (the Undo countdown waits while the location sheet covers the bar).
 - **Docs.** F5's A53–A56 → A59–A62 and its review fixes A57 → A63 (§19); v9.1's A57–A61 → A64–A68 (§20).
 - **Tests.** `tests/unit/desk/render.test.tsx` pins `Date` to its fixture's NOW (the stub's last sync went stale on the real clock after 2026-11-07 03:10:30 UTC, so "shows no counts until data has loaded" failed on `main` too). e2e: the docked-board and iPad landscape tests follow the open request without tabs (`toBeInViewport`); `stages.spec.ts` checks the pane-open cells with waits ("Needs info · 16m", "Not found yet · 24m").
+
+**A70 · Dashboard Performance windows and "None"** (Brian 2026-11-06 21:55–22:05; `components/dashboard/DashboardView.tsx`).
+
+- Contexts (`PERF_CONTEXT`): Time to answer "last 2 hours", Time to reunite "last 2 hours" (lp_stats' reunion window is 2 hours too), Logged "last hour". Spoken: "Average time to answer over the last 2 hours: 9 minutes.", "Average time to reunite over the last 2 hours: 18 minutes."
+- An empty value (`null`, or a field an older lp_stats leaves out) shows `PERF_NONE` "None" (`.val.none`), spoken "No one is waiting for a check.", "No answers in the last 2 hours.", "No reunions in the last 2 hours.", "Nothing logged in the last hour."; Logged 0 is "0".
+- `DashboardContent` takes `failed` (`useStats().failing`, the Reconnecting thresholds): then an empty value shows `NO_VALUE` "—" and says "…: not available."; loaded values still show.
+- **Tests.** `tests/unit/dashboard/dashboard-render.test.tsx` (the contexts, "None" and its sentences, "—" while failing), `tests/e2e/dashboard.spec.ts` ("None" and the contexts with null fields).
