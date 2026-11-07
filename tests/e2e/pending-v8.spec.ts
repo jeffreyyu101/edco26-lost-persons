@@ -290,7 +290,8 @@ test.describe('desk 1440 × 900', () => {
     expect(right.x).toBeGreaterThan(left.x + left.width);
     expect(Math.abs(right.y - left.y)).toBeLessThan(2);
     await expect(page.getByRole('heading', { level: 2, name: /^Waiting for check \d+ requests?$/ })).toBeVisible();
-    await expect(page.getByRole('heading', { level: 2, name: /^Friend coming \d+ requests?$/ })).toBeVisible();
+    // (F3 + F4 release) The header also says "Unread messages" while a Friend coming request has some (F3's dot).
+    await expect(page.getByRole('heading', { level: 2, name: /^Friend coming \d+ requests?( Unread messages)?$/ })).toBeVisible();
 
     // J walks every card on screen: all of Waiting for check before Friend coming.
     const order = await page.evaluate(() =>

@@ -68,12 +68,17 @@ const checkCard = (page: Page, id: string) => page.locator(`[data-testid="check-
 const mineCard = (page: Page, id: string) => page.locator(`[data-testid="mine-card"]:has([data-request-id="${id}"])`);
 const comingCard = (page: Page, id: string) => page.locator(`[data-testid="friend-coming-card"]:has([data-request-id="${id}"])`);
 
-/** Pending → Friend coming (the tab on a phone or a narrow desk; the board's column otherwise). */
+/**
+ * Pending → Friend coming (Pending v9.1, F3 + F4 release: the phone's second section, opened if folded; the
+ * board's column on the desk).
+ */
 async function openComing(page: Page): Promise<void> {
   await page.goto('/?view=pending');
-  const tab = page.getByRole('tab', { name: /^Friend coming/ });
-  await expect.poll(async () => (await tab.isVisible()) || (await page.getByTestId('pending-column-coming').isVisible()), SYNC).toBe(true);
-  if (await tab.isVisible()) await tab.click();
+  const section = page.getByTestId('pending-section-coming');
+  const column = page.getByTestId('pending-column-coming');
+  await expect.poll(async () => (await section.isVisible()) || (await column.isVisible()), SYNC).toBe(true);
+  const toggle = page.getByTestId('queue-toggle-coming').filter({ visible: true });
+  if ((await toggle.count()) && (await toggle.first().getAttribute('aria-expanded')) === 'false') await toggle.first().click();
 }
 const messages = (page: Page) => page.getByTestId('messages');
 const SYNC = { timeout: 20_000 };

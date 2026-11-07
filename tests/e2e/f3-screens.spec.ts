@@ -124,9 +124,11 @@ test('F3 screens', async ({ browser, browserName }) => {
       const ctx = await themed(browser, MED, w, h, theme);
       const page = await ctx.newPage();
       await page.goto('/?view=pending');
-      const tab = page.getByRole('tab', { name: /^Friend coming/ });
-      await expect.poll(async () => (await tab.isVisible()) || (await page.getByTestId('pending-column-coming').isVisible()), { timeout: 20_000 }).toBe(true);
-      if (await tab.isVisible()) await tab.click();
+      // (Pending v9.1) Friend coming is the phone's second section (opened if folded) and the board's column.
+      const section = page.getByTestId('pending-section-coming');
+      await expect.poll(async () => (await section.isVisible()) || (await page.getByTestId('pending-column-coming').isVisible()), { timeout: 20_000 }).toBe(true);
+      const toggle = page.getByTestId('queue-toggle-coming').filter({ visible: true });
+      if ((await toggle.count()) && (await toggle.first().getAttribute('aria-expanded')) === 'false') await toggle.first().click();
       const card = page.locator(`[data-testid="friend-coming-card"]:has([data-request-id="${al.id}"])`);
       await expect(card.getByTestId('enroute-row')).toBeVisible({ timeout: 20_000 });
       await card.scrollIntoViewIfNeeded();
