@@ -1,7 +1,8 @@
 'use client';
 // Bottom sheet (requests.html / states.html .sheet, .handle, .scrim) on Radix Dialog, so focus is trapped
 // and Escape / the scrim close it. 22 px top radius, the drag handle, safe-area padding. Scrolls when its
-// content is taller than the screen.
+// content is taller than the screen. A swipe down closes it too (use-sheet-swipe.ts: past a quarter of its
+// height or a flick; from its top, or anywhere while its content is scrolled to the top).
 //
 // With a field in it (the location's "Bed or chair", the post picker's "Where?") it sits flush on the phone's
 // keyboard (hotfix F5.1): its overlay follows the visual viewport (lib/client/visual-viewport.ts
@@ -12,12 +13,13 @@ import { Dialog, VisuallyHidden } from '@radix-ui/themes';
 import { useEffect, useRef, useState, type FocusEvent, type ReactNode, type RefObject } from 'react';
 import { followKeyboard, isTextField, lockPageScroll, revealDelta } from '@/lib/client/visual-viewport';
 import styles from './ui.module.css';
+import { useSheetSwipe } from './use-sheet-swipe';
 
 interface SheetBase {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   children: ReactNode;
-  /** A tap on the scrim closes the sheet (default). False: only Escape and the sheet's own buttons do. */
+  /** A tap on the scrim or a swipe down closes the sheet (default). False: only Escape and its own buttons do. */
   dismissOnOutside?: boolean;
   /** Focused when the sheet opens, instead of its first control. */
   initialFocus?: RefObject<HTMLElement | null>;
@@ -102,6 +104,7 @@ export function Sheet(props: SheetProps) {
   const { open, onOpenChange, title, hideTitle, description, titleInContent, children, dismissOnOutside = true, initialFocus, onEscapeKeyDown } = props;
   const [node, setNode] = useState<HTMLDivElement | null>(null);
   const onFocus = useSheetKeyboard(node);
+  useSheetSwipe(node, dismissOnOutside ? () => onOpenChange(false) : null);
   // Radix points aria-describedby at a Description it finds; without one, say so (no console warning).
   const describedBy = description || titleInContent ? {} : { 'aria-describedby': undefined };
   return (
@@ -123,7 +126,7 @@ export function Sheet(props: SheetProps) {
             : undefined
         }
       >
-        <div className={styles.handle} aria-hidden />
+        <div className={styles.handle} aria-hidden data-sheet-grab="" />
         {titleInContent ? null : hideTitle ? (
           <VisuallyHidden>
             <Dialog.Title>{title}</Dialog.Title>

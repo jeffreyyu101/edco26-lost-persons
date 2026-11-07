@@ -6,7 +6,7 @@ import { OVERFLOW_WIDTHS, expectNoOverflow } from './helpers/overflow';
 import { newSignedInContext, signedInAs } from './helpers/session';
 
 // The Activity inbox (F4, design/screens/f34-states.html, f34-v2-1..4 and 9): the bell with its count next to
-// search, the phone's full-height sheet and the desk's popover (and sidebar item), one row per request, a row
+// search, the phone's sheet and the desk's popover (and sidebar item), one row per request, a row
 // opens the request and marks it read (opening the sheet does not), Mark all read with Undo, "Nothing new".
 // Another phone (the liaison) answers synthetic requests (TEST-F4V-<tag>) through the API; closed afterwards.
 
@@ -161,7 +161,7 @@ test.describe('phone', () => {
     }
   });
 
-  test('nothing yet: "Nothing new", no Mark all read; the grabber closes the sheet', async ({ browser }) => {
+  test('nothing yet: "Nothing new", no Mark all read; ✕ closes the sheet', async ({ browser }) => {
     const fresh = await newSignedInContext(browser, { staffName: `TEST-F4 Empty ${Date.now().toString(36)}`, team: 'GC/HX - Base' }, { baseURL: BASE, ...devices['iPhone 14'] });
     try {
       const page = await fresh.newPage();

@@ -3,6 +3,7 @@ import { expect, test, type APIRequestContext, type Locator, type Page } from '@
 import type { RequestDetail, RequestSummary } from '../../lib/api-types';
 import { testBaseUrl } from '../../scripts/test-env.mjs';
 import { signedInAs } from './helpers/session';
+import { swipe } from './helpers/swipe';
 
 // Pending v8 (design/screens/pending-v8.html, Brian + Dani 2026-11-06 afternoon) with Pending v9.1 (Brian
 // 2026-11-06 evening, design/screens/pending-v9.html; tests/e2e/pending-v9.spec.ts has the rest), end to end on
@@ -72,23 +73,9 @@ const checkCard = (page: Page, id: string) => page.locator(`[data-testid="check-
 const comingCard = (page: Page, id: string) => page.locator(`[data-testid="friend-coming-card"]:has([data-request-id="${id}"])`);
 const nameOf = (r: RequestSummary) => r.name;
 
-/** A swipe down on `el` (touch events React reads, the same in Chromium and WebKit). */
+/** A swipe down on `el`, held still before the finger lets go (tests/e2e/helpers/swipe.ts; every sheet's swipe). */
 async function swipeDown(el: Locator, distance: number) {
-  await el.evaluate((node, dy) => {
-    const box = node.getBoundingClientRect();
-    const x = box.left + box.width / 2;
-    const y = box.top + box.height / 2;
-    const fire = (type: string, clientY: number, touches: number) => {
-      const ev = new Event(type, { bubbles: true, cancelable: true });
-      const list = touches ? [{ clientX: x, clientY, identifier: 1 }] : [];
-      Object.defineProperty(ev, 'touches', { value: list });
-      Object.defineProperty(ev, 'changedTouches', { value: [{ clientX: x, clientY, identifier: 1 }] });
-      node.dispatchEvent(ev);
-    };
-    fire('touchstart', y, 1);
-    for (let i = 1; i <= 4; i += 1) fire('touchmove', y + (dy * i) / 4, 1);
-    fire('touchend', y + dy, 0);
-  }, distance);
+  await swipe(el, distance, { hold: 150 });
 }
 
 test.describe('phone', () => {

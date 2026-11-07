@@ -23,6 +23,8 @@ export interface ActivityPanelProps {
   /** Closes the sheet / popover (a row was opened). */
   onClose: () => void;
   variant: 'sheet' | 'popover';
+  /** After Mark all read in the header (the sheet's ✕). */
+  headEnd?: ReactNode;
 }
 
 /**
@@ -57,7 +59,7 @@ function Row({ row, now, timeZone, onOpen }: { row: ActivityRow; now: number; ti
   );
 }
 
-export function ActivityPanel({ heading, onClose, variant }: ActivityPanelProps) {
+export function ActivityPanel({ heading, onClose, variant, headEnd }: ActivityPanelProps) {
   const activity = useActivity();
   const now = useNow();
   const timeZone = useEventTimezone();
@@ -95,7 +97,8 @@ export function ActivityPanel({ heading, onClose, variant }: ActivityPanelProps)
 
   return (
     <div className={s.panel} data-testid="activity-panel" data-variant={variant}>
-      <div className={s.head}>
+      {/* In the sheet the header stays put over the list, and a drag on it pulls the sheet down. */}
+      <div className={s.head} data-sheet-grab={variant === 'sheet' ? '' : undefined}>
         {heading({ className: s.title ?? '', children: 'Activity' })}
         {empty ? null : (
           <IconButton
@@ -115,6 +118,7 @@ export function ActivityPanel({ heading, onClose, variant }: ActivityPanelProps)
             </span>
           </IconButton>
         )}
+        {headEnd}
       </div>
       {empty ? (
         <div className={s.empty} data-testid="activity-empty">
