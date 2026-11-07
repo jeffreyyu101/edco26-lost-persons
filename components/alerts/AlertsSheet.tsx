@@ -5,7 +5,8 @@
 // member. "New requests" is also the in-app new-request alert (the old "Alerts" bell). Opened from the avatar
 // menu, the desk sidebar and rail, and once by the banner when Turn on worked.
 import { Button, Switch } from '@radix-ui/themes';
-import { Bell, BellOff, Check } from 'lucide-react';
+import { BellOff } from 'lucide-react';
+import { BellIcon, CheckIcon } from '@/components/activity/icons';
 import { useEffect, useId, useState } from 'react';
 import { NotifySheetRow } from '@/components/ui/NotifyStatus';
 import { Sheet, SheetTitle } from '@/components/ui/Sheet';
@@ -42,7 +43,7 @@ function DeviceBlock() {
       return (
         <div className={s.device} data-state="on" data-testid="alerts-device" role="status">
           <span className={s.deviceIcon} aria-hidden>
-            <Bell size={20} strokeWidth={1.75} />
+            <BellIcon size={20} strokeWidth={1.75} />
           </span>
           <div className={s.deviceBody}>
             <span className={s.deviceTitle}>On for this {noun}</span>
@@ -152,7 +153,7 @@ function TestButton() {
       onClick={() => void pushClient().sendTest().then((ok) => setSent(ok))}
       data-testid="alerts-test"
     >
-      {sent ? <Check size={17} strokeWidth={2} aria-hidden /> : <Bell size={17} strokeWidth={1.75} aria-hidden />}
+      {sent ? <CheckIcon size={17} strokeWidth={2} /> : <BellIcon size={17} strokeWidth={1.75} />}
       {sent ? 'Test alert sent' : alerts.error === 'failed' ? 'Not sent · Try again' : 'Send a test alert'}
     </Button>
   );

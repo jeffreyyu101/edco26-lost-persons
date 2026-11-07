@@ -6,12 +6,12 @@
 //     sidebar's Activity item (ActivityNavItem) and the rail's (ActivityRailItem) open the same popover.
 // The open state is shared (lib/client/activity-client.ts), so the bell and the sidebar item are one control.
 import { Dialog, IconButton, Popover, VisuallyHidden } from '@radix-ui/themes';
-import { Bell } from 'lucide-react';
 import { useEffect, type ComponentPropsWithRef } from 'react';
 import { useInDesk } from '@/components/desk/desk-context';
 import { badgeText } from '@/lib/activity';
 import { activityClient, useActivity } from '@/lib/client/activity-client';
 import { ActivityPanel } from './ActivityPanel';
+import { BellIcon } from './icons';
 import s from './activity.module.css';
 
 /** "Activity, 3 unread" (or "Activity"). */
@@ -40,7 +40,7 @@ function BellButton({ unread, ...rest }: { unread: number } & Omit<ComponentProp
       data-testid="activity-bell"
       data-unread={unread}
     >
-      <Bell size={20} strokeWidth={1.75} aria-hidden />
+      <BellIcon size={20} strokeWidth={1.75} />
       {text ? (
         <span className={s.badge} aria-hidden data-testid="activity-badge">
           {text}
@@ -50,12 +50,17 @@ function BellButton({ unread, ...rest }: { unread: number } & Omit<ComponentProp
   );
 }
 
-/** The phone's sheet: full height, named by its visible "Activity" heading. */
+/**
+ * The phone's sheet: full height, named by its visible "Activity" heading. The grabber is its close button
+ * (a tap, VoiceOver, Switch Control); Escape and the strip of scrim above it close it too.
+ */
 function ActivitySheet({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Content className={`lp-activity-sheet ${s.sheet}`} aria-describedby={undefined} data-testid="activity-sheet">
-        <div className={s.handle} aria-hidden />
+        <Dialog.Close>
+          <button type="button" className={`${s.handle} lp-hit`} aria-label="Close Activity" data-testid="activity-close" />
+        </Dialog.Close>
         <div className={s.sheetScroll}>
           <ActivityPanel
             variant="sheet"
@@ -130,7 +135,7 @@ export function ActivityNavItem() {
       onClick={() => activityClient().setOpen(true)}
       data-testid="desk-activity"
     >
-      <Bell size={16} strokeWidth={1.75} aria-hidden />
+      <BellIcon size={16} strokeWidth={1.75} />
       {/* Named by what it shows, "Activity 3", then " unread" for screen readers (WCAG 2.5.3). */}
       <span className={s.navLabel}>Activity</span>{' '}
       {text ? (

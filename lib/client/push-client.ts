@@ -15,6 +15,8 @@
 //     revoked later → not subscribed → the banner returns.
 //   * onSignOut(): the server forgets the subscription (DELETE, before the session is cleared), the browser
 //     drops it. onSessionEnded() (a 401): the browser drops it. Both clear the app icon badge.
+//   * The store reaches the page's client through lib/client/f4-bridge.ts (pushHooksFor): whether the push
+//     carries an alert (no double alerts, A54), and sign-out / 401, bounded and never rejecting.
 // Never logs anything.
 import { useSyncExternalStore } from 'react';
 import type { PushConfigResponse, PushTestResponse } from '../activity';
@@ -26,9 +28,9 @@ import {
   type Permission,
   type Platform,
 } from './alerts-platform';
-import { apiRequest, type FetchLike } from './http';
 import { readPrefs } from './prefs';
-import { setPushSubscribed } from './push-coverage';
+import { registerPushHooks, type ApiRequest, type PushHooks } from './f4-bridge';
+import { viaStore } from './via-store';
 
 export interface SubscriptionLike {
   readonly endpoint: string;
@@ -61,7 +63,8 @@ export interface PushHost {
   workerShowsPush(registration: PushRegistrationLike): Promise<boolean>;
   getSubscription(registration: PushRegistrationLike): Promise<SubscriptionLike | null>;
   subscribe(registration: PushRegistrationLike, applicationServerKey: Uint8Array): Promise<SubscriptionLike>;
-  fetch: FetchLike;
+  /** The store's door to the API (lib/client/f4-bridge.ts storeApi). */
+  request: ApiRequest;
   storage(): StorageLike | null;
   /** Calls back on focus / visibilitychange / permission change. Returns the remover. */
   watch(onChange: () => void): () => void;
@@ -175,7 +178,6 @@ export function createPushClient(host: PushHost): PushClient {
           subscribed: next.subscribed,
         });
     state = { ...next, platform: p, status };
-    setPushSubscribed(state.subscribed);
     for (const l of [...listeners]) l();
   };
 
@@ -209,7 +211,7 @@ export function createPushClient(host: PushHost): PushClient {
     const keys = json.keys ?? {};
     if (!json.endpoint || !keys.p256dh || !keys.auth) return false;
     const old = storedEndpoint();
-    const res = await apiRequest<PushConfigResponse>(host.fetch, '/api/push/subscribe', {
+    const res = await host.request<PushConfigResponse>('/api/push/subscribe', {
       method: 'POST',
       json: {
         endpoint: json.endpoint,
@@ -281,7 +283,7 @@ export function createPushClient(host: PushHost): PushClient {
   };
 
   const loadConfig = async (gen: number): Promise<void> => {
-    const res = await apiRequest<PushConfigResponse>(host.fetch, '/api/push/prefs', {
+    const res = await host.request<PushConfigResponse>('/api/push/prefs', {
       method: 'POST',
       json: { bell: readPrefs().bell },
       timeoutMs: TIMEOUT_MS,
@@ -327,7 +329,6 @@ export function createPushClient(host: PushHost): PushClient {
     configured = null;
     publicKey = null;
     state = { ...INITIAL_ALERTS };
-    setPushSubscribed(false);
     host.setBadge(0);
     for (const l of [...listeners]) l();
   };
@@ -340,7 +341,7 @@ export function createPushClient(host: PushHost): PushClient {
     }
     const sub = reg ? await host.getSubscription(reg).catch(() => null) : null;
     if (sub && tellServer) {
-      await apiRequest(host.fetch, '/api/push/subscribe', { method: 'DELETE', json: { endpoint: sub.endpoint }, timeoutMs: 2_500 });
+      await host.request('/api/push/subscribe', { method: 'DELETE', json: { endpoint: sub.endpoint }, timeoutMs: 2_500 });
     }
     if (sub) await sub.unsubscribe().catch(() => false);
     storeEndpoint(null);
@@ -401,7 +402,7 @@ export function createPushClient(host: PushHost): PushClient {
       if (!before) return false;
       const gen = epoch;
       compute({ prefs: { ...before, ...change } });
-      const res = await apiRequest<PushConfigResponse>(host.fetch, '/api/push/prefs', { method: 'POST', json: change, timeoutMs: TIMEOUT_MS });
+      const res = await host.request<PushConfigResponse>('/api/push/prefs', { method: 'POST', json: change, timeoutMs: TIMEOUT_MS });
       if (gen !== epoch) return false;
       if (!res.ok) {
         compute({ prefs: before });
@@ -417,7 +418,7 @@ export function createPushClient(host: PushHost): PushClient {
       compute({ busy: true, error: null, tested: false });
       const sub = await host.getSubscription(reg).catch(() => null);
       const res = sub
-        ? await apiRequest<PushTestResponse>(host.fetch, '/api/push/test', { method: 'POST', json: { endpoint: sub.endpoint }, timeoutMs: TIMEOUT_MS })
+        ? await host.request<PushTestResponse>('/api/push/test', { method: 'POST', json: { endpoint: sub.endpoint }, timeoutMs: TIMEOUT_MS })
         : null;
       if (gen !== epoch) return false;
       const sent = !!res && res.ok && res.data.sent === true;
@@ -436,7 +437,6 @@ export function createPushClient(host: PushHost): PushClient {
         await dropBrowserSubscription(true);
       } finally {
         if (had || state.subscribed) reset();
-        else setPushSubscribed(false);
       }
     },
     async onSessionEnded() {
@@ -510,7 +510,7 @@ export function browserPushHost(): PushHost {
         userVisibleOnly: true,
         applicationServerKey: applicationServerKey as BufferSource,
       }) as Promise<SubscriptionLike>,
-    fetch: (input, init) => window.fetch(input, init),
+    request: viaStore,
     storage: () => {
       try {
         return window.localStorage;
@@ -554,19 +554,25 @@ export function pushClient(): PushClient {
   return shared;
 }
 
+/** How long a sign-out waits for this device to stop its pushes before it goes on regardless. */
+export const SIGN_OUT_WAIT_MS = 3_000;
+
+/** What the store asks of a push client (lib/client/f4-bridge.ts), never rejecting and bounded in time. */
+export function pushHooksFor(client: () => PushClient, waitMs = SIGN_OUT_WAIT_MS): PushHooks {
+  return {
+    // A combined alert ("3 new requests") is split before it is asked: its parts are covered one by one.
+    covers: (kind) => client().getState().subscribed && kind !== 'combined',
+    onSignOut: () =>
+      Promise.race([client().onSignOut().catch(() => undefined), new Promise<void>((resolve) => setTimeout(resolve, waitMs))]),
+    onSessionEnded: () => void client().onSessionEnded().catch(() => undefined),
+  };
+}
+
+if (typeof window !== 'undefined') registerPushHooks(pushHooksFor(pushClient));
+
 const serverState = () => INITIAL_ALERTS;
 
 export function useAlerts(): AlertsState {
   const client = pushClient();
   return useSyncExternalStore(client.subscribe, client.getState, serverState);
-}
-
-/** The store's sign-out (lib/client/store-core.ts pushSignOut). */
-export function onSignOut(): Promise<void> {
-  return pushClient().onSignOut();
-}
-
-/** The store's 401 (lib/client/store-core.ts pushSessionEnded). */
-export function onSessionEnded(): Promise<void> {
-  return pushClient().onSessionEnded();
 }

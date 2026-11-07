@@ -119,7 +119,7 @@ describe('alerts in the background are system notifications', () => {
     expect(alertTitles(s)).toEqual(['LP-1004 · S.L. — not in medical']);
     expect(heard.map((e) => e.title)).toEqual(['LP-1004 · S.L. — not in medical']);
     expect(n.shown).toHaveLength(1);
-    expect(n.closed).toEqual([{ tag: `lp-${mine.id}`, key: `${mine.id}:2` }]);
+    expect(n.closed).toEqual([{ tag: mine.id, key: `${mine.id}:2` }]);
   });
 
   it('a notification that could not be shown falls back to the toast + chime', async () => {
@@ -143,7 +143,7 @@ describe('alerts in the background are system notifications', () => {
     await advance(6_000);
     expect(n.shown).toHaveLength(1);
     await finish(a.setStatus(mine.id, STATUS.reunited, 'reunite'));
-    expect(n.closed).toEqual([{ tag: `lp-${mine.id}`, key: `${mine.id}:2` }]);
+    expect(n.closed).toEqual([{ tag: mine.id, key: `${mine.id}:2` }]);
   });
 
   it('a later change of the same request replaces its notification; only the old change is ever closed', async () => {
@@ -160,7 +160,7 @@ describe('alerts in the background are system notifications', () => {
       ['LP-1004 · Waiting for check', `lp-${mine.id}`, `${mine.id}:3`],
     ]);
     // The out-of-date "In medical" may be closed by its own key; the new one never is.
-    expect(n.closed.every((c) => c.tag === `lp-${mine.id}` && c.key === `${mine.id}:2`)).toBe(true);
+    expect(n.closed.every((c) => c.tag === mine.id && c.key === `${mine.id}:2`)).toBe(true);
   });
 
   it('signing out closes every notification of the app', async () => {
@@ -197,7 +197,7 @@ describe('alerts across tabs of one browser (the store’s side)', () => {
     expect(n.shown).toHaveLength(1);
     expect(s().toasts).toEqual([]);
     expect(heard).toEqual([]);
-    expect(n.closed).toEqual([{ tag: `lp-${mine.id}`, key: `${mine.id}:2` }]);
+    expect(n.closed).toEqual([{ tag: mine.id, key: `${mine.id}:2` }]);
   });
 
   it('an alert another tab already delivered shows nowhere here; the rest of the batch does (and only they count toward "3 new requests")', async () => {

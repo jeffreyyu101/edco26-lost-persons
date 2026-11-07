@@ -371,11 +371,12 @@ describe('the notifier', () => {
     const b = { ...a, tag: 'other', key: 'other:1' };
     await system.showNotice(a);
     await system.showNotice(b);
-    system.close(a.tag, `${a.tag}:99`); // an older change: leaves the newer notification alone
+    const id = makeRow(4).id;
+    system.close(id, `${id}:99`); // an older change: leaves the newer notification alone
     await Promise.resolve();
     await Promise.resolve();
     expect(f.open.map((n) => n.tag)).toEqual([a.tag, 'other']);
-    system.close(a.tag, a.key);
+    system.close(id, a.key);
     await Promise.resolve();
     await Promise.resolve();
     expect(f.open.map((n) => n.tag)).toEqual(['other']);

@@ -4,7 +4,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ActivityRow } from '@/lib/activity';
 import { createActivityClient } from '@/lib/client/activity-client';
-import { publishSyncExtras, resetSyncExtras } from '@/lib/client/sync-extras';
+import { publishSyncExtras } from '@/lib/client/f4-bridge';
+import { apiRequest } from '@/lib/client/http';
 
 const A = '0f0f0f0f-0000-4000-8000-0000000000a1';
 const B = '0f0f0f0f-0000-4000-8000-0000000000b2';
@@ -51,17 +52,17 @@ let server: ReturnType<typeof fakeServer>;
 let badges: number[];
 
 beforeEach(() => {
-  resetSyncExtras();
+  publishSyncExtras(null);
   server = fakeServer();
   badges = [];
 });
-afterEach(() => resetSyncExtras());
+afterEach(() => publishSyncExtras(null));
 
 const make = () => {
   // Each client its own badge log (clients of earlier tests still listen to sync).
   const mine: number[] = [];
   badges = mine;
-  return createActivityClient({ fetch: server.fetch, setBadge: (n) => mine.push(n) });
+  return createActivityClient({ request: (path, opts) => apiRequest(server.fetch, path, opts), setBadge: (n) => mine.push(n) });
 };
 
 describe('the bell', () => {

@@ -271,8 +271,8 @@ export interface AlertNotifier {
    * alerts a combined one stands for). False when it could not be shown: the store then toasts it.
    */
   show(alert: AlertEvent, rowOf: (id: string) => RequestSummary | undefined, sources: readonly AlertEvent[]): Promise<boolean>;
-  /** Closes the notification with this tag (only the one of `key`, when given). */
-  close(tag: string, key?: string | null): void;
+  /** Closes this request's notification (tag requestTag(id); only the one of `key`, when given). */
+  close(requestId: string, key?: string | null): void;
   /** Closes every notification of the app (sign-out, another staff signed in), and forgets the board. */
   closeAll(): void;
   /**
@@ -568,8 +568,8 @@ export function createNotifySystem(host: NotifyHost): NotifySystem {
     // The notice is built before anything is awaited, from the rows the store holds at this moment.
     show: (alert, rowOf, sources) => showNotice(systemNotice(alert, rowOf, sources)),
     showNotice,
-    close(tag, key) {
-      closeWhere({ tag }, (n) => key === undefined || key === null || keyOf(n) === key);
+    close(requestId, key) {
+      closeWhere({ tag: requestTag(requestId) }, (n) => key === undefined || key === null || keyOf(n) === key);
     },
     closeAll() {
       closeWhere(undefined, () => true);

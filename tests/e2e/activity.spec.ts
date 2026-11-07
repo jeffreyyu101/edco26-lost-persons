@@ -161,7 +161,7 @@ test.describe('phone', () => {
     }
   });
 
-  test('nothing yet: "Nothing new", no Mark all read', async ({ browser }) => {
+  test('nothing yet: "Nothing new", no Mark all read; the grabber closes the sheet', async ({ browser }) => {
     const fresh = await newSignedInContext(browser, { staffName: `TEST-F4 Empty ${Date.now().toString(36)}`, team: 'GC/HX - Base' }, { baseURL: BASE, ...devices['iPhone 14'] });
     try {
       const page = await fresh.newPage();
@@ -170,6 +170,8 @@ test.describe('phone', () => {
       const sheet = page.getByRole('dialog', { name: 'Activity' });
       await expect(sheet.getByTestId('activity-empty')).toHaveText('Nothing new');
       await expect(sheet.getByRole('button', { name: 'Mark all read' })).toHaveCount(0);
+      await sheet.getByRole('button', { name: 'Close Activity' }).click();
+      await expect(sheet).toBeHidden();
     } finally {
       await fresh.close();
     }

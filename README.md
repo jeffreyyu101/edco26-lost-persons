@@ -35,6 +35,8 @@ message.
 | `SESSION_SECRET` | yes | 32 characters or more. Changing it signs everyone out. |
 | `APP_SHARED_PASSWORD_HASH_B64` or `APP_SHARED_PASSWORD` | one of them | The event password, as a base64 bcrypt hash or as plain text. If both are set, the hash wins. |
 | `EVENT_TIMEZONE` | no | Defaults to `America/New_York`. Every displayed time uses it. |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | for lock-screen alerts | Web Push (already set in production). All three switch it on; `VAPID_SUBJECT` is `mailto:` or `https:`. Missing or invalid: push is off, silently (no alerts banner, no pushes; Activity and in-app alerts still work). A new pair makes every device subscribe again on its next open. |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | no | The same public key at build time. The app reads the key from the server anyway (`POST /api/push/prefs`). |
 
 To make a password hash without writing the password into a file:
 
@@ -98,6 +100,7 @@ npm run start:test                       # http://127.0.0.1:3100
 | `npm run lint` | ESLint, with no warnings allowed |
 | `npm test` | Unit tests (vitest, no network or database) |
 | `npm run test:int` | Integration tests: every route, the SQL functions, concurrency, login limits, the migration and `docs/export.sql` (run read-only), against the local stack through a production build on `PORT` (default 3100). If nothing listens there, the harness starts `next start` itself. Run `npm run build:test` first. |
+| `node scripts/with-e2e-lock.mjs --migrate -- <command>` | Runs integration or e2e tests while holding the shared local-stack lock, after re-applying this branch's rework migration twice (several branches share one local stack). |
 | `npm run test:e2e` | Playwright on the production build: sign-in, lists, the two-phone flow (log → Pending → In medical → alert), system notifications on a desktop (hidden page notifies, visible page toasts), profile, edit and conflicts, dashboard, offline and lie-fi queueing, the service-worker update, the first-load JS budget, and accessibility (axe-core WCAG 2.1 A/AA in light and dark, plus 44 px tap targets). Run `npm run build:test` first. |
 | `node scripts/smoke-csp.mjs` | The production CSP and nonce in Chromium and WebKit: `/signin` hydrates with no violations, `/` redirects without a session, and with one the list, a profile and Back work. Needs the production build running on `PORT`. `npm run test:e2e` runs it too (`tests/e2e/smoke.spec.ts`). |
 | `npm run db:verify-migration` | Applies the rework migration twice to the local database and to an upgrade fixture built from Jeffrey's original schema, then smoke-tests the functions. |
@@ -125,14 +128,20 @@ Pending.
 - **Answers.** Not in medical, In medical, Reunited and Change answer each offer Undo for 10 s. Change answer
   is a menu: the other answer, or Back to Waiting for check. Two people giving the same answer is harmless.
   A change made by someone else shows as "Updated by someone else".
-- **Alerts** appear only while the app is open: changes to your requests by someone else, and new requests
-  when alerts are on (the bell, in the avatar menu). With the app in front, an alert is a toast with a
-  chime. In the background (another tab, a minimised window) it is a system notification instead, where the
-  device allows one and it was allowed (desktop Chrome, Edge, Firefox and Safari, Android Chrome, the iPhone
-  Home Screen app; "Allow notifications" in the avatar menu). It shows the LP number, the status, initials
-  and the post, never contact details, and a click opens the request. One alert is never both a toast and a
-  notification, even with the app in two windows. A Safari tab on iPhone keeps the toast only. There is no
-  push: a closed app gets nothing.
+- **Alerts.** With the app in front, an alert is a toast with a chime: changes to your requests by someone
+  else, and new requests when "New requests" is on. **Lock-screen alerts (Web Push, F4)** reach a locked
+  phone or a closed laptop app once "Turn on" was tapped on that device (desktop browsers, Android Chrome,
+  the iPhone / iPad Home Screen app): answers, location changes and other updates on requests you logged or
+  answered, and new requests with "New requests" on. A notification shows the request's initials and one
+  line ("In medical · Chair 9"), never a name, LP number or contact details, and opens the request. A banner
+  on All, Pending and My requests shows what this device still needs (Turn on, the Home Screen taps, or the
+  settings path when blocked). Avatar menu → Alerts opens the Alerts sheet: this device's state, "Send a test
+  alert", and the "New requests" and "Updates on my requests" switches (saved on the server for every device
+  of yours). One alert is never both a toast and a notification. Without push on a device, a page in the
+  background still shows a system notification where allowed ("Allow notifications"), as before.
+- **Activity.** The bell next to search (and in the desk top bar and sidebar) counts requests with something
+  new for you. One row per request, newest first; opening the request (from anywhere) marks it read; Mark all
+  read has Undo. The app icon badge shows the same count.
 - **Offline.** A new request (with its photos) is saved on the phone first and sent when the signal is back.
   Answers, edits and adding photos to an existing request need a connection.
 - **Dashboard.** Status count tiles first, then Open by post, Recently updated, and Performance last (longest

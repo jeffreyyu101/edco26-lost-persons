@@ -2,7 +2,7 @@
 // all read with Undo, and the app icon badge. Loaded with import() (the bell and the Activity host), so it
 // costs nothing on the first load.
 //
-//   * The unread count rides on every sync (lib/client/sync-extras.ts): live at the sync cadence.
+//   * The unread count rides on every sync (lib/client/f4-bridge.ts): live at the sync cadence.
 //   * The list (GET /api/activity) loads when the sheet or popover opens, and again whenever the unread set
 //     changes while it is open.
 //   * Read state belongs to the request: opening it from anywhere (Activity, a list, a deep link, a push
@@ -12,8 +12,8 @@
 // Never logs anything.
 import { useSyncExternalStore } from 'react';
 import type { ActivityListResponse, ActivityReadResponse, ActivityRow } from '../activity';
-import { apiRequest, type FetchLike } from './http';
-import { lastActivityUnread, subscribeSyncExtras, type ActivityUnread } from './sync-extras';
+import { subscribeSyncExtras, type ActivityUnread, type ApiRequest } from './f4-bridge';
+import { viaStore } from './via-store';
 
 export interface ActivityState {
   /** Unread requests (the bell). */
@@ -38,7 +38,8 @@ export const INITIAL_ACTIVITY: Readonly<ActivityState> = Object.freeze({
 });
 
 export interface ActivityHost {
-  fetch: FetchLike;
+  /** The store's door to the API (lib/client/f4-bridge.ts storeApi). */
+  request: ApiRequest;
   setBadge(count: number): void;
 }
 
@@ -79,9 +80,10 @@ export function createActivityClient(host: ActivityHost): ActivityClient {
   };
 
   const applyUnread = (u: ActivityUnread) => {
-    const ids = u.ids.filter((id) => !pendingRead.has(id));
+    const all = Array.isArray(u.ids) ? u.ids : [];
+    const ids = all.filter((id) => !pendingRead.has(id));
     const changed = !sameIds(state.unreadIds, ids);
-    const unread = Math.max(0, u.count - (u.ids.length - ids.length));
+    const unread = Math.max(0, u.count - (all.length - ids.length));
     if (!changed && unread === state.unread) return;
     set({ unread, unreadIds: new Set(ids) });
     if (state.open && changed) void refresh();
@@ -91,7 +93,7 @@ export function createActivityClient(host: ActivityHost): ActivityClient {
     const seq = ++fetchSeq;
     const gen = epoch;
     set({ loading: state.rows === null, failed: false });
-    const res = await apiRequest<ActivityListResponse>(host.fetch, '/api/activity', { timeoutMs: TIMEOUT_MS });
+    const res = await host.request<ActivityListResponse>('/api/activity', { timeoutMs: TIMEOUT_MS });
     if (seq !== fetchSeq || gen !== epoch) return;
     if (!res.ok || !Array.isArray(res.data.rows)) {
       set({ loading: false, failed: state.rows === null });
@@ -116,9 +118,7 @@ export function createActivityClient(host: ActivityHost): ActivityClient {
     start() {
       if (started) return;
       started = true;
-      const last = lastActivityUnread();
-      if (last) applyUnread(last);
-      subscribeSyncExtras(applyUnread);
+      subscribeSyncExtras(applyUnread); // told the last value at once
     },
     setOpen(open) {
       if (open === state.open) return;
@@ -133,7 +133,7 @@ export function createActivityClient(host: ActivityHost): ActivityClient {
       const unreadIds = new Set(state.unreadIds);
       const had = unreadIds.delete(requestId);
       set({ unreadIds, unread: Math.max(0, state.unread - (had ? 1 : 0)), rows: markRows(new Set([requestId]), true) });
-      void apiRequest<ActivityReadResponse>(host.fetch, '/api/activity/read', { method: 'POST', json: { requestId }, timeoutMs: TIMEOUT_MS }).then(() => {
+      void host.request<ActivityReadResponse>('/api/activity/read', { method: 'POST', json: { requestId }, timeoutMs: TIMEOUT_MS }).then(() => {
         if (gen === epoch) pendingRead.delete(requestId);
       });
     },
@@ -141,7 +141,7 @@ export function createActivityClient(host: ActivityHost): ActivityClient {
       const gen = epoch;
       const before = { unread: state.unread, unreadIds: state.unreadIds, rows: state.rows };
       set({ unread: 0, unreadIds: new Set(), rows: markRows(null, true) });
-      const res = await apiRequest<ActivityReadResponse>(host.fetch, '/api/activity/read', { method: 'POST', json: { all: true }, timeoutMs: TIMEOUT_MS });
+      const res = await host.request<ActivityReadResponse>('/api/activity/read', { method: 'POST', json: { all: true }, timeoutMs: TIMEOUT_MS });
       if (gen !== epoch) return null;
       if (!res.ok) {
         set(before);
@@ -155,7 +155,7 @@ export function createActivityClient(host: ActivityHost): ActivityClient {
       const back = new Set(ids);
       const unreadIds = new Set([...state.unreadIds, ...ids]);
       set({ unreadIds, unread: unreadIds.size, rows: markRows(back, false) });
-      const res = await apiRequest(host.fetch, '/api/activity/unread', { method: 'POST', json: { requestIds: [...ids] }, timeoutMs: TIMEOUT_MS });
+      const res = await host.request('/api/activity/unread', { method: 'POST', json: { requestIds: [...ids] }, timeoutMs: TIMEOUT_MS });
       if (gen !== epoch) return false;
       if (!res.ok) void refresh();
       return res.ok;
@@ -183,7 +183,7 @@ function browserBadge(count: number): void {
 let shared: ActivityClient | null = null;
 
 export function activityClient(): ActivityClient {
-  shared ??= createActivityClient({ fetch: (input, init) => window.fetch(input, init), setBadge: browserBadge });
+  shared ??= createActivityClient({ request: viaStore, setBadge: browserBadge });
   return shared;
 }
 

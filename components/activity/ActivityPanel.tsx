@@ -4,14 +4,15 @@
 // the list is empty), ONE row per request (its latest event), newest first, day labels only when the list
 // spans more than one day, and "Nothing new" when empty. Tapping a row opens the request (and marks it read);
 // the sheet or popover closes. Mark all read shows "3 marked read · Undo" for 5 s.
-import { IconButton, Tooltip } from '@radix-ui/themes';
-import { Bell, CheckCheck } from 'lucide-react';
+import { IconButton } from '@radix-ui/themes';
+import { CheckCheck } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { activityAriaLabel, activityGlyph, activityTime, groupByDay, type ActivityRow } from '@/lib/activity';
 import { activityClient, useActivity } from '@/lib/client/activity-client';
 import { navigate } from '@/lib/client/nav';
 import { useEventTimezone, useNow } from '@/lib/client/store-contract';
 import { ActivityGlyphIcon } from './glyphs';
+import { BellIcon } from './icons';
 import s from './activity.module.css';
 
 const UNDO_MS = 5_000;
@@ -92,25 +93,27 @@ export function ActivityPanel({ heading, onClose, variant }: ActivityPanelProps)
       <div className={s.head}>
         {heading({ className: s.title ?? '', children: 'Activity' })}
         {empty ? null : (
-          <Tooltip content="Mark all read">
-            <IconButton
-              variant="ghost"
-              color="gray"
-              size="3"
-              className={`${s.markAll} lp-hit`}
-              aria-label="Mark all read"
-              disabled={!anyUnread}
-              onClick={() => void markAll()}
-              data-testid="activity-mark-all"
-            >
-              <CheckCheck size={20} strokeWidth={2} aria-hidden />
-            </IconButton>
-          </Tooltip>
+          <IconButton
+            variant="ghost"
+            color="gray"
+            size="3"
+            className={`${s.markAll} lp-hit`}
+            aria-label="Mark all read"
+            disabled={!anyUnread}
+            onClick={() => void markAll()}
+            data-testid="activity-mark-all"
+          >
+            <CheckCheck size={20} strokeWidth={2} aria-hidden />
+            {/* The tooltip: CSS only, like the desk's (Radix Tooltip would grow the first load, spec A25). */}
+            <span className={s.tip} aria-hidden>
+              Mark all read
+            </span>
+          </IconButton>
         )}
       </div>
       {empty ? (
         <div className={s.empty} data-testid="activity-empty">
-          <Bell size={30} strokeWidth={1.5} aria-hidden />
+          <BellIcon size={30} strokeWidth={1.5} />
           Nothing new
         </div>
       ) : activity.rows === null ? (

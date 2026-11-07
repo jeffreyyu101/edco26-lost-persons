@@ -15,7 +15,7 @@
 //   Search       results by the top bar's query (?q=), newest first, the match highlighted.
 import { MapPin, X } from 'lucide-react';
 import { useDeferredValue, useId, useMemo, type ReactNode } from 'react';
-import { AlertsBanner } from '@/components/alerts/AlertsBanner';
+import { AlertsBannerSlot as AlertsBanner } from '@/components/activity/slots';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';

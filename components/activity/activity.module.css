@@ -59,8 +59,45 @@
 .panel[data-variant='popover'] .title {
   font-size: 17px;
 }
+.markAll.markAll {
+  position: relative;
+  margin: 0;
+  overflow: visible;
+}
 .markAll svg {
   color: var(--gray-11);
+}
+/* "Mark all read" on hover and keyboard focus (not on touch screens). */
+.tip {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 6px);
+  right: 0;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--gray-12);
+  color: var(--gray-1);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.12s,
+    visibility 0s 0.12s;
+}
+.markAll:hover > .tip,
+.markAll:focus-visible > .tip {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0.3s, 0.3s;
+}
+@media (hover: none) {
+  .tip {
+    display: none;
+  }
 }
 .markAll[data-disabled] svg {
   color: var(--gray-8);
@@ -249,13 +286,33 @@
   display: flex;
   flex-direction: column;
 }
+/* The grabber, a button: 88 × 24 (44 tall with lp-hit), the 36 × 5 pill drawn in its middle. */
 .handle {
   flex: none;
+  width: 88px;
+  height: 24px;
+  margin: -10px auto 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.handle::after {
+  content: '';
+  position: absolute;
+  left: calc(50% - 18px);
+  top: calc(50% - 2.5px);
   width: 36px;
   height: 5px;
   border-radius: 3px;
   background: var(--gray-a6);
-  margin: 0 auto 8px;
+  pointer-events: none;
+}
+.handle:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -2px;
+  border-radius: 8px;
 }
 @media (prefers-reduced-motion: no-preference) {
   .sheet.sheet[data-state='open'] {

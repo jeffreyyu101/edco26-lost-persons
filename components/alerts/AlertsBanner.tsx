@@ -6,7 +6,8 @@
 //   blocked   "Alerts are blocked" + this device's path to allow them (+ re-check on a computer)
 //   anything else: nothing
 import { Button, IconButton } from '@radix-ui/themes';
-import { Bell, BellOff, RefreshCw } from 'lucide-react';
+import { BellOff } from 'lucide-react';
+import { BellIcon, RefreshIcon } from '@/components/activity/icons';
 import { useEffect, useRef } from 'react';
 import { bannerVisible, blockedSteps, installSteps, showsRecheck } from '@/lib/client/alerts-platform';
 import { openAlertsSheet } from '@/lib/client/alerts-ui';
@@ -44,7 +45,7 @@ export function AlertsBanner() {
     return (
       <section className={s.banner} data-state="off" aria-label="Alerts" data-testid="alerts-banner">
         <span className={s.icon} aria-hidden>
-          <Bell size={18} strokeWidth={1.75} />
+          <BellIcon size={18} strokeWidth={1.75} />
         </span>
         <span className={`${s.title} ${s.body}`}>Alerts are off</span>
         <Button
@@ -69,7 +70,7 @@ export function AlertsBanner() {
     return (
       <section className={s.banner} data-state="install" aria-label="Alerts" data-testid="alerts-banner">
         <span className={s.icon} aria-hidden>
-          <Bell size={18} strokeWidth={1.75} />
+          <BellIcon size={18} strokeWidth={1.75} />
         </span>
         <div className={s.body}>
           <span className={s.title}>Get alerts on your lock screen</span>
@@ -99,7 +100,7 @@ export function AlertsBanner() {
           onClick={() => pushClient().recheck()}
           data-testid="alerts-recheck"
         >
-          <RefreshCw size={16} strokeWidth={2} aria-hidden />
+          <RefreshIcon size={16} strokeWidth={2} />
         </IconButton>
       ) : null}
     </section>

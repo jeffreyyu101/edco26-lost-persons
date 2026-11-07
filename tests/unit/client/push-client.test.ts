@@ -4,9 +4,9 @@
 // subscribes again; permission revoked later brings the banner back; sign-out removes it on the server and in
 // the browser; a 401 removes it in the browser; push off on the server → no banner. Synthetic values only.
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createPushClient, keyBytes, sameKey, type PushHost, type SubscriptionLike } from '@/lib/client/push-client';
-import { pushCovers, pushSubscribed, setPushSubscribed } from '@/lib/client/push-coverage';
+import { createPushClient, keyBytes, pushHooksFor, sameKey, type PushClient, type PushHost, type SubscriptionLike } from '@/lib/client/push-client';
 import type { Permission } from '@/lib/client/alerts-platform';
+import { apiRequest } from '@/lib/client/http';
 
 const KEY_A = 'BEaPyhQXb8N_tL40dgifi5XzkMxfyb9Fq-fyPyhDqG_owTqxDe7FG9PoHwIYVWkQFVaeTf0nbxe42jSDHlw0w28';
 const KEY_B = 'BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM';
@@ -85,6 +85,8 @@ class FakeHost implements PushHost {
     this.sub = new FakeSub(`https://fcm.googleapis.com/fcm/send/device-${this.seq}`, keyText, this);
     return Promise.resolve(this.sub);
   };
+  // The store's door (lib/client/f4-bridge.ts) over a fake fetch.
+  request: PushHost['request'] = (path, opts) => apiRequest(this.fetch, path, opts);
   fetch = async (input: string, init?: RequestInit) => {
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
     this.calls.push({ path: input, method: init?.method ?? 'GET', body });
@@ -131,7 +133,6 @@ let host: FakeHost;
 
 beforeEach(() => {
   host = new FakeHost();
-  setPushSubscribed(false);
 });
 
 describe('turning alerts on', () => {
@@ -151,9 +152,9 @@ describe('turning alerts on', () => {
     const posts = host.posts('/api/push/subscribe');
     expect(posts).toHaveLength(1);
     expect(posts[0]?.body).toMatchObject({ endpoint: 'https://fcm.googleapis.com/fcm/send/device-1', keys: { p256dh: expect.any(String), auth: 'authsecret12' } });
-    expect(pushSubscribed()).toBe(true);
-    expect(pushCovers('in_medical')).toBe(true);
-    expect(pushCovers('combined')).toBe(false);
+    const hooks = pushHooksFor(() => client);
+    expect(hooks.covers('in_medical')).toBe(true);
+    expect(hooks.covers('combined')).toBe(false);
   });
 
   it('refused at the prompt: blocked (the banner shows the path)', async () => {
@@ -263,7 +264,7 @@ describe('an existing subscription', () => {
     host.fire();
     await settle();
     expect(client.getState()).toMatchObject({ status: 'blocked', subscribed: false });
-    expect(pushSubscribed()).toBe(false);
+    expect(pushHooksFor(() => client).covers('in_medical')).toBe(false);
   });
 
   it('allowed again in the site settings: re-check subscribes without asking', async () => {
@@ -314,7 +315,7 @@ describe('lifecycle', () => {
     expect(sub?.unsubscribed).toBe(true);
     expect(client.getState()).toMatchObject({ subscribed: false, status: 'checking' });
     expect(host.badges.at(-1)).toBe(0);
-    expect(pushSubscribed()).toBe(false);
+    expect(pushHooksFor(() => client).covers('in_medical')).toBe(false);
     expect(host.store.size).toBe(0);
   });
 
@@ -332,5 +333,20 @@ describe('lifecycle', () => {
     await settle();
     expect(client.getState().status).toBe('on');
     expect(host.subscribeCalls).toBe(2);
+  });
+
+  it('the store’s hooks never reject, and a sign-out goes on after the wait however the server answers', async () => {
+    const stuck = {
+      getState: () => ({ subscribed: true }),
+      onSignOut: () => new Promise<void>(() => undefined),
+      onSessionEnded: () => Promise.reject(new Error('gone')),
+    } as unknown as PushClient;
+    const hooks = pushHooksFor(() => stuck, 20);
+    const started = Date.now();
+    await expect(hooks.onSignOut()).resolves.toBeUndefined();
+    expect(Date.now() - started).toBeGreaterThanOrEqual(15);
+    expect(() => hooks.onSessionEnded()).not.toThrow();
+    const failing = { ...stuck, onSignOut: () => Promise.reject(new Error('offline')) } as unknown as PushClient;
+    await expect(pushHooksFor(() => failing, 1_000).onSignOut()).resolves.toBeUndefined();
   });
 });

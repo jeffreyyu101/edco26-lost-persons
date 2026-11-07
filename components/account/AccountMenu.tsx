@@ -12,17 +12,12 @@
 //
 // A Radix Popover rather than a DropdownMenu: the Theme segmented control must stay reachable with Tab,
 // which a menu's roving focus does not allow.
-import { AlertDialog, Avatar, Button, Popover, SegmentedControl, Text, VisuallyHidden } from '@radix-ui/themes';
-import { BellDot, BellOff, BellPlus, BellRing, ChartColumn, LogOut, Sun } from 'lucide-react';
+import { AlertDialog, Avatar, Button, Popover, SegmentedControl, Text } from '@radix-ui/themes';
+import { ChartColumn, LogOut, Sun } from 'lucide-react';
 import { useId, useState } from 'react';
-import { alertsValue } from '@/components/alerts/AlertsSheet';
-import { usePushStarted } from '@/components/alerts/AlertsBanner';
-import { openAlertsSheet } from '@/lib/client/alerts-ui';
+import { AccountAlertsRowSlot } from '@/components/activity/slots';
 import { navigate } from '@/lib/client/nav';
-import { NOTIFY_COPY } from '@/components/ui/NotifyStatus';
-import { useAlerts } from '@/lib/client/push-client';
 import { useActions, usePrefs, useSession, type ThemePref } from '@/lib/client/store-contract';
-import { askNotifyPermission, useNotifyState, type NotifyState } from '@/lib/client/system-notify';
 import { avatarInitials, teamShort } from '@/lib/domain';
 import s from './account.module.css';
 
@@ -39,47 +34,15 @@ const THEMES: ReadonlyArray<[ThemePref, string]> = [
 
 const isTheme = (v: string): v is ThemePref => v === 'light' || v === 'dark' || v === 'auto';
 
-/** System notifications (v2.5 A52) where this device has no Web Push: every alert while the app is open. */
-function NotifyItem({ state }: { state: NotifyState }) {
-  if (state.permission === 'default') {
-    return (
-      // Called inside the tap: browsers only prompt for a user gesture.
-      <button type="button" className={s.mitem} onClick={() => void askNotifyPermission()} data-testid="notify-allow">
-        <BellPlus size={16} aria-hidden />
-        {NOTIFY_COPY.allow}
-      </button>
-    );
-  }
-  const on = state.permission === 'granted';
-  return (
-    <div className={`${s.mitem} ${s.static} ${on ? '' : s.quiet}`} data-testid="notify-state" data-state={state.permission}>
-      {on ? <BellDot size={16} aria-hidden /> : <BellOff size={16} aria-hidden />}
-      {on ? (
-        NOTIFY_COPY.on
-      ) : (
-        <>
-          <span aria-hidden>{NOTIFY_COPY.blocked}</span>
-          <VisuallyHidden>{NOTIFY_COPY.blockedFull}</VisuallyHidden>
-        </>
-      )}
-    </div>
-  );
-}
-
 export function AccountMenu({ size = '2' }: AccountMenuProps) {
   const session = useSession();
   const prefs = usePrefs();
   const actions = useActions();
-  usePushStarted();
-  const alerts = useAlerts();
-  const notify = useNotifyState();
   const [open, setOpen] = useState(false);
   const [unsent, setUnsent] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const themeLabelId = useId();
-  const alertsOn = alerts.status === 'on';
-  const alertsShown = alertsValue(alerts.status);
 
   // Offline the session may not be confirmed yet: fall back to who signed in last on this phone.
   const name = session.staffName ?? prefs.rememberedName ?? '';
@@ -166,26 +129,8 @@ export function AccountMenu({ size = '2' }: AccountMenuProps) {
               ))}
             </SegmentedControl.Root>
           </div>
-          {/* Opens the Alerts sheet (F4). Named by what it shows: "Alerts Off" (WCAG 2.5.3). */}
-          <button
-            type="button"
-            className={s.mitem}
-            aria-haspopup="dialog"
-            onClick={() => {
-              setOpen(false);
-              openAlertsSheet();
-            }}
-            data-testid="alerts-menu"
-          >
-            {alertsOn ? <BellRing size={16} aria-hidden /> : <BellOff size={16} aria-hidden />}
-            <span className={s.sp}>Alerts</span>{' '}
-            {alertsShown ? (
-              <span className={s.mval} data-on={alertsOn ? '' : undefined}>
-                {alertsShown}
-              </span>
-            ) : null}
-          </button>
-          {alerts.status === 'unsupported' && notify.supported ? <NotifyItem state={notify} /> : null}
+          {/* Alerts (F4): opens the Alerts sheet; "Allow notifications" where the device has no Web Push. */}
+          <AccountAlertsRowSlot onOpen={() => setOpen(false)} />
           <button
             type="button"
             className={s.mitem}

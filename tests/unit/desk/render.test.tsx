@@ -108,16 +108,13 @@ describe('DeskNav', () => {
     expect(sidebar).toContain(`Pending ${counts.pending}`);
     expect(sidebar).toContain('My requests');
     expect(sidebar).toContain('Dashboard');
-    expect(sidebar).toContain('Alerts');
     expect(sidebar).toContain('Dana Kim');
     expect(sidebar).toContain('Dispatch');
     expect(html).toContain('href="/?view=pending"');
     expect(html).toContain('href="/?dashboard=1"');
-    // F4: the Alerts row opens the Alerts sheet (no switch here any more), and Activity sits under the views.
-    expect(html).toMatch(/data-testid="desk-alerts"/);
-    expect(html).toMatch(/aria-haspopup="dialog"[^>]*data-testid="desk-alerts"/);
-    expect(sidebar).toContain('Activity');
-    expect(html.indexOf('data-testid="desk-activity"')).toBeLessThan(html.indexOf('href="/?dashboard=1"'));
+    // F4: Alerts and Activity are client-only slots (components/activity/slots.tsx, their own chunk), drawn
+    // after hydration: the e2e specs check them (alerts.spec.ts, activity.spec.ts, desk-shell.spec.ts).
+    expect(html).not.toMatch(/role="switch"/);
     // The current view is marked in the sidebar and in the rail.
     expect((html.match(/aria-current="page"/g) ?? []).length).toBe(2);
     expect(html).toMatch(/href="\/"[^>]*aria-current="page"/);
@@ -138,8 +135,6 @@ describe('DeskNav', () => {
     expect(rail).toContain(`aria-label="Pending ${counts.pending}"`);
     expect(rail).toContain('aria-label="My requests"');
     expect(rail).toContain('aria-label="Dashboard"');
-    expect(rail).toMatch(/aria-label="Alerts" aria-haspopup="dialog"/);
-    expect(rail).toMatch(/aria-label="Activity" aria-haspopup="dialog"[^>]*data-testid="desk-rail-activity"/);
   });
 
   it('shows no counts until data has loaded', () => {

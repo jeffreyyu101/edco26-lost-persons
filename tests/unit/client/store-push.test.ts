@@ -1,23 +1,35 @@
 // No double alerts with Web Push (F4, spec §18 A54), through the real store: on a device with a push
 // subscription the page never shows its own system notification for an alert (the push does); in front the
 // toast is unchanged; without a subscription the page's notification is as before (v2.5 A52). The Activity
-// unread count rides on sync (sync-extras). Fake notifier; synthetic rows only.
+// unread count rides on sync (f4-bridge). Fake notifier; synthetic rows only.
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AlertNotifier, AlertRoute, SystemNotice } from '@/lib/client/system-notify';
 import { systemNotice } from '@/lib/client/system-notify';
-import { setPushSubscribed } from '@/lib/client/push-coverage';
-import { lastActivityUnread, resetSyncExtras } from '@/lib/client/sync-extras';
+import { publishSyncExtras, registerPushHooks, storeApi, subscribeSyncExtras, type ActivityUnread } from '@/lib/client/f4-bridge';
 import { STATUS } from '@/lib/domain';
 import { advance } from './helpers/env';
-import { boot, installStoreHooks, ready } from './helpers/boot';
+import { boot, finish, installStoreHooks, ready } from './helpers/boot';
 import { FakeServer, STAFF, makeRow } from './helpers/fake-server';
 
 installStoreHooks();
 
 afterEach(() => {
-  setPushSubscribed(false);
-  resetSyncExtras();
+  registerPushHooks(null);
+  publishSyncExtras(null);
 });
+
+/** A device whose push subscription the server confirmed (lib/client/push-client.ts pushHooksFor). */
+const subscribed = () =>
+  registerPushHooks({ covers: (kind) => kind !== 'combined', onSignOut: async () => undefined, onSessionEnded: () => undefined });
+
+/** The last Activity count the store handed over (what a client starting now begins from). */
+function lastActivityUnread(): ActivityUnread | null {
+  let last: ActivityUnread | null = null;
+  subscribeSyncExtras((u) => {
+    last = u;
+  })();
+  return last;
+}
 
 function bootWith(server: FakeServer, route: AlertRoute) {
   const shown: SystemNotice[] = [];
@@ -42,7 +54,7 @@ describe('Web Push covers the page notification', () => {
     const mine = makeRow(4, { createdBy: STAFF.dana.staff });
     const server = new FakeServer([mine]);
     const { s, shown } = bootWith(server, 'system');
-    setPushSubscribed(true);
+    subscribed();
     await ready();
     server.change(mine.id, { status: STATUS.inMedical });
     await advance(6_000);
@@ -54,7 +66,7 @@ describe('Web Push covers the page notification', () => {
     const mine = makeRow(4, { createdBy: STAFF.dana.staff });
     const server = new FakeServer([mine]);
     const { s, shown } = bootWith(server, 'toast');
-    setPushSubscribed(true);
+    subscribed();
     await ready();
     server.change(mine.id, { status: STATUS.inMedical });
     await advance(6_000);
@@ -90,5 +102,30 @@ describe('the Activity count rides on sync', () => {
     server.syncExtras = { activityUnread: 0, activityUnreadIds: [] };
     await advance(6_000);
     expect(lastActivityUnread()).toEqual({ count: 0, ids: [] });
+  });
+});
+
+describe('F4 sends through the store', () => {
+  it('with the store’s fetch; a sign-out tells the push service first, then holds every later request', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    const { a } = boot(server);
+    await ready();
+    const api = storeApi();
+    expect(api).not.toBeNull();
+    await finish(api!('/api/activity', { timeoutMs: 1_000 }));
+    expect(server.requests('GET', '/api/activity')).toHaveLength(1);
+    registerPushHooks({
+      covers: () => false,
+      onSignOut: async () => {
+        await storeApi()!('/api/push/subscribe', { method: 'DELETE', json: { endpoint: 'x' }, timeoutMs: 1_000 });
+      },
+      onSessionEnded: () => undefined,
+    });
+    expect(await finish(a.signOut())).toEqual({ ok: true });
+    const order = server.log.map((r) => `${r.method} ${r.path}`);
+    expect(order.indexOf('DELETE /api/push/subscribe')).toBeGreaterThan(-1);
+    expect(order.indexOf('DELETE /api/push/subscribe')).toBeLessThan(order.indexOf('DELETE /api/session'));
+    expect(await finish(api!('/api/activity', { timeoutMs: 1_000 }))).toEqual({ ok: false, kind: 'network' });
+    expect(server.requests('GET', '/api/activity')).toHaveLength(1);
   });
 });

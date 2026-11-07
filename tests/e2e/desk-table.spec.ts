@@ -331,8 +331,14 @@ test.describe('desktop 1440 × 900', () => {
   });
 
   test("states: the skeleton before the first sync, then the table; a failing sync shows the red banner", async ({ page }) => {
+    // Only the first page is held back: the shared local stack holds thousands of synthetic rows, and holding
+    // every one of a full sync's pages for 1.5 s outlasted the wait below.
+    let held = false;
     await page.route('**/api/sync*', async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      if (!held) {
+        held = true;
+        await new Promise((resolve) => setTimeout(resolve, 1_500));
+      }
       await route.continue();
     });
     await page.goto('/');

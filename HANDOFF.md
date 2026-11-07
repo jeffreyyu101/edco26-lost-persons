@@ -48,6 +48,62 @@ screenshots.
   shows "Blocked in browser". A notification shows the LP number, the status, initials and the post (no
   phone numbers), and a click opens the request. No server change: no push, no keys to set on Vercel.
 
+### 2026-11-06 evening (F4: lock-screen alerts, the Alerts sheet and Activity)
+
+- **Lock-screen alerts (Web Push).** Answers, location changes, Back to Waiting, Reunited, Discharged,
+  Cancelled and edits reach everyone involved in the request; new requests reach staff with "New requests"
+  on. The notification shows the request's initials and one line ("In medical · Chair 9"), never a name, LP
+  number or phone number. One per request on the lock screen. With the app in front there is no
+  notification (the toast shows); a phone with push never also gets the page's own notification.
+- **Alerts sheet** (avatar menu → Alerts; the desk sidebar and rail): this device On / Off / Blocked, "Send a
+  test alert", and the two switches "New requests" and "Updates on my requests", saved on the server for every
+  device of the staff member. "New requests" is the old in-app Alerts bell.
+- **Alerts banner** on All, Pending and My requests until alerts work on the device, with the exact taps for
+  that phone or browser (Turn on; Home Screen steps on an iPhone or iPad Safari tab; the settings path when
+  blocked).
+- **Activity**: a bell next to search (and in the desk top bar and sidebar) with an unread count; one row per
+  request, newest first; opening the request marks it read; Mark all read with Undo; the app icon badge.
+- Not in this release: messages, en route and the Not in medical / Not found yet notifications (the
+  Messages and Not found yet releases send those through the same inbox and pushes).
+
+#### F4 in production
+
+1. **Migration first.** The F4 section of `20261106000000_rework.sql` adds three tables (`lp_push_prefs`,
+   `lp_push_subscriptions`, `lp_activity`) and the `lp_push_*` / `lp_activity_*` functions. It is additive:
+   nothing the live build uses changes, and a second run keeps every row. Dry run (ending in `rollback;`),
+   then commit, as below. Check:
+   `select count(*) from pg_proc where proname like 'lp\_push\_%' or proname like 'lp\_activity\_%';`
+   returns `12`, and `select to_regclass('public.lp_activity') is not null;` returns `true`.
+2. **Environment.** `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` are already set in production
+   (keep them; `VAPID_SUBJECT` must be `mailto:` or `https:`). `NEXT_PUBLIC_VAPID_PUBLIC_KEY` is optional
+   (the app reads the key from the server). If the keys are missing or invalid, push is simply off: no banner,
+   no pushes; Activity and in-app alerts still work. Do not change the pair during the event: every device
+   would subscribe again on its next open.
+3. **Then deploy.** A build deployed before the migration answers 503 on `/api/push/*` and `/api/activity*`
+   (the bell stays empty, no banner); sync and everything else keep working.
+4. Old phones keep working: their cached app ignores the new sync fields, their queued requests send as
+   before (a new request then notifies staff with "New requests" on).
+
+#### Verified vs researched (alerts banner chips and push behaviour)
+
+| What | How it was checked |
+|---|---|
+| iPhone Safari, iOS 27: Menu → Share → Add to Home Screen → Open as Web App | Researched: Apple, "Turn a website into an app in Safari on iPhone" (iOS 27 page; the button is "the Page Menu button"). Not seen on a device: no iOS Simulator is installed on this machine (T3 device tools found none). |
+| iPhone Safari, iOS 26: More (⋯) → Share → … | Researched: the same Apple article, iOS 26 version ("the More button"). |
+| iPhone Safari, iOS 17 / 18: Share → Add to Home Screen | Researched: Apple, "Bookmark a website in Safari on iPhone", iOS 17 and 18. |
+| iPad Safari 27 / 26 / 18 | Researched: Apple, "Turn a website into an app in Safari on iPad" (27: View More; 26: the More button). |
+| iOS 26+ Safari's frozen user agent (iPhone OS 18_6 + Version/26.x) | Researched: WebKit, "WebKit Features in Safari 26.0". Unit-tested with those strings. |
+| Home Screen app blocked: Settings → Notifications → the app → Allow Notifications | Researched: Apple, "Change notification settings on iPhone", iOS 17, 18, 26 and 27 pages (all give this path). |
+| Android Chrome: More → Site controls → Permissions → Notifications → Allow | Researched: Google, "Use notifications to get alerts" (Android). No Android emulator on this machine. |
+| Android installed app: Settings → Notifications → App notifications → the app | Researched: Google, "Control notifications on Android". |
+| Desktop Chrome: View site information → Notifications | Researched: Google, "Use notifications to get alerts" (computer). Verified in Playwright Chromium (headless): the banner states, Turn on, revoke → blocked, re-check, overflow at 820 / 1180 / 1440 px. |
+| Edge, Firefox, Safari on a Mac | Researched: Microsoft help (via search), Mozilla "Web Push notifications in Firefox", Apple "Customize website notifications in Safari on Mac". Not run. |
+| WebKit revokes push after silent pushes | Researched: Apple docs / WebKit blog quoted in WebKit and Firebase issues (3 silent pushes). The worker never leaves a push silent on WebKit (unit-tested). |
+| A push while the app is in front shows nothing; the page syncs | Verified in Playwright Chromium: a push event dispatched inside this build's real service worker (`worker.evaluate`; the DevTools protocol's push delivery, and `setAppBadge` in a worker, crash the headless Chromium shell). The background path (shown, tag, badge, silent-and-closed on WebKit) is unit-tested against `public/sw.js`. |
+| Encryption and delivery to a push service | Verified in the integration tests: `web-push` 3.6.7 sends to a fake HTTPS push service on 127.0.0.1 that decrypts every payload (aes128gcm) and answers 201, 410, 500 or never (deletion, failure counting and the timeout). |
+| The banner and the sheet on an iPhone layout | Verified in Playwright WebKit (iPhone 14 profile) with a faked PushManager, permission and Home Screen mode: install, off, blocked, on. Not a real iPhone. |
+| Real delivery to a phone's lock screen | Not verified here (needs a real device and the production keys): morning checklist below. |
+
 ## The production migration
 
 [`supabase/migrations/20261106000000_rework.sql`](supabase/migrations/20261106000000_rework.sql) is the only
@@ -91,7 +147,8 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 
 ## Deploying on Vercel
 
-- **Environment variables.** Keep the names Jeffrey's project already has. `NEXT_PUBLIC_SUPABASE_URL` and
+- **Environment variables.** `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` switch lock-screen
+  alerts on (F4; already set). Keep the names Jeffrey's project already has. `NEXT_PUBLIC_SUPABASE_URL` and
   `SUPABASE_SECRET_KEY` (or `SUPABASE_SERVICE_ROLE_KEY`) stay the same. Set `SESSION_SECRET` (32 characters
   or more) and keep `APP_SHARED_PASSWORD_HASH_B64`. `EVENT_TIMEZONE` defaults to `America/New_York`. All
   of them are listed in `.env.example`.
@@ -110,6 +167,19 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
   happens while a new request is unsent.
 
 ## Morning checklist (things tests can't cover)
+
+- [ ] **F4, before the deploy:** the F4 migration section is applied on production (dry run, then commit;
+      the checks under "F4 in production").
+- [ ] **F4, iPhone Home Screen app:** the banner says "Alerts are off"; Turn on asks, then the Alerts sheet
+      opens with "On for this phone"; "Send a test alert" shows a notification on the lock screen within a few
+      seconds with "Is my friend in medical?" / "Test alert"; tapping it opens the app.
+- [ ] **F4, iPhone Safari tab:** the banner shows this phone's Home Screen taps and they match the screen
+      (on iOS 26+, the Compact tab layout; with Bottom / Top, Share is on the toolbar).
+- [ ] **F4, Android Chrome and a desktop browser:** Turn on, then "Send a test alert"; then with the screen
+      locked (or the browser closed), an In medical answer on one of your requests arrives as "J.D." /
+      "In medical" and opens that request. With the app in front, only the toast shows.
+- [ ] **F4, Activity:** someone else answers your request: the bell shows 1; the row opens the request and the
+      count drops; Mark all read → Undo.
 
 - [ ] iPhone camera capture from New request, and the page survives coming back from the camera.
 - [ ] Keychain fills the password on sign-in step 2.
@@ -140,7 +210,11 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
 
 - **Answers, edits and adding photos to an existing request need a connection.** Only new requests (with
   their photos) queue offline. Those buttons show "Needs a connection" offline.
-- **Alerts need the app open.** There is no push. With the app in the background, desktop browsers,
+- **Lock-screen alerts need Web Push on the device** (F4): desktop browsers, Android Chrome and the iPhone /
+  iPad Home Screen app (iOS 16.4+), once Turn on was tapped. A Safari tab on iPhone gets the banner with the
+  Home Screen taps instead. Push goes through Apple's, Google's, Mozilla's or Microsoft's push service, so a
+  phone with no signal gets it when it is back (within an hour for answers, 15 minutes for the rest).
+  Without push, the earlier behaviour holds: with the app in the background, desktop browsers,
   Android and the iPhone Home Screen app show a system notification (once allowed); a Safari tab on iPhone
   shows only the toast. A background tab checks once a minute, so a notification can be up to a minute late.
   Phones pause background pages (an iPhone almost at once, Android Chrome after a few minutes), so phone

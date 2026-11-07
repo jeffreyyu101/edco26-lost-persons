@@ -9,7 +9,7 @@
 import { IconButton } from '@radix-ui/themes';
 import { Plus, Search, X } from 'lucide-react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { ActivityBell } from '@/components/activity/ActivityBell';
+import { ActivityBellSlot } from '@/components/activity/slots';
 import { DashboardConnectionChip } from '@/components/dashboard/ConnectionChip';
 import { useDashboardConnection } from '@/components/dashboard/connection-signal';
 import { goBack, navigate } from '@/lib/client/nav';
@@ -61,7 +61,7 @@ export function DeskTop({ main }: DeskTopProps) {
         <Kbd className={d.newKbd}>N</Kbd>
       </button>
       {/* F4: the Activity bell, its popover anchored here (the sidebar's Activity item opens the same one). */}
-      <ActivityBell place="desk" />
+      <ActivityBellSlot place="desk" />
     </div>
   );
 }
