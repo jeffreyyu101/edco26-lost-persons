@@ -360,6 +360,11 @@ export interface Stats {
   friendsEnRoute?: number;
   /** (F3) Mean minutes from en route to Arrived, over arrivals in the last 2 hours; null if none. */
   avgArriveMinutes?: number | null;
+  /**
+   * (F6, additive) Requests 'Closed – Inactive' now: closed by the server after an hour In medical with no activity.
+   * Never a reunion (not in `reunited`, not in avgReuniteMinutes). Absent from a database before F6.
+   */
+  inactive?: number;
 }
 
 // ---------------------------------------------------------------------------------------------------

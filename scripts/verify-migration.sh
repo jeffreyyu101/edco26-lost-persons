@@ -11,6 +11,10 @@
 #      status) stay answerable / editable / photo-able, new non-canonical values are still refused,
 #      lp_stats byPost adds up to the open count, a repeat of a legacy status is {changed: false} (A36),
 #      and an other_location-only edit audits both halves of the post (A35). Then drops the scratch database.
+#   (F6) On the app database the two re-applies leave exactly ONE pg_cron job 'lp-close-inactive' (every 5 minutes,
+#   `select public.lp_close_inactive()`), which this script then pauses (local stacks keep it paused: the test suites
+#   run lp_close_inactive() themselves). The scratch database is not pg_cron's, so there the file must still succeed
+#   and say the job is NOT scheduled (the guard for a server without pg_cron).
 #
 #   bash scripts/verify-migration.sh
 #
@@ -40,13 +44,23 @@ apply() { # apply <url> <label>
     printf '%s\n' "$out" | grep -v 'skipping$' >&2
     die "$2: FAILED"
   fi
-  printf '%s\n' "$out" | grep -E 'NOTICE: +patients_' | sed -E 's/^.*NOTICE: +/    /' || true
+  printf '%s\n' "$out" | grep -E 'NOTICE: +(patients_|pg_cron|lp-close-inactive)' | sed -E 's/^.*NOTICE: +/    /' || true
   echo "  $2: ok"
+}
+
+pause_job() { # pause_job <url>: no-op without pg_cron or the job
+  psql "$1" -v ON_ERROR_STOP=1 -q -c "do \$pause\$ begin if to_regclass('cron.job') is not null then perform cron.unschedule(j.jobid) from cron.job j where j.jobname = 'lp-close-inactive'; end if; end \$pause\$;" >/dev/null
 }
 
 echo "1. App database ($db_url)"
 apply "$db_url" "re-apply #1"
 apply "$db_url" "re-apply #2"
+# (F6) Exactly one auto-close job after two pastes, every 5 minutes, running lp_close_inactive(); then paused.
+job="$(psql "$db_url" -v ON_ERROR_STOP=1 -q -At -c "select count(*) || '|' || coalesce(min(schedule), '') || '|' || coalesce(min(command), '') from cron.job where jobname = 'lp-close-inactive'")"
+[[ "$job" == "1|*/5 * * * *|select public.lp_close_inactive()" ]] || die "app database: expected one lp-close-inactive job every 5 minutes, got '$job'"
+echo "  lp-close-inactive scheduled exactly once: ok"
+pause_job "$db_url"
+echo "  lp-close-inactive paused on this local stack"
 # lp_stats: the byPost bars always add up to the Open hero number.
 by_post="$(psql "$db_url" -v ON_ERROR_STOP=1 -q -At <<'SQL'
 begin;
@@ -95,7 +109,13 @@ select id, id || '/legacy.jpg', 'unsure', 'Old · Prevent' from public.patients 
 insert into public.audit_events (patient_id, staff_name, action_type, new_value)
 select id, 'Old · Prevent', 'medical_search', '{"outcome":"not_found"}' from public.patients where first_name = 'X.Y.';
 SQL
-apply "$fixture_url" "apply #1"
+fixture_out="$(psql "$fixture_url" -v ON_ERROR_STOP=1 -q -f "$migration" 2>&1)" || { printf '%s\n' "$fixture_out" | grep -v 'skipping$' >&2; die "apply #1: FAILED"; }
+printf '%s\n' "$fixture_out" | grep -E 'NOTICE: +(patients_|pg_cron|lp-close-inactive)' | sed -E 's/^.*NOTICE: +/    /' || true
+echo "  apply #1: ok"
+# (F6) Not pg_cron's database: the file still commits, and says so.
+[[ "$fixture_out" == *"lp-close-inactive: NOT scheduled (pg_cron is not available)"* ]] \
+  || die "fixture: the migration must succeed without pg_cron and say the job is NOT scheduled"
+echo "  without pg_cron: NOT scheduled, migration ok"
 apply "$fixture_url" "apply #2"
 
 # One check per line, run in order (each as service_role, like the app server).

@@ -2,6 +2,7 @@
 //   waiting       empty ring, blue        notInMedical  filled circle with ×, grey (closed, v2.2)
 //   inMedical     ring with a ¾ pie, green closed      filled check, grey
 //   queued        dashed ring, grey        logged       empty ring, gray-10
+//   inactive      (F6) lucide timer-off, a bare outline (no circle), grey: Closed · inactive, unlike Reunited's ✓
 // FINAL (Phase 1a): props are frozen; C may refine styling only.
 import type { CSSProperties } from 'react';
 import { statusMeta, type GlyphKind, type StatusValue } from '@/lib/domain';
@@ -14,7 +15,20 @@ const COLOR: Readonly<Record<GlyphKind, string>> = {
   closed: 'var(--gray-9)',
   queued: 'var(--gray-9)',
   logged: 'var(--gray-10)',
+  // (F6) gray-9, as the other closed glyphs (3:1 on the panel in both themes).
+  inactive: 'var(--gray-9)',
 };
+
+/** (F6) lucide timer-off (v1.70), on its 24 px grid: Closed · inactive. Drawn here so the first load needs no icon chunk. */
+const TIMER_OFF = (
+  <>
+    <path d="M10 2h4" />
+    <path d="M4.6 11a8 8 0 0 0 1.7 8.7 8 8 0 0 0 8.7 1.7" />
+    <path d="M7.4 7.4a8 8 0 0 1 10.3 1 8 8 0 0 1 .9 10.2" />
+    <path d="m2 2 20 20" />
+    <path d="M12 12v-2" />
+  </>
+);
 
 /** The mockups' pie(f): a wedge from 12 o'clock, clockwise, radius 3.25 around (7, 7). */
 export function piePath(fraction: number): string {
@@ -40,6 +54,27 @@ export function StatusGlyph(props: StatusGlyphProps) {
   const size = props.size ?? 14;
   const c = COLOR[kind];
   const a11y = props.label ? { role: 'img' as const, 'aria-label': props.label } : { 'aria-hidden': true as const };
+  if (kind === 'inactive') {
+    // A line glyph draws one pixel larger than the rings, as the stage glyphs do (StageGlyph).
+    return (
+      <svg
+        width={size + 1}
+        height={size + 1}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke={c}
+        strokeWidth={2.25}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={props.className}
+        style={{ flex: 'none', ...props.style }}
+        data-glyph={kind}
+        {...a11y}
+      >
+        {TIMER_OFF}
+      </svg>
+    );
+  }
   return (
     <svg
       width={size}

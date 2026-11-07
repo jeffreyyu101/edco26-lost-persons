@@ -153,6 +153,10 @@ Pending.
   request the button reads "× Not found": the final answer, which closes it as Not found in medical. Lists show
   each request's stage: Needs info, Not found yet, Recheck due, Friend en route and Friend arrived refine the
   stored status (`design/DECISIONS.md`, spec §19).
+- **Closed · inactive** (F6). A request In medical with no activity (no answer, edit, location, photo, message or en
+  route) for an hour is closed by the database every 5 minutes (pg_cron job `lp-close-inactive`), grey with a timer
+  glyph, in Archived; anyone can Reopen it to Friend coming. Waiting for check never closes by itself. Local test
+  stacks keep the job paused (`scripts/test-env.mjs` `pauseInactiveJob`); tests run `lp_close_inactive()` themselves.
 - **Sort by status.** All requests and My requests have a one-tap "⇅ Newest" / "⇅ Updated" ↔ "⇅ Status" toggle
   at the right end of the line under the title (the column header on the desk table), remembered on the
   device: Waiting for check, Friend coming, then the closed ones folded.

@@ -246,6 +246,7 @@ describe('labels', () => {
       reunited: 'gray',
       discharged: 'gray',
       cancelled: 'gray',
+      inactive: 'gray',
     });
     for (const key of ['needsInfo', 'notFoundYet', 'recheckDue', 'enroute', 'arrived'] as const) expect(STAGE_META[key].bucket).toBe('open');
   });

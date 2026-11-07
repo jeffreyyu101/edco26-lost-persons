@@ -20,6 +20,7 @@
 //   actions      sticky, by status; disabled offline with "Needs a connection". Change answer (In medical,
 //                Not in medical) opens a menu: the other answer and Back to Waiting for check
 //                (change-answer.ts). Every answer, change and Reunited offers Undo (the store's snackbar).
+//                (F6) Closed · inactive offers Reopen there instead (back to In medical, no Undo, like every Reopen).
 //                In the desk pane (presentation="panel", design/screens/desktop-log.html) they sit right under
 //                the status block, two equal buttons, and the menu opens downwards.
 //   cancel       red, creator-only (canonical created_by match, A18), while Waiting, confirm Keep / Cancel
@@ -941,6 +942,14 @@ function ActionButton({ action, row, disabled, onClick }: { action: StatusAction
       return (
         <Button {...common} highContrast>
           <Check size={16} aria-hidden />
+          {action.label}
+        </Button>
+      );
+    case 'reopen':
+      // (F6) Closed · inactive: back to In medical (Friend coming), the ⋯ menu's Reopen glyph.
+      return (
+        <Button {...common} variant="soft" color="gray" data-testid="reopen">
+          <RotateCcw size={16} aria-hidden />
           {action.label}
         </Button>
       );

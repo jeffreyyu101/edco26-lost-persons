@@ -12,7 +12,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { ROOT, assertLocalUrl } from './test-env.mjs';
+import { ROOT, assertLocalUrl, pauseInactiveJob } from './test-env.mjs';
 
 const LOCK_DIR = '/tmp/lp-e2e.lock';
 const WAIT_MS = 30 * 60_000;
@@ -115,6 +115,8 @@ try {
       execFileSync('psql', [url, '-v', 'ON_ERROR_STOP=1', '-q', '-f', MIGRATION], { stdio: ['ignore', 'ignore', 'pipe'] });
       console.error(`with-e2e-lock: rework migration applied (${run}/2)`);
     }
+    // (F6) The migration schedules the auto-close job; the suites run it themselves (test-env.mjs pauseInactiveJob).
+    pauseInactiveJob(url);
   }
   code = await new Promise((resolve) => {
     const child = spawn(command[0], command.slice(1), { stdio: 'inherit', env: { ...process.env, LP_E2E_LOCK_OWNER: String(process.pid) } });

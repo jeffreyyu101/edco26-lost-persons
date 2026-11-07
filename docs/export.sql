@@ -46,6 +46,7 @@ select
     when 'Reunited – Closed' then 'Reunited'
     when 'Found – Discharged' then 'Discharged'
     when 'Cancelled' then 'Cancelled'
+    when 'Closed – Inactive' then 'Closed · inactive'
     else p.status
   end as "Status",
   p.status as "Status (database)",

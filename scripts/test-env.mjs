@@ -146,3 +146,36 @@ export function testBaseUrl() {
   const port = process.env.PORT || loadTestEnv().PORT || '3100';
   return `http://127.0.0.1:${port}`;
 }
+
+/**
+ * The local test database URL: SUPABASE_DB_URL (the environment, else .env.test), else the stack `supabase status`
+ * reports for this project. Refuses any non-local host.
+ */
+export function localDbUrl() {
+  let url = process.env.SUPABASE_DB_URL || loadTestEnv({ keys: false }).SUPABASE_DB_URL;
+  if (!url) {
+    const out = execFileSync('supabase', ['status', '-o', 'env', '--workdir', ROOT], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    url = parseEnv(out).DB_URL;
+  }
+  if (!url) throw new Error('no local database URL (set SUPABASE_DB_URL, or start the local stack: supabase start)');
+  assertLocalUrl('database URL', url);
+  return url;
+}
+
+/** (F6) The SQL that pauses the auto-close job: a no-op where pg_cron or the job is missing. */
+export const PAUSE_INACTIVE_JOB_SQL =
+  "do $pause$ begin if to_regclass('cron.job') is not null then " +
+  "perform cron.unschedule(j.jobid) from cron.job j where j.jobname = 'lp-close-inactive'; end if; end $pause$;";
+
+/**
+ * (F6) LOCAL ONLY. Pauses the pg_cron job 'lp-close-inactive' (rework SQL section 9) on a local test database. The
+ * job closes requests that sat In medical for an hour with no activity, every 5 minutes; on a long-lived local stack
+ * the synthetic seed's In medical rows (LP-1004, LP-1005, LP-1007) are hours idle, so a running job would close them
+ * under the test suites, and its timing is not the tests'. Tests that need an auto-close call
+ * public.lp_close_inactive(array[…]) themselves. Every rework migration run schedules the job again, so the
+ * migrating scripts and both test setups call this.
+ */
+export function pauseInactiveJob(url = localDbUrl()) {
+  assertLocalUrl('database URL', url);
+  execFileSync('psql', [url, '-v', 'ON_ERROR_STOP=1', '-q', '-c', PAUSE_INACTIVE_JOB_SQL], { stdio: ['ignore', 'ignore', 'pipe'] });
+}

@@ -6,7 +6,7 @@
 // Released in global-teardown.ts. Nobody truncates tables globally; specs create unique synthetic rows.
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { loadTestEnv } from '../../scripts/test-env.mjs';
+import { loadTestEnv, pauseInactiveJob } from '../../scripts/test-env.mjs';
 
 export const LOCK_DIR = '/tmp/lp-e2e.lock';
 const WAIT_MS = 20 * 60_000;
@@ -100,6 +100,7 @@ export function lockHeldForUs(dir: string = LOCK_DIR, owner = process.env.LP_E2E
 
 export default async function globalSetup(): Promise<void> {
   loadTestEnv();
-  if (lockHeldForUs()) return;
-  await acquireLock();
+  if (!lockHeldForUs()) await acquireLock();
+  // (F6) The specs make their own auto-closes (lp_close_inactive on their rows); the 5-minute job stays paused.
+  pauseInactiveJob();
 }

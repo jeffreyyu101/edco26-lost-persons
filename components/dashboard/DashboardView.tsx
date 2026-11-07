@@ -7,7 +7,8 @@
 //            the phone is offline, the Reconnecting / Offline banner under the header and "Last updated 3:42 PM".
 //   tiles    Open (blue/green split bar) and Closed, big; Waiting for check, In medical, Not found in medical, Reunited
 //            (+ discharged · cancelled when either is non-zero). Status tiles open All filtered (A22); Open opens
-//            Pending, which lists exactly the open requests.
+//            Pending, which lists exactly the open requests. Then two slim tiles: Friends en route (F3) and (F6)
+//            Closed · inactive (in Closed, never in Reunited), side by side when the tiles are six across.
 //   posts    Open by post, busiest first: label over a 6 px bar, count in a fixed column. Opens ?post=&open=1 (A42).
 //   recent   "Recently updated ›" opens All. Rows: number, name, status, updated; a row opens the profile.
 //   perf     Longest wait (opens that request), Time to answer and Time to reunite ("last 2 hours"), Logged ("last
@@ -199,7 +200,41 @@ function Tiles({ stats }: { stats: Stats }) {
         onClick={() => show({ status: STATUS.reunited })}
       />
       <EnrouteTile stats={stats} />
+      <InactiveTile stats={stats} />
     </section>
+  );
+}
+
+/**
+ * (F6) Closed · inactive: requests the server closed after an hour In medical with no activity. A slim tile like
+ * Friends en route (its status glyph, one-line label, count; "—" when the server did not send it). Opens All
+ * filtered to them. They count in Closed, never in Reunited.
+ */
+function InactiveTile({ stats }: { stats: Stats }) {
+  const n = typeof stats.inactive === 'number' && Number.isFinite(stats.inactive) ? stats.inactive : null;
+  return (
+    <button
+      type="button"
+      className={`${s.tap} ${s.tile} ${s.tileWide} ${s.tileHalf} ${s.cl}`}
+      onClick={() => show({ status: STATUS.inactive })}
+      data-testid="tile-inactive"
+    >
+      {/* Named by its own text, like the tiles above (WCAG 2.5.3): "Closed · inactive 2". */}
+      <span className={s.lb}>
+        <StatusGlyph status={STATUS.inactive} />
+        <span>{statusMeta(STATUS.inactive).shortLabel}</span>
+      </span>{' '}
+      {n === null ? (
+        <span className={s.v} data-testid="tile-inactive-value">
+          <span aria-hidden>{NO_VALUE}</span>
+          <VisuallyHidden>not available</VisuallyHidden>
+        </span>
+      ) : (
+        <span className={s.v} data-testid="tile-inactive-value">
+          {n}
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -212,7 +247,7 @@ function EnrouteTile({ stats }: { stats: Stats }) {
   return (
     <button
       type="button"
-      className={`${s.tap} ${s.tile} ${s.tileWide}`}
+      className={`${s.tap} ${s.tile} ${s.tileWide} ${s.tileHalf}`}
       onClick={() => show({ view: 'pending' })}
       data-testid="tile-enroute"
     >

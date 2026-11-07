@@ -29,6 +29,10 @@
 --      functions and the trigger that clears en route when a request leaves In medical. Additive.
 --   8. Web Push and the Activity inbox (F4): lp_push_prefs, lp_push_subscriptions, lp_activity and the
 --      lp_push_* / lp_activity_* functions. Additive.
+--   9. Inactivity auto-close (F6): the status 'Closed – Inactive' (allowed by step 2), lp_inactive_minutes(),
+--      lp_inactive_closes, lp_close_inactive(), lp_inactive_claim(), and the pg_cron job 'lp-close-inactive'
+--      every 5 minutes (enabled and scheduled only where pg_cron can run; a NOTICE says which). Additive.
+--      Pause the job with: select cron.unschedule('lp-close-inactive');
 -- =====================================================================================================
 
 begin;
@@ -190,12 +194,14 @@ alter table public.patients add column if not exists not_found_checks smallint n
 --    row (e.g. reporting_location 'FA 3' or status 'Found – Transported') could never be answered, edited
 --    or given a photo again. New non-canonical values are still refused: lp_clean_fields only accepts the
 --    five posts and lp_set_status only the settable statuses. A NOTICE names the extra values kept.
+--    (F6) 'Closed – Inactive' is needed too (only lp_close_inactive, section 9, writes it): on a database from
+--    before F6 the CHECK lacks it, so the first run of this file replaces the CHECK once (NOT VALID, as above).
 -- -----------------------------------------------------------------------------------------------------
 do $checks$
 declare
   v_locations constant text[] := array['FA 3 – Kinetic', 'FA 4 – Oasis', 'Command', 'Base', 'Other'];
   v_statuses constant text[] := array['Added', 'Checked – Not Found', 'Found – Awaiting Reunion', 'Reunited – Closed',
-                                      'Found – Discharged', 'Bring friend to medical', 'Cancelled'];
+                                      'Found – Discharged', 'Bring friend to medical', 'Cancelled', 'Closed – Inactive'];
   v_def text;
   v_value text;
   v_lacking boolean;
@@ -828,6 +834,11 @@ $fn$;
 --     liaisons tapped Not found at once), is the idempotent repeat: {changed: false}, no audit. Without it
 --     the second phone's 409 retry would close the request at once.
 --   * A due hold never closes by itself: nothing here (or anywhere) runs on a timer.
+--
+--   (F6) 'Closed – Inactive' is never a target here: only lp_close_inactive (section 9, on a timer) writes it, and
+--   only for a request In medical. From it the one move is Reopen → 'Found – Awaiting Reunion' (kind 'reopen'),
+--   for any staff, like a Reopen of Reunited: found_at stays, reunion_started_at restarts, closed_at clears. A
+--   Reopen has no Undo (the app's convention), so nothing here moves a request back to 'Closed – Inactive'.
 create function public.lp_set_status(p_id uuid, p_expected_version bigint, p_status text, p_staff text, p_kind text)
 returns jsonb
 language plpgsql
@@ -908,6 +919,7 @@ begin
     when 'Found – Discharged' then p_status in ('Found – Awaiting Reunion')
     when 'Cancelled' then p_status in ('Added')
     when 'Bring friend to medical' then p_status in ('Reunited – Closed', 'Found – Discharged', 'Checked – Not Found')
+    when 'Closed – Inactive' then p_status in ('Found – Awaiting Reunion')
     -- TRANSITIONS:END
     else false
   end;
@@ -1401,6 +1413,9 @@ $fn$;
 -- lp_stats: everything the dashboard needs (spec §8 + A21 + A49). camelCase keys, passed through by the server.
 --   (F5) A request on a "Not found yet" hold is still 'Added': it counts as open.waiting, never as
 --   notInMedical (only the final Not found does); its first Not found counts as its first answer.
+--   (F6) inactive: requests 'Closed – Inactive' now (closed, in total; the dashboard adds it to Closed). An
+--   inactive close is never a reunion: reunited counts 'Reunited – Closed' only, and Time to reunite reads
+--   status_changed rows into 'Reunited – Closed' of requests that are Reunited now.
 --   open {waiting, inMedical (legacy Bring friend counts as In medical)}; notInMedical, reunited,
 --   discharged, cancelled and total over all rows; loggedLastHour (rows created in the last 60 minutes,
 --   any status); longestWait; avgAnswerMinutes; avgReuniteMinutes; byPost; recent.
@@ -1439,6 +1454,7 @@ begin
     'reunited', pg_catalog.count(*) filter (where status = 'Reunited – Closed'),
     'discharged', pg_catalog.count(*) filter (where status = 'Found – Discharged'),
     'cancelled', pg_catalog.count(*) filter (where status = 'Cancelled'),
+    'inactive', pg_catalog.count(*) filter (where status = 'Closed – Inactive'),
     'total', pg_catalog.count(*),
     'loggedLastHour', pg_catalog.count(*) filter (where created_at > v_now - interval '60 minutes')
   ) into v_counts
@@ -2639,6 +2655,10 @@ $f4drop$;
 -- member's own choice (new_requests_set) and stays. p_default_new_requests is a device's old "Alerts" bell:
 -- until that choice is made, a device whose bell was on turns New requests on (OR), whichever device came
 -- first; without it, New requests starts off. Returns {newRequests, myUpdates}.
+-- (F6, Brian 2026-11-07 02:15: Main Med gets distracted; the lock-screen push is the chosen alert.) Staff of the
+-- Medical team (the canonical staff string's team is 'medical') start with New requests ON, and so does a Medical
+-- staff member's row that never had the switch set in the Alerts sheet (new_requests_set false); everyone else
+-- keeps the rule above. A switch set in the sheet always stays as set.
 create function public.lp_push_prefs_sync(
   p_staff text, p_team text, p_new_requests boolean, p_my_updates boolean, p_default_new_requests boolean)
 returns jsonb
@@ -2653,14 +2673,18 @@ declare
   v_staff text;
   v_team text := pg_catalog.left(pg_catalog.btrim(coalesce(p_team, '')), 120);
   v_row public.lp_push_prefs;
+  v_default boolean;
 begin
   perform public.lp_require_staff(p_staff);
   v_staff := public.lp_canon_staff(p_staff);
+  -- (F6) The device's old bell, or the Medical team's default (on).
+  v_default := coalesce(p_default_new_requests, false)
+               or coalesce((pg_catalog.regexp_match(v_staff, '^(.*) · (.*)$'))[2] = 'medical', false);
 
   insert into public.lp_push_prefs as pr (staff, team, new_requests, my_updates, new_requests_set)
   values (
     v_staff, v_team,
-    coalesce(p_new_requests, p_default_new_requests, false),
+    coalesce(p_new_requests, v_default),
     coalesce(p_my_updates, true),
     p_new_requests is not null)
   on conflict (staff) do update set
@@ -2668,7 +2692,7 @@ begin
     new_requests = case
       when p_new_requests is not null then p_new_requests
       when pr.new_requests_set then pr.new_requests
-      else pr.new_requests or coalesce(p_default_new_requests, false)
+      else pr.new_requests or v_default
     end,
     new_requests_set = pr.new_requests_set or p_new_requests is not null,
     my_updates = coalesce(p_my_updates, pr.my_updates),
@@ -2885,7 +2909,9 @@ declare
   v_unread jsonb;
 begin
   if p_kind is null or p_kind not in ('message', 'enroute', 'enroute_changed', 'enroute_cancelled', 'arrived', 'new_request',
-      'in_medical', 'not_in_medical', 'back_to_waiting', 'moved', 'reunited', 'discharged', 'cancelled', 'edited') then
+      'in_medical', 'not_in_medical', 'back_to_waiting', 'moved', 'reunited', 'discharged', 'cancelled', 'edited',
+      -- (F6) The inactivity auto-close (section 9), told by the app server once per close.
+      'closed_inactive') then
     raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:kind';
   end if;
   select * into v_patient from public.patients where id = p_request;
@@ -3076,6 +3102,236 @@ grant execute on function public.lp_activity_list(text) to service_role;
 grant execute on function public.lp_activity_mark_read(text, uuid) to service_role;
 grant execute on function public.lp_activity_unmark(text, uuid[]) to service_role;
 grant execute on function public.lp_activity_unread(text) to service_role;
+
+-- -----------------------------------------------------------------------------------------------------
+-- 9. F6 · Inactivity auto-close (Brian 2026-11-06 19:55–20:07; spec §24 A96–A103, design/DECISIONS.md "F6
+--    inactivity auto-close"). Friend coming backs up because staff don't tap Reunited, so a request In medical
+--    (Friend coming, Friend en route, Friend arrived; the legacy 'Bring friend to medical' too) with NO ACTIVITY
+--    for lp_inactive_minutes() closes as 'Closed – Inactive' (grey, closed; Reopen brings it back, lp_set_status).
+--    Activity is the request's latest audit_events.occurred_at, else its created_at: every write audits (create,
+--    answer, edit, location, photo, message, unsend, en route); reading never does (lp_mark_read and the Activity
+--    inbox write no audit row). Never closed: Waiting for check (Needs info and the "Not found yet" hold included,
+--    status 'Added') and anything already closed.
+--
+--    ADDITIVE ONLY: the status value (step 2's CHECK), one new table, new functions, the Reopen move and the counts
+--    (sections 6 and 8), and the pg_cron job 'lp-close-inactive' every 5 minutes. The build that is live now keeps
+--    working: it shows 'Closed – Inactive' verbatim, grey, closed, with no actions, and never calls the new
+--    functions. A re-run keeps every close and notice and leaves exactly one job.
+--
+--    lp_inactive_closes  one row per auto-close: when, the activity it was measured from (idle_since), and
+--                        notified_at: set when the app server claims it to tell the staff involved (once per close,
+--                        lp_inactive_claim), or at once for a close it will not tell. Those are a backlog: idle more
+--                        than 15 minutes past the limit when closed (the first run after this file, or after the job
+--                        was paused), so a deploy never sends a burst of stale alerts; and closes nobody claimed
+--                        within 15 minutes.
+--    Pause the job:      select cron.unschedule('lp-close-inactive');   (paste this file again to schedule it again)
+-- -----------------------------------------------------------------------------------------------------
+
+-- ONE constant for SQL and TypeScript (INACTIVE_MINUTES in lib/domain.ts; a unit test compares them).
+create or replace function public.lp_inactive_minutes()
+returns integer
+language sql
+immutable
+security invoker
+set search_path = public, pg_temp
+as $fn$
+  select 60
+$fn$;
+
+create table if not exists public.lp_inactive_closes (
+  request_id uuid not null references public.patients (id) on delete cascade,
+  closed_at timestamptz not null,
+  idle_since timestamptz not null,
+  notified_at timestamptz,
+  primary key (request_id, closed_at)
+);
+create index if not exists lp_inactive_closes_pending_idx on public.lp_inactive_closes (closed_at) where notified_at is null;
+alter table public.lp_inactive_closes enable row level security;
+revoke all on table public.lp_inactive_closes from public, anon, authenticated;
+grant select, insert, update on table public.lp_inactive_closes to service_role;
+
+drop function if exists public.lp_close_inactive();
+drop function if exists public.lp_close_inactive(uuid[]);
+drop function if exists public.lp_inactive_claim(uuid[]);
+
+-- lp_close_inactive: closes every eligible request in ONE statement and returns how many. For each: status
+-- 'Closed – Inactive', closed_at = now, updated_by 'System' (the touch trigger bumps row_version and updated_at,
+-- so every phone's next sync has it; F3's trigger clears its en route rows), one audit row status_changed by
+-- 'System' {status 'Closed – Inactive', kind 'auto_close', idle_since, inactive_minutes} with the note "No activity
+-- for 1 h", and one lp_inactive_closes row. Rows another transaction holds are skipped (SKIP LOCKED: someone is
+-- changing them right now) and come up again on the next run. Idempotent: a second call closes nothing more.
+--   p_only (tests and manual use): only these requests, when they are eligible. The job passes nothing.
+-- SECURITY DEFINER so the pg_cron job (run as the role that scheduled it) needs no table grants; service_role only.
+create function public.lp_close_inactive(p_only uuid[] default null)
+returns integer
+language plpgsql
+volatile
+security definer
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_now timestamptz := pg_catalog.clock_timestamp();
+  v_minutes constant integer := public.lp_inactive_minutes();
+  v_cutoff timestamptz := v_now - pg_catalog.make_interval(mins => v_minutes);
+  -- A close this far past the limit is a backlog: closed, but nobody is told.
+  v_quiet timestamptz := v_now - pg_catalog.make_interval(mins => v_minutes + 15);
+  v_note text := 'No activity for ' || case when v_minutes % 60 = 0 then (v_minutes / 60)::text || ' h'
+                                             else v_minutes::text || ' min' end;
+  v_count integer;
+begin
+  with eligible as (
+    select p.id, p.status, p.found_at, p.reunion_started_at, p.closed_at, p.recheck_at, p.not_found_checks,
+           coalesce((select pg_catalog.max(e.occurred_at) from public.audit_events e where e.patient_id = p.id),
+                    p.created_at) as idle_since
+    from public.patients p
+    where p.status in ('Found – Awaiting Reunion', 'Bring friend to medical')
+      and (p_only is null or p.id = any (p_only))
+      and coalesce((select pg_catalog.max(e.occurred_at) from public.audit_events e where e.patient_id = p.id),
+                   p.created_at) < v_cutoff
+    for update of p skip locked
+  ), closed as (
+    update public.patients p
+       set status = 'Closed – Inactive',
+           closed_at = v_now,
+           recheck_at = null,
+           updated_by = 'System'
+      from eligible el
+     where p.id = el.id
+    returning p.id, el.status as prev_status, el.found_at, el.reunion_started_at, el.closed_at, el.recheck_at,
+              el.not_found_checks, el.idle_since
+  ), audited as (
+    insert into public.audit_events (patient_id, staff_name, action_type, previous_value, new_value, notes, occurred_at)
+    select c.id, 'System', 'status_changed',
+           pg_catalog.jsonb_build_object('status', c.prev_status, 'found_at', c.found_at,
+             'reunion_started_at', c.reunion_started_at, 'closed_at', c.closed_at,
+             'recheck_at', c.recheck_at, 'not_found_checks', c.not_found_checks),
+           pg_catalog.jsonb_build_object('status', 'Closed – Inactive', 'kind', 'auto_close',
+             'idle_since', c.idle_since, 'inactive_minutes', v_minutes,
+             'recheck_at', null, 'not_found_checks', c.not_found_checks),
+           v_note, v_now
+      from closed c
+    returning 1
+  ), noted as (
+    insert into public.lp_inactive_closes (request_id, closed_at, idle_since, notified_at)
+    select c.id, v_now, c.idle_since, case when c.idle_since >= v_quiet then null else v_now end
+      from closed c
+    on conflict do nothing
+    returning 1
+  )
+  select pg_catalog.count(*)::integer into v_count from closed;
+
+  -- Notices nobody claimed in time are done with (their request was reopened, or no phone synced).
+  update public.lp_inactive_closes
+     set notified_at = v_now
+   where notified_at is null and closed_at <= v_now - interval '15 minutes';
+
+  return v_count;
+end
+$fn$;
+
+-- lp_inactive_claim: the app server's sync tells the staff involved about an auto-close once (lib/server/
+-- inactive-notify.ts). Of the requests in p_ids (≤ 200), it claims every close not told yet, from the last 15
+-- minutes, whose request is still 'Closed – Inactive', marking it told in the same statement (SKIP LOCKED: two
+-- syncs at once never claim the same close). Returns the claimed request ids (jsonb array).
+create function public.lp_inactive_claim(p_ids uuid[])
+returns jsonb
+language plpgsql
+volatile
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_ids uuid[];
+begin
+  if p_ids is null or pg_catalog.cardinality(p_ids) = 0 then
+    return '[]'::jsonb;
+  end if;
+  if pg_catalog.cardinality(p_ids) > 200 then
+    raise exception using errcode = 'P0422', message = 'too_many_ids', detail = 'field:ids';
+  end if;
+  with claimable as (
+    select c.request_id, c.closed_at
+      from public.lp_inactive_closes c
+      join public.patients p on p.id = c.request_id
+     where c.notified_at is null
+       and c.request_id = any (p_ids)
+       and c.closed_at > pg_catalog.clock_timestamp() - interval '15 minutes'
+       and p.status = 'Closed – Inactive'
+    for update of c skip locked
+  ), done as (
+    update public.lp_inactive_closes c
+       set notified_at = pg_catalog.clock_timestamp()
+      from claimable k
+     where c.request_id = k.request_id and c.closed_at = k.closed_at
+    returning c.request_id
+  )
+  select coalesce(pg_catalog.array_agg(distinct d.request_id), '{}'::uuid[]) into v_ids from done d;
+  return pg_catalog.to_jsonb(v_ids);
+end
+$fn$;
+
+revoke all on function public.lp_inactive_minutes() from public, anon, authenticated;
+revoke all on function public.lp_close_inactive(uuid[]) from public, anon, authenticated;
+revoke all on function public.lp_inactive_claim(uuid[]) from public, anon, authenticated;
+grant execute on function public.lp_inactive_minutes() to service_role;
+grant execute on function public.lp_close_inactive(uuid[]) to service_role;
+grant execute on function public.lp_inactive_claim(uuid[]) to service_role;
+
+-- (F6, Brian 2026-11-07 02:15) Medical staff whose "New requests" switch was never set in the Alerts sheet get it
+-- ON now, on every device of theirs (lp_push_prefs_sync keeps it so from here on). Anyone who set it keeps it.
+with medical as (
+  update public.lp_push_prefs pr
+     set new_requests = true, updated_at = now()
+   where not pr.new_requests_set
+     and not pr.new_requests
+     and (pg_catalog.regexp_match(pr.staff, '^(.*) · (.*)$'))[2] = 'medical'
+  returning pr.staff
+)
+update public.lp_push_subscriptions s
+   set new_requests = true
+ where s.staff in (select m.staff from medical m) and not s.new_requests;
+
+-- The job: every 5 minutes, exactly one 'lp-close-inactive' (any earlier one of that name is unscheduled first).
+-- pg_cron is enabled here when the server can run it (Supabase: it is preloaded; this is the Dashboard's Database →
+-- Extensions → pg_cron). Where it can't (another database than cron.database_name, a server without it) the file
+-- still succeeds: the NOTICE says the job is NOT scheduled, and lp_close_inactive() can be run by hand.
+do $cron$
+declare
+  v_job bigint;
+  v_due integer;
+begin
+  select pg_catalog.count(*)::integer into v_due
+    from public.patients p
+   where p.status in ('Found – Awaiting Reunion', 'Bring friend to medical')
+     and coalesce((select pg_catalog.max(e.occurred_at) from public.audit_events e where e.patient_id = p.id), p.created_at)
+         < pg_catalog.clock_timestamp() - pg_catalog.make_interval(mins => public.lp_inactive_minutes());
+  raise notice 'lp-close-inactive: % request(s) In medical have had no activity for % min now (the next run closes them).',
+    v_due, public.lp_inactive_minutes();
+
+  if not exists (select 1 from pg_catalog.pg_extension where extname = 'pg_cron')
+     and exists (select 1 from pg_catalog.pg_available_extensions where name = 'pg_cron') then
+    begin
+      create extension if not exists pg_cron;
+      raise notice 'pg_cron: enabled.';
+    exception when others then
+      raise notice 'pg_cron: cannot be enabled here (%).', sqlerrm;
+    end;
+  end if;
+
+  if not exists (select 1 from pg_catalog.pg_extension where extname = 'pg_cron') then
+    raise notice 'lp-close-inactive: NOT scheduled (pg_cron is not available). Enable pg_cron, then paste this file again.';
+    return;
+  end if;
+
+  perform cron.unschedule(j.jobid) from cron.job j where j.jobname = 'lp-close-inactive';
+  v_job := cron.schedule('lp-close-inactive', '*/5 * * * *', 'select public.lp_close_inactive()');
+  raise notice 'lp-close-inactive: scheduled every 5 minutes (job %). Pause: select cron.unschedule(''lp-close-inactive'');', v_job;
+end
+$cron$;
 
 notify pgrst, 'reload schema';
 

@@ -1,7 +1,7 @@
 'use client';
 // The Activity row's bare outline glyph (no container), one per kind (lib/activity.ts ACTIVITY_GLYPH). The
 // walking figure is not in lucide: it is the design's own path (design/screens/f34-states.html P.walk).
-import { Cross, Hourglass, MapPin, MessageSquare, Pencil, Plus, Undo2 } from 'lucide-react';
+import { Cross, Hourglass, MapPin, MessageSquare, Pencil, Plus, TimerOff, Undo2 } from 'lucide-react';
 import type { ComponentType, SVGProps } from 'react';
 import type { ActivityIcon, ActivityTone } from '@/lib/activity';
 import { CheckIcon, XIcon, type IconProps } from './icons';
@@ -39,6 +39,7 @@ const LUCIDE: Readonly<Record<Exclude<ActivityIcon, 'walk'>, ComponentType<IconP
   'undo-2': Undo2,
   plus: Plus,
   pencil: Pencil,
+  'timer-off': TimerOff,
 };
 
 /** step 11 of the tone's Radix scale (gray-11 for gray). */
