@@ -139,7 +139,7 @@ for (const theme of ['light', 'dark'] as const) {
         const waiting = await createRequest(page);
         const answerMe = await createRequest(page);
         const coming = await setStatus(page, await createRequest(page), 'Found – Awaiting Reunion', 'answer');
-        // (F5) One request on a "Not located yet" hold, and one answered Not found twice (final, closed).
+        // (F5) One request on a "Pending" hold, and one answered Not found twice (final, closed).
         const held = await setStatus(page, await createRequest(page), 'Checked – Not Found', 'answer');
         await setStatus(page, await setStatus(page, await createRequest(page), 'Checked – Not Found', 'answer'), 'Checked – Not Found', 'answer');
         await setStatus(page, await setStatus(page, await createRequest(page), 'Found – Awaiting Reunion', 'answer'), 'Reunited – Closed', 'reunite');
@@ -279,7 +279,7 @@ for (const theme of ['light', 'dark'] as const) {
           await expect(page.getByTestId('audit-item').first()).toBeVisible();
           await expect(page.getByTestId('messages').getByTestId('bubble-them')).toBeVisible({ timeout: 15_000 });
         });
-        await visit(`/?r=${held.id}`, 'Profile (not located yet)', () => expect(page.getByTestId('recheck-row')).toBeVisible());
+        await visit(`/?r=${held.id}`, 'Profile (pending)', () => expect(page.getByTestId('recheck-row')).toBeVisible());
         await visit(`/?r=${walking.id}`, 'Profile (my en route)', async () => {
           const mine = page.getByTestId('status-block').getByRole('button', { name: /^Friend en route ~\d+ min$/ });
           await expect(mine).toBeVisible({ timeout: 15_000 });

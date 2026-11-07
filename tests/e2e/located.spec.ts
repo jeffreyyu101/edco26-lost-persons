@@ -1,9 +1,9 @@
 // (2026-11-07, Located / Not located; design/DECISIONS.md, BUILD_SPEC A104) HIPAA: no status or answer wording on
 // screen says a named person is "in medical". End to end on the real store, API and database, Chromium and WebKit:
-//   * Pending (phone): "⧗ Not located yet" and "✓ Located"; the hold's chip and Undo bar; the final "× Not located"
+//   * Pending (phone): "⧗ Pending" and "✓ Located"; the hold's chip and Undo bar; the final "× Not located"
 //     and its Undo bar; Located's sheet "<name> located"; Friend coming's card; nothing on a card says "medical";
 //   * the request page: the status block, the audit trail and Change answer's menu, Located and Not located;
-//   * the desk table's status cells (Located · Bed 3, Not located yet · 9m, Not located · 2 checks), whole.
+//   * the desk table's status cells (Located · Bed 3, Pending · 9m, Not located · 2 checks), whole.
 // Synthetic rows only (TEST-LOC-…), closed again afterwards.
 import { randomUUID } from 'node:crypto';
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
@@ -69,7 +69,7 @@ async function cardWords(card: Locator): Promise<string> {
   });
 }
 
-test('Pending: ⧗ Not located yet, then × Not located; ✓ Located opens "<name> located"; no card says medical', async ({ page }) => {
+test('Pending: ⧗ Pending, then × Not located; ✓ Located opens "<name> located"; no card says medical', async ({ page }) => {
   const held = await createRequest(page.request);
   const located = await createRequest(page.request);
   await page.goto('/?view=pending');
@@ -78,15 +78,15 @@ test('Pending: ⧗ Not located yet, then × Not located; ✓ Located opens "<nam
 
   // The two answers.
   const answer = card.getByTestId('not-found-answer');
-  await expect(answer).toHaveText('Not located yet');
-  await expect(answer).toHaveAccessibleName('Not located yet. Keeps this request open and schedules a recheck');
+  await expect(answer).toHaveText('Pending');
+  await expect(answer).toHaveAccessibleName('Pending. Keeps this request open and schedules a recheck');
   await expect(card.getByRole('button', { name: 'Located', exact: true })).toBeVisible();
   expect(await cardWords(card)).not.toMatch(SAYS_MEDICAL);
 
   // The first: the hold's chip and Undo bar.
   await answer.click();
-  await expect(card.getByTestId('hold-chip')).toHaveText('Not located yet');
-  await expect(page.getByRole('status').filter({ hasText: /^Not located yet · recheck in 20 min/ })).toBeVisible();
+  await expect(card.getByTestId('hold-chip')).toHaveText('Pending');
+  await expect(page.getByRole('status').filter({ hasText: /^Pending · recheck in 20 min/ })).toBeVisible();
   await expect(answer).toHaveText('Not located');
   await expect(answer).toHaveAccessibleName('Not located. Closes this request as not located');
   expect(await cardWords(card)).not.toMatch(SAYS_MEDICAL);
@@ -146,7 +146,7 @@ test('the request page: Located · friend coming and Not located, the audit trai
 test.describe('desk', () => {
   test.use({ viewport: { width: 1440, height: 900 }, isMobile: false, hasTouch: false });
 
-  test('the table: Located · Bed 3, Not located yet · 9m, Not located · 2 checks, whole; no status cell says medical', async ({ page }) => {
+  test('the table: Located · Bed 3, Pending · 9m, Not located · 2 checks, whole; no status cell says medical', async ({ page }) => {
     const held = await setStatus(page.request, await createRequest(page.request), STATUS.notInMedical);
     let located = await setStatus(page.request, await createRequest(page.request), STATUS.inMedical);
     located = (await call<{ request: RequestSummary }>(page.request, 'PATCH', `/api/requests/${located.id}`, { patch: { medicalLocation: 'Bed 3' }, expectedVersion: located.rowVersion })).request;
@@ -162,7 +162,7 @@ test.describe('desk', () => {
           .join(' '),
       );
     await expect(cell(held.id)).toBeVisible({ timeout: 20_000 });
-    await expect.poll(() => shown(held.id)).toMatch(/^Not located yet · (now|\d+m)$/);
+    await expect.poll(() => shown(held.id)).toMatch(/^Pending · (now|\d+m)$/);
     await expect.poll(() => shown(located.id)).toBe('Located · Bed 3');
     await page.getByTestId('closed-fold').first().click();
     await expect.poll(() => shown(final.id)).toBe('Not located · 2 checks');

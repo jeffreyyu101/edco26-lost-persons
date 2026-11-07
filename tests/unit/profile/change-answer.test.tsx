@@ -183,8 +183,8 @@ describe('the profile footer', () => {
     expect(buttons(bar)).toHaveLength(2);
     expect(bar).not.toContain('aria-haspopup');
     // (Pending v9.1) The left answer of a request never held: the first Not found, which holds it.
-    expect(bar).toContain('>Not located yet<');
-    expect(bar).toContain('aria-label="Not located yet. Keeps this request open and schedules a recheck"');
+    expect(bar).toContain('>Pending<');
+    expect(bar).toContain('aria-label="Pending. Keeps this request open and schedules a recheck"');
     expect(bar).toContain('>Located<');
     // Never held: the hold, not the final "Not located" (which closes it).
     expect(bar).not.toContain('>Not located<');

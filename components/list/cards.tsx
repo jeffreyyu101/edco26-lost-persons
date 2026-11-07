@@ -232,7 +232,13 @@ export interface CheckCardProps {
   leaving?: boolean;
 }
 
-/** (Pending v9.1) The hold's indicator for a card: none, held ("Not found yet") or due ("Recheck due"). */
+/**
+ * The left answer's longer label ("Pending" / "Not located"): its invisible copy keeps the button one width in both
+ * states (list.module.css .ansLabel).
+ */
+const ANSWER_SIZE_AS = NOT_FOUND_YET_LABEL.length >= ANSWER_LABEL.notFound.length ? NOT_FOUND_YET_LABEL : ANSWER_LABEL.notFound;
+
+/** (Pending v9.1) The hold's indicator for a card: none, held ("Pending") or due ("Recheck due"). */
 export function holdState(row: Pick<RequestSummary, 'status' | 'recheckAt'>, now: number): 'none' | 'held' | 'due' {
   if (!isHeld(row)) return 'none';
   return isRecheckDue(row, now) ? 'due' : 'held';
@@ -309,7 +315,7 @@ export const CheckCard = memo(function CheckCard({ row, now, offline, onNotInMed
         >
           {answer.kind === 'hold' ? <Hourglass size={16} strokeWidth={1.75} aria-hidden /> : <X size={16} strokeWidth={2.25} aria-hidden />}
           {/* Sized for the longer of its two labels, so it keeps one width and place in both states. */}
-          <span className={s.ansLabel} data-size-as={NOT_FOUND_YET_LABEL}>
+          <span className={s.ansLabel} data-size-as={ANSWER_SIZE_AS}>
             {answer.label}
           </span>
         </Button>
@@ -440,7 +446,7 @@ export const MineCard = memo(function MineCard({
   const hold = holdState(row, now);
   const holdSaid = hold === 'due' ? `${NOT_FOUND_YET_LABEL.toLowerCase()}, recheck due` : hold === 'held' ? NOT_FOUND_YET_LABEL.toLowerCase() : '';
   const stageSaid = stage.key === 'needsInfo' ? stage.said : hold !== 'none' ? '' : statusMeta(row.status).label;
-  const said = [stageSaid, holdSaid].filter(Boolean).join(', ').replace(/^n/, 'N');
+  const said = [stageSaid, holdSaid].filter(Boolean).join(', ').replace(/^./, (c) => c.toUpperCase());
   const label = `${whoPhrase(row)}. ${sub}. ${said}${waiting ? `, waiting ${minutesPhrase(minutes)}` : `, ${minutesPhrase(minutes)} ago`}.`;
   return (
     <Card

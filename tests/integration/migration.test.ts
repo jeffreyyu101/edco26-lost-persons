@@ -5,7 +5,7 @@
 // Then the free-text age (2026-11-06): smallint → text on a scratch copy of production as it is today
 // (rework already applied once), pasted twice. And patients.medical_location (Pending v8, 2026-11-06
 // afternoon) on a scratch copy built with the rework file as the F1 release shipped it (commit 7291a7b). And the
-// "Not located yet" hold (F5) on a scratch copy of production as the F2 release left it (commit 85c9320): a dry run
+// "Pending" hold (F5) on a scratch copy of production as the F2 release left it (commit 85c9320): a dry run
 // that ends in rollback changes nothing, then two pastes.
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -234,7 +234,7 @@ describe('20261106000000_rework.sql: medical_location on production as it is bef
  * line changed to rollback: nothing is kept), then add the hold once, keep every hold and location on a second
  * paste, and leave the calls the F2 build makes working (its allowlist ignores the two new lp_row keys).
  */
-describe('20261106000000_rework.sql: the "Not located yet" hold on production as the F2 release left it', () => {
+describe('20261106000000_rework.sql: the "Pending" hold on production as the F2 release left it', () => {
   const FIXTURE = 'lp_hold_fixture';
   const RELEASED = '85c9320';
   const REWORK = 'supabase/migrations/20261106000000_rework.sql';

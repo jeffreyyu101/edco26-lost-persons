@@ -1,4 +1,4 @@
-// F5: the "Not located yet" hold through the real store (spec §19 A62): the first Not found's overlay keeps the
+// F5: the "Pending" hold through the real store (spec §19 A62): the first Not found's overlay keeps the
 // status and goes on hold at once, its Undo bar names the recheck time, a double tap stays one answer, a
 // deliberate second Not found is final, and A12's 409 resend never turns someone else's hold into a final answer.
 // The fake server answers a first Not found as lp_set_status does (status stays Added). Synthetic data only.
@@ -30,7 +30,7 @@ function holdingServer(server: FakeServer, wait?: () => Promise<undefined>) {
 }
 
 describe('the hold in the store', () => {
-  it('the first Not found keeps Waiting for check and goes on hold at once; the Undo bar reads "Not located yet · recheck in 20 min"', async () => {
+  it('the first Not found keeps Waiting for check and goes on hold at once; the Undo bar reads "Pending · recheck in 20 min"', async () => {
     const server = new FakeServer([R1]);
     const { a, s } = boot(server);
     await ready();
@@ -45,8 +45,8 @@ describe('the hold in the store', () => {
     g.open();
     expect(await finish(p)).toMatchObject({ ok: true, changed: true });
     expect(s().confirmed.get(R1.id)).toMatchObject({ status: STATUS.waiting, notFoundChecks: 1 });
-    expect(s().snackbar?.message).toBe(`Not located yet · recheck in ${RECHECK_MINUTES} min`);
-    expect(s().snackbar?.said).toBe(`Not located yet, recheck in ${RECHECK_MINUTES} minutes.`);
+    expect(s().snackbar?.message).toBe(`Pending · recheck in ${RECHECK_MINUTES} min`);
+    expect(s().snackbar?.said).toBe(`Pending, recheck in ${RECHECK_MINUTES} minutes.`);
     // Undo: back to Waiting for check, kind undo, as before.
     await finish(a.undo(s().snackbar!.id));
     expect(statusPosts(server).at(-1)?.body).toEqual({ status: STATUS.waiting, expectedVersion: 2, kind: 'undo' });
@@ -76,7 +76,7 @@ describe('the hold in the store', () => {
     expect(s().confirmed.get(R1.id)?.status).toBe(STATUS.notInMedical);
   });
 
-  it('Undo of the final Not found brings the card back held at once ("Not located yet" + "× Not located"), and a "× Not located" tapped meanwhile is the final answer again', async () => {
+  it('Undo of the final Not found brings the card back held at once ("Pending" + "× Not located"), and a "× Not located" tapped meanwhile is the final answer again', async () => {
     const recheckAt = new Date(Date.now() + 5 * 60_000).toISOString();
     const server = new FakeServer([makeRow(1, { recheckAt, notFoundChecks: 1, rowVersion: 2 })]);
     const { a, s } = boot(server);

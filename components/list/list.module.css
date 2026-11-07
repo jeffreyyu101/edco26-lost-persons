@@ -1122,10 +1122,10 @@ button.lr:focus-visible {
   font-weight: 500;
 }
 
-/* (2026-11-07, Located / Not located) The left answer keeps one width and place in both states (Pending v9.1):
-   "⧗ Not located yet" is wider than an equal share of a phone card's row beside Message and "✓ Located", so its
-   label reserves the longer label's width (data-size-as) with an invisible copy of no height; "× Not located"
-   then takes the same width. Not in the accessibility tree (visibility: hidden; the button has its aria-label). */
+/* (2026-11-07, Located / Not located; Pending) The left answer keeps one width and place in both states (Pending
+   v9.1): its label reserves the longer of "⧗ Pending" and "× Not located" (data-size-as, components/list/cards.tsx
+   ANSWER_SIZE_AS) with an invisible copy of no height, so both states take the same width. Not in the
+   accessibility tree (visibility: hidden; the button has its aria-label). */
 .ansLabel {
   display: inline-flex;
   flex-direction: column;

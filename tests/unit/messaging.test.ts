@@ -13,6 +13,7 @@ import {
   enrouteDetail,
   enrouteView,
   etaPhrase,
+  fillWithQuickLine,
   iAmEnroute,
   maskContacts,
   messageDetail,
@@ -80,7 +81,7 @@ describe('sides and names', () => {
 describe('quick lines (status × side)', () => {
   const row = (status: string, extra: Record<string, unknown> = {}) => ({ status, ...extra });
 
-  it('stages: waiting (incl. the Not located yet hold), in medical, closed', () => {
+  it('stages: waiting (incl. the Pending hold), in medical, closed', () => {
     expect(quickStage(row(STATUS.waiting))).toBe('waiting');
     expect(quickStage(row(STATUS.notInMedical, { recheckAt: at(20) }))).toBe('waiting');
     expect(quickStage(row(STATUS.notInMedical))).toBe('closed');
@@ -101,16 +102,34 @@ describe('quick lines (status × side)', () => {
       'message:Ready for them',
       'message:Hold — not ready yet',
     ]);
-    expect(texts('in_medical', 'foh')).toEqual(['enroute:En route', "message:Can't find them", 'message:Friend left the area']);
-    expect(texts('in_medical', 'foh', true)).toEqual(['arrived:Arrived', "message:Can't find them", 'message:Friend left the area']);
+    // (2026-11-07 13:52) "Can't find them" is gone; En route / Arrived and "Friend left the area" stay.
+    expect(texts('in_medical', 'foh')).toEqual(['enroute:En route', 'message:Friend left the area']);
+    expect(texts('in_medical', 'foh', true)).toEqual(['arrived:Arrived', 'message:Friend left the area']);
     // Once the friend arrived neither En route nor Arrived is offered again (as on the cards).
-    expect(texts('in_medical', 'foh', false, true)).toEqual(["message:Can't find them", 'message:Friend left the area']);
-    expect(texts('in_medical', 'foh', true, true)).toEqual(["message:Can't find them", 'message:Friend left the area']);
+    expect(texts('in_medical', 'foh', false, true)).toEqual(['message:Friend left the area']);
+    expect(texts('in_medical', 'foh', true, true)).toEqual(['message:Friend left the area']);
+    for (const stage of ['waiting', 'in_medical', 'closed'] as const) {
+      for (const side of ['medical', 'foh'] as const) {
+        for (const mine of [false, true]) {
+          for (const arrived of [false, true]) expect(texts(stage, side, mine, arrived).join('|')).not.toContain("Can't find them");
+        }
+      }
+    }
     expect(texts('closed', 'medical')).toEqual([]);
     expect(texts('closed', 'foh')).toEqual([]);
     // Medical's lines never depend on en route.
     expect(quickLines('in_medical', 'medical', true)).toBe(MEDICAL_LINES.in_medical);
     expect(quickLines('waiting', 'foh', true)).toBe(FOH_WAITING_LINES);
+  });
+
+  it('a tap fills the composer (2026-11-07 13:55): set when empty, appended after a space, typed text never lost', () => {
+    expect(fillWithQuickLine('', 'Any tattoos or marks?')).toBe('Any tattoos or marks?');
+    expect(fillWithQuickLine('   ', 'Any tattoos or marks?')).toBe('Any tattoos or marks?');
+    expect(fillWithQuickLine('Hi Rae.', 'Do you have a photo?')).toBe('Hi Rae. Do you have a photo?');
+    expect(fillWithQuickLine('Hi Rae. ', 'Do you have a photo?')).toBe('Hi Rae. Do you have a photo?');
+    expect(fillWithQuickLine('Line one\n', 'Ready for them')).toBe('Line one\nReady for them');
+    // Two taps: both lines, in order.
+    expect(fillWithQuickLine(fillWithQuickLine('', 'Bring 1 person only'), 'Ready for them')).toBe('Bring 1 person only Ready for them');
   });
 });
 
@@ -354,7 +373,7 @@ describe('rows: carried activity and sameRow', () => {
     expect(activityOf(makeRow(2))).toMatchObject({ messageCount: 0, unread: 0, lastMessage: null, enroute: null });
   });
 
-  it('regression: medical\'s "Not located yet" on a Needs info request ends Needs info (status unchanged, the hold set), and so does its Undo', () => {
+  it('regression: medical\'s "Pending" on a Needs info request ends Needs info (status unchanged, the hold set), and so does its Undo', () => {
     const before = withActivity({ recheckAt: null, notFoundChecks: 0 });
     const held = makeRow(1, { rowVersion: 2, status: STATUS.waiting, recheckAt: '2026-11-07T03:20:00.000000+00:00', notFoundChecks: 1 });
     expect(carryActivity(before, held)).toMatchObject({ needsInfo: false, messageCount: 2, unread: 1 });

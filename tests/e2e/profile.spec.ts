@@ -76,7 +76,7 @@ async function setStatus(page: Page, origin: string, row: RequestSummary, status
 const statusBlock = (page: Page) => page.getByTestId('status-block');
 const changeAnswer = (page: Page) => page.getByTestId('profile-actions').getByRole('button', { name: 'Change answer' });
 const undoButton = (page: Page) => page.getByRole('button', { name: 'Undo', exact: true });
-/** (Pending v9.1) The left answer on a request Waiting for check: "Not located yet" (the hold), then "Not located". */
+/** (Pending v9.1) The left answer on a request Waiting for check: "Pending" (the hold), then "Not located". */
 const notFoundAnswer = (page: Page) => page.getByTestId('not-found-answer');
 /** (Pending v9.1) The Undo bar after a Not found that closed the request: "K.Z. closed · not located". */
 const closedSnack = (name: string) => `${initials(name)} closed · ${STATUS_META[STATUS.notInMedical].label.toLowerCase()}`;
@@ -179,9 +179,9 @@ test('Not located is closed and grey, and keeps exactly its actions: Change answ
   const origin = baseURL as string;
   const row = await createRequest(page, origin);
   await page.goto(`/?r=${row.id}`);
-  // (F5) The first Not found puts it on a "Not located yet" hold, still Waiting for check; the second is final.
-  // (Pending v9.1) The button says which: "Not located yet", then "Not located".
-  await expect(notFoundAnswer(page)).toHaveText('Not located yet');
+  // (F5) The first Not found puts it on a "Pending" hold, still Waiting for check; the second is final.
+  // (Pending v9.1) The button says which: "Pending", then "Not located".
+  await expect(notFoundAnswer(page)).toHaveText('Pending');
   await notFoundAnswer(page).click();
   await expect(statusBlock(page).getByTestId('recheck-row')).toBeVisible();
   await expect(profileStatus(page, 'Added')).toBeVisible();
@@ -373,10 +373,10 @@ test('the Not found button on the profile offers Undo too', async ({ page, baseU
   const origin = baseURL as string;
   const row = await createRequest(page, origin);
   await page.goto(`/?r=${row.id}`);
-  // (F5) The first Not found puts it on hold ("Not located yet · recheck in 20 min"); Undo takes the hold away.
+  // (F5) The first Not found puts it on hold ("Pending · recheck in 20 min"); Undo takes the hold away.
   await notFoundAnswer(page).click();
   await expect(statusBlock(page).getByTestId('recheck-row')).toBeVisible();
-  await expect(page.getByText(/^Not located yet · recheck in 20 min$/)).toBeVisible();
+  await expect(page.getByText(/^Pending · recheck in 20 min$/)).toBeVisible();
   await undoButton(page).click();
   await expect(statusBlock(page).getByTestId('recheck-row')).toHaveCount(0);
   await expect(profileStatus(page, 'Added')).toBeVisible();

@@ -9,10 +9,10 @@ import { ROOT, testBaseUrl } from '../../scripts/test-env.mjs';
 import { axeViolations, smallTargets } from './helpers/a11y';
 import { newSignedInContext, signedInAs, type TestStaff } from './helpers/session';
 
-// F5: status stages and the "Not located yet" hold (design/screens/updates.html #clarify / #recheck / #colors),
+// F5: status stages and the "Pending" hold (design/screens/updates.html #clarify / #recheck / #colors),
 // end to end:
-//   * the real flow on the real store, API and database: medical answers Not located yet → the card stays where it
-//     is with a "Not located yet" chip (Undo takes it away) → the page clock passes the recheck time → the chip
+//   * the real flow on the real store, API and database: medical answers Pending → the card stays where it
+//     is with a "Pending" chip (Undo takes it away) → the page clock passes the recheck time → the chip
 //     reads "Recheck due", nothing moves (Pending v9.1) → the final Not found closes it; front of house's My
 //     requests card shows the chip and no recheck time, then the final grey Not in medical; the desk status
 //     cell's strings (the wait after every Waiting for check stage);
@@ -108,7 +108,7 @@ async function phoneContext(browser: Browser, staff: TestStaff): Promise<Browser
 // The real flow
 // ---------------------------------------------------------------------------------------------------
 
-test('medical: Not located yet → the chip, in place (Undo takes it away) → Recheck due, nothing moves → the final Not found closes it; front of house sees each step', async ({
+test('medical: Pending → the chip, in place (Undo takes it away) → Recheck due, nothing moves → the final Not found closes it; front of house sees each step', async ({
   page,
   browser,
 }) => {
@@ -122,25 +122,25 @@ test('medical: Not located yet → the chip, in place (Undo takes it away) → R
     const card = checkCard(page, r.id);
     await expect(card).toBeVisible({ timeout: 20_000 });
     const answer = card.getByTestId('not-found-answer');
-    await expect(answer).toHaveText('Not located yet');
+    await expect(answer).toHaveText('Pending');
     const position = () => page.locator('[data-testid="check-card"]').evaluateAll((els, id) => els.findIndex((el) => el.getAttribute('data-pending-card') === id), r.id);
     const before = await position();
 
-    // First Not found: the card stays where it is, with the chip and "Not located yet · recheck in 20 min" + Undo.
+    // First Not found: the card stays where it is, with the chip and "Pending · recheck in 20 min" + Undo.
     await answer.click();
-    await expect(card.getByTestId('hold-chip')).toHaveText('Not located yet');
-    await expect(page.getByRole('status').filter({ hasText: /^Not located yet · recheck in 20 min/ })).toBeVisible();
+    await expect(card.getByTestId('hold-chip')).toHaveText('Pending');
+    await expect(page.getByRole('status').filter({ hasText: /^Pending · recheck in 20 min/ })).toBeVisible();
     expect(await position()).toBe(before);
 
     // Undo: no hold, no chip.
     await page.getByRole('button', { name: 'Undo', exact: true }).click();
     await expect(card.getByTestId('hold-chip')).toHaveCount(0);
-    await expect(answer).toHaveText('Not located yet');
+    await expect(answer).toHaveText('Pending');
     await expect.poll(async () => (await call<RequestDetail>(page.request, 'GET', `/api/requests/${r.id}`)).notFoundChecks).toBe(0);
 
     // Again, for real this time.
     await answer.click();
-    await expect(card.getByTestId('hold-chip')).toHaveText('Not located yet');
+    await expect(card.getByTestId('hold-chip')).toHaveText('Pending');
     await expect(answer).toHaveText('Not located');
     await expect.poll(async () => (await call<RequestDetail>(page.request, 'GET', `/api/requests/${r.id}`)).notFoundChecks).toBe(1);
     const held = await call<RequestDetail>(page.request, 'GET', `/api/requests/${r.id}`);
@@ -150,7 +150,7 @@ test('medical: Not located yet → the chip, in place (Undo takes it away) → R
     // Front of house: still open, the violet chip, and no recheck time on the card.
     await foh.goto('/?view=mine');
     const mine = mineCard(foh, r.id);
-    await expect(mine.getByTestId('hold-chip')).toHaveText('Not located yet', { timeout: 20_000 });
+    await expect(mine.getByTestId('hold-chip')).toHaveText('Pending', { timeout: 20_000 });
     await expect(mine).not.toContainText(recheck);
 
     // 21 minutes later on medical's phone: Recheck due, in place. Never closed by itself.
@@ -175,7 +175,7 @@ test('medical: Not located yet → the chip, in place (Undo takes it away) → R
   }
 });
 
-test('the request (medical): Not located yet in violet, who answered, Recheck, and the answers inside the block', async ({ page }) => {
+test('the request (medical): Pending in violet, who answered, Recheck, and the answers inside the block', async ({ page }) => {
   const r = await createRequest(page.request);
   const held = await setStatus(page.request, r, STATUS.notInMedical);
   await page.goto(`/?r=${r.id}`);
@@ -183,7 +183,7 @@ test('the request (medical): Not located yet in violet, who answered, Recheck, a
   await expect(block).toHaveAttribute('data-tone', 'violet', {
     timeout: 20_000,
   });
-  await expect(block.getByTestId('status-label')).toHaveText('Not located yet');
+  await expect(block.getByTestId('status-label')).toHaveText('Pending');
   await expect(block).toContainText(MEDIC.staffName);
   await expect(block.getByTestId('recheck-row')).toHaveText(`Recheck ${formatClockAmPm(held.recheckAt as string, TZ)}`);
   const answers = block.getByTestId('block-answers');
@@ -196,8 +196,8 @@ test('the request (medical): Not located yet in violet, who answered, Recheck, a
     }),
   ).toBeVisible();
   await expect(page.getByTestId('profile-actions')).toHaveCount(0);
-  // The audit trail: Waiting for check → Not located yet, with the recheck time.
-  await expect(page.getByTestId('audit-item').first()).toContainText('Not located yet');
+  // The audit trail: Waiting for check → Pending, with the recheck time.
+  await expect(page.getByTestId('audit-item').first()).toContainText('Pending');
   await expect(page.getByTestId('audit-item').first()).toContainText(`Recheck ${formatClockAmPm(held.recheckAt as string, TZ)}`);
   // In medical from the block clears the hold.
   await answers.getByRole('button', { name: IN_MEDICAL, exact: true }).click();
@@ -212,7 +212,7 @@ test.describe('desk', () => {
     hasTouch: false,
   });
 
-  test('the status cell: "Waiting for check · 9m", "Not located yet · 9m", "Located · Bed 3", "Not located · 2 checks"; no en route column', async ({
+  test('the status cell: "Waiting for check · 9m", "Pending · 9m", "Located · Bed 3", "Not located · 2 checks"; no en route column', async ({
     page,
   }) => {
     const waiting = await createRequest(page.request);
@@ -244,7 +244,7 @@ test.describe('desk', () => {
     await expect(cell(waiting.id)).toBeVisible({ timeout: 20_000 });
     await expect.poll(() => shown(waiting.id)).toMatch(/^Waiting for check · (now|\d+m)$/);
     // (Pending v9.1) The wait after the label, never the recheck time.
-    await expect.poll(() => shown(held.id)).toMatch(/^Not located yet · (now|\d+m)$/);
+    await expect.poll(() => shown(held.id)).toMatch(/^Pending · (now|\d+m)$/);
     await expect.poll(() => shown(located.id)).toBe(`${STATUS_META[STATUS.inMedical].shortLabel} · Bed 3`);
     await page.getByTestId('closed-fold').first().click();
     await expect.poll(() => shown(final.id)).toBe(`${NOT_IN_MEDICAL} · 2 checks`);
@@ -787,8 +787,8 @@ test.describe('fixture', () => {
         expect(cells).toEqual({
           15: `${STATUS_META[STATUS.waiting].shortLabel} · 59m`,
           14: 'Needs info · 16m',
-          13: 'Not located yet · 24m',
-          17: 'Not located yet · 12m',
+          13: 'Pending · 24m',
+          17: 'Pending · 12m',
           7: whole ? 'Not located · 2 checks' : 'Not located',
         });
         // Needs info on hold: its own glyph only (no recheck glyph, no time).

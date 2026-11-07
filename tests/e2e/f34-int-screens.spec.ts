@@ -83,7 +83,7 @@ test('F3 + F4 release screens', async ({ browser, browserName }) => {
   const foh = fohCtx.request;
   const med = medCtx.request;
 
-  // Waiting for check: J.D. (medical asked: Needs info), K.T. (the first Not found: the "Not located yet" hold).
+  // Waiting for check: J.D. (medical asked: Needs info), K.T. (the first Not found: the "Pending" hold).
   // Friend coming: A.L. at Chair 14 with Dana en route, R.P. just answered.
   const kt = await make(foh, 'K. T.', '19', 'Female', 'Yellow raincoat, glitter boots');
   const al = await make(foh, 'A. L.', '21', 'Female', 'Silver jacket, pink hair');

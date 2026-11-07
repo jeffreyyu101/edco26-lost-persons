@@ -767,8 +767,12 @@ export const PHOTO_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as con
 /** How long a "Not found yet" hold lasts. MUST equal lp_stages_recheck_minutes() in the rework SQL (unit-tested). */
 export const RECHECK_MINUTES = 20;
 
-/** The held stage's label (lib/stages.ts STAGE_META.notFoundYet; here for the alerts on the first load). */
-export const NOT_FOUND_YET_LABEL = 'Not located yet';
+/**
+ * The held stage's label (lib/stages.ts STAGE_META.notFoundYet; here for the alerts on the first load): "Pending"
+ * (the ops lead + Brian, 2026-11-07 12:29: the 20-minute hold is the third answer, Pending; it was "Not found yet",
+ * then "Not located yet"). Due, it still reads "Recheck due".
+ */
+export const NOT_FOUND_YET_LABEL = 'Pending';
 
 const holdEpoch = (iso: string | null | undefined): number => {
   const t = iso ? Date.parse(iso) : NaN;

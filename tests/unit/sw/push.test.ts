@@ -85,7 +85,7 @@ describe('push (no window in front)', () => {
   });
 
   it('regression: a later answer replaces medical\'s hold with sound; an older payload (no flags) is neither sticky nor renotifying', async () => {
-    await worker.push(payload({ kind: 'not_in_medical', body: 'Not located yet · recheck 4:40 PM', requireInteraction: false }));
+    await worker.push(payload({ kind: 'not_in_medical', body: 'Pending · recheck 4:40 PM', requireInteraction: false }));
     await worker.push(payload());
     expect(worker.notifications).toHaveLength(1);
     expect(worker.notifications[0]?.options).toMatchObject({ body: 'Located · Chair 9', renotify: true, requireInteraction: true });

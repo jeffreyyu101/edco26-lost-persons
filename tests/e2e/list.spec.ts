@@ -56,7 +56,7 @@ async function setStatus(page: Page, r: RequestSummary, status: string, kind: st
   return ((await res.json()) as { request: RequestSummary }).request;
 }
 
-/** (F5) Not in medical, final: the first Not found only puts it on a "Not located yet" hold; the second closes it. */
+/** (F5) Not in medical, final: the first Not found only puts it on a "Pending" hold; the second closes it. */
 async function notFound(page: Page, r: RequestSummary): Promise<RequestSummary> {
   const held = await setStatus(page, r, 'Checked – Not Found', 'answer');
   return setStatus(page, held, 'Checked – Not Found', 'answer');
@@ -883,9 +883,9 @@ test('Not found leaves Pending; ?status= shows a filter chip that clears to All'
   const r = await createRequest(page);
   await page.goto('/?view=pending');
   await expect(checkCard(page, r.id)).toBeVisible({ timeout: 10_000 });
-  // (v9.1) The first Not found holds it, in place with a "Not located yet" chip; the second closes it.
+  // (v9.1) The first Not found holds it, in place with a "Pending" chip; the second closes it.
   await checkCard(page, r.id).getByTestId('not-found-answer').click();
-  await expect(checkCard(page, r.id).getByTestId('hold-chip')).toHaveText('Not located yet');
+  await expect(checkCard(page, r.id).getByTestId('hold-chip')).toHaveText('Pending');
   await checkCard(page, r.id).getByTestId('not-found-answer').click();
   await expect(checkCard(page, r.id)).toHaveCount(0);
   await expect.poll(async () => ((await (await page.request.get(`/api/requests/${r.id}`)).json()) as RequestSummary).status).toBe('Checked – Not Found');
@@ -992,7 +992,8 @@ test('front of house logs a request with a photo; the liaison sees it in Pending
     await expect(comingCard(page, id!).getByTestId('location-chip')).toHaveAccessibleName('Chair 7, edit location');
 
     // A, back on the list, is alerted on its next poll: their own request moved to In medical.
-    const toast = a.locator('.lp-toast').filter({ hasText: new RegExp(`${lpText} · .+ located`) });
+    // "<initials> located", never "<initials> — not located" (the later toast, which also ends in "located").
+    const toast = a.locator('.lp-toast').filter({ hasText: new RegExp(`${lpText} · [^—]+ located`) });
     await expect(toast).toBeVisible({ timeout: 15_000 });
     await expect(toast).toContainText(/LP-\d+ · .+ located/);
     await expect(toast).toContainText('Bring the friend to Main Med');

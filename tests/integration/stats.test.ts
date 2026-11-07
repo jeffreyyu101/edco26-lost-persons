@@ -49,7 +49,7 @@ function expectedAvgAnswerMinutes(): number | null {
       ((e.type === 'status_changed' || e.type === 'check_completed') && e.prev === STATUS.waiting && answers.has(e.next ?? '')) ||
       (e.type === 'medical_search' && e.outcome === 'not_found') ||
       e.type === 'medical_search_found' ||
-      // (F5) The first Not found, which put the request on a "Not located yet" hold (status stays Waiting).
+      // (F5) The first Not found, which put the request on a "Pending" hold (status stays Waiting).
       (e.type === 'status_changed' && e.held === 'true');
     if (!isAnswer) continue;
     const prev = first.get(e.pid);

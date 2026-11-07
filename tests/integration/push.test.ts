@@ -336,13 +336,13 @@ describe('the routes notify (contract D)', () => {
     const danaPhone = push.device();
     await subscribe(dana, danaPhone);
     const r = await createRequest(dana);
-    // The first Not found: the "Not located yet" hold (the row stays Waiting for check, recheck in 20 minutes).
+    // The first Not found: the "Pending" hold (the row stays Waiting for check, recheck in 20 minutes).
     const held = await setStatus(r, 'Checked – Not Found', 'answer', rae);
     expect(held.status).toBe('Added');
     expect(held.recheckAt).toBeTruthy();
     const first = await eventually(() => activityOf(dana, r.id).then((a) => a ?? undefined));
     expect(first).toMatchObject({ kind: 'not_in_medical', read_at: null });
-    expect(first.detail).toMatch(/^Not located yet · recheck \d{1,2}:\d{2} (AM|PM)$/);
+    expect(first.detail).toMatch(/^Pending · recheck \d{1,2}:\d{2} (AM|PM)$/);
     await eventually(() => danaPhone.deliveries.length === 1);
     // The final Not found closes it: the status's own label (STATUS_META, "Not located").
     const closed = await setStatus(held, 'Checked – Not Found', 'answer', rae);
