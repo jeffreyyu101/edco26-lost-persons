@@ -3,14 +3,18 @@
 // happening: teal "Friend en route" + "~4 min" (a minute countdown to the stored ETA; "now"; amber "late"),
 // a small count when several staff are bringing the friend, green "Friend arrived". No names or teams.
 // On a request I am en route on, the row is a button (chevron) that reopens the same sheet I started from,
-// with my ETA selected, "Cancel en route" and "Update". For everyone else it is read-only.
-import { Button } from '@radix-ui/themes';
-import { Check, ChevronRight } from 'lucide-react';
+// with my ETA selected, "Cancel en route" and "Update". For everyone else it is read-only (not a live region:
+// its minute countdown must not be announced every minute).
+// A tap of mine that was not delivered keeps what I asked for on screen with "Not delivered · Retry" and a
+// Delete under it (EnrouteFailed), like a message bubble that was not delivered.
+import { Button, IconButton, VisuallyHidden } from '@radix-ui/themes';
+import { Check, ChevronRight, X } from 'lucide-react';
 import { WalkIcon } from './WalkIcon';
 import { useState, type ReactNode } from 'react';
 import { Sheet } from '@/components/ui/Sheet';
 import type { EnrouteSummary, RequestSummary } from '@/lib/api-types';
-import { useEnroute, useMessaging } from '@/lib/client/messages-hooks';
+import { useEnroute, useFailedEnroute, useMessaging } from '@/lib/client/messages-hooks';
+import type { MessageJob } from '@/lib/client/messages-logic';
 import { useNow } from '@/lib/client/store-contract';
 import { isInMedical } from '@/lib/domain';
 import { ETA_CHOICES, enrouteView, iAmEnroute } from '@/lib/messaging';
@@ -35,6 +39,9 @@ export function EnrouteRow({ enroute, status, onEdit, pressed, testId = 'enroute
   const now = useNow();
   const view = enrouteView(enroute, now, status);
   if (!view) return null;
+  const tappable = !!onEdit && view.state === 'enroute';
+  // Read-only: the visible pieces are hidden from screen readers and one sentence says it all instead.
+  const hide = tappable ? undefined : true;
   const content: ReactNode = (
     <>
       {view.state === 'arrived' ? (
@@ -42,13 +49,23 @@ export function EnrouteRow({ enroute, status, onEdit, pressed, testId = 'enroute
       ) : (
         <WalkIcon size={18} strokeWidth={2} className={s.enrIcon} aria-hidden />
       )}
-      <span className={s.enrLabel}>{view.label}</span>
-      {view.count > 1 ? <span className={s.enrCount}>{view.count}</span> : null}
-      {view.eta ? <span className={s.enrEta}>{view.eta}</span> : null}
-      {onEdit ? <ChevronRight size={16} strokeWidth={2.25} className={view.eta ? s.enrChev : `${s.enrChev} ${s.enrPush}`} aria-hidden /> : null}
+      <span className={s.enrLabel} aria-hidden={hide}>
+        {view.label}
+      </span>
+      {view.count > 1 ? (
+        <span className={s.enrCount} aria-hidden={hide}>
+          {view.count}
+        </span>
+      ) : null}
+      {view.eta ? (
+        <span className={s.enrEta} aria-hidden={hide}>
+          {view.eta}
+        </span>
+      ) : null}
+      {tappable ? <ChevronRight size={16} strokeWidth={2.25} className={view.eta ? s.enrChev : `${s.enrChev} ${s.enrPush}`} aria-hidden /> : null}
     </>
   );
-  if (onEdit && view.state === 'enroute') {
+  if (tappable) {
     return (
       <button
         type="button"
@@ -64,8 +81,52 @@ export function EnrouteRow({ enroute, status, onEdit, pressed, testId = 'enroute
     );
   }
   return (
-    <div className={s.enr} data-tone={view.tone} data-testid={testId} role="status" aria-label={view.sentence}>
+    <div className={s.enr} data-tone={view.tone} data-testid={testId}>
       {content}
+      <VisuallyHidden>{view.sentence}</VisuallyHidden>
+    </div>
+  );
+}
+
+/** What a tap that was not delivered asked for, in words (screen readers). */
+function tapPhrase(job: MessageJob): string {
+  switch (job.enroute?.action) {
+    case 'arrive':
+      return 'Arrived';
+    case 'cancel':
+      return 'Cancel en route';
+    default:
+      return 'En route';
+  }
+}
+
+/**
+ * "Not delivered · Retry" and Delete under the en route row (or in its place): my tap on this request failed
+ * (3 tries online, or the server refused it). Retry sends it again; Delete forgets it (the row goes back
+ * to what the server has).
+ */
+export function EnrouteFailed({ control }: { control: Pick<EnrouteControl, 'failed' | 'retry' | 'discard'> }) {
+  const job = control.failed;
+  if (!job) return null;
+  const what = tapPhrase(job);
+  return (
+    <div className={s.enrFail} data-testid="enroute-failed">
+      <b aria-hidden>Not delivered</b>
+      <span aria-hidden>·</span>
+      <button type="button" className={s.retry} onClick={control.retry} data-testid="enroute-retry" aria-label={`${what} was not delivered. Retry.`}>
+        Retry
+      </button>
+      <IconButton
+        size="2"
+        variant="ghost"
+        color="gray"
+        className={`${s.enrFailDelete} lp-hit`}
+        onClick={control.discard}
+        data-testid="enroute-discard"
+        aria-label={`Delete the ${what.toLowerCase()} tap that was not delivered.`}
+      >
+        <X size={16} strokeWidth={2} aria-hidden />
+      </IconButton>
     </div>
   );
 }
@@ -73,12 +134,16 @@ export function EnrouteRow({ enroute, status, onEdit, pressed, testId = 'enroute
 /** In the request's status block, under the location (updates.html v7 "1"): the row, tappable when mine. */
 export function StatusEnroute({ row }: { row: RequestSummary }) {
   const control = useEnrouteControl(row);
-  if (!control.available) return null;
+  if (!control.available && !control.failed) return null;
+  const shown = control.available && !!control.enroute;
   return (
     <>
-      {control.enroute ? (
+      {shown || control.failed ? (
         <div className={s.inStatus}>
-          <EnrouteRow enroute={control.enroute} status={row.status} onEdit={control.mine ? control.openEdit : undefined} pressed={control.sheetOpen} />
+          {control.available ? (
+            <EnrouteRow enroute={control.enroute} status={row.status} onEdit={control.mine ? control.openEdit : undefined} pressed={control.sheetOpen} />
+          ) : null}
+          <EnrouteFailed control={control} />
         </div>
       ) : null}
       {control.sheet}
@@ -201,11 +266,16 @@ export interface EnrouteControl {
   /** The sheet element to render once, anywhere in the container. */
   sheet: ReactNode;
   sheetOpen: boolean;
+  /** My tap on this request that was not delivered, with Retry and Delete (EnrouteFailed). */
+  failed: MessageJob | null;
+  retry: () => void;
+  discard: () => void;
 }
 
 export function useEnrouteControl(row: RequestSummary): EnrouteControl {
   const api = useMessaging();
   const enroute = useEnroute(row);
+  const failed = useFailedEnroute(row.id);
   const [mode, setMode] = useState<'new' | 'edit' | null>(null);
   const mine = iAmEnroute(enroute);
   const available = !!api && isInMedical(row.status);
@@ -235,5 +305,12 @@ export function useEnrouteControl(row: RequestSummary): EnrouteControl {
     arrive: () => void api?.setEnroute(row.id, 'arrive', null),
     sheet,
     sheetOpen: mode !== null,
+    failed,
+    retry: () => {
+      if (failed) api?.retry(failed.id);
+    },
+    discard: () => {
+      if (failed) void api?.discard(failed.id);
+    },
   };
 }

@@ -6,8 +6,9 @@ import { newSignedInContext } from './helpers/session';
 
 // Screenshots of the F3 screens for the side-by-side check against the approved renders
 // (design/screens/updates-v7-*.png, enroute-edit-*.png, clarify-*.png, f34-v2-5/6.png). Writes
-// design/screens/f3-*.png at 390 × 844 and 1440 × 900, light and dark. Only with LP_F3_SCREENS=1 (Chromium);
-// never part of the gate. Synthetic rows, closed again afterwards.
+// design/screens/f3-*.png at 390 × 844 and 1440 × 900, light and dark (f3-coming-*: medical's Pending →
+// Friend coming with a read-only en route row, against updates-v7-4.png). Only with LP_F3_SCREENS=1
+// (Chromium); never part of the gate. Synthetic rows, closed again afterwards.
 
 const BASE = testBaseUrl();
 // Real-looking names ("Dana K.", "Rae C."): run on a freshly seeded stack so My requests holds only these rows.
@@ -113,6 +114,24 @@ test('F3 screens', async ({ browser, browserName }) => {
       await expect(page.locator(`[data-request-id="${al.id}"]`).first()).toBeVisible({ timeout: 20_000 });
       await page.waitForTimeout(1_500);
       await page.screenshot({ path: `${OUT}/f3-mine-${w}x${h}-${theme}.png` });
+      await ctx.close();
+    }
+  }
+
+  // Medical: Pending → Friend coming, A.L.'s card with the read-only en route row (Dana is bringing them).
+  for (const theme of ['light', 'dark'] as const) {
+    for (const [w, h] of SIZES) {
+      const ctx = await themed(browser, MED, w, h, theme);
+      const page = await ctx.newPage();
+      await page.goto('/?view=pending');
+      const tab = page.getByRole('tab', { name: /^Friend coming/ });
+      await expect.poll(async () => (await tab.isVisible()) || (await page.getByTestId('pending-column-coming').isVisible()), { timeout: 20_000 }).toBe(true);
+      if (await tab.isVisible()) await tab.click();
+      const card = page.locator(`[data-testid="friend-coming-card"]:has([data-request-id="${al.id}"])`);
+      await expect(card.getByTestId('enroute-row')).toBeVisible({ timeout: 20_000 });
+      await card.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(800);
+      await page.screenshot({ path: `${OUT}/f3-coming-${w}x${h}-${theme}.png` });
       await ctx.close();
     }
   }

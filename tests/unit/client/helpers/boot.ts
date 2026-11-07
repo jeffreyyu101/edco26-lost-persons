@@ -23,11 +23,17 @@ export function installStoreHooks(): void {
   });
 }
 
-export function boot(server: FakeServer, opts: EnvOptions = {}, tweak?: (env: StoreEnv) => void) {
-  const fe = fakeEnv(server, opts);
+export interface BootOptions extends EnvOptions {
+  /** How the messages engine loads (default: at once, without the dynamic import). */
+  loadMessaging?: () => Promise<typeof createMessaging>;
+}
+
+export function boot(server: FakeServer, opts: BootOptions = {}, tweak?: (env: StoreEnv) => void) {
+  const { loadMessaging, ...envOpts } = opts;
+  const fe = fakeEnv(server, envOpts);
   tweak?.(fe.env);
   // The messages engine without the dynamic import, so its load settles with the fake timers.
-  const store = createAppStore({ eventTimezone: TZ, env: () => fe.env, loadMessaging: () => Promise.resolve(createMessaging) });
+  const store = createAppStore({ eventTimezone: TZ, env: () => fe.env, loadMessaging: loadMessaging ?? (() => Promise.resolve(createMessaging)) });
   const stop = store.start?.() ?? (() => {});
   stops.push(stop);
   return { store, fe, stop, s: () => store.getState(), a: store.actions };

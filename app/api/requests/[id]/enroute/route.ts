@@ -5,7 +5,9 @@
 //   {action: 'arrive'}                                              the friend arrived
 // Only while In medical: at any other status it is accepted and changes nothing ({changed: false,
 // ignored: true}), so a queued tap that lands late never fails. Repeats change nothing. A change tells
-// everyone involved (contract D: enroute / enroute_changed / enroute_cancelled / arrived), after the response.
+// everyone involved (contract D: enroute / enroute_changed / enroute_cancelled / arrived), after the response
+// (next/server after(): the tap never waits for push).
+import { after } from 'next/server';
 import type { ActivityResponse } from '@/lib/api-types';
 import { idParam, json, readJson } from '@/lib/server/http';
 import { enrouteEvent, mapActivity, notifyInvolved, recipientsOf } from '@/lib/server/messages';
@@ -33,7 +35,10 @@ export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/enroute
   const out: ActivityResponse = { changed: data.changed === true, activity: mapActivity(data.activity), ...(data.ignored === true ? { ignored: true } : {}) };
   if (out.changed) {
     const event = enrouteEvent(id, session.staff, data.event, out.activity.enroute);
-    if (event) await notifyInvolved(recipientsOf(data.recipients), event);
+    if (event) {
+      const recipients = recipientsOf(data.recipients);
+      after(() => notifyInvolved(recipients, event));
+    }
   }
   return json(out);
 });

@@ -131,7 +131,8 @@ Pending.
   (medical or front of house), Copy and Unsend (15 minutes). My requests and Pending cards show the last
   message and an unread count. A message written offline is saved on the phone and sent once the signal is
   back. Front of house can say **Friend en route** (optional ETA) and **Arrived**; one teal row shows it, with
-  no names. Any status change out of In medical clears it.
+  no names. Any status change out of In medical clears it (an Undo within 30 s puts it back). An En route
+  tap that could not be sent shows "Not delivered · Retry" under the row.
 - **Alerts** appear only while the app is open: changes to your requests by someone else, and new requests
   when alerts are on (the bell, in the avatar menu). With the app in front, an alert is a toast with a
   chime. In the background (another tab, a minimised window) it is a system notification instead, where the

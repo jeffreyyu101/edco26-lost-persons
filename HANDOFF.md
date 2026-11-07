@@ -73,7 +73,8 @@ file production needs. The other files in that folder are the local chain: the b
 - **Messages and en route (section 7, 2026-11-06 evening)** need it again before that build deploys. It is
   additive: three new tables (`lp_messages`, `lp_message_reads`, `lp_enroute`, RLS on, `service_role`
   only), a partial index on `audit_events`, the trigger `lp_enroute_clear` on `patients` (a status change out
-  of In medical deletes that request's en route rows in the same transaction), and new functions
+  of In medical deletes that request's en route rows in the same transaction, keeping them in its audit row so
+  that going back to In medical within 30 s, e.g. an Undo of Reunited, restores them), and new functions
   (`lp_post_message`, `lp_mark_read`, `lp_set_enroute`, `lp_unsend_message`, `lp_involved_staff`,
   `lp_messages_thread`, `lp_messages_sync`, `lp_enroute_stats` and three helpers). No existing column,
   constraint or function changes. The build that is live now keeps working on it: it never calls the new
@@ -140,8 +141,8 @@ schema differs from `supabase/schema.sql`. Stop and send Brian the message. Don'
       Settings → Notifications. In a Safari tab on iPhone nothing is asked and alerts stay toasts.
 - [ ] Messages on two phones (one Medical, one front of house): medical asks from a To check card, the other
       phone shows the badge and the preview within a few seconds, the reply shows "Read" on the asker's phone.
-      En route ~5 min, change it, cancel and Undo, Arrived; Reunited clears the row. A message typed in
-      airplane mode shows "Sending…" and goes out once the signal is back.
+      En route ~5 min, change it, cancel and Undo, Arrived; Reunited clears the row, and its Undo brings the
+      row back. A message typed in airplane mode shows "Sending…" and goes out once the signal is back.
 - [ ] At the end, run `docs/export.sql` in the SQL editor and download the results (Query 1, then Query 2;
       the steps are at the top of the file).
 - [ ] Redeploy on Vercel with an old tab open: "Update ready · Reload" appears. It shows only once the phone

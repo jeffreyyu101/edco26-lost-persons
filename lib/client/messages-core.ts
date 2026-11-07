@@ -602,6 +602,11 @@ export function createMessaging(host: MessagingHost): MessagingEngine {
     },
 
     async setEnroute(requestId, action, etaMinutes, opts) {
+      // A new tap replaces my taps on this request that were not delivered (only the latest one counts).
+      const me = host.staff();
+      for (const j of snapshot.jobs) {
+        if (j.kind === 'enroute' && j.requestId === requestId && j.state === 'failed' && jobIsMine(j, me)) await removeJob(j.id);
+      }
       const job: MessageJob = {
         id: uuid(),
         kind: 'enroute',

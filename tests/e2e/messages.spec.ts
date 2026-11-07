@@ -16,6 +16,7 @@ import { newSignedInContext, signedInAs } from './helpers/session';
 const BASE = testBaseUrl();
 const FOH = { staffName: 'TEST-F3 Dana Front', team: 'GC/HX - Dispatch' };
 const MED = { staffName: 'TEST-F3 Rae Medic', team: 'Medical' };
+const WALKER = { staffName: 'TEST-F3 Sam Walker', team: 'GC/HX - Base' };
 const TAG = `TEST-F3-${Date.now().toString(36)}`;
 let seq = 0;
 
@@ -65,6 +66,15 @@ test.afterEach(async () => {
 
 const checkCard = (page: Page, id: string) => page.locator(`[data-testid="check-card"]:has([data-request-id="${id}"])`);
 const mineCard = (page: Page, id: string) => page.locator(`[data-testid="mine-card"]:has([data-request-id="${id}"])`);
+const comingCard = (page: Page, id: string) => page.locator(`[data-testid="friend-coming-card"]:has([data-request-id="${id}"])`);
+
+/** Pending → Friend coming (the tab on a phone or a narrow desk; the board's column otherwise). */
+async function openComing(page: Page): Promise<void> {
+  await page.goto('/?view=pending');
+  const tab = page.getByRole('tab', { name: /^Friend coming/ });
+  await expect.poll(async () => (await tab.isVisible()) || (await page.getByTestId('pending-column-coming').isVisible()), SYNC).toBe(true);
+  if (await tab.isVisible()) await tab.click();
+}
 const messages = (page: Page) => page.getByTestId('messages');
 const SYNC = { timeout: 20_000 };
 
@@ -139,10 +149,14 @@ test('medical asks from To check; front of house replies; read; en route, change
     await expect(row).toContainText(/~[45] min/);
     await expect(card2.getByTestId('arrived-button')).toBeVisible();
 
-    // Medical sees it read-only (no names), on the request.
-    await expect(med.getByTestId('status-block').getByTestId('enroute-row')).toContainText('Friend en route', SYNC);
-    await expect(med.getByTestId('status-block').getByTestId('enroute-row')).toHaveAttribute('role', 'status');
-    await expect(med.getByTestId('status-block').getByTestId('enroute-row')).not.toContainText('TEST-F3');
+    // Medical sees it read-only (no names), on the request. Not a live region: its minute countdown is never
+    // announced; a screen reader reads one sentence.
+    const medRow = med.getByTestId('status-block').getByTestId('enroute-row');
+    await expect(medRow).toContainText('Friend en route', SYNC);
+    await expect(medRow).not.toHaveAttribute('role');
+    await expect(medRow.locator('[role="status"], [aria-live]')).toHaveCount(0);
+    await expect(medRow).toContainText(/Friend en route, about [45] min away\./);
+    await expect(medRow).not.toContainText('TEST-F3');
 
     // Change: the same sheet with my ETA selected; Update waits for a change.
     await row.click();
@@ -167,8 +181,13 @@ test('medical asks from To check; front of house replies; read; en route, change
     await card2.getByTestId('arrived-button').click();
     await expect(card2.getByTestId('enroute-row')).toContainText('Friend arrived', SYNC);
     await expect.poll(async () => (await call<ThreadPage>(page.request, 'GET', `/api/requests/${r.id}/messages`)).activity.enroute?.state, SYNC).toBe('arrived');
+    // The request's quick lines no longer offer En route (or Arrived) once the friend arrived, as on the card.
+    await page.goto(`/?r=${r.id}`);
+    await expect(page.getByTestId('status-block').getByTestId('enroute-row')).toContainText('Friend arrived', SYNC);
+    await expect(messages(page).getByTestId('quick-lines').getByRole('button')).toHaveText(["Can't find them", 'Friend left the area']);
 
     // Reunited clears it.
+    await openMine(page, r.id);
     await setStatus(med.request, r.id, 'Reunited – Closed', 'reunite');
     await expect(card2.getByTestId('enroute-row')).toHaveCount(0, SYNC);
   } finally {
@@ -193,6 +212,40 @@ test('a message written offline shows "Sending…" and is sent exactly once when
   await expect(messages(page).getByTestId('receipt')).toHaveText('Delivered', SYNC);
   const thread = await call<ThreadPage>(page.request, 'GET', `/api/requests/${r.id}/messages`);
   expect(thread.messages.filter((m) => m.body === 'On our way now')).toHaveLength(1);
+});
+
+test('an En route tap that keeps failing shows "Not delivered · Retry" and keeps the row; Retry sends it', async ({ page, browser }) => {
+  test.setTimeout(120_000);
+  const r = await createRequest(page.request);
+  const medCtx = await newSignedInContext(browser, MED);
+  try {
+    await setStatus(medCtx.request, r.id, 'Found – Awaiting Reunion', 'answer');
+  } finally {
+    await medCtx.close();
+  }
+  await page.route('**/api/requests/*/enroute', (route) =>
+    route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'unavailable', message: 'Down' } }) }),
+  );
+  const card = await openMine(page, r.id);
+  await card.getByTestId('enroute-button').click();
+  await page.getByTestId('enroute-sheet').getByRole('radio', { name: /^~5 min/ }).click();
+  await page.getByTestId('enroute-send').click();
+  await expect(card.getByTestId('enroute-row')).toContainText('Friend en route');
+  // Three tries online (3 s, then 10 s apart): not delivered. What I asked for stays on the card.
+  const failed = card.getByTestId('enroute-failed');
+  await expect(failed).toContainText('Not delivered', { timeout: 40_000 });
+  await expect(card.getByTestId('enroute-row')).toContainText('Friend en route');
+  await expect(card.getByTestId('enroute-button')).toHaveCount(0);
+  await expect(failed.getByTestId('enroute-retry')).toHaveAccessibleName('En route was not delivered. Retry.');
+  const box = await failed.getByTestId('enroute-discard').boundingBox();
+  expect(Math.round(box?.height ?? 0)).toBeGreaterThanOrEqual(32);
+  await expectNoOverflow(page, `[data-testid="mine-card"]:has([data-request-id="${r.id}"])`);
+  // Signal back: Retry sends it, the line goes, the server has it.
+  await page.unroute('**/api/requests/*/enroute');
+  await failed.getByTestId('enroute-retry').click();
+  await expect(failed).toHaveCount(0, SYNC);
+  await expect.poll(async () => (await call<RequestDetail>(page.request, 'GET', `/api/requests/${r.id}`)).enroute?.state, SYNC).toBe('enroute');
+  await expect(card.getByTestId('enroute-row')).toContainText(/~[45] min/);
 });
 
 test.describe('no overflow', () => {
@@ -222,6 +275,20 @@ test.describe('no overflow', () => {
         await call(page.request, 'POST', `/api/requests/${r.id}/messages`, { clientMutationId: randomUUID(), body: 'Got it, just me and the friend' });
         await setStatus(page.request, r.id, 'Found – Awaiting Reunion', 'answer');
         await call(page.request, 'POST', `/api/requests/${r.id}/enroute`, { action: 'set', etaMinutes: 5 });
+        // Two more In medical requests of mine: someone else en route on one (read-only "late" row), and
+        // the friend arrived on the other (green row).
+        const others = await createRequest(page.request);
+        const arrived = await createRequest(page.request);
+        const walkerCtx = await newSignedInContext(browser, WALKER);
+        try {
+          for (const x of [others, arrived]) await setStatus(page.request, x.id, 'Found – Awaiting Reunion', 'answer');
+          const late = new Date(Date.now() - 5 * 60_000).toISOString();
+          await call(walkerCtx.request, 'POST', `/api/requests/${others.id}/enroute`, { action: 'set', etaAt: late, etaMinutes: 5 });
+          await call(walkerCtx.request, 'POST', `/api/requests/${arrived.id}/enroute`, { action: 'set', etaMinutes: 10 });
+          await call(walkerCtx.request, 'POST', `/api/requests/${arrived.id}/enroute`, { action: 'arrive' });
+        } finally {
+          await walkerCtx.close();
+        }
 
         await p.goto(`/?r=${r.id}`);
         await expect(messages(p).getByTestId('bubble-mine')).toBeVisible(SYNC);
@@ -229,11 +296,32 @@ test.describe('no overflow', () => {
         await expectNoOverflow(p, '[data-testid="messages"]');
         await expectNoOverflow(p, '[data-testid="status-block"]');
 
+        // The en route sheet at every width: edit (mine, from the status block's row), then new (another
+        // In medical request, from the composer's En route pill).
+        await p.getByTestId('status-block').getByTestId('enroute-row').click();
+        await expect(p.getByTestId('enroute-sheet')).toHaveAttribute('data-mode', 'edit');
+        await expectNoOverflow(p, '[data-testid="enroute-sheet"]');
+        await p.keyboard.press('Escape');
+        await expect(p.getByTestId('enroute-sheet')).toHaveCount(0);
+        await p.goto(`/?r=${others.id}`);
+        await messages(p).getByRole('button', { name: /^En route/ }).click();
+        await expect(p.getByTestId('enroute-sheet')).toHaveAttribute('data-mode', 'new');
+        await expectNoOverflow(p, '[data-testid="enroute-sheet"]');
+        await p.keyboard.press('Escape');
+
         await p.goto('/?view=mine');
         const card = mineCard(p, r.id);
         if (await card.count()) {
           await expect(card.getByTestId('enroute-row')).toBeVisible(SYNC);
           await expectNoOverflow(p, `[data-testid="mine-card"]:has([data-request-id="${r.id}"])`);
+          // Someone else en route (read-only), and Friend arrived, on my own cards.
+          for (const id of [others.id, arrived.id]) {
+            const c = mineCard(p, id);
+            await expect(c.getByTestId('enroute-row')).toBeVisible(SYNC);
+            await c.scrollIntoViewIfNeeded();
+            await expectNoOverflow(p, `[data-testid="mine-card"]:has([data-request-id="${id}"])`);
+          }
+          await expect(mineCard(p, arrived.id).getByTestId('enroute-row')).toContainText('Friend arrived');
           await card.getByTestId('enroute-row').click();
           await expect(p.getByTestId('enroute-sheet')).toBeVisible();
           await expectNoOverflow(p, '[data-testid="enroute-sheet"]');
@@ -253,6 +341,14 @@ test.describe('no overflow', () => {
           await expect(check.getByTestId('message-preview')).toContainText('Butterfly tattoo', SYNC);
           await check.scrollIntoViewIfNeeded();
           await expectNoOverflow(mp, `[data-testid="check-card"][data-pending-card="${waiting.id}"]`);
+          // Pending → Friend coming: read-only en route rows (teal, amber "late") and Friend arrived (green).
+          await openComing(mp);
+          for (const [id, text] of [[r.id, /Friend en route/], [others.id, /late/], [arrived.id, /Friend arrived/]] as const) {
+            const coming = comingCard(mp, id);
+            await expect(coming.getByTestId('enroute-row')).toContainText(text, SYNC);
+            await coming.scrollIntoViewIfNeeded();
+            await expectNoOverflow(mp, `[data-testid="friend-coming-card"][data-pending-card="${id}"]`);
+          }
         } finally {
           await mctx.close();
         }

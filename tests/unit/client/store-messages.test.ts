@@ -7,8 +7,10 @@ import type { RequestSummary, ThreadMessage } from '@/lib/api-types';
 import { openKv } from '@/lib/client/persist';
 import type { MessagingApi } from '@/lib/client/messages-core';
 import { STATUS } from '@/lib/domain';
+import { createMessaging } from '@/lib/client/messages-core';
+import { effectiveEnroute, failedEnrouteTap } from '@/lib/client/messages-logic';
 import { advance, settle } from './helpers/env';
-import { boot, finish, installStoreHooks, ready } from './helpers/boot';
+import { boot, finish, installStoreHooks, ready, values } from './helpers/boot';
 import { FakeServer, STAFF, apiError, json, makeRow, type FakeRequest } from './helpers/fake-server';
 
 installStoreHooks();
@@ -285,6 +287,50 @@ describe('read, en route and the alert', () => {
     expect(threads.enroute.get(ROW)).toMatchObject({ state: 'enroute', etaAt: '2026-11-07T03:06:00.000000+00:00', etaMinutes: 5 });
   });
 
+  it('an en route tap that keeps failing stays on screen as "Not delivered" until Retry, a new tap or Delete', async () => {
+    const row = makeRow(1, { status: STATUS.inMedical });
+    const { api, threads, fe, s } = setup([row]);
+    await ready();
+    const base = threads.handle;
+    let failing = true;
+    fe.server.override = (req) => (failing && req.method === 'POST' && req.path.endsWith('/enroute') ? apiError(503, 'unavailable', 'Down') : base(req));
+    const shown = () => effectiveEnroute(s().confirmed.get(ROW)?.enroute ?? null, api.getSnapshot().jobs, 0);
+    await finish(api.setEnroute(ROW, 'set', 5));
+    await advance(100);
+    expect(shown()).toMatchObject({ count: 1, state: 'enroute', mine: { etaMinutes: 5 } });
+    await advance(100_000);
+    const posts = () => fe.server.requests('POST', '/api/requests/').filter((r) => r.path.endsWith('/enroute')).length;
+    expect(posts()).toBe(3);
+    const failed = failedEnrouteTap(api.getSnapshot().jobs);
+    expect(failed).toMatchObject({ state: 'failed', error: { message: 'Not delivered' } });
+    // What I asked for stays (never a silent drop back to the En route button), and sign-out knows about it.
+    expect(shown()).toMatchObject({ count: 1, state: 'enroute', mine: { etaMinutes: 5 } });
+    expect(api.unsentCount()).toBe(1);
+    // Retry sends it.
+    failing = false;
+    api.retry(failed?.id ?? '');
+    await advance(100);
+    expect(threads.enroute.get(ROW)).toMatchObject({ state: 'enroute', etaMinutes: 5 });
+    expect(api.getSnapshot().jobs).toHaveLength(0);
+
+    // A new tap replaces one that was not delivered; Delete forgets one.
+    failing = true;
+    await finish(api.setEnroute(ROW, 'arrive', null));
+    await advance(100_000);
+    expect(failedEnrouteTap(api.getSnapshot().jobs)?.enroute?.action).toBe('arrive');
+    expect(shown()).toMatchObject({ state: 'arrived' });
+    await finish(api.setEnroute(ROW, 'set', 10));
+    await advance(10);
+    expect(api.getSnapshot().jobs.filter((j) => j.enroute?.action === 'arrive')).toHaveLength(0);
+    await advance(100_000);
+    const again = failedEnrouteTap(api.getSnapshot().jobs);
+    expect(again?.enroute).toMatchObject({ action: 'set', etaMinutes: 10 });
+    await finish(api.discard(again?.id ?? ''));
+    expect(api.getSnapshot().jobs).toHaveLength(0);
+    expect(await mjobKeys(fe.dbName)).toHaveLength(0);
+    expect(shown()).toMatchObject({ state: 'enroute', mine: { etaMinutes: 5 } });
+  });
+
   it('a synced new message from someone else on my request toasts once (never on the first sync)', async () => {
     const row = makeRow(1, { createdBy: STAFF.dana.staff, messageCount: 0, unread: 0, lastMessage: null, lastMessageAt: null, needsInfo: false, enroute: null, involved: true });
     const { fe, s } = setup([row]);
@@ -313,5 +359,69 @@ describe('sign-out', () => {
     await settle();
     expect(await mjobKeys(fe.dbName)).toHaveLength(0);
     expect(api.getSnapshot().threads.size).toBe(0);
+  });
+});
+
+describe('the engine is never on the boot or sign-out path', () => {
+  const NEVER = () => new Promise<typeof createMessaging>(() => undefined);
+  const syncs = (server: FakeServer) => server.requests('GET', '/api/sync').length;
+
+  it('the first sync and the queued requests go while the engine is still downloading (it never arrives)', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    const first = boot(server);
+    await ready();
+    first.fe.setOnline(false);
+    await finish(first.a.create({ values: values(), clientMutationId: '00000000-0000-4000-8000-0000000000c1', photos: [], photoTiming: 'today' }));
+    first.stop();
+    await settle();
+    server.log.length = 0;
+    const second = boot(server, { dbName: first.fe.dbName, loadMessaging: NEVER });
+    await ready();
+    await advance(1_000);
+    expect(syncs(server)).toBeGreaterThanOrEqual(1);
+    expect(second.s().confirmed.size).toBeGreaterThanOrEqual(1);
+    expect(server.requests('POST', '/api/requests').filter((r) => r.path === '/api/requests')).toHaveLength(1);
+    expect(second.s().outbox).toHaveLength(0);
+  });
+
+  it('sign-out counts saved messages from the phone without the engine, and never hangs', async () => {
+    const { api, fe, stop } = setup();
+    await ready();
+    fe.setOnline(false);
+    await finish(api.send(ROW, 'Not sent yet'));
+    stop();
+    await settle();
+    const again = boot(fe.server, { dbName: fe.dbName, loadMessaging: NEVER });
+    await ready();
+    expect(await finish(again.a.signOut())).toEqual({ ok: false, reason: 'outbox', count: 0, messages: 1 });
+    const none = boot(new FakeServer([makeRow(1)]), { loadMessaging: NEVER });
+    await ready();
+    expect(await finish(none.a.signOut(), 1_000)).toEqual({ ok: true });
+  });
+
+  it('a message saved before a failed boot load is read and sent once the engine loads later', async () => {
+    const { api, threads, fe, stop } = setup();
+    await ready();
+    fe.setOnline(false);
+    await finish(api.send(ROW, 'Queued, then the app reopened offline'));
+    stop();
+    await settle();
+    let loads = 0;
+    const flaky = () => {
+      loads += 1;
+      return loads <= 2 ? Promise.reject(new Error('chunk failed')) : Promise.resolve(createMessaging);
+    };
+    const again = boot(fe.server, { dbName: fe.dbName, loadMessaging: flaky });
+    again.fe.setOnline(false);
+    await ready();
+    expect(threads.posts).toBe(0);
+    again.fe.setOnline(true);
+    again.fe.fire('window', 'online');
+    await advance(10_000);
+    expect(loads).toBe(3);
+    expect(threads.posts).toBe(1);
+    expect(threads.messages.map((m) => m.body)).toEqual(['Queued, then the app reopened offline']);
+    expect((again.a.messages as MessagingApi).getSnapshot().jobs).toHaveLength(0);
+    expect(await mjobKeys(fe.dbName)).toHaveLength(0);
   });
 });

@@ -120,22 +120,20 @@ export const MEDICAL_LINES: Readonly<Record<QuickStage, readonly QuickLine[]>> =
 export const FOH_WAITING_LINES: readonly QuickLine[] = [msg('Friend is still here'), msg('Friend left the area')];
 
 /**
- * The quick lines for a request, a side, and whether I am en route on it now. Every quick line is just a
- * message except En route (opens the en route sheet) and Arrived.
+ * The quick lines for a request, a side, whether I am en route on it now, and whether the friend has
+ * arrived. Every quick line is just a message except En route (opens the en route sheet) and Arrived.
  *   Waiting (incl. Not found yet): medical asks; front of house says whether the friend is still here.
  *   In medical: medical's handover lines; front of house "En route" (before) or "Arrived" (while en route),
- *   "Can't find them", "Friend left the area".
+ *   neither once the friend arrived (as on the cards), then "Can't find them", "Friend left the area".
  *   Closed: none (free text only).
  */
-export function quickLines(stage: QuickStage, side: Side, enrouteMine: boolean): readonly QuickLine[] {
+export function quickLines(stage: QuickStage, side: Side, enrouteMine: boolean, arrived = false): readonly QuickLine[] {
   if (side === 'medical') return MEDICAL_LINES[stage];
   if (stage === 'waiting') return FOH_WAITING_LINES;
   if (stage === 'in_medical') {
-    return [
-      enrouteMine ? { text: 'Arrived', kind: 'arrived' } : { text: 'En route', kind: 'enroute' },
-      msg("Can't find them"),
-      msg('Friend left the area'),
-    ];
+    const rest = [msg("Can't find them"), msg('Friend left the area')];
+    if (arrived) return rest;
+    return [enrouteMine ? { text: 'Arrived', kind: 'arrived' } : { text: 'En route', kind: 'enroute' }, ...rest];
   }
   return [];
 }
@@ -237,10 +235,28 @@ export const DETAIL = {
   arrived: 'Friend arrived',
 } as const;
 
-/** "Rae C.: Bring 1 person only" (sender's short name, the text cut to 120 characters). */
+/** What stands in for a phone number or an email address in a notification. */
+export const CONTACT_MASK = '•••';
+
+/**
+ * A message text with contact details masked, for notifications (contract E: never a phone number or
+ * contact detail on a lock screen or in Activity): email addresses, and any run of 7 or more digits that
+ * may be broken up by spaces, dashes, dots, slashes or parentheses ("407-555-0199", "(407) 555 0199",
+ * "+1 407 555 0199"). Shorter numbers ("Bed 3", "4:40 PM", "FA 4", "24") stay.
+ */
+export function maskContacts(text: string): string {
+  return text
+    .replace(/[^\s@<>()[\]",;:]+@[^\s@<>()[\]",;:]+\.[^\s@<>()[\]",;:]{2,}/g, CONTACT_MASK)
+    .replace(/\+?\(?\d[\d\s().\/-]*\d/g, (run) => ((run.match(/\d/g)?.length ?? 0) >= 7 ? CONTACT_MASK : run));
+}
+
+/**
+ * "Rae C.: Bring 1 person only" (sender's short name, contact details masked, the text cut to 120
+ * characters).
+ */
 export function messageDetail(senderStaff: string, body: string): string {
   const who = senderShort(senderStaff);
-  const text = truncateText(body, MESSAGE_PREVIEW_MAX);
+  const text = truncateText(maskContacts(body), MESSAGE_PREVIEW_MAX);
   return who ? `${who}: ${text}` : text;
 }
 

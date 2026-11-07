@@ -2,7 +2,8 @@
 // receipt under the caller's latest one; ?beforeAt&beforeId pages back ("Earlier messages").
 // POST /api/requests/:id/messages (lp_post_message): one message, idempotent on clientMutationId (201 when
 // created, 200 for a retry). 20 a minute per staff (429 + Retry-After). A new message tells everyone
-// involved (contract D), after the response.
+// involved (contract D), after the response (next/server after(): the bubble never waits for push).
+import { after } from 'next/server';
 import type { PostMessageResponse, ThreadPage } from '@/lib/api-types';
 import { idParam, json, parseQuery, readJson } from '@/lib/server/http';
 import { mapActivity, mapMessage, mapThread, messageEvent, notifyInvolved, recipientsOf } from '@/lib/server/messages';
@@ -44,6 +45,10 @@ export const POST = authedRoute<P>('POST /api/requests/[id]/messages', {}, async
     'message',
   );
   const out: PostMessageResponse = { created: data.created === true, message: mapMessage(data.message), activity: mapActivity(data.activity) };
-  if (out.created) await notifyInvolved(recipientsOf(data.recipients), messageEvent(id, session.staff, out.message.body));
+  if (out.created) {
+    const recipients = recipientsOf(data.recipients);
+    const event = messageEvent(id, session.staff, out.message.body);
+    after(() => notifyInvolved(recipients, event));
+  }
   return json(out, out.created ? 201 : 200);
 });

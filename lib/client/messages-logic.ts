@@ -220,11 +220,13 @@ export function receiptFor(messages: readonly ThreadMessage[], receipt: ThreadRe
 
 /**
  * The en route summary to show: the server's, with my latest queued tap applied on top. Others' rows are
- * the server's; my own is replaced (set), removed (cancel) or marked arrived (arrive).
+ * the server's; my own is replaced (set), removed (cancel) or marked arrived (arrive). A tap that was not
+ * delivered still counts (what I asked for stays on screen, with "Not delivered · Retry" under it) until it is
+ * retried, deleted or replaced by a new tap.
  */
 export function effectiveEnroute(server: EnrouteSummary | null | undefined, myJobs: readonly MessageJob[], now: number): EnrouteSummary | null {
   const base = server ?? null;
-  const taps = jobOrder(myJobs).filter((j) => j.kind === 'enroute' && j.enroute && j.state !== 'failed');
+  const taps = jobOrder(myJobs).filter((j) => j.kind === 'enroute' && j.enroute);
   const last = taps[taps.length - 1];
   if (!last?.enroute) return base;
   const hadMine = !!base?.mine && (base.mine.state ?? 'enroute') === 'enroute';
@@ -260,6 +262,12 @@ export function effectiveEnroute(server: EnrouteSummary | null | undefined, myJo
         mine: { etaAt: base?.mine?.etaAt ?? null, etaMinutes: base?.mine?.etaMinutes ?? null, state: 'arrived' },
       };
   }
+}
+
+/** My latest en route tap on a request that was not delivered (it shows "Not delivered · Retry"), or null. */
+export function failedEnrouteTap(myJobs: readonly MessageJob[]): MessageJob | null {
+  const failed = jobOrder(myJobs).filter((j) => j.kind === 'enroute' && j.enroute && j.state === 'failed');
+  return failed[failed.length - 1] ?? null;
 }
 
 // ---------------------------------------------------------------------------------------------------

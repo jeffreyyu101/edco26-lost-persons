@@ -146,13 +146,44 @@ describe('the lazily loaded messages engine', () => {
     expect(f.calls).toEqual(['send r1 Hi again']);
   });
 
-  it('sign-out without the engine still discards the queued jobs it was asked to', async () => {
+  it('sign-out without the engine still discards the queued jobs it was asked to, without waiting for it', async () => {
     const g = gatedLoader(() => fakeEngine().engine);
     const { h, keys } = host(['mjob:a', 'cache:x', 'mjob:b']);
     const m = createLazyMessaging(h, g.load);
-    const done = m.clear(true);
-    g.fail();
-    await done;
+    void m.ready().catch(() => undefined); // still downloading, never arrives
+    await m.clear(true);
     expect(keys).toEqual(['cache:x']);
+  });
+
+  it('counts unsent jobs for sign-out from IndexedDB while the engine is not there, then from the engine', async () => {
+    const f = fakeEngine();
+    const g = gatedLoader(() => f.engine);
+    const { h } = host(['mjob:a', 'cache:x']);
+    const m = createLazyMessaging(h, g.load);
+    m.start();
+    expect(await m.unsentNow()).toBe(1);
+    g.release();
+    await tick();
+    expect(await m.unsentNow()).toBe(2);
+  });
+
+  it('a hydrate asked while the load failed runs (then kicks) as soon as a later call loads the engine', async () => {
+    const f = fakeEngine();
+    const g = gatedLoader(() => f.engine);
+    const m = createLazyMessaging(host().h, g.load);
+    m.start();
+    g.fail();
+    const first = m.hydrate();
+    g.fail();
+    await first;
+    expect(f.calls).toEqual([]);
+    m.kick();
+    g.release();
+    await tick();
+    await tick();
+    expect(f.calls).toEqual(['start', 'hydrate', 'kick', 'kick']);
+    // Asked again, it reads again.
+    await m.hydrate();
+    expect(f.calls.filter((c) => c === 'hydrate')).toHaveLength(2);
   });
 });

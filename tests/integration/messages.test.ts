@@ -285,10 +285,14 @@ describe('en route', () => {
     expect((await enroute(r.id, { action: 'cancel' }, p.fohCookie)).changed).toBe(false);
     const undone = await enroute(r.id, { action: 'set', etaAt: before, etaMinutes: 10 }, p.fohCookie);
     expect(undone.activity.enroute?.mine?.etaAt).toBe(before);
-    // Arrived wins over everyone en route.
+    // Arrived wins over everyone en route: the other walker's row is arrived too (nobody is stranded).
     const arrived = await enroute(r.id, { action: 'arrive' }, p.fohCookie);
     expect(arrived.activity.enroute).toMatchObject({ state: 'arrived' });
     expect((await enroute(r.id, { action: 'arrive' }, p.fohCookie)).changed).toBe(false);
+    expect((await rowFor(r.id, other)).enroute).toMatchObject({ state: 'arrived', mine: { state: 'arrived' } });
+    expect((await enroute(r.id, { action: 'arrive' }, other)).changed).toBe(false);
+    expect(psql(`select string_agg(state, ',') from lp_enroute where request_id = '${r.id}'`)).toBe('arrived,arrived');
+    expect(psql(`select new_value ->> 'also_arrived' from audit_events where patient_id = '${r.id}' and action_type = 'enroute' order by occurred_at desc limit 1`)).toBe('1');
     // Audit rows (one per change) with the staff key, for the export and Time to arrive.
     expect(psql(`select string_agg(new_value ->> 'state', ',' order by occurred_at) from audit_events where patient_id = '${r.id}' and action_type = 'enroute'`))
       .toBe('enroute,enroute,changed,cancelled,enroute,arrived');
@@ -323,9 +327,39 @@ describe('en route', () => {
     await post(r.id, 'Bring 1 person only', p.medCookie);
     await enroute(r.id, { action: 'set', etaMinutes: 5 }, p.fohCookie);
     const reunited = await setStatus(inMed, STATUS.reunited, 'reunite', p.medCookie);
+    // Reopened later than the Undo window (the clearing is backdated by a minute).
+    psql(`update audit_events set occurred_at = occurred_at - interval '1 minute' where patient_id = '${r.id}' and action_type = 'enroute'`);
     await setStatus(reunited, STATUS.inMedical, 'reopen', p.medCookie);
     const row = await rowFor(r.id, p.fohCookie);
     expect(row).toMatchObject({ messageCount: 1, enroute: null });
+  });
+
+  it.each([
+    ['Reunited', STATUS.reunited, 'reunite'],
+    ['Not in medical', STATUS.notInMedical, 'change'],
+    ['Discharged', STATUS.discharged, 'discharge'],
+  ])('Undo of %s puts every en route back as it was', async (_label, status, kind) => {
+    const p = await people();
+    const walker = await cookieFor(newStaff('GC/HX - Base'));
+    const r = await createRequest(p.foh);
+    const inMed = await setStatus(r, STATUS.inMedical, 'answer', p.medCookie);
+    await enroute(r.id, { action: 'set', etaMinutes: 10 }, p.fohCookie);
+    await enroute(r.id, { action: 'set', etaMinutes: 5 }, walker);
+    const before = (await rowFor(r.id, p.fohCookie)).enroute;
+    const snapshot = () => psql(`select string_agg(staff || '/' || state || '/' || coalesce(eta_minutes::text, '-') || '/' || coalesce(eta_at::text, '-'), ',' order by staff) from lp_enroute where request_id = '${r.id}'`);
+    const rows = snapshot();
+    const closed = await setStatus(inMed, status, kind, p.medCookie);
+    expect(psql(`select count(*) from lp_enroute where request_id = '${r.id}'`)).toBe('0');
+    await setStatus(closed, STATUS.inMedical, 'undo', p.medCookie);
+    expect(snapshot()).toBe(rows);
+    expect((await rowFor(r.id, p.fohCookie)).enroute).toEqual(before);
+    expect(psql(`select new_value ->> 'state' from audit_events where patient_id = '${r.id}' and action_type = 'enroute' order by occurred_at desc limit 1`)).toBe('restored');
+    // Once only: a second round trip with nobody en route in between brings nothing back from the first.
+    await enroute(r.id, { action: 'cancel' }, p.fohCookie);
+    await enroute(r.id, { action: 'cancel' }, walker);
+    const again = await setStatus(await rowFor(r.id, p.medCookie), status, kind, p.medCookie);
+    await setStatus(again, STATUS.inMedical, 'undo', p.medCookie);
+    expect(psql(`select count(*) from lp_enroute where request_id = '${r.id}'`)).toBe('0');
   });
 });
 
@@ -377,6 +411,23 @@ describe('dashboard stats', () => {
     expect(after.friendsEnRoute).toBe(before.friendsEnRoute);
     expect(typeof after.avgArriveMinutes).toBe('number');
     expect(after).toHaveProperty('open');
+  });
+
+  it('friendsEnRoute leaves out a request whose friend arrived, even with a stale en route row on it', async () => {
+    const p = await people();
+    const walker = newStaff('GC/HX - Base');
+    const r = await createRequest(p.foh);
+    await setStatus(r, STATUS.inMedical, 'answer', p.medCookie);
+    const base = Number(psql(`select lp_enroute_stats() ->> 'friendsEnRoute'`));
+    await enroute(r.id, { action: 'set', etaMinutes: 5 }, p.fohCookie);
+    await enroute(r.id, { action: 'set', etaMinutes: 10 }, await cookieFor(walker));
+    expect(Number(psql(`select lp_enroute_stats() ->> 'friendsEnRoute'`))).toBe(base + 1);
+    await enroute(r.id, { action: 'arrive' }, p.fohCookie);
+    expect(Number(psql(`select lp_enroute_stats() ->> 'friendsEnRoute'`))).toBe(base);
+    // A late tap (queued offline) puts someone back to 'enroute' after the friend arrived: still not counted.
+    await enroute(r.id, { action: 'set', etaMinutes: 5 }, await cookieFor(walker));
+    expect(psql(`select string_agg(state, ',' order by state) from lp_enroute where request_id = '${r.id}'`)).toBe('arrived,enroute');
+    expect(Number(psql(`select lp_enroute_stats() ->> 'friendsEnRoute'`))).toBe(base);
   });
 });
 

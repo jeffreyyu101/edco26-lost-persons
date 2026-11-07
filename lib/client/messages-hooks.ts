@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { EnrouteSummary, RequestSummary } from '../api-types';
 import type { MessagingApi, MessagingSnapshot, ThreadState } from './messages-core';
-import { effectiveEnroute, type MessageJob } from './messages-logic';
+import { effectiveEnroute, failedEnrouteTap, type MessageJob } from './messages-logic';
 import { useAppStore } from './store-contract';
 
 const EMPTY: MessagingSnapshot = { threads: new Map(), jobs: [] };
@@ -68,6 +68,12 @@ export function useEnroute(row: Pick<RequestSummary, 'id' | 'enroute'>): Enroute
   const jobs = useRequestJobs(row.id);
   const enrouteJobs = useMemo(() => jobs.filter((j) => j.kind === 'enroute'), [jobs]);
   return useMemo(() => effectiveEnroute(row.enroute ?? null, enrouteJobs, 0), [row.enroute, enrouteJobs]);
+}
+
+/** My en route tap on this request that was not delivered ("Not delivered · Retry"), or null. */
+export function useFailedEnroute(requestId: string): MessageJob | null {
+  const jobs = useRequestJobs(requestId);
+  return useMemo(() => failedEnrouteTap(jobs), [jobs]);
 }
 
 // ---------------------------------------------------------------------------------------------------

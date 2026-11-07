@@ -157,7 +157,8 @@ test.describe('desktop 1440 × 900', () => {
     await expect(page.getByTestId('desk-rail')).toBeHidden();
     // The sidebar column is 232 px: the main column starts there.
     expect((await main(page).boundingBox())?.x).toBeCloseTo(232, 0);
-    for (const name of [/^All requests \d+$/, /^Pending \d+$/, /^My requests \d+$/, /^Dashboard$/]) {
+    // F3: Pending carries an "Unread messages" dot while a Pending request has unread messages.
+    for (const name of [/^All requests \d+$/, /^Pending \d+( Unread messages)?$/, /^My requests \d+$/, /^Dashboard$/]) {
       await expect(sidebar.getByRole('link', { name })).toBeVisible();
     }
     await expect(sidebar.getByRole('switch', { name: 'Alerts' })).toBeVisible();

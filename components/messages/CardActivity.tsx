@@ -17,7 +17,7 @@ import { navigate } from '@/lib/client/nav';
 import { usePending, useSession } from '@/lib/client/store-contract';
 import { initials, isInMedical } from '@/lib/domain';
 import { previewText, sideOfTeam, unreadOf } from '@/lib/messaging';
-import { EnrouteRow, useEnrouteControl } from './Enroute';
+import { EnrouteFailed, EnrouteRow, useEnrouteControl } from './Enroute';
 import s from './messages.module.css';
 
 /** Opens the request with its Messages in view and the field focused. */
@@ -143,6 +143,7 @@ export function MineActivity({ row }: { row: RequestSummary }) {
       {inMedical ? (
         <EnrouteRow enroute={enroute.enroute} status={row.status} onEdit={enroute.mine ? enroute.openEdit : undefined} pressed={enroute.sheetOpen} />
       ) : null}
+      <EnrouteFailed control={enroute} />
       <PreviewRow row={row} />
       <div className={s.cardBtns} data-count={action ? 2 : 1}>
         {action}
@@ -167,9 +168,12 @@ export function ComingEnroute({ row }: { row: RequestSummary }) {
   if (!api) return null;
   return (
     <>
-      {enroute.enroute && isInMedical(row.status) ? (
+      {(enroute.enroute && isInMedical(row.status)) || enroute.failed ? (
         <Slot>
-          <EnrouteRow enroute={enroute.enroute} status={row.status} onEdit={enroute.mine ? enroute.openEdit : undefined} pressed={enroute.sheetOpen} />
+          {enroute.enroute && isInMedical(row.status) ? (
+            <EnrouteRow enroute={enroute.enroute} status={row.status} onEdit={enroute.mine ? enroute.openEdit : undefined} pressed={enroute.sheetOpen} />
+          ) : null}
+          <EnrouteFailed control={enroute} />
         </Slot>
       ) : null}
       {enroute.sheet}

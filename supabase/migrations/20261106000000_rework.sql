@@ -1617,8 +1617,14 @@ grant select, insert, update, delete on table public.lp_message_reads to service
 grant select, insert, update, delete on table public.lp_enroute to service_role;
 
 -- A status change out of In medical clears every en route on the request, in the same transaction, with one
--- audit row ('enroute' / cleared) attributed to whoever changed the status (updated_by). No notification of
--- its own: the status change's notification reaches en-route staff through lp_involved_staff.
+-- audit row ('enroute' / cleared) attributed to whoever changed the status (updated_by); the rows it cleared
+-- are kept in that audit row (previous_value.rows). No notification of its own: the status change's
+-- notification reaches en-route staff through lp_involved_staff.
+-- Back to In medical within 30 seconds of the change that cleared them (an Undo of Reunited / Not in
+-- medical / Discharged, or a mis-tap put right at once), from the status they were cleared to, with no en
+-- route event since: the cleared rows come back as they were (audit 'enroute' / restored). Later than that
+-- (a reopen), the request starts with nobody en route. The trigger cannot see the change's kind (lp_set_status
+-- writes it after the update), hence the window: the Undo bar shows for 10 s, plus time on the network.
 -- create or replace (never drop): the trigger depends on it.
 create or replace function public.lp_enroute_on_status()
 returns trigger
@@ -1628,17 +1634,55 @@ set search_path = public, pg_temp
 as $fn$
 declare
   v_n integer;
+  v_rows jsonb;
 begin
   if new.status in ('Found – Awaiting Reunion', 'Bring friend to medical') then
+    select a.previous_value -> 'rows' into v_rows
+      from public.audit_events a
+     where a.patient_id = new.id
+       and a.action_type = 'enroute'
+       and a.new_value ->> 'state' = 'cleared'
+       and a.new_value ->> 'status' = old.status
+       and a.occurred_at > pg_catalog.clock_timestamp() - interval '30 seconds'
+       and not exists (
+         select 1 from public.audit_events b
+          where b.patient_id = new.id and b.action_type = 'enroute' and b.occurred_at > a.occurred_at
+       )
+     order by a.occurred_at desc
+     limit 1;
+    if v_rows is not null and pg_catalog.jsonb_typeof(v_rows) = 'array'
+       and not exists (select 1 from public.lp_enroute e where e.request_id = new.id) then
+      with back as (
+        insert into public.lp_enroute as e (request_id, staff, staff_name, eta_at, eta_minutes, state, updated_at)
+        select new.id, r.staff, coalesce(r.staff_name, r.staff), r.eta_at, r.eta_minutes, r.state, coalesce(r.updated_at, pg_catalog.clock_timestamp())
+          from pg_catalog.jsonb_to_recordset(v_rows)
+               as r(staff text, staff_name text, eta_at timestamptz, eta_minutes smallint, state text, updated_at timestamptz)
+         where r.staff is not null and r.state in ('enroute', 'arrived')
+           and (r.eta_minutes is null or r.eta_minutes between 0 and 60)
+        on conflict (request_id, staff) do nothing
+        returning 1
+      )
+      select pg_catalog.count(*)::integer into v_n from back;
+      if v_n > 0 then
+        insert into public.audit_events (patient_id, staff_name, action_type, previous_value, new_value, occurred_at)
+        values (new.id, new.updated_by, 'enroute', null,
+                pg_catalog.jsonb_build_object('state', 'restored', 'status', new.status, 'count', v_n), pg_catalog.clock_timestamp());
+      end if;
+    end if;
     return null;
   end if;
   with gone as (
-    delete from public.lp_enroute e where e.request_id = new.id returning e.staff
+    delete from public.lp_enroute e where e.request_id = new.id returning e.*
   )
-  select pg_catalog.count(*)::integer into v_n from gone;
+  select pg_catalog.count(*)::integer,
+         coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+           'staff', g.staff, 'staff_name', g.staff_name, 'eta_at', g.eta_at, 'eta_minutes', g.eta_minutes,
+           'state', g.state, 'updated_at', g.updated_at)), '[]'::jsonb)
+    into v_n, v_rows
+  from gone g;
   if v_n > 0 then
     insert into public.audit_events (patient_id, staff_name, action_type, previous_value, new_value, occurred_at)
-    values (new.id, new.updated_by, 'enroute', pg_catalog.jsonb_build_object('count', v_n),
+    values (new.id, new.updated_by, 'enroute', pg_catalog.jsonb_build_object('count', v_n, 'rows', v_rows),
             pg_catalog.jsonb_build_object('state', 'cleared', 'status', new.status), pg_catalog.clock_timestamp());
   end if;
   return null;
@@ -2037,7 +2081,8 @@ $fn$;
 --            p_eta_offset_seconds (the pill's minutes minus how long ago it was tapped, so a queued tap keeps
 --            its ETA), else no ETA. ETAs are clamped to ±6 h. p_eta_minutes is the pill (0–60) or null.
 --   'cancel' clears only the caller's en route.
---   'arrive' the friend arrived (the caller's row becomes 'arrived').
+--   'arrive' the friend arrived (the caller's row becomes 'arrived', and so does everyone else's still en
+--            route on the request: the friend is there; the audit row counts them in also_arrived).
 --   Only while the request is In medical; at any other status the call is accepted and changes nothing
 --   ({changed: false, ignored: true}), so a queued tap that lands after the answer changed never fails.
 --   Repeats change nothing (same state and ETA within 30 s). Audit 'enroute' {state: enroute | changed |
@@ -2067,6 +2112,7 @@ declare
   v_eta timestamptz;
   v_event text;
   v_prev jsonb;
+  v_others integer := 0;
 begin
   perform public.lp_require_staff(p_staff);
   if p_request is null then
@@ -2130,13 +2176,19 @@ begin
     insert into public.lp_enroute as e (request_id, staff, staff_name, eta_at, eta_minutes, state, updated_at)
     values (p_request, v_key, p_staff, v_eta, v_cur.eta_minutes, 'arrived', v_now)
     on conflict (request_id, staff) do update set staff_name = excluded.staff_name, state = 'arrived', updated_at = excluded.updated_at;
+    -- The friend is there: everyone else still bringing them is done too (the row reads "Friend arrived" for
+    -- all), so nobody is left with an en route they can no longer change, and Friends en route drops it.
+    update public.lp_enroute e set state = 'arrived', updated_at = v_now
+     where e.request_id = p_request and e.staff <> v_key and e.state = 'enroute';
+    get diagnostics v_others = row_count;
     v_event := 'arrived';
   end if;
 
   insert into public.audit_events (patient_id, staff_name, action_type, previous_value, new_value, occurred_at)
   values (p_request, p_staff, 'enroute', v_prev,
           pg_catalog.jsonb_build_object('state', v_event, 'eta_at', v_eta,
-            'eta_minutes', case when p_action = 'set' then p_eta_minutes else v_cur.eta_minutes end, 'staff_key', v_key),
+            'eta_minutes', case when p_action = 'set' then p_eta_minutes else v_cur.eta_minutes end, 'staff_key', v_key)
+          || case when v_others > 0 then pg_catalog.jsonb_build_object('also_arrived', v_others) else '{}'::jsonb end,
           v_now);
 
   return pg_catalog.jsonb_build_object('changed', true, 'ignored', false, 'event', v_event,
@@ -2273,7 +2325,8 @@ begin
 end
 $fn$;
 
--- lp_enroute_stats: the dashboard's "Friends en route" (requests In medical with someone en route now) and
+-- lp_enroute_stats: the dashboard's "Friends en route" (requests In medical with someone en route now and
+-- nobody arrived yet) and
 -- "Time to arrive" (mean minutes from going en route to Arrived, over arrivals in the last 2 hours, 1 decimal;
 -- null when none). An arrival is measured from the same staff's latest 'enroute' event on the request before
 -- it: a changed ETA does not restart the clock, a cancel and a new en route does. /api/stats merges it into
@@ -2292,10 +2345,16 @@ declare
   v_friends integer;
   v_avg numeric;
 begin
-  select pg_catalog.count(distinct e.request_id)::integer into v_friends
-  from public.lp_enroute e
-  join public.patients p on p.id = e.request_id
-  where e.state = 'enroute' and p.status in ('Found – Awaiting Reunion', 'Bring friend to medical');
+  -- A request whose friend arrived is no longer "en route", even if a late tap left someone's row 'enroute'.
+  select pg_catalog.count(*)::integer into v_friends
+  from (
+    select e.request_id
+    from public.lp_enroute e
+    join public.patients p on p.id = e.request_id
+    where p.status in ('Found – Awaiting Reunion', 'Bring friend to medical')
+    group by e.request_id
+    having pg_catalog.bool_and(e.state = 'enroute')
+  ) as x;
 
   select pg_catalog.round(pg_catalog.avg(extract(epoch from (x.arrived_at - x.started_at)) / 60.0)::numeric, 1) into v_avg
   from (

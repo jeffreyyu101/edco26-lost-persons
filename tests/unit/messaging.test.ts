@@ -14,6 +14,7 @@ import {
   enrouteView,
   etaPhrase,
   iAmEnroute,
+  maskContacts,
   messageDetail,
   previewText,
   quickLines,
@@ -32,6 +33,7 @@ import {
   classifyJobFailure,
   diffMessageAlerts,
   effectiveEnroute,
+  failedEnrouteTap,
   jobOrder,
   jobSendable,
   mergeEarlierPage,
@@ -89,8 +91,8 @@ describe('quick lines (status × side)', () => {
   });
 
   it('the whole table', () => {
-    const texts = (stage: Parameters<typeof quickLines>[0], side: Parameters<typeof quickLines>[1], mine = false) =>
-      quickLines(stage, side, mine).map((l) => `${l.kind}:${l.text}`);
+    const texts = (stage: Parameters<typeof quickLines>[0], side: Parameters<typeof quickLines>[1], mine = false, arrived = false) =>
+      quickLines(stage, side, mine, arrived).map((l) => `${l.kind}:${l.text}`);
     expect(texts('waiting', 'medical')).toEqual(['message:Any tattoos or marks?', 'message:What are they wearing?', 'message:Do you have a photo?']);
     expect(texts('waiting', 'foh')).toEqual(['message:Friend is still here', 'message:Friend left the area']);
     expect(texts('in_medical', 'medical')).toEqual([
@@ -101,6 +103,9 @@ describe('quick lines (status × side)', () => {
     ]);
     expect(texts('in_medical', 'foh')).toEqual(['enroute:En route', "message:Can't find them", 'message:Friend left the area']);
     expect(texts('in_medical', 'foh', true)).toEqual(['arrived:Arrived', "message:Can't find them", 'message:Friend left the area']);
+    // Once the friend arrived neither En route nor Arrived is offered again (as on the cards).
+    expect(texts('in_medical', 'foh', false, true)).toEqual(["message:Can't find them", 'message:Friend left the area']);
+    expect(texts('in_medical', 'foh', true, true)).toEqual(["message:Can't find them", 'message:Friend left the area']);
     expect(texts('closed', 'medical')).toEqual([]);
     expect(texts('closed', 'foh')).toEqual([]);
     // Medical's lines never depend on en route.
@@ -168,6 +173,20 @@ describe('notification details (contract B)', () => {
 
   it('never a phone number or an LP number in a detail', () => {
     expect(messageDetail('Rae Chen · Medical', 'Call me')).not.toMatch(/LP-\d/);
+  });
+
+  it('masks phone numbers and email addresses (contract E), keeps short numbers', () => {
+    expect(messageDetail('Dana Kent · Dispatch', 'Her sister is at 407-555-0199')).toBe('Dana K.: Her sister is at •••');
+    for (const phone of ['(407) 555 0199', '+1 407 555 0199', '407.555.0199', '4075550199', '555-0199']) {
+      expect(maskContacts(`Call ${phone} now`)).toBe('Call ••• now');
+    }
+    expect(maskContacts('Email rae.chen+edc@example.org or text')).toBe('Email ••• or text');
+    for (const kept of ['Bed 3', 'Chair 9 → Bed 3', 'Back at 4:40 PM', 'FA 4, 24 M', 'Bring 1 person only', '2 of 3 friends']) {
+      expect(maskContacts(kept)).toBe(kept);
+    }
+    // Masked before the cut: a number at the edge never shows half.
+    const long = messageDetail('Rae Chen · Medical', `${'x'.repeat(110)} 407 555 0199`);
+    expect(long).not.toMatch(/\d{3}/);
   });
 });
 
@@ -290,11 +309,21 @@ describe('optimistic en route', () => {
     // Someone else stays when I cancel.
     const two: EnrouteSummary = { count: 2, earliestEta: at(2), state: 'enroute', mine: { etaAt: at(5), etaMinutes: 5, state: 'enroute' } };
     expect(effectiveEnroute(two, [me('cancel')], NOW)).toMatchObject({ count: 1, mine: null });
-    // The latest tap wins; a failed one is ignored.
+    // The latest tap wins; one that was not delivered still shows what I asked for (with Retry under it).
     expect(effectiveEnroute(null, [me('set', 5, 1), me('cancel', null, 2)], NOW)).toBeNull();
-    expect(effectiveEnroute(server, [{ ...me('cancel'), state: 'failed' }], NOW)).toBe(server);
+    expect(effectiveEnroute(server, [{ ...me('cancel'), state: 'failed' }], NOW)).toBeNull();
+    expect(effectiveEnroute(null, [{ ...me('set', 5), state: 'failed' }], NOW)).toMatchObject({ count: 1, state: 'enroute', mine: { etaMinutes: 5 } });
+    expect(effectiveEnroute(server, [{ ...me('arrive'), state: 'failed' }], NOW)).toMatchObject({ state: 'arrived' });
     // The Undo of a cancel puts the exact ETA back.
     expect(effectiveEnroute(null, [job(1, { kind: 'enroute', body: undefined, enroute: { action: 'set', etaMinutes: 5, etaAt: at(7) } })], NOW)?.mine?.etaAt).toBe(at(7));
+  });
+
+  it('the tap that was not delivered (for "Not delivered · Retry"): the latest failed en route tap only', () => {
+    expect(failedEnrouteTap([me('set', 5)])).toBeNull();
+    const failed = { ...me('set', 5, 1), state: 'failed' as const };
+    expect(failedEnrouteTap([failed])).toBe(failed);
+    expect(failedEnrouteTap([failed, me('cancel', null, 2)])).toBe(failed);
+    expect(failedEnrouteTap([{ ...job(1), state: 'failed' }])).toBeNull();
   });
 });
 

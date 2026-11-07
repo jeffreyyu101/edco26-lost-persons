@@ -2362,9 +2362,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 
     async signOut(opts) {
       const unsent = state.outbox.length;
-      // The engine loads after start; its queued messages count only once it has read them.
-      await messaging.ready().catch(() => undefined);
-      const messages = messaging.unsentCount();
+      // The engine loads after start: its count once it has read its jobs, else the saved `mjob:` keys
+      // (never waits for the engine's code to download).
+      const messages = await messaging.unsentNow();
       if ((unsent > 0 || messages > 0) && !opts?.discardOutbox) {
         return { ok: false, reason: 'outbox', count: unsent, ...(messages > 0 ? { messages } : {}) };
       }
@@ -2446,8 +2446,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     }
     if (!isLive(id)) return;
     set({ hydrated: true, durableStorage: durable });
-    if (durable) await messaging.hydrate();
-    if (!isLive(id)) return;
+    // Not awaited: the first sync and the request outbox never wait for the messages engine's code (it may
+    // still be downloading on a slow network). It reads its saved jobs and kicks them once it is there.
+    if (durable) void messaging.hydrate();
     if (durable) await importLegacyQueue();
     if (!isLive(id)) return;
     const pendingSignOut = resumeSignOut;

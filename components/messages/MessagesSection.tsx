@@ -136,7 +136,7 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
   }, [row.id]);
 
   const side = sideOfTeam(session.team);
-  const lines = quickLines(quickStage(row), side, enroute.mine);
+  const lines = quickLines(quickStage(row), side, enroute.mine, enroute.enroute?.state === 'arrived');
 
   const copy = (text: string) => {
     void navigator.clipboard?.writeText(text).then(
