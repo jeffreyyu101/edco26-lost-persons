@@ -9,6 +9,7 @@
 // later rename of a label flows through.
 import { NOT_FOUND_YET_LABEL, STATUS, STATUS_META, ageGender, initials, joinName } from './domain';
 import { agoPhrase, formatClockAmPm, eventDate, minutesSince } from './format';
+import { threadPath } from './thread-link';
 
 // ---------------------------------------------------------------------------------------------------
 // Kinds (contract A)
@@ -149,7 +150,7 @@ export interface PushPayload {
   body: string;
   /** "lp-<id>": one notification per request on the lock screen (the OS replaces, never stacks). */
   tag: string;
-  /** "/?r=<id>" (or "/" for a test alert). */
+  /** "/?r=<id>", "/?r=<id>&to=thread" for a message (R2: it opens at the thread), or "/" for a test alert. */
   url: string;
   kind: ActivityKind | 'test';
   requestId: string | null;
@@ -327,7 +328,7 @@ export function pushPayload(event: Pick<ActivityEvent, 'requestId' | 'kind' | 'd
     title: event.kind === 'new_request' ? NEW_REQUEST_TITLE : title || NO_NAME,
     body: scrubDetail(event.detail),
     tag: `lp-${event.requestId}`,
-    url: `/?r=${event.requestId}`,
+    url: event.kind === 'message' ? threadPath(event.requestId) : `/?r=${event.requestId}`,
     kind: event.kind,
     requestId: event.requestId,
     renotify: true,

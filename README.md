@@ -170,6 +170,10 @@ Pending.
   back. Front of house can say **Friend en route** (optional ETA) and **Arrived**; one teal row shows it, with
   no names. Any status change out of In medical clears it (an Undo within 30 s puts it back). An En route
   tap that could not be sent shows "Not delivered · Retry" under the row.
+- **Request page order** (2026-11-07). A request reads status, details, photos, then Messages, then the audit
+  trail. While it needs info or has unread messages, one line under the status shows the latest message; it, a
+  Message button, a desk row's unread badge, a message's Activity row, toast or notification open the request at
+  its thread (the composer focused on a computer only). See `design/DECISIONS.md` "Request page order".
 - **Alerts.** With the app in front, an alert is a toast with a chime: changes to your requests by someone
   else, and new requests when "New requests" is on. **Lock-screen alerts (Web Push, F4)** reach a locked
   phone or a closed laptop app once "Turn on" was tapped on that device (desktop browsers, Android Chrome,

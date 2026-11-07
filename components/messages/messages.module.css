@@ -24,6 +24,15 @@
   position: relative;
   margin-top: 4px;
   min-width: 0;
+  /* (R2) A jump to the thread lands its heading under the phone's sticky top bar, not behind it. */
+  scroll-margin-top: calc(56px + env(safe-area-inset-top));
+}
+.section.panel {
+  scroll-margin-top: 4px;
+}
+/* (R2) The heading takes the focus of a jump on a phone (the keyboard stays down): no ring for that. */
+.head:focus {
+  outline: none;
 }
 
 .head {
@@ -626,6 +635,51 @@ button.enr:focus-visible {
   background: var(--blue-9);
 }
 
+/* (R1) The request page's latest-message line under the status block: the chip, then the preview, as one
+   44 px button that brings the thread into view (clarify-3.png's "Needs info | You: …" row). */
+.threadPreview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  margin: 10px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.threadPreview:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+.tpChip {
+  flex: none;
+  display: inline-flex;
+}
+.tpBox {
+  flex: 1 1 auto;
+  min-height: 44px;
+  padding: 12px 10px 12px 12px;
+}
+.threadPreview:hover .tpBox {
+  background: var(--gray-a4);
+}
+.threadPreview:active .tpBox {
+  background: var(--gray-a5);
+}
+.tpGo {
+  flex: none;
+  margin-left: auto;
+  color: var(--gray-11);
+}
+
 .cardBtns {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -682,6 +736,15 @@ button.enr:focus-visible {
 }
 :global(.dark) .rowBadge {
   background: var(--blue-8);
+}
+/* (R2) A click on the badge opens the request at its Messages: a 44 px tall area around it, inside the row. */
+.rowBadge {
+  position: relative;
+}
+.rowBadge::after {
+  content: '';
+  position: absolute;
+  inset: -12px -10px;
 }
 
 /* An unread dot after a tab or nav label. */

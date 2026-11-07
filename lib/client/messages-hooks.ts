@@ -39,6 +39,15 @@ export function useThread(requestId: string): ThreadState | null {
   return useMessagingSlice(select);
 }
 
+/**
+ * The request's thread has come back from the server since this page loaded (a copy from the phone's cache does
+ * not count). That load wrote the request's activity, its unread count included, into the row first.
+ */
+export function useThreadLoaded(requestId: string): boolean {
+  const select = useCallback((s: MessagingSnapshot) => (s.threads.get(requestId)?.loadedAt ?? 0) > 0, [requestId]);
+  return useMessagingSlice(select);
+}
+
 /** This phone's queued messages and en route taps for a request, oldest first. */
 export function useRequestJobs(requestId: string): readonly MessageJob[] {
   const select = useCallback((s: MessagingSnapshot) => {
@@ -74,23 +83,4 @@ export function useEnroute(row: Pick<RequestSummary, 'id' | 'enroute'>): Enroute
 export function useFailedEnroute(requestId: string): MessageJob | null {
   const jobs = useRequestJobs(requestId);
   return useMemo(() => failedEnrouteTap(jobs), [jobs]);
-}
-
-// ---------------------------------------------------------------------------------------------------
-// "Open the thread": a Message button navigates to the request and asks its Messages to come into view
-// with the composer focused. One flag, read once by the request's MessagesSection.
-// ---------------------------------------------------------------------------------------------------
-
-let focusRequest: { id: string; at: number } | null = null;
-
-export function requestThreadFocus(requestId: string): void {
-  focusRequest = { id: requestId, at: Date.now() };
-}
-
-/** True once for the request whose Message button was just tapped (within 5 s). */
-export function takeThreadFocus(requestId: string): boolean {
-  const f = focusRequest;
-  if (!f || f.id !== requestId || Date.now() - f.at > 5_000) return false;
-  focusRequest = null;
-  return true;
 }

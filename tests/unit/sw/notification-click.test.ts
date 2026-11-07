@@ -82,6 +82,21 @@ describe('notificationclick', () => {
     expect(worker.opened).toEqual([]);
   });
 
+  it("(R2) a message's thread address reaches the page as it is: in place, a navigation, or a new window", async () => {
+    const thread = `/?r=${ID}&to=thread`;
+    const app = win('tab-1', '/');
+    pages.push(app);
+    await worker.notificationClick({ url: thread });
+    expect(app.asked).toEqual([thread]);
+    const signIn = win('tab-2', '/signin', { answers: null });
+    pages.splice(0, pages.length, signIn);
+    await worker.notificationClick({ url: thread });
+    expect(signIn.navigated).toEqual([thread]);
+    pages.splice(0, pages.length);
+    await worker.notificationClick({ url: thread });
+    expect(worker.opened).toEqual([thread]);
+  });
+
   it('prefers the focused app window, then any app window, over a sign-in page', async () => {
     const signIn = win('tab-0', '/signin', { answers: null });
     const background = win('tab-1', '/');

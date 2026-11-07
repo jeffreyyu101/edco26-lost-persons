@@ -2,7 +2,8 @@
 // The Activity inbox (design/screens/f34-states.html Activity, f34-v2-2..4 and 9; design/references/
 // mobbin-activity-inbox.txt): "Activity" with a ✓✓ Mark all read (disabled when nothing is unread, gone when
 // the list is empty), ONE row per request (its latest event), newest first, day labels only when the list
-// spans more than one day, and "Nothing new" when empty. Tapping a row opens the request (and marks it read);
+// spans more than one day, and "Nothing new" when empty. Tapping a row opens the request (and marks it read),
+// at its Messages when the row's latest event is a message (R2, 2026-11-07);
 // the sheet or popover closes. Mark all read shows "3 marked read · Undo" for 5 s.
 import { IconButton, VisuallyHidden } from '@radix-ui/themes';
 import { CheckCheck } from 'lucide-react';
@@ -10,6 +11,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { activityAriaLabel, activityGlyph, activityLine2, activityTime, groupByDay, type ActivityRow } from '@/lib/activity';
 import { activityClient, useActivity } from '@/lib/client/activity-client';
 import { navigate } from '@/lib/client/nav';
+import { openThread } from '@/lib/client/thread-jump';
 import { useEventTimezone, useNow } from '@/lib/client/store-contract';
 import { ActivityGlyphIcon } from './glyphs';
 import { BellIcon } from './icons';
@@ -32,7 +34,7 @@ export interface ActivityPanelProps {
  * screen readers, rather than by aria-label: a message's line ("Rae C.: Bring 1 person only") beside a
  * different aria-label failed axe's label-in-name check (WCAG 2.5.3; F3 + F4 release).
  */
-function Row({ row, now, timeZone, onOpen }: { row: ActivityRow; now: number; timeZone: string; onOpen: (id: string) => void }) {
+function Row({ row, now, timeZone, onOpen }: { row: ActivityRow; now: number; timeZone: string; onOpen: (row: ActivityRow) => void }) {
   const glyph = activityGlyph(row.kind, row.detail);
   return (
     <button
@@ -41,7 +43,7 @@ function Row({ row, now, timeZone, onOpen }: { row: ActivityRow; now: number; ti
       data-read={row.read ? '' : undefined}
       data-kind={row.kind}
       data-testid="activity-row"
-      onClick={() => onOpen(row.requestId)}
+      onClick={() => onOpen(row)}
     >
       <VisuallyHidden>{activityAriaLabel(row, now)}</VisuallyHidden>
       {row.read ? null : <span className={s.dot} aria-hidden />}
@@ -73,10 +75,12 @@ export function ActivityPanel({ heading, onClose, variant, headEnd }: ActivityPa
   const empty = activity.rows !== null && rows.length === 0;
   const anyUnread = rows.some((r) => !r.read) || activity.unread > 0;
 
-  const open = (id: string) => {
-    activityClient().markRead(id);
+  const open = (row: ActivityRow) => {
+    activityClient().markRead(row.requestId);
     onClose();
-    navigate({ r: id });
+    // (R2) A row whose latest event is a message lands at the request's thread; the others at its top.
+    if (row.kind === 'message') openThread(row.requestId);
+    else navigate({ r: row.requestId });
   };
 
   const markAll = async () => {

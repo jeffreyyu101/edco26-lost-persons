@@ -6,25 +6,25 @@
 //   messages), then En route / Arrived (front of house, In medical) and Message with its unread count.
 //   Pending → To check: the preview above the answers, and a 44 px Message button left of them.
 //   Pending → Friend coming: the en route row, then Message | Reunited.
-//   Desk tables: a count after the name. Pending's Friend coming tab and the nav's Pending: a dot.
+//   Desk tables: a count after the name (a click on it lands at the thread). Pending's Friend coming tab and
+//   the nav's Pending: a dot.
+//   The request page (R1, 2026-11-07): the preview as a button under the status block (ThreadPreview).
+// The Message buttons, the desk badge and the request page's preview open the thread (lib/client/thread-jump).
 import { Button, IconButton, VisuallyHidden } from '@radix-ui/themes';
-import { Check, MessageSquare } from 'lucide-react';
+import { Check, ChevronDown, MessageSquare } from 'lucide-react';
 import { WalkIcon } from './WalkIcon';
 import type { ReactNode } from 'react';
 import type { RequestSummary } from '@/lib/api-types';
-import { requestThreadFocus, useMessaging } from '@/lib/client/messages-hooks';
+import { useMessaging } from '@/lib/client/messages-hooks';
 import { navigate } from '@/lib/client/nav';
 import { usePending, useSession } from '@/lib/client/store-contract';
+import { openThread, requestThreadJump } from '@/lib/client/thread-jump';
 import { initials, isInMedical } from '@/lib/domain';
 import { previewText, sideOfTeam, unreadOf } from '@/lib/messaging';
+import type { DisplayStage } from '@/lib/stages';
+import { StageChip } from '@/components/list/StageChips';
 import { EnrouteFailed, EnrouteRow, useEnrouteControl } from './Enroute';
 import s from './messages.module.css';
-
-/** Opens the request with its Messages in view and the field focused. */
-export function openThread(id: string): void {
-  requestThreadFocus(id);
-  navigate({ r: id });
-}
 
 function who(row: RequestSummary): string {
   return initials(row.name) || 'this request';
@@ -106,6 +106,44 @@ export function PreviewRow({ row }: { row: RequestSummary }) {
       </span>
       <VisuallyHidden>{sentence}</VisuallyHidden>
     </div>
+  );
+}
+
+/** "Any tattoos or marks?" stays as it is; "Bring 1 person" gets its full stop (the sentence goes on). */
+const closed = (text: string) => (/[.?!…]$/.test(text) ? text : `${text}.`);
+
+/**
+ * (Request page order R1, Brian 2026-11-07) The request page's latest-message line, under the status block: the
+ * cards' preview (the amber Needs info chip when it applies, "Rae C.: Any tattoos or marks?" on one line, the unread
+ * dot) as one 44 px button that brings the thread into view, and on a computer focuses the composer. The page
+ * decides when it shows (lib/messaging threadPreviewShown).
+ */
+export function ThreadPreview({ row, needsInfo, unread }: { row: RequestSummary; needsInfo: DisplayStage | null; unread: boolean }) {
+  const last = row.lastMessage && (row.messageCount ?? 0) > 0 ? row.lastMessage : null;
+  const p = last ? previewText(last) : null;
+  const said = [
+    needsInfo ? `${needsInfo.label}.` : '',
+    last && p ? closed(`Last message${unread ? ', unread' : ''}, from ${last.mine ? 'you' : p.who}: ${p.text}`) : '',
+    'Go to messages.',
+  ];
+  return (
+    <button type="button" className={s.threadPreview} data-testid="thread-preview" onClick={() => requestThreadJump(row.id)}>
+      {needsInfo ? (
+        <span className={s.tpChip} aria-hidden>
+          <StageChip stage={needsInfo} />
+        </span>
+      ) : null}
+      <span className={`${s.preview} ${s.tpBox}`} aria-hidden>
+        {unread ? <span className={s.udot} data-testid="preview-unread" /> : null}
+        {p ? (
+          <span className={s.previewText}>
+            <span className={s.previewWho}>{p.who}:</span> {p.text}
+          </span>
+        ) : null}
+        <ChevronDown size={16} strokeWidth={2} className={s.tpGo} />
+      </span>
+      <VisuallyHidden>{said.filter(Boolean).join(' ')}</VisuallyHidden>
+    </button>
   );
 }
 
@@ -192,15 +230,28 @@ export function unreadSentence(row: RequestSummary): string {
   return n === 0 ? '' : ` ${n} unread ${n === 1 ? 'message' : 'messages'}.`;
 }
 
-/** A count after a name in a desk table row (unread messages from others). */
+/** A desk row's unread badge marks itself: a click on it opens the request at its Messages (openRowAt). */
+const THREAD_BADGE = 'data-thread-badge';
+
+/**
+ * A count after a name in a desk table row (unread messages from others). The row is the one control (a button
+ * holds no other); a click on the badge (its tap area grown to 44 px) lands at the thread (R2).
+ */
 export function UnreadBadge({ row }: { row: RequestSummary }) {
   const n = unreadOf(row);
   if (n === 0) return null;
   return (
-    <span className={s.rowBadge} data-testid="row-unread" aria-hidden>
+    <span className={s.rowBadge} data-testid="row-unread" {...{ [THREAD_BADGE]: '' }} aria-hidden>
       {n}
     </span>
   );
+}
+
+/** A desk row's click: at the Messages when it landed on the unread badge, else at the top. */
+export function openRowAt(id: string, target: EventTarget | null): void {
+  const el = target as { closest?: (selector: string) => unknown } | null;
+  if (typeof el?.closest === 'function' && el.closest(`[${THREAD_BADGE}]`)) openThread(id);
+  else navigate({ r: id });
 }
 
 /** A dot after a label while any of these rows has unread messages. */

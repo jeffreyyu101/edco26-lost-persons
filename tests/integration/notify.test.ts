@@ -115,7 +115,8 @@ describe('notifyStaff', () => {
     const s = sent().filter((x) => x.endpoint === phone || x.endpoint === laptop);
     expect(s.map((x) => x.endpoint).sort()).toEqual([phone, laptop].sort());
     for (const x of s) {
-      expect(x.payload).toMatchObject({ title: 'J.D.', tag: `lp-${r.id}`, url: `/?r=${r.id}`, kind: 'message', renotify: true, badge: 1 });
+      // (R2, 2026-11-07) A message opens the request at its thread.
+      expect(x.payload).toMatchObject({ title: 'J.D.', tag: `lp-${r.id}`, url: `/?r=${r.id}&to=thread`, kind: 'message', renotify: true, badge: 1 });
       expect(x.payload.body).toBe('Rae C.: call me on ••• about');
       const text = JSON.stringify(x.payload);
       expect(text).not.toMatch(/LP-?\d/);
