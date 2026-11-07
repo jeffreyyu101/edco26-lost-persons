@@ -182,13 +182,16 @@ export interface EnrouteView {
 export const ENROUTE_LABEL = 'Friend en route';
 export const ARRIVED_LABEL = 'Friend arrived';
 
-/** "~4 min" (minutes rounded up), "now" within 30 s of the ETA or up to a minute past it, "late" after that. */
+/**
+ * "~4 min" (whole minutes, rounded: a fresh "~5 min" reads 5 even when the phone's clock is a few seconds
+ * behind the server's), "now" within 30 s of the ETA or up to a minute past it, "late" after that.
+ */
 export function etaPhrase(etaAt: string | null | undefined, now: number): { text: string; late: boolean } | null {
   if (!etaAt) return null;
   const at = Date.parse(etaAt);
   if (!Number.isFinite(at)) return null;
   const left = at - now;
-  if (left > NOW_WITHIN_MS) return { text: `~${Math.max(1, Math.ceil(left / 60_000))} min`, late: false };
+  if (left > NOW_WITHIN_MS) return { text: `~${Math.max(1, Math.round(left / 60_000))} min`, late: false };
   if (left > -LATE_AFTER_MS) return { text: 'now', late: false };
   return { text: 'late', late: true };
 }

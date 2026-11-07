@@ -200,7 +200,8 @@ function EnrouteTile({ stats }: { stats: Stats }) {
       className={`${s.tap} ${s.tile} ${s.tileWide}`}
       onClick={() => show({ view: 'pending' })}
       data-testid="tile-enroute"
-      aria-label={n === null ? 'Friends en route: not available. Opens Pending.' : `Friends en route now: ${n}. Opens Pending.`}
+      // Starts with the visible text (WCAG 2.5.3): "Friends en route 3".
+      aria-label={n === null ? `Friends en route ${NO_VALUE} not available. Opens Pending.` : `Friends en route ${n}, now. Opens Pending.`}
     >
       <span className={s.lb} aria-hidden>
         <WalkIcon size={14} strokeWidth={2} className={s.enrGlyph} />
