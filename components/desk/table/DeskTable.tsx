@@ -10,7 +10,7 @@
 // Esc) and the pane's previous / next walk them in the order shown, and the open request is the selected
 // row (data-selected, aria-current).
 import { Skeleton } from '@radix-ui/themes';
-import { ChevronDown, CircleAlert } from 'lucide-react';
+import { ChevronDown, CircleAlert, RefreshCw } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
 import { StageGlyph } from '@/components/ui/StageGlyph';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
@@ -105,6 +105,10 @@ interface CellsProps {
   statusLabel: string;
   /** (F5) What follows the label: "· 4:40 PM", "· Bed 3", "· ~4 min", "· 2 checks". */
   statusExtra?: string;
+  /** (F5) Its short form for a narrow status column ("· 4:40"; '' for none). Absent: always `statusExtra`. */
+  statusExtraShort?: string;
+  /** (F5) A glyph before it: ⟳ for a recheck time. */
+  statusExtraGlyph?: 'recheck';
   post: string;
   created: string;
   createdTitle?: string;
@@ -131,7 +135,7 @@ function Cells(p: CellsProps) {
       <span className={cx(t.cStatus, t.st)} data-col="status" data-tone={p.tone} aria-hidden>
         {p.glyph}
         <span className={t.stl}>{p.statusLabel}</span>
-        {p.statusExtra ? <span className={t.stx}>{p.statusExtra}</span> : null}
+        <StatusExtra extra={p.statusExtra} short={p.statusExtraShort} glyph={p.statusExtraGlyph} />
       </span>
       <span className={cx(t.cPost, t.mut)} data-col="post" aria-hidden>
         {p.post}
@@ -151,6 +155,27 @@ function Cells(p: CellsProps) {
       <span className={cx(t.cBy, t.mut)} data-col="by" title={p.byTitle} aria-hidden>
         {p.by}
       </span>
+    </>
+  );
+}
+
+/** (F5) What follows the status label: whole while the column has room, else its short form. */
+function StatusExtra({ extra, short, glyph }: { extra?: string; short?: string; glyph?: 'recheck' }) {
+  if (!extra) return null;
+  const mark = glyph === 'recheck' ? <RefreshCw size={12} strokeWidth={2} className={t.stxGlyph} aria-hidden /> : null;
+  if (short === undefined) {
+    return (
+      <>
+        {mark}
+        <span className={t.stx}>{extra}</span>
+      </>
+    );
+  }
+  return (
+    <>
+      {mark}
+      <span className={cx(t.stx, t.stxWide)}>{extra}</span>
+      {short ? <span className={cx(t.stx, t.stxNarrow)}>{short}</span> : null}
     </>
   );
 }
@@ -193,6 +218,8 @@ export const TableRow = memo(function TableRow({ row, times, selected, stage, ti
         tone={look.tone}
         statusLabel={look.label}
         statusExtra={stage?.extra}
+        statusExtraShort={stage?.extraShort}
+        statusExtraGlyph={stage?.extraGlyph}
         post={postCell(row)}
         created={times.created}
         createdTitle={times.createdTitle}
@@ -240,6 +267,8 @@ export const SearchRow = memo(function SearchRow({ hit, times, selected, stage, 
         tone={look.tone}
         statusLabel={look.label}
         statusExtra={stage?.extra}
+        statusExtraShort={stage?.extraShort}
+        statusExtraGlyph={stage?.extraGlyph}
         post={postCell(row)}
         created={times.created}
         createdTitle={times.createdTitle}

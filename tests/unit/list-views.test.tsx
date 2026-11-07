@@ -410,12 +410,12 @@ describe('list views render', () => {
   const shown = (html: string, n: number, col: string) => {
     const cell = cellHtml(html, n, col);
     if (cell === null) return null;
-    return text(cell.replace(/<span class="[^"]*vh[^"]*">[^<]*<\/span>/g, '').replace(/<span class="[^"]*stNarrow[^"]*">[^<]*<\/span>/g, ''));
+    return text(cell.replace(/<span class="[^"]*vh[^"]*">[^<]*<\/span>/g, '').replace(/<span class="[^"]*stNarrow[^"]*"[^>]*>[^<]*<\/span>/g, ''));
   };
   /** The status label LP-n's row shows under 400 px instead ("Waiting"), or null when it keeps its label. */
   const narrow = (html: string, n: number) => {
     const cell = cellHtml(html, n, 'status') ?? '';
-    const m = /<span class="[^"]*stNarrow[^"]*">([^<]*)<\/span>/.exec(cell);
+    const m = /<span class="[^"]*stNarrow[^"]*"[^>]*>([^<]*)<\/span>/.exec(cell);
     if (!m) return null;
     // Narrow and wide labels come as a pair, so CSS can show exactly one of them.
     expect(cell).toMatch(/<span class="[^"]*stWide[^"]*">[^<]+<\/span>/);

@@ -211,6 +211,35 @@ describe('builds from before the hold', () => {
 });
 
 describe('dashboard', () => {
+  it('a hold that is not due is not the longest wait, even as the oldest Waiting row; once due, it is', async () => {
+    const creator = newStaff();
+    const r = await createRequest(creator);
+    await ok(medical, r.id, STATUS.notInMedical, r.rowVersion);
+    // The oldest Waiting for check row of all: a dashboard that ignored the hold would name it.
+    psql(
+      `update public.patients set created_at = (select min(created_at) from public.patients where status = 'Added') - interval '1 minute' where id = '${r.id}'`,
+    );
+    expect(psql(`select id from public.patients where status = 'Added' order by created_at, case_number limit 1`)).toBe(r.id);
+    const stats = async () => (await api('/api/stats', { cookie: await cookieFor(medical) })).body as Stats;
+    try {
+      const notDue = await stats();
+      expect(notDue.longestWait?.id ?? null).not.toBe(r.id);
+      // The next oldest Waiting row that is not on a hold still counts (or none at all).
+      const next = psql(
+        `select coalesce((select id::text from public.patients where status = 'Added' and (recheck_at is null or recheck_at <= now()) order by created_at, case_number limit 1), '')`,
+      );
+      expect(notDue.longestWait?.id ?? '').toBe(next);
+      // Due: it waits for medical again, and is the longest wait.
+      psql(`update public.patients set recheck_at = now() - interval '1 minute' where id = '${r.id}'`);
+      const due = await stats();
+      expect(due.longestWait?.id).toBe(r.id);
+      expect(due.longestWait?.minutes).toBeGreaterThanOrEqual(1);
+    } finally {
+      const row = await dbRow(r.id);
+      await api(`/api/requests/${r.id}/cancel`, { json: { expectedVersion: row.row_version }, cookie: await cookieFor(creator) });
+    }
+  });
+
   it('a held request counts as open Waiting for check, never as Not in medical; the final one does', async () => {
     const r = await createRequest(newStaff());
     const before = (await api('/api/stats', { cookie: await cookieFor(medical) })).body as Stats;
@@ -223,8 +252,6 @@ describe('dashboard', () => {
     expect(during.notInMedical).toBe(before.notInMedical);
     // Its first Not found counts as its first answer.
     expect(during.avgAnswerMinutes).not.toBeNull();
-    // A held request that is not due is not the longest wait.
-    if (during.longestWait) expect(during.longestWait.id).not.toBe(r.id);
     await ok(medical, r.id, STATUS.notInMedical, held.rowVersion);
     const after = (await api('/api/stats', { cookie: await cookieFor(medical) })).body as Stats;
     expect(after.notInMedical).toBe(count(`status = 'Checked – Not Found'`));

@@ -5,9 +5,12 @@
 //   * Each alert is keyed by (id, rowVersion); more than 2 at once become one "3 updates" toast.
 //   * One alert toast per request: a later alert for it replaces the earlier toast, and a status toast
 //     closes once the row is in another status (alertStillCurrent), so a sticky "is in medical" never
-//     outlives a changed or undone answer.
+//     outlives a changed or undone answer. (F5) Going on hold or off it counts as a change too: the "Not
+//     found yet" alert closes when its Undo takes the hold away.
+//   * (F5) The hold's alert names the request by its initials only, never its LP number (contract B: it may
+//     reach the lock screen): "K.T." / "Not found yet · recheck 4:40 PM".
 import type { RequestSummary } from '../api-types';
-import { NOT_FOUND_YET_LABEL, STATUS, ageGender, initials, isHeld, isInMedical, sameStaff, statusMeta } from '../domain';
+import { STATUS, ageGender, holdDetail, initials, isHeld, isInMedical, sameStaff, statusMeta } from '../domain';
 import { formatCaseNumber } from '../format';
 import type { AlertEvent, ToastItem } from './store-contract';
 
@@ -24,6 +27,8 @@ export interface AlertContext {
   bell: boolean;
   /** `${id}:${rowVersion}` already alerted (mutated: keys are added). */
   seen: Set<string>;
+  /** (F5) The event timezone, for a hold's recheck time. */
+  timeZone?: string;
 }
 
 export const alertKey = (row: Pick<RequestSummary, 'id' | 'rowVersion'>) => `${row.id}:${row.rowVersion}`;
@@ -35,7 +40,9 @@ function subject(row: RequestSummary): string {
   return who ? `${lp} · ${who}` : lp;
 }
 
-export function statusAlert(row: RequestSummary): AlertEvent {
+export function statusAlert(row: RequestSummary, timeZone?: string): AlertEvent {
+  // (F5) An Undo of the final Not found, or of In medical, can put the hold back: it reads "Not found yet".
+  if (isHeld(row)) return holdAlert(row, timeZone);
   const s = subject(row);
   if (isInMedical(row.status)) {
     return { kind: 'in_medical', requestId: row.id, title: `${s} is in medical`, subtitle: 'Bring the friend to Main Med', count: 1 };
@@ -47,9 +54,15 @@ export function statusAlert(row: RequestSummary): AlertEvent {
   return { kind: 'status_changed', requestId: row.id, title: `${s} — ${statusMeta(row.status).shortLabel.toLowerCase()}`, count: 1 };
 }
 
-/** (F5) "LP-1004 · S.L. — not found yet": the first Not found, which put the request on hold. */
-export function holdAlert(row: RequestSummary): AlertEvent {
-  return { kind: 'status_changed', requestId: row.id, title: `${subject(row)} — ${NOT_FOUND_YET_LABEL.toLowerCase()}`, count: 1 };
+/** (F5) The title of a request with no name to take initials from (as F4's Activity rows). */
+export const HOLD_ALERT_UNNAMED = 'Request';
+
+/**
+ * (F5) "K.T." / "Not found yet · recheck 4:40 PM": the first Not found put the request on hold (recheck-6.png).
+ * Initials and nouns only (contract B), no LP number: the system notification shows the same words.
+ */
+export function holdAlert(row: RequestSummary, timeZone?: string): AlertEvent {
+  return { kind: 'status_changed', requestId: row.id, title: initials(row.name) || HOLD_ALERT_UNNAMED, subtitle: holdDetail(row.recheckAt, timeZone), count: 1 };
 }
 
 export function newRequestAlert(row: RequestSummary): AlertEvent {
@@ -82,12 +95,12 @@ export function diffAlerts(
         // (F5) The first Not found keeps the request Waiting for check: going on hold is the change.
         if (isHeld(row) && !isHeld(before)) {
           ctx.seen.add(key);
-          out.push(holdAlert(row));
+          out.push(holdAlert(row, ctx.timeZone));
         }
         continue;
       }
       ctx.seen.add(key);
-      out.push(statusAlert(row));
+      out.push(statusAlert(row, ctx.timeZone));
     } else {
       if (!ctx.bell || mine || byMe) continue;
       if (row.clientMutationId && ctx.ownMutationIds.has(row.clientMutationId)) continue;
@@ -104,6 +117,8 @@ export interface RaisedAlert {
   alert: AlertEvent;
   /** The row's status when the alert was raised (null for alerts with no request). */
   status: string | null;
+  /** (F5) Whether the row was on a "Not found yet" hold then (domain isHeld). */
+  held?: boolean;
   /** `${id}:${rowVersion}` of the row that raised it: the same in every tab that raises this alert. */
   key: string;
 }
@@ -116,7 +131,7 @@ export function diffRaisedAlerts(
 ): RaisedAlert[] {
   const out: RaisedAlert[] = [];
   for (const row of rows) {
-    for (const alert of diffAlerts(previous, [row], ctx)) out.push({ alert, status: row.status, key: alertKey(row) });
+    for (const alert of diffAlerts(previous, [row], ctx)) out.push({ alert, status: row.status, held: isHeld(row), key: alertKey(row) });
   }
   return out;
 }
@@ -136,10 +151,18 @@ export function latestPerRequest<T extends { alert: AlertEvent }>(items: readonl
 /**
  * Whether an alert toast still tells the truth about its request. A status alert ("is in medical") is out
  * of date as soon as the row is in another status (the answer was changed or undone), so it must not stay
- * on screen. A new-request alert is about the request being logged, which stays true.
+ * on screen. A new-request alert is about the request being logged, which stays true. (F5) `alertedHeld`:
+ * whether the row was on hold when the alert was raised; a hold taken away (the first Not found undone) or
+ * put back leaves the status as it was, but the alert is out of date all the same.
  */
-export function alertStillCurrent(kind: AlertEvent['kind'], alertedStatus: string | null, row: Pick<RequestSummary, 'status'> | undefined): boolean {
+export function alertStillCurrent(
+  kind: AlertEvent['kind'],
+  alertedStatus: string | null,
+  row: Pick<RequestSummary, 'status' | 'recheckAt'> | undefined,
+  alertedHeld?: boolean,
+): boolean {
   if (!row || kind === 'new_request' || kind === 'combined') return true;
+  if (alertedHeld !== undefined && isHeld(row) !== alertedHeld) return false;
   if (kind === 'in_medical') return isInMedical(row.status);
   if (alertedStatus === null) return true;
   return row.status === alertedStatus || (isInMedical(row.status) && isInMedical(alertedStatus));

@@ -576,7 +576,8 @@ button.lr:focus-visible {
 }
 
 /* Under 400 px "Waiting for check" reads "Waiting" (list-helpers.narrowStatusLabel): with a created time
-   from an earlier day ("Fri 11:02 PM") the full label would leave the name two letters. */
+   from an earlier day ("Fri 11:02 PM") the full label would leave the name two letters. (F5) Not in medical
+   reads its answer's label there: the same today, "Not found" for "Not found in medical" after the rename. */
 .stNarrow {
   display: none;
 }

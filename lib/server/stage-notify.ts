@@ -5,16 +5,14 @@
 // renamed label flows through). Nouns only: never a name, phone number or id. Server only.
 import 'server-only';
 import type { RequestSummary } from '../api-types';
-import { STATUS, canonStaff, isHeld, statusMeta } from '../domain';
-import { STAGE_META } from '../stages';
-import { formatClockAmPm } from '../format';
+import { STATUS, canonStaff, holdDetail, isHeld, statusMeta } from '../domain';
 import { eventTimezone } from './env';
 import { involvedStaff } from './involved';
 import { notifyStaff, type ActivityEvent } from './notify';
 
 /** The detail of a Not found answer, from the row the answer returned; null when it is neither. */
 export function notFoundDetail(row: Pick<RequestSummary, 'status' | 'recheckAt'>, timeZone: string): string | null {
-  if (isHeld(row)) return `${STAGE_META.notFoundYet.label} · recheck ${formatClockAmPm(row.recheckAt as string, timeZone)}`;
+  if (isHeld(row)) return holdDetail(row.recheckAt, timeZone);
   if (row.status === STATUS.notInMedical) return statusMeta(row.status).label;
   return null;
 }

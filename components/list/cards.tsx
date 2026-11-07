@@ -438,7 +438,7 @@ export const MineCard = memo(function MineCard({
           )}
         </div>
         {chip ? (
-          stage.key === 'notFoundYet' ? (
+          stage.recheck ? (
             <div className={s.stageRow}>
               <RecheckTimeChip stage={stage} />
             </div>
