@@ -355,3 +355,7 @@ What the next release ships on top of the live F2 (`main` 85c9320): F5 (stages a
 - **Every Performance row names its window**: Time to answer "last 2 hours" (was "avg, 2 h"), Time to reunite "last 2 hours" (was "avg"; lp_stats averages reunions over the last 2 hours too), Logged "last hour" (unchanged).
 - **An empty value reads "None"**, not "—": no one waiting (Longest wait), no answers or no reunions in the last 2 hours. Screen readers hear "No one is waiting for a check", "No answers in the last 2 hours", "No reunions in the last 2 hours". Logged is a count, so 0 stays "0".
 - **"—" only while the stats request fails** (the dashboard's Reconnecting): then an empty value is not known to be empty, and its sentence says "not available". Values that did load still show.
+
+## Hotfix F5.1 (Brian, 2026-11-07, from his iPhone) — `screens/hotfix-f5-1-*.png`
+
+- **The live line sits 12 px under the header's icons on every list view, with "⇅" centred on it at its right end, clear of the avatar (pending-v9.html frames 6, 7, 9), and every sheet with a field sits flush on the iPhone keyboard with the scrim over everything else and the page behind pinned.**

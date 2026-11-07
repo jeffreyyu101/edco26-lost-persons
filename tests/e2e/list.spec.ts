@@ -440,11 +440,12 @@ test.describe('the line under the title (v2.2 afternoon: minutes, a banner for p
     await expect(live(page)).toHaveAttribute('data-state', 'healthy');
     await expect(liveText(page)).toHaveText('Updated just now');
     await expect(connectionBanner(page)).toHaveCount(0);
-    // One line right under the title, lined up with it, before the list; tabular figures, a plain dot.
+    // One line right under the title, lined up with it, before the list; tabular figures, a plain dot. (Hotfix
+    // F5.1: its row starts 12 px under the header's icons, pending-v9.html's rhythm, 11 px under the title's box.)
     const title = (await page.getByTestId('view-switcher').boundingBox())!;
     const line = (await live(page).boundingBox())!;
     expect(line.y).toBeGreaterThanOrEqual(title.y + title.height - 1);
-    expect(line.y).toBeLessThan(title.y + title.height + 8);
+    expect(line.y).toBeLessThan(title.y + title.height + 14);
     await expect(live(page)).toHaveCSS('font-variant-numeric', 'tabular-nums');
     const dot = live(page).locator('[class*="liveDot"]');
     // Its dot lines up with the title's first letter. (F5 release: on All and My requests the line shares a row

@@ -274,36 +274,12 @@ export function photoIntake(current: number, picked: number): { take: number; dr
 }
 
 // ---------------------------------------------------------------------------------------------------
-// The on-screen keyboard (the form scrolls; Send stays pinned; the focused row stays in view)
+// The on-screen keyboard (the form scrolls; Send stays pinned; the focused row stays in view). Whether a
+// keyboard is up, and how far to scroll a row into view (revealDelta), are lib/client/visual-viewport.ts,
+// shared with every sheet.
 // ---------------------------------------------------------------------------------------------------
 
-/** The visual viewport is this much shorter than the layout viewport when a keyboard is up. */
-export const KEYBOARD_MIN_PX = 100;
-
-/**
- * A keyboard covers part of the layout viewport: the visual viewport is shorter by more than
- * KEYBOARD_MIN_PX at no zoom. A pinch zoom also shrinks the visual viewport, so it never counts.
- */
-export function keyboardOpen(layoutHeight: number, visualHeight: number, scale: number): boolean {
-  return scale <= 1.01 && layoutHeight - visualHeight > KEYBOARD_MIN_PX;
-}
-
-interface VerticalBox {
-  top: number;
-  bottom: number;
-}
-
-/**
- * How far to scroll the form so `box` (the focused row, with its chips and error line) sits inside `view`
- * with `margin` to spare: up when it is above, down when it is below but never past its top (a row taller
- * than the view shows its top). 0 when it is already in view.
- */
-export function revealDelta(view: VerticalBox, box: VerticalBox, margin: number): number {
-  const up = box.top - margin - view.top;
-  if (up < 0) return up;
-  const down = box.bottom + margin - view.bottom;
-  return down > 0 ? Math.min(down, up) : 0;
-}
+export { revealDelta } from '@/lib/client/visual-viewport';
 
 // ---------------------------------------------------------------------------------------------------
 // Ids
