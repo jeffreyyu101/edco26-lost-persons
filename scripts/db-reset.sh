@@ -65,6 +65,11 @@ echo "db-reset: loading supabase/seed.sql"
 # seed.sql aborts unless lp.allow_seed is on; only this script sets it, after the local-host checks above.
 psql "$db_url" -v ON_ERROR_STOP=1 -q -c "set lp.allow_seed = 'on'" -f supabase/seed.sql >/dev/null
 
+# (F6) The migrations scheduled the auto-close job (pg_cron 'lp-close-inactive'); locally it stays paused so the seed
+# keeps its In medical rows as in the mockups. Run `select public.lp_close_inactive();` to close idle ones by hand.
+echo "db-reset: pausing the auto-close job (lp-close-inactive)"
+psql "$db_url" -v ON_ERROR_STOP=1 -q -c "do \$pause\$ begin if to_regclass('cron.job') is not null then perform cron.unschedule(j.jobid) from cron.job j where j.jobname = 'lp-close-inactive'; end if; end \$pause\$;" >/dev/null
+
 echo "db-reset: uploading synthetic seed photos"
 full="supabase/seed-photos/photo.jpg"
 thumb="supabase/seed-photos/photo_thumb.jpg"

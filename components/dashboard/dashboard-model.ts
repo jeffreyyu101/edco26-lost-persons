@@ -41,9 +41,18 @@ export function countParts(count: number | null | undefined): ValuePart[] | null
   return known(count) ? [{ value: String(Math.round(count)), unit: '' }] : null;
 }
 
-/** Closed = Not in medical + Reunited + Discharged + Cancelled (v2.2: Not in medical counts as closed). */
-export function closedTotal(stats: Pick<Stats, 'notInMedical' | 'reunited' | 'discharged' | 'cancelled'>): number {
-  return stats.notInMedical + stats.reunited + stats.discharged + stats.cancelled;
+/**
+ * Closed = Not in medical + Reunited + Discharged + Cancelled (v2.2: Not in medical counts as closed) + (F6) Closed ·
+ * inactive (0 when the server does not send it).
+ */
+export function closedTotal(stats: Pick<Stats, 'notInMedical' | 'reunited' | 'discharged' | 'cancelled' | 'inactive'>): number {
+  return stats.notInMedical + stats.reunited + stats.discharged + stats.cancelled + inactiveCount(stats);
+}
+
+/** (F6) The Closed · inactive count, 0 when absent (a database before F6) or not a count. */
+export function inactiveCount(stats: Pick<Stats, 'inactive'>): number {
+  const n = stats.inactive;
+  return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? Math.round(n) : 0;
 }
 
 /** The Reunited tile's small grey line: "+1 discharged · 1 cancelled", or null when both are 0. */

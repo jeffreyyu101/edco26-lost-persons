@@ -88,6 +88,8 @@ export type StageKey =
   | 'reunited'
   | 'discharged'
   | 'cancelled'
+  /** (F6) Closed by the server after an hour In medical with no activity: grey, closed, lucide timer-off. */
+  | 'inactive'
   /** A legacy status this app does not know (shown verbatim, grey, closed). */
   | 'legacy';
 
@@ -122,6 +124,7 @@ export const STAGE_META: Readonly<Record<Exclude<StageKey, 'legacy'>, StageMeta>
   reunited: fromStatus(STATUS.reunited),
   discharged: fromStatus(STATUS.discharged),
   cancelled: fromStatus(STATUS.cancelled),
+  inactive: fromStatus(STATUS.inactive),
 };
 
 /**
@@ -323,6 +326,7 @@ function stageOf(row: StageSource, opts: StageOptions): DisplayStage {
   if (status === STATUS.reunited) return of('reunited');
   if (status === STATUS.discharged) return of('discharged');
   if (status === STATUS.cancelled) return of('cancelled');
+  if (status === STATUS.inactive) return of('inactive', { fullLabel: STATUS_META[STATUS.inactive].label, said: STATUS_META[STATUS.inactive].label });
   const legacy = statusMeta(status);
   return { label: legacy.shortLabel, fullLabel: legacy.label, tone: legacy.tone, glyph: legacy.glyph, bucket: legacy.bucket, key: 'legacy', said: legacy.label };
 }

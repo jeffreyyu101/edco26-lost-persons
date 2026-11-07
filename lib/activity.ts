@@ -29,6 +29,8 @@ export const ACTIVITY_KINDS = [
   'discharged',
   'cancelled',
   'edited',
+  /** (F6) The server closed it after an hour In medical with no activity (lib/server/inactive-notify.ts). */
+  'closed_inactive',
 ] as const;
 
 export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
@@ -233,6 +235,11 @@ export function closedDetail(kind: 'reunited' | 'discharged' | 'cancelled'): str
 /** edited: any other change to the request's details. */
 export const EDITED_DETAIL = 'Details changed';
 
+/** (F6) closed_inactive: the status label, "Closed · inactive". */
+export function inactiveDetail(): string {
+  return STATUS_META[STATUS.inactive].label;
+}
+
 /**
  * The event of a status change made through POST /api/requests/:id/status (contract D, F4's kinds), or null.
  * Not in medical is never raised here: the Not found yet hold (F5) owns both its answers.
@@ -317,7 +324,7 @@ export function testPayload(): PushPayload {
 // ---------------------------------------------------------------------------------------------------
 
 /** lucide icon names the Activity row maps to components (components/activity/glyphs.tsx). */
-export type ActivityIcon = 'message-square' | 'cross' | 'walk' | 'check' | 'map-pin' | 'hourglass' | 'x' | 'undo-2' | 'plus' | 'pencil';
+export type ActivityIcon = 'message-square' | 'cross' | 'walk' | 'check' | 'map-pin' | 'hourglass' | 'x' | 'undo-2' | 'plus' | 'pencil' | 'timer-off';
 /** Radix colour scale; the glyph is step 11 of it. */
 export type ActivityTone = 'gray' | 'green' | 'teal' | 'violet' | 'blue';
 
@@ -342,6 +349,8 @@ export const ACTIVITY_GLYPH: Readonly<Record<ActivityKind, ActivityGlyph>> = {
   discharged: { icon: 'check', tone: 'gray' },
   cancelled: { icon: 'x', tone: 'gray' },
   edited: { icon: 'pencil', tone: 'gray' },
+  // (F6) The status glyph of Closed · inactive (StatusGlyph 'inactive'), grey: closed.
+  closed_inactive: { icon: 'timer-off', tone: 'gray' },
 };
 
 /** The "Not found yet" hold (F5): its detail starts with these words (lib/domain's label, so a rename flows through). */
@@ -431,6 +440,7 @@ const SPOKEN_KIND: Readonly<Record<ActivityKind, string>> = {
   discharged: 'closed',
   cancelled: 'closed',
   edited: 'details changed',
+  closed_inactive: 'closed',
 };
 
 /** Spoken form of the initials: "J.D." → "J D"; NO_NAME stays. */

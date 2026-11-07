@@ -1,6 +1,6 @@
 # Handoff: "Is my friend in medical?" rebuild
 
-Updated: 2026-11-07 (the F3 + F4 release, `feat/f34`). **Production is live at
+Updated: 2026-11-07 (F6 inactivity auto-close, `feat/f6-inactive`, on top of the F3 + F4 release). **Production is live at
 https://edco26-lost-persons.vercel.app**, deployed from `main`.
 
 [`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md) is the engineering contract (§17 holds the 2026-11-06 morning
@@ -133,6 +133,24 @@ screenshots.
 - **Hotfix F5.1 is in** (`main` 332c90a merged): the release ships on top of exactly what production runs.
 - Decisions: `design/DECISIONS.md` "The F3 + F4 release" (and its review fixes); spec: `docs/BUILD_SPEC.md` §23 (A90–A95).
 
+### 2026-11-07 (F6 inactivity auto-close, `feat/f6-inactive`, ships after F3 + F4)
+
+- **A request In medical with no activity for an hour closes by itself** as **"Closed · inactive"** (grey, a timer-off
+  glyph; "Inactive" on a phone under 430 px), folded into Archived / Closed. Activity is any write (answer, edit,
+  location, photo, message, en route); opening or reading never counts. Waiting for check (Needs info, Not found yet)
+  never closes. The database does it every 5 minutes (pg_cron job **`lp-close-inactive`**), as "System", with the
+  note "No activity for 1 h" in the audit trail and the export.
+- **Reopen** (anyone) is in the request's action bar and brings it back to Friend coming. The staff involved get one
+  Activity row and push, "Closed · inactive". The backlog the first run closes is told to nobody: no Activity row,
+  no push, and no in-app alert on a phone running this build.
+- **Dashboard:** a "Closed · inactive" tile beside Friends en route; they count in Closed, never in Reunited or Time to
+  reunite. **Export:** the status reads "Closed · inactive".
+- **Medical starts with "New requests" on** (lock-screen push and the in-app toast) unless they switched it off in the
+  Alerts sheet (Brian, 2026-11-07 02:15). On by that default alone it adds no Activity row: their bell and app badge
+  count what they counted before.
+- **Deploy first, then the migration** ([F6 in production](#f6-in-production)): this build works on today's database.
+- Decisions: `design/DECISIONS.md` "F6 inactivity auto-close"; spec: `docs/BUILD_SPEC.md` §24 (A96–A103).
+
 ### 2026-11-06 evening (F4: lock-screen alerts, the Alerts sheet and Activity)
 
 - **Lock-screen alerts (Web Push).** Answers, location changes, Back to Waiting, Reunited, Discharged,
@@ -210,6 +228,70 @@ screenshots.
 | Real delivery to a phone's lock screen | Not verified here (needs a real device and the production keys): morning checklist below. |
 
 ## The production migration
+
+### F6 in production
+
+Production has the F3 + F4 file (`main` cf78f90). This release's file is that file with section 9 appended (the
+auto-close) and these additive changes in place: step 2's status list gains `'Closed – Inactive'` (so the first paste
+replaces `patients_status_check` once, `NOT VALID`, keeping every value in use), `lp_row` adds `quiet_close`,
+`lp_set_status` allows Closed – Inactive → In medical (Reopen), `lp_stats` adds `inactive`, `lp_push_prefs` gains
+`new_requests_team_default`, `lp_activity_record` accepts `closed_inactive` (and writes no new-request row for a
+Medical switch that is on by the team's default alone), and `lp_push_prefs_sync` starts Medical with New requests on.
+
+**Order: deploy first, then the migration.** This build works on the database production has now: it calls one new
+function (`lp_inactive_claim`) only for a Closed · inactive row, which can't exist yet; the dashboard's "Closed ·
+inactive" tile shows "—"; Reopen never appears; the Alerts switches are read and set as before. The other order would
+let the first run (within 5 minutes of the commit) close the backlog under the old build, which shows the value
+verbatim with no Reopen, raises an in-app alert for each one on its phones, and never tells a close in the gap (an
+untold close is given up after 15 minutes).
+
+1. **Deploy** (merge to `main`; Vercel deploys it; no new environment variable). Ask staff to tap "Update ready ·
+   Reload". A phone left on the old build still works; it only shows the closes verbatim, grey, with no Reopen, until
+   it reloads.
+2. **Before** (SQL Editor, as `postgres`):
+   - `select public.lp_stages_recheck_minutes();` returns `20`, and
+     `select count(*) from pg_proc where proname like 'lp\_push\_%' or proname like 'lp\_activity\_%';` returns `12`
+     (F5 and F4 are applied). If not, stop.
+   - `select name, installed_version from pg_available_extensions where name = 'pg_cron';` returns one row (the
+     installed version may be empty: the file enables it). No row: the file still applies, but nothing closes until
+     pg_cron is enabled (Database → Extensions → pg_cron) and the file is pasted again.
+3. **Dry run.** Paste the whole file, change the last line `commit;` to `rollback;`, run. It must finish without an
+   error. Read the NOTICEs:
+   - `patients_status_check: replacing (NOT VALID). Legacy values kept …` (first time only);
+   - `lp-close-inactive: N request(s) In medical have had no activity for 60 min now (the next run closes them).`
+     N is the backlog the first run will close, quietly (a close more than 15 minutes past the hour tells nobody: no
+     Activity row, no push, no in-app alert on the new build);
+   - `pg_cron: enabled.` (only if it was not), then `lp-close-inactive: scheduled every 5 minutes (job …)`.
+     `NOT scheduled (pg_cron is not available)` means step 2's pg_cron row was missing.
+   Nothing is saved. The locks are brief: the CHECK swap on `patients` (`lock_timeout` 5 s; behind a long live write it
+   stops with a lock timeout and changes nothing: run it again).
+4. **Commit:** paste the file again unchanged (ending in `commit;`) and run it.
+5. **Check:**
+   - `select public.lp_inactive_minutes();` returns `60`;
+   - `select count(*) from pg_proc where proname in ('lp_close_inactive', 'lp_inactive_claim', 'lp_inactive_minutes');` returns `3`;
+   - `select jobname, schedule, command, active from cron.job where jobname = 'lp-close-inactive';` returns exactly one
+     row: `lp-close-inactive | */5 * * * * | select public.lp_close_inactive() | t`;
+   - `select pg_get_constraintdef(oid) like '%Closed – Inactive%' from pg_constraint where conname = 'patients_status_check';` returns `true`;
+   - `select to_regclass('public.lp_inactive_closes') is not null, public.lp_stats() ? 'inactive';` returns `true | true`;
+   - (7b) `select count(*) from public.lp_push_prefs where staff like '% · medical' and not new_requests_set and not new_requests;` returns `0`.
+6. **After the first run** (within 5 minutes of the commit):
+   - `select status, return_message, start_time from cron.job_run_details where jobid = (select jobid from cron.job where jobname = 'lp-close-inactive') order by start_time desc limit 3;`
+     shows `succeeded`;
+   - `select count(*) from public.patients where status = 'Closed – Inactive';` is the dry run's N (plus any closed since);
+   - `select count(*), count(*) filter (where quiet) from public.lp_inactive_closes;` the second number is the backlog;
+   - `select count(*) from public.lp_inactive_closes where notified_at is null;` is `0` within 20 minutes.
+
+**Pause it** (a bad night, a wrong close): `select cron.unschedule('lp-close-inactive');`. Nothing closes until the file
+is pasted again (which schedules exactly one job) or `select cron.schedule('lp-close-inactive', '*/5 * * * *', 'select public.lp_close_inactive()');`.
+A closed request is reopened from its action bar (Reopen), one at a time. To go back, redeploy the previous build and
+pause the job; the SQL can stay (the old build shows Closed – Inactive verbatim and can't reopen it). A second paste
+keeps every close and notice and leaves one job.
+
+If the migration has to go first after all (the deploy is blocked), pause the job right after the commit as a normal
+step (`select cron.unschedule('lp-close-inactive');`) and schedule it again (the `cron.schedule` line above, or a
+paste of the file) once the new build is live. The old build works on the migrated database: it never calls the new
+functions; its Not found, answers and edits are unchanged; its dashboard's Closed tile leaves Closed · inactive out;
+its Activity list skips a `closed_inactive` row (the bell still counts it) until the phone reloads.
 
 ### F3 + F4 in production
 
@@ -373,6 +455,15 @@ expires, so share it like the password (the staff group chat, never a public pos
 
 ## Morning checklist (things tests can't cover)
 
+- [ ] **F6, after the deploy:** the migration is applied ([F6 in production](#f6-in-production): deploy, dry run,
+      commit, checks); within 5 minutes `cron.job_run_details` shows the first run `succeeded`, and an open phone on
+      the new build shows no toast for the backlog it closed.
+- [ ] **F6 on real phones:** a front-of-house phone with alerts on, locked; an In medical request of theirs left alone
+      for an hour shows "Closed · inactive" under its initials on the lock screen, once; in the app it is in Archived
+      with the grey timer; Reopen on it puts it back in Friend coming.
+- [ ] **F6, Medical:** a Medical phone that never touched the Alerts sheet shows "New requests" on, and a new request
+      reaches its lock screen; its Activity bell does not count it.
+
 - [ ] **F3 + F4, before the deploy:** the migration is applied on production ([F3 + F4 in
       production](#f3--f4-in-production): dry run, commit, checks).
 - [ ] **F3 + F4, Not found on real phones:** front of house with alerts on locks the phone; medical taps "Not
@@ -452,6 +543,14 @@ expires, so share it like the password (the staff group chat, never a public pos
       join link (Settings → Apps → Safari → Clear History and Website Data).
 
 ## Known limits
+
+- **The auto-close is by the clock, not by intent** (F6): a request someone is still working on without touching it
+  (no message, location or en route) closes after an hour In medical; Reopen brings it back. A close is told to the
+  staff involved only when a phone syncs within 15 minutes of it (any open app does, every few seconds), and never
+  for the backlog closed on the first run after the migration or after the job was paused (no Activity row, no push,
+  no in-app alert; a phone still on a build from before F6 shows its usual in-app update for its own requests).
+- **Medical's default "New requests" is a push, not an Activity row** (F6 7b): a Medical member who switches it on
+  in the Alerts sheet (or whose phone's old bell had it on) gets the Activity row too, as everyone else does.
 
 - **Answers, edits and adding photos to an existing request need a connection.** Only new requests (with
   their photos) queue offline. Those buttons show "Needs a connection" offline.

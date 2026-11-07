@@ -3,7 +3,8 @@
 //
 // Things that must stay identical to SQL in supabase/migrations/20261106000000_rework.sql (unit tests
 // compare them): TRANSITIONS (lp_set_status), TEAM_ALIASES + canonStaff (lp_canon_staff), postShort
-// (lp_stats), the field limits (lp_clean_fields), RECHECK_MINUTES (lp_stages_recheck_minutes).
+// (lp_stats), the field limits (lp_clean_fields), RECHECK_MINUTES (lp_stages_recheck_minutes), INACTIVE_MINUTES
+// (lp_inactive_minutes), STATUSES (the status CHECK's needed values, rework step 2).
 
 /** RFC 9562 UUID (versions 1–8, variant 10xx), like Jeffrey's isUuid. */
 export function isUuid(value: unknown): value is string {
@@ -24,6 +25,11 @@ export const STATUS = {
   cancelled: 'Cancelled',
   /** Legacy: never written by this app. Treated like In medical everywhere in the UI and in stats. */
   legacyBringFriend: 'Bring friend to medical',
+  /**
+   * (F6) Closed by the server after INACTIVE_MINUTES with no activity while In medical (lp_close_inactive, every
+   * 5 minutes). Never written by a client; Reopen brings it back to In medical.
+   */
+  inactive: 'Closed – Inactive',
 } as const;
 
 /** Every value the status CHECK allows, in the constraint's order. */
@@ -35,6 +41,7 @@ export const STATUSES = [
   STATUS.discharged,
   STATUS.legacyBringFriend,
   STATUS.cancelled,
+  STATUS.inactive,
 ] as const;
 
 export type Status = (typeof STATUSES)[number];
@@ -72,7 +79,8 @@ export type GlyphKind =
   | 'inMedical' // ring with a ¾ pie, green
   | 'closed' // filled check, grey
   | 'queued' // dashed ring, grey (outbox item, not sent yet)
-  | 'logged'; // empty ring, gray-10 (audit trail "Logged")
+  | 'logged' // empty ring, gray-10 (audit trail "Logged")
+  | 'inactive'; // (F6) lucide timer-off, bare outline, grey (Closed · inactive)
 
 export interface StatusMeta {
   /** Full UI label, e.g. "In medical · friend coming". */
@@ -115,6 +123,8 @@ export const STATUS_META: Readonly<Record<Status, StatusMeta>> = {
   [STATUS.discharged]: { label: 'Discharged', shortLabel: 'Discharged', tone: 'gray', glyph: 'closed', bucket: 'closed' },
   [STATUS.cancelled]: { label: 'Cancelled', shortLabel: 'Cancelled', tone: 'gray', glyph: 'closed', bucket: 'closed' },
   [STATUS.legacyBringFriend]: { label: 'In medical · friend coming', shortLabel: 'In medical', tone: 'green', glyph: 'inMedical', bucket: 'open' },
+  // (F6) "Inactive" on a narrow phone, where "Closed · inactive" would take the name's room (the timer glyph says the rest).
+  [STATUS.inactive]: { label: 'Closed · inactive', shortLabel: 'Closed · inactive', narrowLabel: 'Inactive', tone: 'gray', glyph: 'inactive', bucket: 'closed' },
 };
 
 /**
@@ -157,6 +167,8 @@ export const TRANSITIONS: Readonly<Record<Status, readonly Status[]>> = {
   [STATUS.discharged]: [STATUS.inMedical],
   [STATUS.cancelled]: [STATUS.waiting],
   [STATUS.legacyBringFriend]: [STATUS.reunited, STATUS.discharged, STATUS.notInMedical],
+  // (F6) Reopen only (kind 'reopen', any staff).
+  [STATUS.inactive]: [STATUS.inMedical],
 };
 
 export function canTransition(from: string, to: string): boolean {
@@ -216,10 +228,13 @@ export function actionLabel(id: StatusActionId): string {
 /**
  * The sticky action bar on the profile / the Pending cards (spec §8):
  *   Waiting → Not found, In medical · In medical → Change answer, Reunited ·
- *   Not found in medical → Change answer · closed / unknown → none.
+ *   Not found in medical → Change answer · (F6) Closed · inactive → Reopen (where Change answer sits; it may have
+ *   closed under someone still working on it) · other closed / unknown → none.
  */
 export function primaryActions(status: string): StatusAction[] {
   switch (status) {
+    case STATUS.inactive:
+      return [action('reopen')];
     case STATUS.waiting:
       return [action('notInMedical'), action('inMedical')];
     case STATUS.inMedical:
@@ -785,4 +800,24 @@ export function isRecheckDue(row: { status: string; recheckAt?: string | null },
 /** True when a Not found on this request puts it on hold (the first Not found) rather than closing it. */
 export function notFoundHolds(row: { status: string; notFoundChecks?: number }): boolean {
   return row.status === STATUS.waiting && (row.notFoundChecks ?? 0) === 0;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// F6 · Inactivity auto-close (Brian 2026-11-06 19:55–20:07): a request In medical with no activity (no audit row:
+// answer, edit, location, photo, message, en route) for INACTIVE_MINUTES is closed by the server as
+// STATUS.inactive ("Closed · inactive"), every 5 minutes (pg_cron 'lp-close-inactive', rework SQL section 9).
+// ---------------------------------------------------------------------------------------------------
+
+/** How long a request may sit In medical with no activity. MUST equal lp_inactive_minutes() in the rework SQL (unit-tested). */
+export const INACTIVE_MINUTES = 60;
+
+/** Who the auto-close is attributed to (updated_by and the audit row's staff). */
+export const SYSTEM_STAFF = 'System';
+
+/** The audit row's kind for an auto-close (status_changed, new_value.kind; not a StatusKind: no client sends it). */
+export const AUTO_CLOSE_KIND = 'auto_close';
+
+/** True for a request the server closed for inactivity. */
+export function isInactiveClosed(status: string): boolean {
+  return status === STATUS.inactive;
 }

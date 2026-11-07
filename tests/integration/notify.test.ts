@@ -49,8 +49,14 @@ async function device(staff: Staff, tag: string) {
   return endpoint;
 }
 
-async function rows(requestId: string) {
-  const { data, error } = await admin().from('lp_activity').select('staff, kind, actor, detail, read_at').eq('request_id', requestId);
+/**
+ * The request's Activity rows, of `only` these staff when given: (F6 7b) every Medical identity on the shared stack
+ * that never set New requests now has it on, so creating a request also writes their "New request" rows.
+ */
+async function rows(requestId: string, only?: readonly Staff[]) {
+  let query = admin().from('lp_activity').select('staff, kind, actor, detail, read_at').eq('request_id', requestId);
+  if (only) query = query.in('staff', only.map(canon));
+  const { data, error } = await query;
   if (error) throw new Error(error.code);
   return data as Array<{ staff: string; kind: string; actor: string; detail: string; read_at: string | null }>;
 }
@@ -74,7 +80,7 @@ describe('notifyStaff', () => {
     const r = await createRequest(dana, { name: 'Ana TEST-S Lima' });
     await notifyStaff([staffOf(dana), staffOf(dana).toUpperCase(), staffOf(rae)], { requestId: r.id, kind: 'in_medical', actor: staffOf(rae), detail: 'In medical' });
     await notifyStaff([staffOf(dana), staffOf(rae)], { requestId: r.id, kind: 'moved', actor: staffOf(rae), detail: 'Chair 9 → Bed 3' });
-    const got = await rows(r.id);
+    const got = await rows(r.id, [dana, rae]);
     expect(got).toHaveLength(1);
     expect(got[0]).toMatchObject({ staff: canon(dana), kind: 'moved', detail: 'Chair 9 → Bed 3', actor: staffOf(rae), read_at: null });
   });
@@ -120,7 +126,7 @@ describe('notifyStaff', () => {
       expect((x.options.vapidDetails as { subject?: string }).subject).toBe(process.env.VAPID_SUBJECT);
     }
     // The stored detail is scrubbed too.
-    expect((await rows(r.id))[0]?.detail).toBe('Rae C.: call me on ••• about');
+    expect((await rows(r.id, [dana]))[0]?.detail).toBe('Rae C.: call me on ••• about');
   });
 
   it('a 410 from the push service deletes the subscription; a 500 counts a failure', async () => {
@@ -144,7 +150,7 @@ describe('notifyStaff', () => {
     await notifyStaff([staffOf(dana)], { requestId: r.id, kind: 'edited', actor: 'Someone · Medical', detail: 'Details changed' });
     expect(Date.now() - started).toBeLessThan(NOTIFY_WAIT_MS + 300);
     // The row is written before the push goes out.
-    expect(await rows(r.id)).toHaveLength(1);
+    expect(await rows(r.id, [dana])).toHaveLength(1);
   });
 
   it('never throws: an unknown request, a bad kind, nobody to tell', async () => {

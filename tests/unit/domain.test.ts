@@ -76,8 +76,15 @@ describe('statuses', () => {
 
   it('lists every value of the database CHECK', () => {
     expect([...STATUSES].sort()).toEqual(
-      ['Added', 'Bring friend to medical', 'Cancelled', 'Checked – Not Found', 'Found – Awaiting Reunion', 'Found – Discharged', 'Reunited – Closed'].sort(),
+      [
+        'Added', 'Bring friend to medical', 'Cancelled', 'Checked – Not Found', 'Found – Awaiting Reunion', 'Found – Discharged', 'Reunited – Closed',
+        // (F6) Only the server's inactivity auto-close writes it.
+        'Closed – Inactive',
+      ].sort(),
     );
+    // The same values, in the same order, as rework step 2's v_statuses (the CHECK's needed values).
+    const sql = /v_statuses constant text\[\] := array\[([^\]]*)\]/.exec(MIGRATION)?.[1] ?? '';
+    expect([...sql.matchAll(/'([^']+)'/g)].map((m) => m[1])).toEqual([...STATUSES]);
   });
 });
 
@@ -119,9 +126,9 @@ describe('transitions', () => {
     expect(undoTarget('Found – Awaiting Reunion')).toBe('Found – Awaiting Reunion');
     expect(undoTarget('Bring friend to medical')).toBe('Found – Awaiting Reunion');
     expect(undoTarget('Found – Transported')).toBeNull();
-    // Every undoable tap's reverse move is allowed by the transition table.
+    // Every undoable tap's reverse move is allowed by the transition table. (F6: Reopen has no Undo.)
     for (const from of STATUSES) {
-      for (const a of primaryActions(from)) {
+      for (const a of primaryActions(from).filter((x) => x.undoable)) {
         const back = undoTarget(from);
         expect(back && canTransition(a.to, back), `${from} → ${a.to} → undo`).toBe(true);
       }

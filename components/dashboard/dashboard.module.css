@@ -227,6 +227,10 @@ button.tile:active {
 .tileWide .lb > svg {
   margin-top: 0;
 }
+/* A slim tile's label is one line, never cut: the tile is the column's full width (or half of six columns). */
+.tileWide .lb > span {
+  white-space: nowrap;
+}
 .enrGlyph {
   flex: none;
   color: var(--teal-11);
@@ -633,6 +637,10 @@ button.pr:active {
     .tileClosed,
     .tileLate {
       margin-top: 0;
+    }
+    /* (F6) Friends en route and Closed · inactive share one row: three columns each. */
+    .tile.tileWide.tileHalf {
+      grid-column: span 3;
     }
   }
 }

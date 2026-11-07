@@ -9,6 +9,8 @@
 //     found yet" alert closes when its Undo takes the hold away.
 //   * (F5) The hold's alert names the request by its initials only, never its LP number (contract B: it may
 //     reach the lock screen): "K.T." / "Not found yet · recheck 4:40 PM".
+//   * (F6) A backlog auto-close (row.quietClose: the first run after the migration, or after the job was paused)
+//     never alerts, as the server never tells it: no toast, no system notification, no burst on the deploy.
 import type { RequestSummary } from '../api-types';
 import { STATUS, ageGender, initials, isHeld, isInMedical, sameStaff, statusMeta } from '../domain';
 import { holdDetail } from '../hold-detail';
@@ -92,6 +94,7 @@ export function diffAlerts(
     const byMe = sameStaff(row.updatedBy, ctx.sessionStaff);
     if (before) {
       if (!mine || byMe) continue;
+      if (row.quietClose === true && before.status !== row.status) continue;
       if (before.status === row.status) {
         // (F5) The first Not found keeps the request Waiting for check: going on hold is the change.
         if (isHeld(row) && !isHeld(before)) {

@@ -67,11 +67,13 @@ describe('POST /api/push/prefs', () => {
     expect((await api('/api/push/prefs', { json: {}, cookie: await cookieFor(newStaff()), origin: 'https://evil.example' })).status).toBe(403);
   });
 
-  it('push is on (the test keys), with the defaults: New requests off (unless the phone bell was on), Updates on', async () => {
-    const res = await api('/api/push/prefs', { json: {}, cookie: await cookieFor(medical()) });
+  it('push is on (the test keys), with the defaults: New requests off (unless the phone bell was on, or Medical), Updates on', async () => {
+    const res = await api('/api/push/prefs', { json: {}, cookie: await cookieFor(newStaff('GC/HX - Base')) });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ enabled: true, newRequests: false, myUpdates: true });
     expect(res.body.publicKey).toBe(process.env.VAPID_PUBLIC_KEY);
+    // (F6 7b, Brian 2026-11-07 02:15: Main Med gets distracted) The Medical team starts with New requests ON.
+    expect((await api('/api/push/prefs', { json: {}, cookie: await cookieFor(medical()) })).body).toMatchObject({ newRequests: true, myUpdates: true });
     expect((await api('/api/push/prefs', { json: {}, cookie: await cookieFor(newStaff()) })).body).toMatchObject({ newRequests: false, myUpdates: true });
     // The phone's old "Alerts" bell is the default for a staff member seen for the first time.
     expect((await api('/api/push/prefs', { json: { bell: true }, cookie: await cookieFor(newStaff()) })).body).toMatchObject({ newRequests: true });
@@ -90,6 +92,67 @@ describe('POST /api/push/prefs', () => {
     expect(await subRow(d2.endpoint)).toMatchObject({ new_requests: true, my_updates: false });
     // A first read never changes them back.
     expect((await api('/api/push/prefs', { json: { bell: false }, cookie })).body).toMatchObject({ newRequests: true, myUpdates: false });
+  });
+
+  it('F6 7b: Medical has New requests ON by default (new devices and rows never set); set in the sheet, it stays; nobody else changes', async () => {
+    // A new Medical device: on, the device row too, and they are among the new-request staff.
+    const rae = medical();
+    const raePhone = push.device();
+    expect(await subscribe(rae, raePhone, { bell: false })).toMatchObject({ newRequests: true, myUpdates: true });
+    expect(await subRow(raePhone.endpoint)).toMatchObject({ new_requests: true });
+    const { data: who } = await admin().rpc('lp_push_new_request_staff');
+    expect(who as string[]).toContain(canon(rae));
+    // An existing Medical row that never had the switch set (made before this default) turns on at its next read.
+    const sam = medical();
+    const { error } = await admin().from('lp_push_prefs').insert({ staff: canon(sam), team: 'Medical', new_requests: false, new_requests_set: false });
+    expect(error).toBeNull();
+    expect((await api('/api/push/prefs', { json: {}, cookie: await cookieFor(sam) })).body).toMatchObject({ newRequests: true });
+    // Switched off in the Alerts sheet: it stays off, whatever a device's old bell says.
+    const lee = medical();
+    const leeCookie = await cookieFor(lee);
+    expect((await api('/api/push/prefs', { json: { newRequests: false }, cookie: leeCookie })).body).toMatchObject({ newRequests: false });
+    expect((await api('/api/push/prefs', { json: {}, cookie: leeCookie })).body).toMatchObject({ newRequests: false });
+    expect(await subscribe(lee, push.device())).toMatchObject({ newRequests: false });
+    // Front of house keeps New requests off.
+    const dana = newStaff();
+    expect(await subscribe(dana, push.device())).toMatchObject({ newRequests: false });
+    // So a new request reaches the Medical phone with nothing set, on its lock screen.
+    // Medical staff who turned it on themselves (the sheet, or a device's old bell) keep their Activity rows.
+    const kai = medical();
+    const kaiPhone = push.device();
+    await subscribe(kai, kaiPhone);
+    expect((await api('/api/push/prefs', { json: { newRequests: true }, cookie: await cookieFor(kai) })).body).toMatchObject({ newRequests: true });
+    const ivy = medical();
+    const ivyPhone = push.device();
+    expect(await subscribe(ivy, ivyPhone, { bell: true })).toMatchObject({ newRequests: true });
+    const raeCookie = await cookieFor(rae);
+    // The device echoes the server's switch back as its bell (ActivityHost): it stays the team's default.
+    expect((await api('/api/push/prefs', { json: { bell: true }, cookie: raeCookie })).body).toMatchObject({ newRequests: true });
+    const unreadBefore = (await api('/api/activity/unread', { cookie: raeCookie })).body.count;
+    const res = await api('/api/requests', {
+      json: { clientMutationId: crypto.randomUUID(), reportingLocation: 'FA 3 – Kinetic', name: 'Kim TEST-S Ode', age: '30' },
+      cookie: await cookieFor(dana),
+    });
+    expect(res.status).toBe(201);
+    const id = res.body.request.id as string;
+    await eventually(() => raePhone.deliveries.some((d) => d.payload.requestId === id && d.payload.kind === 'new_request'));
+    await eventually(() => kaiPhone.deliveries.some((d) => d.payload.requestId === id && d.payload.kind === 'new_request'));
+    await eventually(() => ivyPhone.deliveries.some((d) => d.payload.requestId === id && d.payload.kind === 'new_request'));
+    // Regression (review; "show nothing extra"): on by the Medical default alone it is the push only, no Activity row,
+    // so Rae's bell and app badge never count every request logged.
+    expect(await activityOf(rae, id)).toBeNull();
+    expect((await api('/api/activity/unread', { cookie: raeCookie })).body.count).toBe(unreadBefore);
+    expect(await activityOf(kai, id)).toMatchObject({ kind: 'new_request', read_at: null });
+    expect(await activityOf(ivy, id)).toMatchObject({ kind: 'new_request', read_at: null });
+    // Set in the sheet (even to on), it is Rae's own choice from then: the Activity rows come back.
+    expect((await api('/api/push/prefs', { json: { newRequests: true }, cookie: raeCookie })).body).toMatchObject({ newRequests: true });
+    const res2 = await api('/api/requests', {
+      json: { clientMutationId: crypto.randomUUID(), reportingLocation: 'FA 3 – Kinetic', name: 'Lou TEST-S Ode', age: '31' },
+      cookie: await cookieFor(dana),
+    });
+    expect(res2.status).toBe(201);
+    const id2 = res2.body.request.id as string;
+    await eventually(() => activityOf(rae, id2).then((a) => a?.kind === 'new_request' && a));
   });
 
   it('regression: a device with the old bell ON is never turned off by another device of theirs (bell off) that came first', async () => {
@@ -234,6 +297,8 @@ describe('the routes notify (contract D)', () => {
     const row = await eventually(() => activityOf(dana, r.id).then((a) => a ?? undefined));
     expect(row).toMatchObject({ kind: 'in_medical', detail: 'In medical', read_at: null });
     expect(row.actor).toBe(staffOf(rae));
+    // The actor's own answer is never theirs to hear. (F6 7b: Rae's Medical default pushes the new request, but writes
+    // no Activity row.)
     expect(await activityOf(rae, r.id)).toBeNull();
     await eventually(() => danaPhone.deliveries.length === 1);
     const p = danaPhone.deliveries[0]!;

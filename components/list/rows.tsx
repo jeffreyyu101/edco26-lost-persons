@@ -135,8 +135,12 @@ function LogCells({ number, name, glyph, tone, statusLabel, statusNarrow, create
   );
 }
 
-/** (F5) The narrow label of a status stage (Waiting for check, Not found in medical); the other stages are short already. */
-const narrowStageLabel = (key: StageKey, status: string) => (key === 'waiting' || key === 'notInMedical' ? narrowStatusLabel(status) : null);
+/**
+ * (F5) The narrow label of a status stage (Waiting for check, Not found in medical, F6's Closed · inactive); the other
+ * stages are short already.
+ */
+const narrowStageLabel = (key: StageKey, status: string) =>
+  key === 'waiting' || key === 'notInMedical' || key === 'inactive' ? narrowStatusLabel(status) : null;
 
 export interface LogRowProps {
   row: RequestSummary;

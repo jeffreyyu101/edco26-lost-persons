@@ -6,8 +6,12 @@
 // The first page of a poll also carries the signed-in staff member's unread Activity (F4, spec §22 A85,
 // additive: activityUnread and the fingerprint activityKey, about 50 bytes; the ids are fetched only when the
 // key moves), read in parallel; when it can't be read the fields are left out and the rows still sync.
+// F6 (spec §24 A100): when the answer holds a request the server closed for inactivity in the last 15 minutes, the
+// handler claims and tells that close after the response (lib/server/inactive-notify.ts), once across all phones.
+import { after } from 'next/server';
 import type { SyncResponse } from '@/lib/api-types';
 import { json, parseQuery } from '@/lib/server/http';
+import { inactiveCandidates, notifyInactiveCloses } from '@/lib/server/inactive-notify';
 import { mapSync } from '@/lib/server/mappers';
 import { decorateSync } from '@/lib/server/messages';
 import { authedRoute } from '@/lib/server/route';
@@ -49,5 +53,8 @@ export const GET = authedRoute('GET /api/sync', {}, async ({ request, session })
   const [raw, activity] = await Promise.all([rpc<unknown>('lp_sync', args), firstPage ? unreadActivity(session.staff) : Promise.resolve<ActivityPart>({})]);
   const sync = mapSync(raw);
   const firstDeltaPage = !q.ids && !!q.since && !q.afterAt;
-  return json({ ...(await decorateSync(sync, { staff: session.staff, since: q.since ?? null, changed: firstDeltaPage })), ...activity });
+  const out = { ...(await decorateSync(sync, { staff: session.staff, since: q.since ?? null, changed: firstDeltaPage })), ...activity };
+  const closed = inactiveCandidates(out.rows);
+  if (closed.length > 0) after(() => notifyInactiveCloses(closed));
+  return json(out);
 });
