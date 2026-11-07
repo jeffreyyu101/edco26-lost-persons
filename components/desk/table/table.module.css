@@ -520,11 +520,6 @@ button.fold:focus-visible {
 .chev {
   display: flex;
   color: var(--gray-11);
-  transition: transform 0.15s;
-}
-
-.chev[data-open] {
-  transform: rotate(180deg);
 }
 
 /* ---- Above the table: the connection banner and the filter chips ---------------------------------- */

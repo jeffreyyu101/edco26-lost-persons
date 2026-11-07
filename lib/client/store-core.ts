@@ -105,7 +105,7 @@ import {
   type ToastItem,
 } from './store-contract';
 import { chunk, isRow, mergeRows, overlayForPatch, replaceAll, staleIds, summaryOf } from './sync-merge';
-import type { HoldRules, SnackWords } from './hold-rules';
+import type { HoldFields, HoldRules } from './hold-rules';
 import { uuid } from './uuid';
 
 // ---------------------------------------------------------------------------------------------------
@@ -294,6 +294,8 @@ interface UndoRecord {
   id: string;
   to: SettableStatus;
   version: number;
+  /** (Pending v9.1) The hold fields before the undone change: lp_set_status's Undo puts them back. */
+  restore: HoldFields;
 }
 
 /** What an alert toast on screen is about (one per request; see alerts.ts alertStillCurrent). */
@@ -1238,14 +1240,16 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   /** The row's latest version came from this phone, or from the same staff member on another phone. */
   const changedByThisStaff = (row: RequestSummary) => ownKeys.has(alertKey(row)) || sameStaff(row.updatedBy, state.session.staff);
 
-  const showUndo = (row: RequestSummary, from: string, to: SettableStatus, words: SnackWords | null) => {
-    const back = undoTarget(from);
+  /** `hold` is the loaded hold rules (loadHold): the Undo bar's words and the hold fields the Undo restores. */
+  const showUndo = (row: RequestSummary, before: RequestSummary, to: SettableStatus, hold: HoldRules) => {
+    const back = undoTarget(before.status);
     if (!back || !isSettable(back) || back === to) return;
     clearSnackbar();
     const snackId = uuid();
-    undoRecords.set(snackId, { id: row.id, to: back, version: row.rowVersion });
-    // (Pending v9.1) A Not found says what it did (`words`, hold.notFoundSnack): "Not found yet · recheck in 20 min"
-    // (the hold) or "B.W. closed · not found in medical" (the final answer).
+    undoRecords.set(snackId, { id: row.id, to: back, version: row.rowVersion, restore: hold.holdFieldsOf(before) });
+    // (Pending v9.1) A Not found says what it did: "Not found yet · recheck in 20 min" (the hold) or "B.W. closed ·
+    // not found in medical" (the final answer).
+    const words = hold.notFoundSnack(row, to);
     const message = words?.message ?? `${formatCaseNumber(row.caseNumber)} · ${statusMeta(to).shortLabel}`;
     set({ snackbar: { id: snackId, message, ...(words ? { said: words.said } : {}), expiresAt: now() + UNDO_MS } });
     // Held (the location sheet covers the bar): the countdown starts when the hold is released.
@@ -1280,7 +1284,20 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     };
   };
 
-  const runStatus = async (id: string, to: SettableStatus, kind: StatusKind, undoVersion: number | null, tapHeld?: boolean): Promise<MutationResult> => {
+  /**
+   * (Pending v9.1) Requests with an Undo on its way, and the row it brings back: a tap on that card reads it (see
+   * setStatus), not the confirmed row it replaces.
+   */
+  const undoing = new Map<string, Pick<RequestSummary, 'status' | 'recheckAt'>>();
+
+  const runStatus = async (
+    id: string,
+    to: SettableStatus,
+    kind: StatusKind,
+    undoVersion: number | null,
+    tapHeld?: boolean,
+    restore?: HoldFields,
+  ): Promise<MutationResult> => {
     // (F5) The hold's client side (loadHold). Nothing is on screen yet, so a failed load is only the toast.
     const hold = await loadHold().catch(() => null);
     if (!hold) {
@@ -1298,8 +1315,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     if (undoVersion === null && to === STATUS.notInMedical && kind === 'answer' && tapHeld === false && isHeld(row)) {
       return { ok: true, changed: false, request: row };
     }
-    // (F5) A first Not found keeps the status and goes on hold (lib/client/hold-rules.ts predicts it).
-    setOverlay(id, { mutationId: uuid(), kind: 'status', fields: hold.statusOverlayFields(row, to, kind, now()), startedAt: now() });
+    // (F5) A first Not found keeps the status and goes on hold (lib/client/hold-rules.ts predicts it); (Pending v9.1)
+    // an Undo comes back with the hold fields it restores.
+    setOverlay(id, { mutationId: uuid(), kind: 'status', fields: hold.statusOverlayFields(row, to, kind, now(), restore), startedAt: now() });
     let res: HttpResult<ChangeResponse> = await postStatus(id, to, undoVersion ?? row.rowVersion, kind);
     if (gen !== state.generation) return fail('failed', COPY.failed);
     if (!res.ok && res.kind === 'http' && res.status === 409 && kind !== 'undo') {
@@ -1330,7 +1348,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       const request = res.data.request;
       commitOwn(request, id);
       markLive();
-      if (res.data.changed && UNDOABLE_KINDS.has(kind)) showUndo(request, from, to, hold.notFoundSnack(request, to));
+      if (res.data.changed && UNDOABLE_KINDS.has(kind)) showUndo(request, row, to, hold);
       return { ok: true, changed: !!res.data.changed, request: state.confirmed.get(id) ?? request };
     }
     if (res.ok) return mutationFailed(id, { ok: false, kind: 'network' }, { conflictToast: true });
@@ -2180,7 +2198,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       if (offlineNow()) return refuseOffline();
       // (F5) Whether the request was on hold, as the server last said, when tapped (see runStatus). Not the
       // overlay: a double tap lands while the first tap's predicted hold is on screen, and must stay a repeat.
-      const confirmedRow = state.confirmed.get(id);
+      // (Pending v9.1) While an Undo is on its way the card on screen is the one it brings back (its overlay, held
+      // again after the final Not found's Undo): a "× Not found" tapped there is meant as the final answer.
+      const confirmedRow = undoing.get(id) ?? state.confirmed.get(id);
       const tapHeld = confirmedRow ? isHeld(confirmedRow) : false;
       return serialize(id, async () => (await writeGate(false)) ?? runStatus(id, status, kind, null, tapHeld));
     },
@@ -2200,7 +2220,12 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
           showToast({ tone: 'amber', icon: 'alert', title: COPY.undoStale, durationMs: 6_000 });
           return fail('conflict', COPY.undoStale, current);
         }
-        return runStatus(record.id, record.to, 'undo', record.version);
+        undoing.set(record.id, { status: record.to, recheckAt: record.restore.recheckAt });
+        try {
+          return await runStatus(record.id, record.to, 'undo', record.version, undefined, record.restore);
+        } finally {
+          undoing.delete(record.id);
+        }
       });
     },
 

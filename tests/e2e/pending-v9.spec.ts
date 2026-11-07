@@ -366,9 +366,21 @@ test.describe('fixture', () => {
       await expect.poll(() => left.evaluate((el) => el.scrollTop)).toBeGreaterThan(100);
       expect(await right.evaluate((el) => el.scrollTop)).toBe(0);
       expect(await page.evaluate(() => window.scrollY)).toBe(0);
-      // The header pins to the top of its column.
+      // The header pins to the very top of its column, and nothing scrolled under it shows above it (review fix:
+      // the column's top padding used to leave a 6 px strip of cards over the pinned header).
+      await left.evaluate((el) => {
+        el.scrollTop = 157;
+      });
       const header = (await page.getByTestId('queue-header-check').boundingBox())!;
-      expect(Math.abs(header.y - l.y)).toBeLessThan(10);
+      expect(Math.abs(header.y - l.y)).toBeLessThan(1);
+      const above = await page.evaluate(
+        ({ x, y }) => {
+          const el = document.elementFromPoint(x, y);
+          return { header: !!el?.closest('[data-testid="queue-header-check"]'), card: !!el?.closest('[data-testid="check-card"]') };
+        },
+        { x: l.x + l.width / 2, y: l.y + 3 },
+      );
+      expect(above).toEqual({ header: true, card: false });
 
       // J walks every card on screen, Waiting for check before Friend coming.
       const order = await page.evaluate(() =>
@@ -396,6 +408,77 @@ test.describe('fixture', () => {
       expect(right.x).toBeGreaterThan(left.x + left.width);
       expect(left.width).toBeGreaterThan(320);
     });
+  });
+
+  test('board: two columns at every desk width, a request docked beside it included; the answers keep one line', async ({ browser }) => {
+    test.setTimeout(120_000);
+    // SPEC rule 5 (review fix): the board never stacks from 768 px. [viewport, open a request beside it]
+    const cases = [
+      [768, 1024, false],
+      [1024, 768, true],
+      [1180, 820, true],
+      [1280, 800, true],
+    ] as const;
+    for (const [width, height, docked] of cases) {
+      await withPage(browser, DANA, { ...viewportFor(width), viewport: { width, height } }, async (page) => {
+        await serve(page, { rows: [...ALL_FIX] });
+        await page.goto('/?view=pending');
+        const left = page.getByTestId('pending-column-check');
+        const right = page.getByTestId('pending-column-coming');
+        await expect(left.locator('[data-testid="check-card"]').first()).toBeVisible({ timeout: 20_000 });
+        if (docked) {
+          await page.locator(`[data-pending-card="${idOf('B.W.')}"] [data-request-id]`).click();
+          await expect(page.getByTestId('profile')).toBeVisible();
+        }
+        const where = `${width}×${height}${docked ? ' with a request open' : ''}`;
+        const l = (await left.boundingBox())!;
+        const r = (await right.boundingBox())!;
+        expect(r.x, where).toBeGreaterThan(l.x + l.width);
+        expect(Math.abs(r.y - l.y), where).toBeLessThan(2);
+        // Each column scrolls on its own: Friend coming is on screen beside Waiting for check.
+        await expect(right.locator('[data-testid="friend-coming-card"]').first()).toBeInViewport();
+        expect(await left.evaluate((el) => getComputedStyle(el).overflowY), where).toBe('auto');
+        // Every answer and its label on one 44 px line, nothing cut.
+        const answers = await left.locator('[data-testid="check-card"] button[data-accent-color]').evaluateAll((els) =>
+          els.map((el) => ({ text: (el.textContent ?? '').trim(), h: el.getBoundingClientRect().height, cut: el.scrollWidth > el.clientWidth + 1 })),
+        );
+        expect(answers.length, where).toBeGreaterThan(0);
+        for (const a of answers) expect(a, `${where}: ${a.text}`).toMatchObject({ h: 44, cut: false });
+        expect(await layoutProblems(page), where).toEqual([]);
+      });
+    }
+  });
+
+  test('desk: the connection banner never pushes the board below the window (the page never scrolls)', async ({ browser }) => {
+    const ctx = await newSignedInContext(browser, DANA, viewportFor(1440));
+    const page = await ctx.newPage();
+    try {
+      await serve(page, { rows: [...ALL_FIX] });
+      await page.goto('/?view=pending');
+      const left = page.getByTestId('pending-column-check');
+      await expect(left.locator('[data-testid="check-card"]').first()).toBeVisible({ timeout: 20_000 });
+      await ctx.setOffline(true);
+      // F2's banner is not a status region (its words are announced once by `live-announcement`); the shell may
+      // render a hidden copy, so the visible one.
+      await expect(page.getByText(/^Offline · \d+ waiting to send$/).filter({ visible: true })).toBeVisible({ timeout: 15_000 });
+      await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight))
+        .toBeLessThanOrEqual(0);
+      const vh = await page.evaluate(() => window.innerHeight);
+      for (const col of ['check', 'coming'] as const) {
+        const box = (await page.getByTestId(`pending-column-${col}`).boundingBox())!;
+        expect(box.y + box.height, col).toBeLessThanOrEqual(vh + 1);
+      }
+      // The last card's answers are reachable by scrolling the column.
+      await left.evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
+      const last = (await left.locator('[data-testid="check-card"]').last().boundingBox())!;
+      expect(last.y + last.height).toBeLessThanOrEqual(vh);
+    } finally {
+      await ctx.setOffline(false);
+      await ctx.close();
+    }
   });
 
   // -------------------------------------------------------------------------------------------------
@@ -466,7 +549,14 @@ test.describe('fixture', () => {
       const fold = page.getByTestId('closed-fold');
       await expect(fold).toHaveAccessibleName('Closed 3 requests');
       await expect(fold).toHaveAttribute('aria-expanded', 'false');
+      // The row is full width, its › at the right edge (frame 9).
+      const foldBox = (await fold.boundingBox())!;
+      const sectionBox = (await page.getByTestId('mine-closed').boundingBox())!;
+      expect(Math.abs(foldBox.width - sectionBox.width)).toBeLessThan(1);
+      const chev = (await fold.locator('svg.lucide-chevron-right').boundingBox())!;
+      expect(foldBox.x + foldBox.width - (chev.x + chev.width)).toBeLessThan(24);
       await fold.click();
+      await expect(fold.locator('svg.lucide-chevron-down')).toHaveCount(1);
       await expect(page.getByTestId('closed-rows').locator('[data-testid="mine-card"]')).toHaveCount(3);
 
       // All requests keeps its own order (Newest).
@@ -630,7 +720,7 @@ test.describe('fixture', () => {
   }
 
   for (const theme of ['light', 'dark'] as const) {
-    for (const width of [375, 390, 820, 1180, 1440] as const) {
+    for (const width of [375, 390, 768, 820, 1180, 1440] as const) {
       test(`overflow at ${width} px (${theme}): Pending, All and My requests by status, the request`, async ({ browser }) => {
         test.setTimeout(90_000);
         await withPage(browser, DANA, viewportFor(width), async (page) => {

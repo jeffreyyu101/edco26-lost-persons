@@ -152,7 +152,7 @@ button.portrait {
   background: var(--teal-a3);
 }
 
-/* "⟳ Recheck 4:40 PM" under a "Not found yet" block (recheck-3.png): a hairline in the block's colour. */
+/* "↺ Recheck 4:40 PM" (lucide history) under a "Not found yet" block (recheck-3.png): a hairline in the block's colour. */
 .recheckRow {
   display: flex;
   align-items: center;

@@ -66,7 +66,7 @@ import { displayName } from './list-helpers';
 import { PendingQueues, useLeaving } from './PendingQueues';
 import { SortToggle } from './SortToggle';
 import { primeKeyboard, useScrollMemory, useStatusTap, useStickyHeight } from './hooks';
-import { mineFreshTone, resultCount, searchDisplay, updatedSince } from './list-helpers';
+import { mineFreshTone, resultCount, searchDisplay, stageClock, updatedSince } from './list-helpers';
 import { AllSkeleton, MineSkeleton, PendingSkeleton } from './ListSkeletons';
 import { ArchivedFold, ArchivedRows, ColumnHeader, GroupDivider, LogGrid, LogRow, OutboxLogRow, SearchLogRow } from './rows';
 import type { ListViewName } from './ViewSwitcher';
@@ -277,7 +277,7 @@ function Rows({ rows, now, tz }: { rows: readonly RequestSummary[]; now: number;
   return (
     <>
       {rows.map((row) => (
-        <LogRow key={row.id} row={row} now={now} {...rowTimes(row, now, tz)} />
+        <LogRow key={row.id} row={row} now={stageClock(row, now)} {...rowTimes(row, now, tz)} />
       ))}
     </>
   );
@@ -762,7 +762,7 @@ export function SearchView({ q }: SearchViewProps) {
                 <SearchLogRow
                   key={row.id}
                   hit={hit}
-                  now={now}
+                  now={stageClock(row, now)}
                   {...rowTimes(row, now, tz)}
                   nameRanges={d.nameRanges}
                   caseRanges={d.caseRanges}

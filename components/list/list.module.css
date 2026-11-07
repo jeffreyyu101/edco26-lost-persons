@@ -650,9 +650,12 @@ button.lr:focus-visible {
   padding: 0 1px;
 }
 
-/* "Closed  6  ⌄": a plain row, not a card (polish-v7.html .fold). */
+/* "Closed  6  ›": a plain row, not a card (polish-v7.html .fold, pending-v9.html .arch). Full width in the log grid
+   and in a plain block (My requests' Closed by status), so the chevron and the hairlines reach the right edge. */
 .fold {
   grid-column: 1 / -1;
+  box-sizing: border-box;
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -700,12 +703,7 @@ button.lr:focus-visible {
 
 .foldChev {
   display: flex;
-  color: var(--gray-10);
-  transition: transform 0.15s;
-}
-
-.foldChev[data-open] {
-  transform: rotate(180deg);
+  color: var(--gray-11);
 }
 
 /* The closed rows under the fold: a subgrid, so they share the log's columns. */
@@ -1091,6 +1089,33 @@ button.lr:focus-visible {
 
 .pbtnSoft.pbtnSoft {
   font-weight: 500;
+}
+
+/* On the desk board each column is a size container (components/desk/pending-board.module.css .col; nothing above
+   a phone's cards is one, so none of this applies there). A column under 340 px (a 768 px iPad, a request docked
+   beside the board) tightens the card so "⧗ Not found yet" keeps its one line; under 290 px (a request docked
+   on a 1024–1279 px screen) the two answers stack, full width, Not found first. */
+@container (max-width: 339.98px) {
+  .pcard {
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .pwho {
+    gap: 10px;
+  }
+
+  .pbtn.pbtn {
+    gap: 6px;
+    padding: 0 6px;
+    font-size: 14px;
+  }
+}
+
+@container (max-width: 289.98px) {
+  .pacts {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* My requests: the stage chip in a card's corner (Needs info). Text is step 12 on the tint in light (step 11 is

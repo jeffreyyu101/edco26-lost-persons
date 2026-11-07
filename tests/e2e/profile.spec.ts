@@ -312,10 +312,13 @@ test('Change answer opens a menu: the other answer or Back to Waiting for check,
   await undoButton(page).click();
   await expect(profileStatus(page, 'Found – Awaiting Reunion')).toBeVisible();
 
-  // The server kept every move: the audit trail holds each change and each Undo.
-  const detail = await api<RequestDetail>(page.request, origin, 'GET', `/api/requests/${row.id}`);
-  const moves = detail.audit.filter((e) => e.action === 'status').map((e) => `${e.previous.status} → ${e.next.status} (${e.next.kind})`);
-  expect(moves).toEqual([
+  // The server kept every move: the audit trail holds each change and each Undo. (Polled: the status above is the
+  // tap's optimistic overlay, shown before the last Undo has reached the server.)
+  const moves = async () => {
+    const detail = await api<RequestDetail>(page.request, origin, 'GET', `/api/requests/${row.id}`);
+    return detail.audit.filter((e) => e.action === 'status').map((e) => `${e.previous.status} → ${e.next.status} (${e.next.kind})`);
+  };
+  await expect.poll(moves).toEqual([
     'Added → Found – Awaiting Reunion (answer)',
     'Found – Awaiting Reunion → Added (change)',
     'Added → Found – Awaiting Reunion (undo)',

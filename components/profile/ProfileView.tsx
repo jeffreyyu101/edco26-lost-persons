@@ -25,7 +25,7 @@
 //   cancel       red, creator-only (canonical created_by match, A18), while Waiting, confirm Keep / Cancel
 //   conflict     "Updated by someone else" when another person's change arrives while it is open
 import { AlertDialog, Badge, Button, DropdownMenu, Heading, IconButton, Skeleton, Text, VisuallyHidden } from '@radix-ui/themes';
-import { Camera, Check, ChevronDown, Clock, CloudOff, Ellipsis, Hourglass, MapPin, Pencil, Phone, Plus, RefreshCw, RotateCcw, Trash2, Undo2, X } from 'lucide-react';
+import { Camera, Check, ChevronDown, Clock, CloudOff, Ellipsis, History, Hourglass, MapPin, Pencil, Phone, Plus, RotateCcw, Trash2, Undo2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { CropSheet } from '@/components/photo/CropSheet';
 import { useCropQueue, type CropPick } from '@/components/photo/use-crop-queue';
@@ -706,7 +706,8 @@ function StatusBlock({
           (Pending v9.1): the request's own status block keeps when the recheck is due. */}
       {stage.recheck ? (
         <div className={s.recheckRow} data-due={stage.due ? '' : undefined} data-testid="recheck-row">
-          <RefreshCw size={16} strokeWidth={2} aria-hidden className={s.recheckGlyph} />
+          {/* (Pending v9.1 GLYPHS) lucide history is Recheck everywhere; refresh-cw is the live line's Refresh only. */}
+          <History size={16} strokeWidth={2} aria-hidden className={s.recheckGlyph} />
           <span>{stage.recheck}</span>
         </div>
       ) : null}

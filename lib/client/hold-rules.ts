@@ -24,6 +24,9 @@ export interface HoldDomain {
   formatCaseNumber: typeof Format.formatCaseNumber;
 }
 
+/** The hold fields a status change replaced: what lp_set_status's Undo puts back (rework.sql). */
+export type HoldFields = Pick<RequestSummary, 'recheckAt' | 'notFoundChecks'>;
+
 /** An Undo bar's visible words and what a screen reader hears (Pending v9.1). */
 export interface SnackWords {
   message: string;
@@ -38,8 +41,18 @@ export function holdRules(d: HoldDomain) {
     return d.notFoundHolds(row) && kind !== 'undo';
   }
 
-  /** The optimistic overlay of a status tap: the fields the server is expected to return. */
-  function statusOverlayFields(row: RequestSummary, to: SettableStatus, kind: StatusKind, now: number): Partial<RequestSummary> {
+  /** A row's hold fields as an Undo record keeps them (an older cache without them reads as no hold). */
+  function holdFieldsOf(row: Partial<HoldFields>): HoldFields {
+    return { recheckAt: row.recheckAt ?? null, notFoundChecks: row.notFoundChecks ?? 0 };
+  }
+
+  /**
+   * The optimistic overlay of a status tap: the fields the server is expected to return. An Undo passes the hold
+   * fields the undone change replaced (`restore`): the server puts them back, so the card comes back exactly as it
+   * will be (the "Not found yet" chip and "× Not found" after the final Not found's Undo), not as a bare status.
+   */
+  function statusOverlayFields(row: RequestSummary, to: SettableStatus, kind: StatusKind, now: number, restore?: HoldFields | null): Partial<RequestSummary> {
+    if (kind === 'undo' && restore) return { status: to, ...holdFieldsOf(restore) };
     if (to === STATUS.notInMedical) {
       if (holdsOnNotFound(row, kind)) return { recheckAt: new Date(now + RECHECK_MINUTES * 60_000).toISOString(), notFoundChecks: 1 };
       return { status: to, recheckAt: null };
@@ -78,7 +91,7 @@ export function holdRules(d: HoldDomain) {
     return to === STATUS.notInMedical && d.isHeld(row) ? (notFoundSnack(row, to)?.message ?? null) : null;
   }
 
-  return { holdsOnNotFound, statusOverlayFields, holdChanged, notFoundSnack, holdSnackMessage };
+  return { holdsOnNotFound, holdFieldsOf, statusOverlayFields, holdChanged, notFoundSnack, holdSnackMessage };
 }
 
 export type HoldRules = ReturnType<typeof holdRules>;

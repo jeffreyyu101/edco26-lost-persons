@@ -5,9 +5,9 @@ import { NOT_FOUND_YET_LABEL, RECHECK_MINUTES, STATUS, STATUS_META, initials, is
 import { formatCaseNumber } from '../format';
 import { holdRules, type HoldDomain } from './hold-rules';
 
-export type { HoldDomain, HoldRules, SnackWords } from './hold-rules';
+export type { HoldDomain, HoldFields, HoldRules, SnackWords } from './hold-rules';
 
 /** What the rules are bound to (the store binds the same values: store-core.ts loadHold). */
 export const HOLD_DOMAIN: HoldDomain = { STATUS, STATUS_META, NOT_FOUND_YET_LABEL, RECHECK_MINUTES, initials, isHeld, notFoundHolds, formatCaseNumber };
 
-export const { holdsOnNotFound, statusOverlayFields, holdChanged, notFoundSnack, holdSnackMessage } = holdRules(HOLD_DOMAIN);
+export const { holdsOnNotFound, holdFieldsOf, statusOverlayFields, holdChanged, notFoundSnack, holdSnackMessage } = holdRules(HOLD_DOMAIN);

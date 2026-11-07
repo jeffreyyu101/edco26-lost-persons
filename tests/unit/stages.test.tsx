@@ -374,6 +374,19 @@ describe('optimistic hold', () => {
     expect(holdsOnNotFound(row(), 'undo')).toBe(false);
   });
 
+  it('an Undo overlays the hold fields the undone change replaced (Pending v9.1): the card comes back as the server restores it', () => {
+    const closed = row({ status: STATUS.notInMedical, recheckAt: null, notFoundChecks: 2 });
+    expect(statusOverlayFields(closed, STATUS.waiting, 'undo', NOW, { recheckAt: at(5), notFoundChecks: 1 })).toEqual({
+      status: STATUS.waiting,
+      recheckAt: at(5),
+      notFoundChecks: 1,
+    });
+    const held = row({ recheckAt: at(5), notFoundChecks: 1 });
+    expect(statusOverlayFields(held, STATUS.waiting, 'undo', NOW, { recheckAt: null, notFoundChecks: 0 })).toEqual({ status: STATUS.waiting, recheckAt: null, notFoundChecks: 0 });
+    // Without a record (an older caller) only the status, as before.
+    expect(statusOverlayFields(closed, STATUS.waiting, 'undo', NOW)).toEqual({ status: STATUS.waiting });
+  });
+
   it('a hold that moved under a tap blocks the resend of a Not found', () => {
     expect(holdChanged(row(), row({ recheckAt: at(20), notFoundChecks: 1 }))).toBe(true);
     expect(holdChanged(row(), row())).toBe(false);
@@ -609,6 +622,10 @@ describe('renders', () => {
     expect(block).toContain('data-tone="violet"');
     expect(block).toContain('>Not found yet<');
     expect(block).toContain(`Recheck ${formatClockAmPm(held.recheckAt!, TZ)}`);
+    // (Pending v9.1 GLYPHS) Recheck is lucide history, as on the chip and the heading; refresh-cw is the live line's.
+    const recheck = block.slice(block.indexOf('data-testid="recheck-row"'), block.indexOf('data-testid="recheck-row"') + 1200);
+    expect(recheck).toContain('lucide-history');
+    expect(block).not.toContain('lucide-refresh-cw');
     expect(block).toContain('data-testid="block-answers"');
     // (Pending v9.1) Held: the left answer is the final "Not found".
     expect(block).toContain('>Not found<');
