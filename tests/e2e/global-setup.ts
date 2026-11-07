@@ -1,6 +1,6 @@
 // Playwright global setup (v2.1 A17):
 //   * refuses to run unless .env.test points at local Supabase
-//   * takes a cross-process lock (mkdir /tmp/lp-e2e.lock, holding the owner's pid), waiting up to 20
+//   * takes a cross-process lock (mkdir /tmp/lp-e2e.lock, or LP_E2E_LOCK_DIR, holding the owner's pid), waiting up to 20
 //     minutes, so agents on different ports never run end-to-end suites against the shared local stack at
 //     the same time. A lock whose owner process is alive is never taken over, however long it is held.
 // Released in global-teardown.ts. Nobody truncates tables globally; specs create unique synthetic rows.
@@ -8,7 +8,19 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { loadTestEnv, pauseInactiveJob } from '../../scripts/test-env.mjs';
 
-export const LOCK_DIR = '/tmp/lp-e2e.lock';
+/** The lock's path when LP_E2E_LOCK_DIR is unset: the one every checkout on the shared local stack takes. */
+export const DEFAULT_LOCK_DIR = '/tmp/lp-e2e.lock';
+
+/**
+ * The lock directory: LP_E2E_LOCK_DIR when set (a run on its own isolated stack takes a lock of its own, e.g.
+ * /tmp/lp-e2e.lock-s4, so it never waits on runs against other stacks), else DEFAULT_LOCK_DIR.
+ */
+export function lockDirFrom(env: Record<string, string | undefined> = process.env): string {
+  const dir = env.LP_E2E_LOCK_DIR?.trim();
+  return dir ? dir : DEFAULT_LOCK_DIR;
+}
+
+export const LOCK_DIR = lockDirFrom();
 const WAIT_MS = 20 * 60_000;
 /** mkdir and the pid write are two steps: a lock without a pid is only abandoned after this long. */
 const NO_PID_GRACE_MS = 10_000;

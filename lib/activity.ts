@@ -66,6 +66,26 @@ export interface ActivityRow {
   read: boolean;
 }
 
+/**
+ * (2026-11-07, Located / Not located) lp_activity keeps each row's detail as it was written, so a row from before
+ * the rename can still start with an old status word: "In medical · Chair 9", "Not found yet · recheck 4:40 PM",
+ * "Not found in medical". Read back, a status row (in_medical / not_in_medical) whose detail is exactly such a
+ * word, or starts with it and " · ", reads with today's label; every other row and detail is left as written.
+ */
+const LEGACY_STATUS_WORDS: ReadonlyArray<readonly [ActivityKind, string, string]> = [
+  ['in_medical', 'In medical', STATUS_META[STATUS.inMedical].shortLabel],
+  ['not_in_medical', 'Not found yet', NOT_FOUND_YET_LABEL],
+  ['not_in_medical', 'Not found in medical', STATUS_META[STATUS.notInMedical].label],
+  ['not_in_medical', 'Not in medical', STATUS_META[STATUS.notInMedical].label],
+];
+
+export function currentDetail(kind: ActivityKind, detail: string): string {
+  for (const [k, old, now] of LEGACY_STATUS_WORDS) {
+    if (kind === k && (detail === old || detail.startsWith(`${old} · `))) return `${now}${detail.slice(old.length)}`;
+  }
+  return detail;
+}
+
 /** lp_activity_list's snake_case row → ActivityRow (null when it is not one). */
 export function mapActivityRow(raw: unknown): ActivityRow | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -78,7 +98,7 @@ export function mapActivityRow(raw: unknown): ActivityRow | null {
     requestId,
     kind: r.kind,
     title: requestTitle(s(r.first_name), s(r.last_name)),
-    detail: scrubDetail(s(r.detail) ?? ''),
+    detail: currentDetail(r.kind, scrubDetail(s(r.detail) ?? '')),
     at,
     read: r.read_at !== null && r.read_at !== undefined,
   };
@@ -133,7 +153,7 @@ export interface PushPayload {
   requestId: string | null;
   /**
    * Sound and show again when it replaces an earlier one: every request event (one tag per request, so a
-   * later answer must never silently replace "In medical" or medical's question), as the page's own
+   * later answer must never silently replace "Located" or medical's question), as the page's own
    * notification did (system-notify noticeOptions).
    */
   renotify: boolean;
@@ -208,7 +228,7 @@ export function newRequestDetail(row: { name: string | null; age: string | null;
   return [initials(row.name), ageGender(row.age, row.gender), row.postShort].filter(Boolean).join(' · ');
 }
 
-/** in_medical: "In medical · Chair 9", or "In medical" (the label is STATUS_META's). */
+/** in_medical: "Located · Chair 9", or "Located" (the label is STATUS_META's). */
 export function inMedicalDetail(location: string | null | undefined): string {
   const label = STATUS_META[STATUS.inMedical].shortLabel;
   const where = location?.trim();
@@ -448,7 +468,7 @@ function spokenTitle(title: string): string {
   return title === NO_NAME ? 'A request with no name' : `Request ${title.replace(/\./g, ' ').trim()}`;
 }
 
-/** The row's full sentence: "Request J D, answer: In medical · Chair 9. 5 minutes ago. Unread." */
+/** The row's full sentence: "Request J D, answer: Located, Chair 9. 5 minutes ago. Unread." */
 export function activityAriaLabel(row: Pick<ActivityRow, 'kind' | 'title' | 'detail' | 'at' | 'read'>, now: number): string {
   const detail = detailAfterTitle(row).replace(/ · /g, ', ').replace(/ → /g, ' to ');
   const ago = agoPhrase(minutesSince(row.at, now));

@@ -1,4 +1,4 @@
-// All requests, log option B (2026-11-06): open requests first, every closed one (Not found in medical included)
+// All requests, log option B (2026-11-06): open requests first, every closed one (Not located included)
 // folded; My requests open first, then the closed ones. Synthetic stub rows only.
 import { describe, expect, it } from 'vitest';
 import type { RequestSummary } from '@/lib/api-types';
@@ -18,7 +18,7 @@ describe('log sections (option B)', () => {
     expect(open.length + closed.length).toBe(rows.length);
   });
 
-  it('Not found in medical is closed; Waiting, In medical and legacy Bring friend are open', () => {
+  it('Not located is closed; Waiting, In medical and legacy Bring friend are open', () => {
     const { open, closed } = logSections(rows);
     expect(closed.filter((r) => r.status === STATUS.notInMedical).map((r) => r.caseNumber)).toEqual([1009, 1008]);
     expect(open.every((r) => statusBucket(r.status) === 'open')).toBe(true);

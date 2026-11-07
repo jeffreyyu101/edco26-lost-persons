@@ -9,16 +9,16 @@ import { ROOT, testBaseUrl } from '../../scripts/test-env.mjs';
 import { axeViolations, smallTargets } from './helpers/a11y';
 import { newSignedInContext, signedInAs, type TestStaff } from './helpers/session';
 
-// F5: status stages and the "Not found yet" hold (design/screens/updates.html #clarify / #recheck / #colors),
+// F5: status stages and the "Not located yet" hold (design/screens/updates.html #clarify / #recheck / #colors),
 // end to end:
-//   * the real flow on the real store, API and database: medical answers Not found yet → the card stays where it
-//     is with a "Not found yet" chip (Undo takes it away) → the page clock passes the recheck time → the chip
+//   * the real flow on the real store, API and database: medical answers Not located yet → the card stays where it
+//     is with a "Not located yet" chip (Undo takes it away) → the page clock passes the recheck time → the chip
 //     reads "Recheck due", nothing moves (Pending v9.1) → the final Not found closes it; front of house's My
 //     requests card shows the chip and no recheck time, then the final grey Not in medical; the desk status
 //     cell's strings (the wait after every Waiting for check stage);
 //   * a fixture (page.route on /api/sync and the request) for every stage at once: overflow at 375, 390, 820,
 //     1180 and 1440 px (nothing wider than its container, nothing outside the viewport, one-line status tags),
-//     the post-rename long label "Not found in medical · 2 checks", axe in light and dark, and the screenshots
+//     the post-rename long label "Not located · 2 checks", axe in light and dark, and the screenshots
 //     (LP_F5_SHOTS=1 writes design/screens/f5-*.png).
 // Synthetic rows only (TEST-F5-…), closed again afterwards.
 
@@ -108,7 +108,7 @@ async function phoneContext(browser: Browser, staff: TestStaff): Promise<Browser
 // The real flow
 // ---------------------------------------------------------------------------------------------------
 
-test('medical: Not found yet → the chip, in place (Undo takes it away) → Recheck due, nothing moves → the final Not found closes it; front of house sees each step', async ({
+test('medical: Not located yet → the chip, in place (Undo takes it away) → Recheck due, nothing moves → the final Not found closes it; front of house sees each step', async ({
   page,
   browser,
 }) => {
@@ -122,26 +122,26 @@ test('medical: Not found yet → the chip, in place (Undo takes it away) → Rec
     const card = checkCard(page, r.id);
     await expect(card).toBeVisible({ timeout: 20_000 });
     const answer = card.getByTestId('not-found-answer');
-    await expect(answer).toHaveText('Not found yet');
+    await expect(answer).toHaveText('Not located yet');
     const position = () => page.locator('[data-testid="check-card"]').evaluateAll((els, id) => els.findIndex((el) => el.getAttribute('data-pending-card') === id), r.id);
     const before = await position();
 
-    // First Not found: the card stays where it is, with the chip and "Not found yet · recheck in 20 min" + Undo.
+    // First Not found: the card stays where it is, with the chip and "Not located yet · recheck in 20 min" + Undo.
     await answer.click();
-    await expect(card.getByTestId('hold-chip')).toHaveText('Not found yet');
-    await expect(page.getByRole('status').filter({ hasText: /^Not found yet · recheck in 20 min/ })).toBeVisible();
+    await expect(card.getByTestId('hold-chip')).toHaveText('Not located yet');
+    await expect(page.getByRole('status').filter({ hasText: /^Not located yet · recheck in 20 min/ })).toBeVisible();
     expect(await position()).toBe(before);
 
     // Undo: no hold, no chip.
     await page.getByRole('button', { name: 'Undo', exact: true }).click();
     await expect(card.getByTestId('hold-chip')).toHaveCount(0);
-    await expect(answer).toHaveText('Not found yet');
+    await expect(answer).toHaveText('Not located yet');
     await expect.poll(async () => (await call<RequestDetail>(page.request, 'GET', `/api/requests/${r.id}`)).notFoundChecks).toBe(0);
 
     // Again, for real this time.
     await answer.click();
-    await expect(card.getByTestId('hold-chip')).toHaveText('Not found yet');
-    await expect(answer).toHaveText('Not found');
+    await expect(card.getByTestId('hold-chip')).toHaveText('Not located yet');
+    await expect(answer).toHaveText('Not located');
     await expect.poll(async () => (await call<RequestDetail>(page.request, 'GET', `/api/requests/${r.id}`)).notFoundChecks).toBe(1);
     const held = await call<RequestDetail>(page.request, 'GET', `/api/requests/${r.id}`);
     expect(held).toMatchObject({ status: STATUS.waiting, notFoundChecks: 1 });
@@ -150,7 +150,7 @@ test('medical: Not found yet → the chip, in place (Undo takes it away) → Rec
     // Front of house: still open, the violet chip, and no recheck time on the card.
     await foh.goto('/?view=mine');
     const mine = mineCard(foh, r.id);
-    await expect(mine.getByTestId('hold-chip')).toHaveText('Not found yet', { timeout: 20_000 });
+    await expect(mine.getByTestId('hold-chip')).toHaveText('Not located yet', { timeout: 20_000 });
     await expect(mine).not.toContainText(recheck);
 
     // 21 minutes later on medical's phone: Recheck due, in place. Never closed by itself.
@@ -175,7 +175,7 @@ test('medical: Not found yet → the chip, in place (Undo takes it away) → Rec
   }
 });
 
-test('the request (medical): Not found yet in violet, who answered, Recheck, and the answers inside the block', async ({ page }) => {
+test('the request (medical): Not located yet in violet, who answered, Recheck, and the answers inside the block', async ({ page }) => {
   const r = await createRequest(page.request);
   const held = await setStatus(page.request, r, STATUS.notInMedical);
   await page.goto(`/?r=${r.id}`);
@@ -183,12 +183,12 @@ test('the request (medical): Not found yet in violet, who answered, Recheck, and
   await expect(block).toHaveAttribute('data-tone', 'violet', {
     timeout: 20_000,
   });
-  await expect(block.getByTestId('status-label')).toHaveText('Not found yet');
+  await expect(block.getByTestId('status-label')).toHaveText('Not located yet');
   await expect(block).toContainText(MEDIC.staffName);
   await expect(block.getByTestId('recheck-row')).toHaveText(`Recheck ${formatClockAmPm(held.recheckAt as string, TZ)}`);
   const answers = block.getByTestId('block-answers');
-  // (Pending v9.1) Held: the left answer is the final "Not found".
-  await expect(answers.getByTestId('not-found-answer')).toHaveText('Not found');
+  // (Pending v9.1) Held: the left answer is the final "Not located".
+  await expect(answers.getByTestId('not-found-answer')).toHaveText('Not located');
   await expect(
     answers.getByRole('button', {
       name: IN_MEDICAL,
@@ -196,8 +196,8 @@ test('the request (medical): Not found yet in violet, who answered, Recheck, and
     }),
   ).toBeVisible();
   await expect(page.getByTestId('profile-actions')).toHaveCount(0);
-  // The audit trail: Waiting for check → Not found yet, with the recheck time.
-  await expect(page.getByTestId('audit-item').first()).toContainText('Not found yet');
+  // The audit trail: Waiting for check → Not located yet, with the recheck time.
+  await expect(page.getByTestId('audit-item').first()).toContainText('Not located yet');
   await expect(page.getByTestId('audit-item').first()).toContainText(`Recheck ${formatClockAmPm(held.recheckAt as string, TZ)}`);
   // In medical from the block clears the hold.
   await answers.getByRole('button', { name: IN_MEDICAL, exact: true }).click();
@@ -212,7 +212,7 @@ test.describe('desk', () => {
     hasTouch: false,
   });
 
-  test('the status cell: "Waiting for check · 9m", "Not found yet · 9m", "In medical · Bed 3", "Not found in medical · 2 checks"; no en route column', async ({
+  test('the status cell: "Waiting for check · 9m", "Not located yet · 9m", "Located · Bed 3", "Not located · 2 checks"; no en route column', async ({
     page,
   }) => {
     const waiting = await createRequest(page.request);
@@ -244,7 +244,7 @@ test.describe('desk', () => {
     await expect(cell(waiting.id)).toBeVisible({ timeout: 20_000 });
     await expect.poll(() => shown(waiting.id)).toMatch(/^Waiting for check · (now|\d+m)$/);
     // (Pending v9.1) The wait after the label, never the recheck time.
-    await expect.poll(() => shown(held.id)).toMatch(/^Not found yet · (now|\d+m)$/);
+    await expect.poll(() => shown(held.id)).toMatch(/^Not located yet · (now|\d+m)$/);
     await expect.poll(() => shown(located.id)).toBe(`${STATUS_META[STATUS.inMedical].shortLabel} · Bed 3`);
     await page.getByTestId('closed-fold').first().click();
     await expect.poll(() => shown(final.id)).toBe(`${NOT_IN_MEDICAL} · 2 checks`);
@@ -599,16 +599,17 @@ async function layoutProblems(page: Page): Promise<string[]> {
 }
 
 /**
- * Puts the post-rename words on every Not in medical status cell, as the rename will: the status label "Not found
- * in medical", and the answer's label "Not found" where a narrow phone shows that instead ([data-narrow]).
+ * (F5) Put F2's rename's words on every Not in medical status cell before that rename shipped. (2026-11-07) The labels
+ * are "Not located" now, at every width (no [data-narrow] form), so this changes nothing; kept so the fixture's
+ * checks read as before.
  */
 async function applyLongLabel(page: Page) {
   await page.evaluate(
     ([from, answer]) => {
       for (const el of document.querySelectorAll<HTMLElement>('[data-col="status"] span, [data-testid="mine-card"] span')) {
         if (el.children.length > 0) continue;
-        if (el.hasAttribute('data-narrow') && el.textContent === answer) el.textContent = 'Not found';
-        else if (el.textContent === from) el.textContent = 'Not found in medical';
+        if (el.hasAttribute('data-narrow') && el.textContent === answer) el.textContent = 'Not located';
+        else if (el.textContent === from) el.textContent = 'Not located';
       }
     },
     [NOT_IN_MEDICAL, NOT_FOUND] as const,
@@ -680,7 +681,7 @@ test.describe('fixture', () => {
   });
 
   for (const width of WIDTHS) {
-    test(`overflow at ${width} px: every stage, every view, and the long "Not found in medical · 2 checks"`, async ({ browser }) => {
+    test(`overflow at ${width} px: every stage, every view, and the long "Not located · 2 checks"`, async ({ browser }) => {
       test.setTimeout(90_000);
       const ctx = await newSignedInContext(
         browser,
@@ -727,7 +728,7 @@ test.describe('fixture', () => {
               };
             });
             expect(fit).toEqual({
-              text: 'Not found in medical· 2 checks',
+              text: 'Not located· 2 checks',
               whole: true,
               clear: true,
             });
@@ -740,7 +741,7 @@ test.describe('fixture', () => {
   }
 
   // A request open beside the list is the desk's usual state. Tonight's values are the widest: a long wait
-  // ("· 59m") and, after the rename, "Not found in medical · 2 checks" (Pending v9.1: no recheck times in a cell).
+  // ("· 59m") and, after the rename, "Not located · 2 checks" (Pending v9.1: no recheck times in a cell).
   // Every one fits whole in its status cell, clear of the next column, at both pane breakpoints' narrowest and at
   // the usual widths.
   for (const width of [1024, 1180, 1280, 1440] as const) {
@@ -786,9 +787,9 @@ test.describe('fixture', () => {
         expect(cells).toEqual({
           15: `${STATUS_META[STATUS.waiting].shortLabel} · 59m`,
           14: 'Needs info · 16m',
-          13: 'Not found yet · 24m',
-          17: 'Not found yet · 12m',
-          7: whole ? 'Not found in medical · 2 checks' : 'Not found in medical',
+          13: 'Not located yet · 24m',
+          17: 'Not located yet · 12m',
+          7: whole ? 'Not located · 2 checks' : 'Not located',
         });
         // Needs info on hold: its own glyph only (no recheck glyph, no time).
         await expect(table.locator(`[data-request-id="${ROW(14).id}"] [data-col="status"] svg`)).toHaveCount(1);

@@ -133,6 +133,13 @@ screenshots.
 - **Hotfix F5.1 is in** (`main` 332c90a merged): the release ships on top of exactly what production runs.
 - Decisions: `design/DECISIONS.md` "The F3 + F4 release" (and its review fixes); spec: `docs/BUILD_SPEC.md` §23 (A90–A95).
 
+### 2026-11-07 (Located / Not located hotfix, `hotfix/located`, after F6)
+
+- **"In medical" now reads "Located" and "Not found in medical" reads "Not located"** everywhere staff see a status or
+  answer ("✓ Located", "× Not located", "⧗ Not located yet", alerts, notifications, Activity, dashboard, export), for
+  HIPAA (ops lead, Brian approved). Labels only: no migration, database values unchanged; deploy as usual. Old Activity
+  rows read with the new words; pushes already on lock screens keep theirs. The app's title is unchanged.
+
 ### 2026-11-07 (F6 inactivity auto-close, `feat/f6-inactive`, ships after F3 + F4)
 
 - **A request In medical with no activity for an hour closes by itself** as **"Closed · inactive"** (grey, a timer-off

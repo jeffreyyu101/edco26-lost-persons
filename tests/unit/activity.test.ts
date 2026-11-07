@@ -53,8 +53,8 @@ describe('contract B: detail copy', () => {
     expect(enrouteDetail(null)).toBe('Friend en route');
     expect(newRequestDetail({ name: 'Tara Ruiz', age: '24', gender: 'Male', postShort: 'FA 4' })).toBe('T.R. · 24 M · FA 4');
     expect(newRequestDetail({ name: null, age: null, gender: null, postShort: 'FA 3' })).toBe('FA 3');
-    expect(inMedicalDetail('Chair 9')).toBe('In medical · Chair 9');
-    expect(inMedicalDetail(null)).toBe('In medical');
+    expect(inMedicalDetail('Chair 9')).toBe('Located · Chair 9');
+    expect(inMedicalDetail(null)).toBe('Located');
     expect(backToWaitingDetail()).toBe('Back to Waiting for check');
     expect(movedDetail('Chair 9', 'Bed 3')).toBe('Chair 9 → Bed 3');
     expect(movedDetail(null, 'Bed 3')).toBe('Bed 3');
@@ -69,11 +69,11 @@ describe('contract B: detail copy', () => {
   });
 
   it('scrubDetail drops request ids and phone numbers, keeps short numbers', () => {
-    expect(scrubDetail('LP-1013 · In medical · Chair 9')).toBe('In medical · Chair 9');
+    expect(scrubDetail('LP-1013 · Located · Chair 9')).toBe('Located · Chair 9');
     expect(scrubDetail('Rae C.: call (407) 555-0142 now')).toBe('Rae C.: call ••• now');
     expect(scrubDetail('Rae C.: +1 407 555 0142')).toBe('Rae C.: •••');
     expect(scrubDetail('T.R. · 24 M · FA 4')).toBe('T.R. · 24 M · FA 4');
-    expect(scrubDetail('Not found yet · recheck 4:40 PM')).toBe('Not found yet · recheck 4:40 PM');
+    expect(scrubDetail('Not located yet · recheck 4:40 PM')).toBe('Not located yet · recheck 4:40 PM');
     expect(scrubDetail('Friend en route · ~4 min')).toBe('Friend en route · ~4 min');
     expect(Array.from(scrubDetail('y'.repeat(500)))).toHaveLength(200);
   });
@@ -86,8 +86,8 @@ describe('contract B: detail copy', () => {
 
 describe('which events F4 raises (contract D)', () => {
   it('status changes: In medical, Back to Waiting, Reunited, Discharged — never Not in medical', () => {
-    expect(statusChangeEvent(STATUS.inMedical, 'Chair 9')).toEqual({ kind: 'in_medical', detail: 'In medical · Chair 9' });
-    expect(statusChangeEvent(STATUS.legacyBringFriend, null)).toEqual({ kind: 'in_medical', detail: 'In medical' });
+    expect(statusChangeEvent(STATUS.inMedical, 'Chair 9')).toEqual({ kind: 'in_medical', detail: 'Located · Chair 9' });
+    expect(statusChangeEvent(STATUS.legacyBringFriend, null)).toEqual({ kind: 'in_medical', detail: 'Located' });
     expect(statusChangeEvent(STATUS.waiting, null)).toEqual({ kind: 'back_to_waiting', detail: 'Back to Waiting for check' });
     expect(statusChangeEvent(STATUS.reunited, null)?.kind).toBe('reunited');
     expect(statusChangeEvent(STATUS.discharged, null)?.kind).toBe('discharged');
@@ -96,7 +96,7 @@ describe('which events F4 raises (contract D)', () => {
   });
 
   it('edits: the first location while In medical completes the answer; a new place moves; else Details changed', () => {
-    expect(editEvent(['medical_location'], null, 'Chair 9', STATUS.inMedical)).toEqual({ kind: 'in_medical', detail: 'In medical · Chair 9' });
+    expect(editEvent(['medical_location'], null, 'Chair 9', STATUS.inMedical)).toEqual({ kind: 'in_medical', detail: 'Located · Chair 9' });
     expect(editEvent(['medical_location'], 'Chair 9', 'Bed 3', STATUS.inMedical)).toEqual({ kind: 'moved', detail: 'Chair 9 → Bed 3' });
     expect(editEvent(['medical_location'], null, 'Bed 3', STATUS.reunited)).toEqual({ kind: 'moved', detail: 'Bed 3' });
     expect(editEvent(['medical_location'], 'Bed 3', null, STATUS.inMedical)).toEqual({ kind: 'edited', detail: 'Details changed' });
@@ -106,8 +106,8 @@ describe('which events F4 raises (contract D)', () => {
 
 describe('push payload', () => {
   it('title = initials (New request for a new one), body = the scrubbed detail, one tag per request', () => {
-    const p = pushPayload({ requestId: ID, kind: 'in_medical', detail: 'LP-1013 In medical · Chair 9' }, 'J.D.', 2);
-    expect(p).toMatchObject({ title: 'J.D.', body: 'In medical · Chair 9', tag: `lp-${ID}`, url: `/?r=${ID}`, renotify: true, requireInteraction: true, badge: 2 });
+    const p = pushPayload({ requestId: ID, kind: 'in_medical', detail: 'LP-1013 Located · Chair 9' }, 'J.D.', 2);
+    expect(p).toMatchObject({ title: 'J.D.', body: 'Located · Chair 9', tag: `lp-${ID}`, url: `/?r=${ID}`, renotify: true, requireInteraction: true, badge: 2 });
     expect(pushPayload({ requestId: ID, kind: 'new_request', detail: 'T.R. · 24 M · FA 4' }, 'T.R.', null).title).toBe('New request');
     expect(pushPayload({ requestId: ID, kind: 'message', detail: 'Rae C.: hi' }, 'A.L.', null).renotify).toBe(true);
   });
@@ -160,8 +160,8 @@ describe('the inbox', () => {
     expect(ACTIVITY_GLYPH.discharged).toEqual({ icon: 'check', tone: 'gray' });
     expect(ACTIVITY_GLYPH.cancelled).toEqual({ icon: 'x', tone: 'gray' });
     expect(ACTIVITY_GLYPH.edited).toEqual({ icon: 'pencil', tone: 'gray' });
-    expect(activityGlyph('not_in_medical', 'Not found yet · recheck 4:40 PM')).toEqual({ icon: 'hourglass', tone: 'violet' });
-    expect(activityGlyph('not_in_medical', 'Not found in medical')).toEqual({ icon: 'x', tone: 'gray' });
+    expect(activityGlyph('not_in_medical', 'Not located yet · recheck 4:40 PM')).toEqual({ icon: 'hourglass', tone: 'violet' });
+    expect(activityGlyph('not_in_medical', 'Not located')).toEqual({ icon: 'x', tone: 'gray' });
   });
 
   it('the badge: hidden at 0, then 1–9, then 9+', () => {
@@ -195,8 +195,8 @@ describe('the inbox', () => {
 
   it('every row has a full sentence for screen readers', () => {
     const at = new Date(NOW - 5 * 60_000).toISOString();
-    expect(activityAriaLabel({ kind: 'in_medical', title: 'J.D.', detail: 'In medical · Chair 9', at, read: false }, NOW)).toBe(
-      'Request J D, answer: In medical, Chair 9. 5 minutes ago. Unread.',
+    expect(activityAriaLabel({ kind: 'in_medical', title: 'J.D.', detail: 'Located · Chair 9', at, read: false }, NOW)).toBe(
+      'Request J D, answer: Located, Chair 9. 5 minutes ago. Unread.',
     );
     expect(activityAriaLabel({ kind: 'moved', title: 'R.P.', detail: 'Chair 9 → Bed 3', at, read: true }, NOW)).toBe(
       'Request R P, location changed: Chair 9 to Bed 3. 5 minutes ago.',
@@ -210,7 +210,7 @@ describe('the inbox', () => {
     expect(activityLine2({ kind: 'new_request', title: 'T.R.', detail: 'T.R. · 24 M · FA 4' })).toBe('New request · 24 M · FA 4');
     expect(activityLine2({ kind: 'new_request', title: NO_NAME, detail: '24 M · FA 4' })).toBe('New request · 24 M · FA 4');
     expect(activityLine2({ kind: 'new_request', title: 'T.R.', detail: 'T.R.' })).toBe('New request');
-    expect(activityLine2({ kind: 'in_medical', title: 'J.D.', detail: 'In medical · Chair 9' })).toBe('In medical · Chair 9');
+    expect(activityLine2({ kind: 'in_medical', title: 'J.D.', detail: 'Located · Chair 9' })).toBe('Located · Chair 9');
   });
 
   it('maps lp_activity_list rows (unknown kinds dropped, detail scrubbed)', () => {

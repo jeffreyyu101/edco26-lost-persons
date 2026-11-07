@@ -96,9 +96,9 @@ test.describe('phone', () => {
       await expect(sheet.getByRole('button', { name: /Unread\.$/ })).toHaveCount(2);
       // Newest first, initials only, the detail in nouns, the time; unread rows have the dot.
       await expect(rows.nth(0)).toContainText('B.T.');
-      await expect(rows.nth(0)).toContainText('In medical');
+      await expect(rows.nth(0)).toContainText('Located');
       await expect(rows.nth(0)).toContainText('now');
-      await expect(rows.nth(0)).toHaveAccessibleName(/^Request B T, answer: In medical\. .*Unread\.$/);
+      await expect(rows.nth(0)).toHaveAccessibleName(/^Request B T, answer: Located\. .*Unread\.$/);
       await expect(sheet).not.toContainText('LP-');
       await expect(sheet).not.toContainText('555');
       // Opening the sheet marks nothing read.

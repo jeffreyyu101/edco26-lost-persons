@@ -13,7 +13,7 @@ const A = '0f0f0f0f-0000-4000-8000-0000000000a1';
 const B = '0f0f0f0f-0000-4000-8000-0000000000b2';
 const C = '0f0f0f0f-0000-4000-8000-0000000000c3';
 
-const row = (requestId: string, read: boolean, at = '2026-11-06T21:00:00Z', detail = 'In medical'): ActivityRow => ({ requestId, kind: 'in_medical', title: 'J.D.', detail, at, read });
+const row = (requestId: string, read: boolean, at = '2026-11-06T21:00:00Z', detail = 'Located'): ActivityRow => ({ requestId, kind: 'in_medical', title: 'J.D.', detail, at, read });
 
 function fakeServer() {
   const calls: Array<{ path: string; method: string; body: unknown }> = [];
@@ -191,12 +191,12 @@ describe('the list', () => {
     publishSyncExtras(server.sync());
     client.setOpen(true);
     await settle();
-    expect(client.getState().rows?.[0]?.detail).toBe('In medical');
+    expect(client.getState().rows?.[0]?.detail).toBe('Located');
     // Medical sets the location of A: still unread, so the unread set is unchanged, but its row is new.
-    server.setRows([row(A, false, '2026-11-06T21:25:00Z', 'In medical · Bed 3'), row(B, false, '2026-11-06T20:00:00Z'), row(C, true, '2026-11-06T19:00:00Z')]);
+    server.setRows([row(A, false, '2026-11-06T21:25:00Z', 'Located · Bed 3'), row(B, false, '2026-11-06T20:00:00Z'), row(C, true, '2026-11-06T19:00:00Z')]);
     publishSyncExtras(server.sync());
     await settle();
-    expect(client.getState().rows?.[0]).toMatchObject({ requestId: A, detail: 'In medical · Bed 3' });
+    expect(client.getState().rows?.[0]).toMatchObject({ requestId: A, detail: 'Located · Bed 3' });
   });
 
   it('offline: says so instead of an endless spinner', async () => {

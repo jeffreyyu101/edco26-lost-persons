@@ -83,13 +83,13 @@ export type GlyphKind =
   | 'inactive'; // (F6) lucide timer-off, bare outline, grey (Closed · inactive)
 
 export interface StatusMeta {
-  /** Full UI label, e.g. "In medical · friend coming". */
+  /** Full UI label, e.g. "Located · friend coming". */
   label: string;
-  /** Short label for compact places (audit "from → to", alerts), e.g. "In medical". */
+  /** Short label for compact places (audit "from → to", alerts), e.g. "Located". */
   shortLabel: string;
   /**
    * An even shorter label for the log's status cell on a narrow phone (under 400 px), where the short one
-   * would take the name's room: "Waiting", "Not found" (the glyph says the rest). Absent: the short label
+   * would take the name's room: "Waiting", "Inactive" (the glyph says the rest). Absent: the short label
    * fits everywhere. The row's sentence always says the full status.
    */
   narrowLabel?: string;
@@ -99,30 +99,25 @@ export interface StatusMeta {
 }
 
 /**
- * The answer buttons (the Pending cards, the profile, the Change answer menu): "Not found" and "In medical"
- * (Brian, 2026-11-06 18:00). The status itself reads "Not found in medical" (STATUS_META); the database value
- * stays 'Checked – Not Found'.
+ * The answer buttons (the Pending cards, the profile, the Change answer menu): "Not located" and "Located"
+ * (Brian, 2026-11-07, HIPAA: no staff-visible wording says a named person is in medical; DECISIONS). The status
+ * itself reads "Not located" (STATUS_META); the database values stay 'Checked – Not Found' / 'Found – Awaiting
+ * Reunion'.
  */
 export const ANSWER_LABEL = {
-  notFound: 'Not found',
-  inMedical: 'In medical',
+  notFound: 'Not located',
+  inMedical: 'Located',
 } as const;
 
 export const STATUS_META: Readonly<Record<Status, StatusMeta>> = {
   [STATUS.waiting]: { label: 'Waiting for check', shortLabel: 'Waiting for check', narrowLabel: 'Waiting', tone: 'blue', glyph: 'waiting', bucket: 'open' },
-  [STATUS.notInMedical]: {
-    label: 'Not found in medical',
-    shortLabel: 'Not found in medical',
-    narrowLabel: ANSWER_LABEL.notFound,
-    tone: 'gray',
-    glyph: 'notInMedical',
-    bucket: 'closed',
-  },
-  [STATUS.inMedical]: { label: 'In medical · friend coming', shortLabel: 'In medical', tone: 'green', glyph: 'inMedical', bucket: 'open' },
+  // (2026-11-07) "Not located" is short enough for the narrowest log (it was "Not found in medical", narrow "Not found").
+  [STATUS.notInMedical]: { label: 'Not located', shortLabel: 'Not located', tone: 'gray', glyph: 'notInMedical', bucket: 'closed' },
+  [STATUS.inMedical]: { label: 'Located · friend coming', shortLabel: 'Located', tone: 'green', glyph: 'inMedical', bucket: 'open' },
   [STATUS.reunited]: { label: 'Reunited', shortLabel: 'Reunited', tone: 'gray', glyph: 'closed', bucket: 'closed' },
   [STATUS.discharged]: { label: 'Discharged', shortLabel: 'Discharged', tone: 'gray', glyph: 'closed', bucket: 'closed' },
   [STATUS.cancelled]: { label: 'Cancelled', shortLabel: 'Cancelled', tone: 'gray', glyph: 'closed', bucket: 'closed' },
-  [STATUS.legacyBringFriend]: { label: 'In medical · friend coming', shortLabel: 'In medical', tone: 'green', glyph: 'inMedical', bucket: 'open' },
+  [STATUS.legacyBringFriend]: { label: 'Located · friend coming', shortLabel: 'Located', tone: 'green', glyph: 'inMedical', bucket: 'open' },
   // (F6) "Inactive" on a narrow phone, where "Closed · inactive" would take the name's room (the timer glyph says the rest).
   [STATUS.inactive]: { label: 'Closed · inactive', shortLabel: 'Closed · inactive', narrowLabel: 'Inactive', tone: 'gray', glyph: 'inactive', bucket: 'closed' },
 };
@@ -220,15 +215,15 @@ function action(id: StatusActionId, overrides: Partial<StatusAction> = {}): Stat
   return { creatorOnly: false, ...ACTION[id], ...overrides };
 }
 
-/** (F5) An action's button label ("Not found", "In medical"), for surfaces that name it outside a button. */
+/** (F5) An action's button label ("Not located", "Located"), for surfaces that name it outside a button. */
 export function actionLabel(id: StatusActionId): string {
   return ACTION[id].label;
 }
 
 /**
  * The sticky action bar on the profile / the Pending cards (spec §8):
- *   Waiting → Not found, In medical · In medical → Change answer, Reunited ·
- *   Not found in medical → Change answer · (F6) Closed · inactive → Reopen (where Change answer sits; it may have
+ *   Waiting → Not located, Located · Located → Change answer, Reunited ·
+ *   Not located → Change answer · (F6) Closed · inactive → Reopen (where Change answer sits; it may have
  *   closed under someone still working on it) · other closed / unknown → none.
  */
 export function primaryActions(status: string): StatusAction[] {
@@ -773,7 +768,7 @@ export const PHOTO_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as con
 export const RECHECK_MINUTES = 20;
 
 /** The held stage's label (lib/stages.ts STAGE_META.notFoundYet; here for the alerts on the first load). */
-export const NOT_FOUND_YET_LABEL = 'Not found yet';
+export const NOT_FOUND_YET_LABEL = 'Not located yet';
 
 const holdEpoch = (iso: string | null | undefined): number => {
   const t = iso ? Date.parse(iso) : NaN;

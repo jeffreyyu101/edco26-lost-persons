@@ -15,7 +15,7 @@ const IPHONE_APP = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) Apple
 const payload = (over: Record<string, unknown> = {}) => ({
   v: 1,
   title: 'J.D.',
-  body: 'In medical · Chair 9',
+  body: 'Located · Chair 9',
   tag: `lp-${ID}`,
   url: `/?r=${ID}`,
   kind: 'in_medical',
@@ -56,7 +56,7 @@ function win(id: string, opts: { focused?: boolean; visible?: boolean; path?: st
   return w;
 }
 
-const told = (kind = 'in_medical', body = 'In medical · Chair 9') => ({ type: 'lp-push', kind, requestId: ID, title: 'J.D.', body });
+const told = (kind = 'in_medical', body = 'Located · Chair 9') => ({ type: 'lp-push', kind, requestId: ID, title: 'J.D.', body });
 
 let pages: PageClient[];
 let worker: Worker;
@@ -72,7 +72,7 @@ describe('push (no window in front)', () => {
     expect(worker.notifications).toHaveLength(1);
     const [n] = worker.notifications;
     expect(n?.title).toBe('J.D.');
-    expect(n?.options).toMatchObject({ body: 'In medical · Chair 9', tag: `lp-${ID}`, icon: '/icons/icon-192.png', renotify: true, requireInteraction: true, silent: false });
+    expect(n?.options).toMatchObject({ body: 'Located · Chair 9', tag: `lp-${ID}`, icon: '/icons/icon-192.png', renotify: true, requireInteraction: true, silent: false });
     expect(n?.data).toMatchObject({ url: `/?r=${ID}`, push: true, requestId: ID });
     expect(worker.badge()).toBe(3);
   });
@@ -85,10 +85,10 @@ describe('push (no window in front)', () => {
   });
 
   it('regression: a later answer replaces medical\'s hold with sound; an older payload (no flags) is neither sticky nor renotifying', async () => {
-    await worker.push(payload({ kind: 'not_in_medical', body: 'Not found yet · recheck 4:40 PM', requireInteraction: false }));
+    await worker.push(payload({ kind: 'not_in_medical', body: 'Not located yet · recheck 4:40 PM', requireInteraction: false }));
     await worker.push(payload());
     expect(worker.notifications).toHaveLength(1);
-    expect(worker.notifications[0]?.options).toMatchObject({ body: 'In medical · Chair 9', renotify: true, requireInteraction: true });
+    expect(worker.notifications[0]?.options).toMatchObject({ body: 'Located · Chair 9', renotify: true, requireInteraction: true });
     const { renotify: _r, requireInteraction: _q, ...old } = payload({ kind: 'moved', body: 'Bed 3' });
     await worker.push(old);
     expect(worker.notifications[0]?.options).toMatchObject({ body: 'Bed 3', renotify: false, requireInteraction: false });

@@ -57,7 +57,7 @@ function fakeStore(held: string[] = [ID]) {
 }
 
 const push = (over: Record<string, unknown> = {}) => ({ type: 'lp-push', kind: 'moved', requestId: ID, title: 'J.D.', body: 'Chair 9 → Bed 3', ...over });
-const statusAlert = (requestId = ID): AlertEvent => ({ kind: 'in_medical', requestId, title: 'LP-1004 · J.D. is in medical', count: 1 });
+const statusAlert = (requestId = ID): AlertEvent => ({ kind: 'in_medical', requestId, title: 'LP-1004 · J.D. located', count: 1 });
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -81,7 +81,7 @@ describe('a push while the app is in front', () => {
   it('the sync raised its own toast for the request: nothing more (never two toasts for one event)', async () => {
     const f = fakeStore();
     const toasts = createPushToasts(f.store);
-    toasts.handle(push({ kind: 'in_medical', body: 'In medical' }), true);
+    toasts.handle(push({ kind: 'in_medical', body: 'Located' }), true);
     f.poll([statusAlert()]);
     await vi.advanceTimersByTimeAsync(10);
     expect(f.toasts).toHaveLength(0);
@@ -92,7 +92,7 @@ describe('a push while the app is in front', () => {
     const toasts = createPushToasts(f.store);
     f.poll([statusAlert()]);
     await vi.advanceTimersByTimeAsync(2_000);
-    toasts.handle(push({ kind: 'in_medical', body: 'In medical' }), true);
+    toasts.handle(push({ kind: 'in_medical', body: 'Located' }), true);
     f.poll();
     await vi.advanceTimersByTimeAsync(10);
     expect(f.toasts).toHaveLength(0);
@@ -111,7 +111,7 @@ describe('a push while the app is in front', () => {
     const f = fakeStore();
     const toasts = createPushToasts(f.store);
     f.setSyncing(true);
-    toasts.handle(push({ kind: 'in_medical', body: 'In medical' }), true);
+    toasts.handle(push({ kind: 'in_medical', body: 'Located' }), true);
     f.setSyncing(false); // the old poll: no alert yet
     await vi.advanceTimersByTimeAsync(10);
     expect(f.toasts).toHaveLength(0);

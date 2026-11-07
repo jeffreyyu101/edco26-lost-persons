@@ -85,22 +85,22 @@ describe('dashboard render', () => {
     expect(html).not.toContain('/api/export');
   });
 
-  it('tiles: Open and Closed big, then Waiting, In medical, Not found in medical, Reunited, with their numbers', () => {
+  it('tiles: Open and Closed big, then Waiting, In medical, Not located, Reunited, with their numbers', () => {
     const html = render(storeWith(), <DashboardContent stats={v7Stats()} />);
     const order = ['tile-open', 'tile-closed', 'tile-waiting', 'tile-in-medical', 'tile-not-in-medical', 'tile-reunited'].map((id) => at(html, `data-testid="${id}"`));
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(html).toMatch(/data-testid="open-count"[^>]*>7</);
     expect(slice(html, 'tile-closed')).toMatch(/>Closed<\/span><\/span> <span[^>]*><span[^>]*>6</);
     expect(slice(html, 'tile-waiting')).toMatch(/>Waiting for check<\/span><\/span> <span[^>]*><span[^>]*>4</);
-    expect(slice(html, 'tile-in-medical')).toMatch(/>In medical<\/span><\/span> <span[^>]*><span[^>]*>3</);
-    expect(slice(html, 'tile-not-in-medical')).toMatch(/>Not found in medical<\/span><\/span> <span[^>]*><span[^>]*>2</);
+    expect(slice(html, 'tile-in-medical')).toMatch(/>Located<\/span><\/span> <span[^>]*><span[^>]*>3</);
+    expect(slice(html, 'tile-not-in-medical')).toMatch(/>Not located<\/span><\/span> <span[^>]*><span[^>]*>2</);
     expect(slice(html, 'tile-reunited')).toMatch(/>Reunited<\/span><\/span> <span[^>]*><span[^>]*>2</);
     // Closed is not a filter (there is no closed-bucket view); every other tile opens a view.
     expect(html).toMatch(/<div[^>]*data-testid="tile-closed"/);
     for (const id of ['tile-open', 'tile-waiting', 'tile-in-medical', 'tile-not-in-medical', 'tile-reunited']) {
       expect(html).toMatch(new RegExp(`<button[^>]*data-testid="${id}"`));
     }
-    // Not found in medical is closed and grey: the grey × glyph, like the closed check on Reunited.
+    // Not located is closed and grey: the grey × glyph, like the closed check on Reunited.
     expect(slice(html, 'tile-not-in-medical', 600)).toMatch(/data-glyph="notInMedical"[^>]*><circle[^>]*fill="var\(--gray-9\)"/);
     expect(slice(html, 'tile-reunited', 600)).toMatch(/data-glyph="closed"[^>]*><circle[^>]*fill="var\(--gray-9\)"/);
     expect(slice(html, 'tile-waiting', 600)).toContain('var(--blue-9)');
@@ -146,12 +146,12 @@ describe('dashboard render', () => {
     expect(recent).toContain('aria-label="Recently updated. Show all requests"');
     expect(recent).not.toContain('LP-');
     const row = recent.slice(at(recent, 'data-request-id="5eed0000-0000-4000-8000-000000001007"'));
-    expect(row).toMatch(/^[^<]*><span[^>]*>1007<\/span> <span[^>]*>Jordan Diaz<\/span> <span[^>]*data-tone="green"[^>]*><svg[\s\S]*?<\/svg>In medical<\/span> <span[^>]*>[12]m<\/span>/);
+    expect(row).toMatch(/^[^<]*><span[^>]*>1007<\/span> <span[^>]*>Jordan Diaz<\/span> <span[^>]*data-tone="green"[^>]*><svg[\s\S]*?<\/svg>Located<\/span> <span[^>]*>[12]m<\/span>/);
     // (useNow's clock is read when the module loads, so 2 minutes can read as 1.)
     // The name starts with exactly what the row shows (WCAG 2.5.3), then the sentence.
-    expect(recent).toMatch(/aria-label="1007 Jordan Diaz In medical ([12])m\. In medical · friend coming, FA 4, updated \1 minutes? ago\."/);
-    expect(recent).toMatch(/aria-label="1009 A\.N\. Not found in medical ([56])m\. Not found in medical, FA 3, updated \1 minutes ago\."/);
-    // Closed rows are marked (greyed); Not found in medical is one of them now.
+    expect(recent).toMatch(/aria-label="1007 Jordan Diaz Located ([12])m\. Located · friend coming, FA 4, updated \1 minutes? ago\."/);
+    expect(recent).toMatch(/aria-label="1009 A\.N\. Not located ([56])m\. Not located, FA 3, updated \1 minutes ago\."/);
+    // Closed rows are marked (greyed); Not located is one of them now.
     expect(recent).toMatch(/data-closed=""[^>]*data-request-id="5eed0000-0000-4000-8000-000000001009"/);
     expect(recent).toMatch(/data-closed=""[^>]*data-request-id="5eed0000-0000-4000-8000-000000001006"/);
     expect(recent).not.toMatch(/data-closed=""[^>]*data-request-id="5eed0000-0000-4000-8000-000000001010"/);

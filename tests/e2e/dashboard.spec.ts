@@ -56,7 +56,7 @@ async function numbers(page: Page) {
   };
 }
 
-/** Closed = Not found in medical + Reunited + Discharged + Cancelled, as the tiles show them. */
+/** Closed = Not located + Reunited + Discharged + Cancelled, as the tiles show them. */
 async function closedNumbers(page: Page) {
   const value = async (id: string) => Number(await page.getByTestId(`${id}-value`).innerText());
   return {
@@ -126,7 +126,7 @@ test('open counts move by the deltas of this test, and tiles and bars open All f
     .poll(() => numbers(page), POLL)
     .toEqual({ open: before.open + 1, waiting: before.waiting, inMedical: before.inMedical + 1, fa4: before.fa4 + 1 });
 
-  // The cancelled one counts as closed (Closed = Not found in medical + Reunited + Discharged + Cancelled).
+  // The cancelled one counts as closed (Closed = Not located + Reunited + Discharged + Cancelled).
   await expect.poll(async () => (await closedNumbers(page)).closed, POLL).toBeGreaterThanOrEqual(closedBefore.closed + 1);
 
   // Recently updated lists it, number first, and opens its profile.
@@ -134,8 +134,8 @@ test('open counts move by the deltas of this test, and tiles and bars open All f
   const recentRow = recent.getByRole('button', { name: new RegExp(row.name) });
   await expect(recentRow).toBeVisible();
   // The number leads the row; the name starts with what the row shows (WCAG 2.5.3).
-  await expect(recentRow).toHaveAccessibleName(new RegExp(`^${row.caseNumber} ${row.name} In medical (now|\\d+m)\\. In medical · friend coming, FA 4, updated `));
-  expect((await recentRow.innerText()).replace(/\s+/g, ' ').trim()).toMatch(new RegExp(`^${row.caseNumber} ${row.name} In medical (now|\\d+m)$`));
+  await expect(recentRow).toHaveAccessibleName(new RegExp(`^${row.caseNumber} ${row.name} Located (now|\\d+m)\\. Located · friend coming, FA 4, updated `));
+  expect((await recentRow.innerText()).replace(/\s+/g, ' ').trim()).toMatch(new RegExp(`^${row.caseNumber} ${row.name} Located (now|\\d+m)$`));
   await recentRow.click();
   await expect(page).toHaveURL(new RegExp(`\\?r=${row.id}$`));
   await expect(page.getByTestId('profile')).toBeVisible();
@@ -206,7 +206,7 @@ test('an Other location named like a fixed post gets its own bar and filter', as
   const openListed = async () => {
     await expect(page.getByTestId('request-list')).toBeVisible();
     const rows = page.getByTestId('request-list').locator('[data-request-id]');
-    const openRows = rows.and(page.getByRole('button', { name: /, (Waiting for check|In medical)\b/ }));
+    const openRows = rows.and(page.getByRole('button', { name: /, (Waiting for check|Located)\b/ }));
     const listed = await rows.count();
     const open = await openRows.count();
     expect(open, (await rows.allTextContents()).join('\n')).toBe(listed);
@@ -469,7 +469,7 @@ test.describe('with /api/stats mocked', () => {
     expect(waiting.y).toBeGreaterThan(open.bottom);
     // The two big numbers sit on one line.
     expect((await box(page, 'open-count')).bottom).toBe((await box(page, 'tile-closed-value')).bottom);
-    // Not found in medical's number lines up with Reunited's even though Reunited has a second line.
+    // Not located's number lines up with Reunited's even though Reunited has a second line.
     expect((await box(page, 'tile-not-in-medical-value')).bottom).toBe((await box(page, 'tile-reunited-value')).bottom);
     const posts = await regionBox(page, 'Open by post');
     const recent = await regionBox(page, 'Recently updated');
@@ -613,7 +613,7 @@ test.describe('with /api/stats mocked', () => {
     expect(answer.y).toBe(longest.y);
     expect(answer.x).toBeGreaterThan(longest.right);
 
-    // iPad portrait: 3 × 2, Open / Waiting / In medical over Closed / Not found in medical / Reunited, each row's
+    // iPad portrait: 3 × 2, Open / Waiting / In medical over Closed / Not located / Reunited, each row's
     // values on one line; posts still beside recent.
     for (const width of [820, 768]) {
       await page.setViewportSize({ width, height: 1024 });

@@ -85,7 +85,7 @@ describe('list helpers', () => {
     expect(statusSince(byCase(1004))).toBe(byCase(1004).reunionStartedAt); // in medical
     expect(statusSince(byCase(1005))).toBe(byCase(1005).foundAt); // legacy Bring friend, no reunion time
     expect(statusSince(byCase(1003))).toBe(byCase(1003).closedAt); // reunited
-    expect(statusSince(byCase(1009))).toBe(byCase(1009).updatedAt); // not found in medical
+    expect(statusSince(byCase(1009))).toBe(byCase(1009).updatedAt); // not located
   });
 
   it('isFresh: the last minute only, tolerating a slightly fast database clock', () => {
@@ -105,9 +105,9 @@ describe('list helpers', () => {
     expect(mineFreshTone({ ...byCase(1012), createdAt: iso(0.2) }, NOW, STUB_SESSION.staff)).toBeNull();
   });
 
-  it('stepperModel follows the status (Not found in medical ends the line)', () => {
-    expect(stepperModel(STATUS.waiting)).toMatchObject({ steps: ['Logged', 'Checked', 'In medical', 'Reunited'], current: 1, mode: 'pend' });
-    expect(stepperModel(STATUS.notInMedical)).toMatchObject({ steps: ['Logged', 'Checked', 'Not found in medical'], current: 2, mode: 'cur' });
+  it('stepperModel follows the status (Not located ends the line)', () => {
+    expect(stepperModel(STATUS.waiting)).toMatchObject({ steps: ['Logged', 'Checked', 'Located', 'Reunited'], current: 1, mode: 'pend' });
+    expect(stepperModel(STATUS.notInMedical)).toMatchObject({ steps: ['Logged', 'Checked', 'Not located'], current: 2, mode: 'cur' });
     expect(stepperModel(STATUS.inMedical)).toMatchObject({ current: 2, mode: 'cur', color: 'var(--green-9)' });
     expect(stepperModel(STATUS.legacyBringFriend)).toMatchObject({ current: 2, mode: 'cur' });
     expect(stepperModel(STATUS.reunited)).toMatchObject({ current: 3, mode: 'cur' });
@@ -212,10 +212,10 @@ describe('list helpers', () => {
 
   it('log rows: a full sentence per row, the bare number, the Archived fold name', () => {
     expect(logRowLabel(byCase(1013), '11:02 PM', 'updated 2 minutes ago')).toBe('LP-1013, T.R., Waiting for check, created 11:02 PM, updated 2 minutes ago');
-    expect(logRowLabel(byCase(1004), 'Thu 9:58 PM', 'not updated yet')).toBe('LP-1004, S.L., In medical, friend coming, created Thu 9:58 PM, not updated yet');
-    expect(logRowLabel({ ...byCase(1009), name: '' }, '10:44 PM', 'updated 6 minutes ago')).toBe('LP-1009, No name, Not found in medical, created 10:44 PM, updated 6 minutes ago');
+    expect(logRowLabel(byCase(1004), 'Thu 9:58 PM', 'not updated yet')).toBe('LP-1004, S.L., Located, friend coming, created Thu 9:58 PM, not updated yet');
+    expect(logRowLabel({ ...byCase(1009), name: '' }, '10:44 PM', 'updated 6 minutes ago')).toBe('LP-1009, No name, Not located, created 10:44 PM, updated 6 minutes ago');
     expect(searchLogLabel(byCase(1012), '10:58 PM', 'not updated yet', '…pink braids')).toBe('LP-1012, Kayla Martinez, Waiting for check, created 10:58 PM, not updated yet. …pink braids');
-    expect(statusPhrase(STATUS.legacyBringFriend)).toBe('In medical, friend coming');
+    expect(statusPhrase(STATUS.legacyBringFriend)).toBe('Located, friend coming');
     expect(logNumber(998)).toBe('998');
     // Search ranges in "LP-0998" / "LP-1012" map onto the bare number.
     expect(logNumberRanges(1012, [[3, 7]])).toEqual([[0, 4]]);
@@ -224,14 +224,14 @@ describe('list helpers', () => {
     expect(logNumberRanges(998, [[0, 2]])).toEqual([]);
     expect(archivedFoldLabel(1)).toBe('Archived 1 request');
     expect(archivedFoldLabel(6)).toBe('Archived 6 requests');
-    // On a narrow phone only the two long labels get shorter, so the name keeps its room (review fix; F2:
-    // "Not found in medical" reads "Not found" there, like its answer button).
+    // On a narrow phone only the long labels get shorter, so the name keeps its room (review fix). (2026-11-07)
+    // "Not located" is short already: it reads the same there (it was "Not found in medical", narrow "Not found").
     expect(narrowStatusLabel(STATUS.waiting)).toBe('Waiting');
-    expect(narrowStatusLabel(STATUS.notInMedical)).toBe('Not found');
-    for (const st of [STATUS.inMedical, STATUS.legacyBringFriend, STATUS.reunited, STATUS.discharged, STATUS.cancelled, 'Some legacy value']) {
+    expect(narrowStatusLabel(STATUS.inactive)).toBe('Inactive');
+    for (const st of [STATUS.notInMedical, STATUS.inMedical, STATUS.legacyBringFriend, STATUS.reunited, STATUS.discharged, STATUS.cancelled, 'Some legacy value']) {
       expect(narrowStatusLabel(st)).toBeNull();
     }
-    // Not found in medical is closed and grey everywhere, the stepper included.
+    // Not located is closed and grey everywhere, the stepper included.
     expect(stepperModel(STATUS.notInMedical).color).toBe('var(--gray-9)');
     expect(isClosed(STATUS.notInMedical)).toBe(true);
   });
@@ -441,7 +441,7 @@ describe('list views render', () => {
     const at = open.map((n) => html.indexOf(`data-request-id="${idOf(n)}"`));
     expect(at[0]).toBeGreaterThan(attention);
     for (let i = 1; i < at.length; i++) expect(at[i]).toBeGreaterThan(at[i - 1]!);
-    // Every closed one (Not found in medical included) is folded: not rendered, counted in the fold.
+    // Every closed one (Not located included) is folded: not rendered, counted in the fold.
     const all = [...store.getState().confirmed.values()];
     const closed = all.filter((r) => statusMeta(r.status).bucket === 'closed');
     expect(closed.map((r) => r.caseNumber)).toEqual(expect.arrayContaining([1009, 1008, 1006, 1003, 1002, 1001]));
@@ -467,7 +467,7 @@ describe('list views render', () => {
     const at = closed.map((n) => html.indexOf(`data-request-id="${idOf(n)}"`));
     expect(at[0]).toBeGreaterThan(group);
     for (let i = 1; i < at.length; i++) expect(at[i]).toBeGreaterThan(at[i - 1]!);
-    // Greyed: Not found in medical and Reunited rows carry the closed style; open rows do not.
+    // Greyed: Not located and Reunited rows carry the closed style; open rows do not.
     expect(rowTag(html, 1009)).toContain('data-closed');
     expect(rowTag(html, 1003)).toContain('data-closed');
     expect(rowTag(html, 1013)).not.toContain('data-closed');
@@ -619,7 +619,7 @@ describe('list views render', () => {
     for (const r of store.getState().confirmed.values()) {
       if (statusMeta(r.status).bucket === 'closed') expect(pending).not.toContain(`data-request-id="${r.id}"`);
     }
-    // My requests: no Archived fold, and Not found in medical (LP-1009) and Reunited (LP-1003) are on the page.
+    // My requests: no Archived fold, and Not located (LP-1009) and Reunited (LP-1003) are on the page.
     const mine = render(store, <MineView />);
     expect(mine).not.toContain('data-testid="closed-fold"');
     expect(mine).not.toContain('Archived');
@@ -650,8 +650,8 @@ describe('list views render', () => {
     expect(shown(html, 1013, 'updated')).toBe('—');
     expect(html.slice(html.indexOf(`data-request-id="${idOf(1013)}"`))).toMatch(/^[^]*?data-col="status" data-tone="blue"/);
     // Jordan Diaz (LP-1007) moved to In medical 2 minutes ago: green, "2m" (or 1m/3m at a minute edge).
-    expect(spoken(html, 1007)).toMatch(/^LP-1007, Jordan Diaz, In medical, friend coming, created (?:[A-Z][a-z]{2} )?\S+ (AM|PM), updated [123] minutes? ago$/);
-    expect(shown(html, 1007, 'status')).toBe('In medical');
+    expect(spoken(html, 1007)).toMatch(/^LP-1007, Jordan Diaz, Located, friend coming, created (?:[A-Z][a-z]{2} )?\S+ (AM|PM), updated [123] minutes? ago$/);
+    expect(shown(html, 1007, 'status')).toBe('Located');
     expect(narrow(html, 1007)).toBeNull();
     expect(shown(html, 1007, 'updated')).toMatch(/^[123]m$/);
     expect(html.slice(html.indexOf(`data-request-id="${idOf(1007)}"`))).toMatch(/^[^]*?data-col="status" data-tone="green"/);
@@ -674,7 +674,7 @@ describe('list views render', () => {
     const html = render(store, <AllView status={null} post="FA 3 – Kinetic" />);
     expect(html).not.toContain('data-testid="closed-fold"');
     expect(html).not.toContain('Waiting to send');
-    // LP-1009 (Not found in medical) and LP-1002 (Discharged) are at FA 3: listed in place, greyed.
+    // LP-1009 (Not located) and LP-1002 (Discharged) are at FA 3: listed in place, greyed.
     expect(html).toContain(`data-request-id="${idOf(1009)}"`);
     expect(rowTag(html, 1009)).toContain('data-closed');
     expect(rowTag(html, 1012)).not.toContain('data-closed');
@@ -706,10 +706,11 @@ describe('list views render', () => {
     const store = storeWith((s) => ({ ...s, outbox: [outboxItem()] }));
     const html = render(store, <AllView status={STATUS.notInMedical} post={null} />);
     expect(html).toContain('data-testid="status-chip"');
-    expect(html).toContain('Not found in medical 2 shown. Clear this filter');
+    expect(html).toContain('Not located 2 shown. Clear this filter');
     expect(html).not.toContain('Waiting to send');
-    // Under 430 px the final status reads "Not found" (F2), also now that rows show stages (F5).
-    expect(narrow(html, 1009)).toBe('Not found');
+    // (2026-11-07) "Not located" has no narrow form: one label, the same at every width.
+    expect(narrow(html, 1009)).toBeNull();
+    expect(shown(html, 1009, 'status')).toBe('Not located');
   });
 
   it('skeletons only while there is no data; the error state once the empty cache is known and offline', () => {
@@ -773,7 +774,7 @@ describe('list views render', () => {
     expect(mine).toMatch(/aria-label="My requests \d+, change view"/);
   });
 
-  it('My requests: Not found in medical is closed, greyed, in the Closed area after the open requests', () => {
+  it('My requests: Not located is closed, greyed, in the Closed area after the open requests', () => {
     // Every stub row is "mine" for this check (created by the signed-in staff).
     const store = storeWith((s) => ({ ...s, myIds: new Set([...s.confirmed.keys()]) }));
     const html = render(store, <MineView />);
@@ -782,7 +783,7 @@ describe('list views render', () => {
     const card = (n: number) => html.indexOf(`data-request-id="${idOf(n)}"`);
     for (const n of [1013, 1012, 1007, 1004]) expect(card(n)).toBeLessThan(area);
     for (const n of [1009, 1008, 1003, 1001]) expect(card(n)).toBeGreaterThan(area);
-    // The Not found in medical card is dimmed like every closed card.
+    // The Not located card is dimmed like every closed card.
     const tag = html.slice(html.lastIndexOf('data-testid="mine-card"', card(1009)) - 300, card(1009));
     expect(tag).toMatch(/dimCard/);
   });
@@ -806,10 +807,10 @@ describe('list views render', () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(order[3]).toBeLessThan(coming);
     // The left answer of a request never held is the first Not found (the hold).
-    expect(html).toContain('>Not found yet<');
-    expect(html).toContain('aria-label="Not found yet. Keeps this request open and schedules a recheck"');
-    // The answer buttons never carry the status's long label (F2's rename: the status is "Not found in medical").
-    expect(html).not.toContain('>Not found in medical<');
+    expect(html).toContain('>Not located yet<');
+    expect(html).toContain('aria-label="Not located yet. Keeps this request open and schedules a recheck"');
+    // Never held: no final "Not located" answer yet (it closes the request; the status reads the same words).
+    expect(html).not.toContain('>Not located<');
   });
 
   it('Pending To check card: photo only when there is one, the name, minutes with a clock, wearing, "post · LP-####"', () => {

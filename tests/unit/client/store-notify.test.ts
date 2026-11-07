@@ -62,7 +62,7 @@ function bootWith(server: FakeServer, route: AlertRoute = 'system') {
 
 const alertTitles = (s: () => { toasts: readonly { title: string }[] }) => s().toasts.map((t) => t.title);
 
-describe('(F5) my request going on the "Not found yet" hold', () => {
+describe('(F5) my request going on the "Not located yet" hold', () => {
   const RECHECK = '2026-11-07T04:40:00Z'; // 11:40 PM in New York
   const hold = { recheckAt: RECHECK, notFoundChecks: 1 };
   const undo = { recheckAt: null, notFoundChecks: 0 };
@@ -75,7 +75,7 @@ describe('(F5) my request going on the "Not found yet" hold', () => {
     server.change(mine.id, hold);
     await advance(6_000);
     expect(n.shown).toEqual([
-      { title: 'S.L.', body: 'Not found yet · recheck 11:40 PM', tag: `lp-${mine.id}`, url: `/?r=${mine.id}`, key: `${mine.id}:2`, requireInteraction: false },
+      { title: 'S.L.', body: 'Not located yet · recheck 11:40 PM', tag: `lp-${mine.id}`, url: `/?r=${mine.id}`, key: `${mine.id}:2`, requireInteraction: false },
     ]);
     expect(s().toasts).toEqual([]);
     // The 10 s Undo lands after the alert: the request is plain Waiting for check again, status unchanged.
@@ -85,14 +85,14 @@ describe('(F5) my request going on the "Not found yet" hold', () => {
     expect(n.shown).toHaveLength(1);
   });
 
-  it('in front: the toast "S.L." / "Not found yet · recheck 11:40 PM" goes when the hold is undone; an Undo that puts it back says "Not found yet" again', async () => {
+  it('in front: the toast "S.L." / "Not located yet · recheck 11:40 PM" goes when the hold is undone; an Undo that puts it back says "Not located yet" again', async () => {
     const mine = makeRow(4, { firstName: 'Sofia', lastName: 'Lopez', createdBy: STAFF.dana.staff });
     const server = new FakeServer([mine]);
     const { s, heard } = bootWith(server, 'toast');
     await ready();
     server.change(mine.id, hold);
     await advance(6_000);
-    expect(s().toasts.map((t) => [t.title, t.subtitle])).toEqual([['S.L.', 'Not found yet · recheck 11:40 PM']]);
+    expect(s().toasts.map((t) => [t.title, t.subtitle])).toEqual([['S.L.', 'Not located yet · recheck 11:40 PM']]);
     expect(heard.map((e) => e.title)).toEqual(['S.L.']);
     server.change(mine.id, undo);
     await advance(6_000);
@@ -102,10 +102,10 @@ describe('(F5) my request going on the "Not found yet" hold', () => {
     await advance(6_000);
     server.change(mine.id, { status: STATUS.notInMedical, recheckAt: null, notFoundChecks: 2 });
     await advance(6_000);
-    expect(alertTitles(s)).toEqual(['LP-1004 · S.L. — not found in medical']);
+    expect(alertTitles(s)).toEqual(['LP-1004 · S.L. — not located']);
     server.change(mine.id, { status: STATUS.waiting, ...hold });
     await advance(6_000);
-    expect(s().toasts.map((t) => [t.title, t.subtitle])).toEqual([['S.L.', 'Not found yet · recheck 11:40 PM']]);
+    expect(s().toasts.map((t) => [t.title, t.subtitle])).toEqual([['S.L.', 'Not located yet · recheck 11:40 PM']]);
   });
 });
 
@@ -120,7 +120,7 @@ describe('alerts in the background are system notifications', () => {
     await advance(6_000);
     expect(n.shown).toEqual([
       {
-        title: 'S.L. · In medical',
+        title: 'S.L. · Located',
         body: 'FA 3\nBring the friend to Main Med',
         tag: `lp-${mine.id}`,
         url: `/?r=${mine.id}`,
@@ -160,12 +160,12 @@ describe('alerts in the background are system notifications', () => {
     server.change(mine.id, { status: STATUS.inMedical });
     await advance(6_000);
     expect(n.shown).toHaveLength(1);
-    // Back in front: the changed answer is a toast, and the stale "In medical" notification goes.
+    // Back in front: the changed answer is a toast, and the stale "Located" notification goes.
     n.route = 'toast';
     server.change(mine.id, { status: STATUS.notInMedical });
     await advance(6_000);
-    expect(alertTitles(s)).toEqual(['LP-1004 · S.L. — not found in medical']);
-    expect(heard.map((e) => e.title)).toEqual(['LP-1004 · S.L. — not found in medical']);
+    expect(alertTitles(s)).toEqual(['LP-1004 · S.L. — not located']);
+    expect(heard.map((e) => e.title)).toEqual(['LP-1004 · S.L. — not located']);
     expect(n.shown).toHaveLength(1);
     expect(n.closed).toEqual([{ tag: mine.id, key: `${mine.id}:2` }]);
   });
@@ -178,11 +178,11 @@ describe('alerts in the background are system notifications', () => {
     n.works = false;
     server.change(mine.id, { status: STATUS.inMedical });
     await advance(6_000);
-    expect(alertTitles(s)).toEqual(['LP-1004 · S.L. is in medical']);
+    expect(alertTitles(s)).toEqual(['LP-1004 · S.L. located']);
     expect(heard).toHaveLength(1);
   });
 
-  it('an "In medical" notification closes once the row leaves In medical without an alert (my own Reunited)', async () => {
+  it('an "Located" notification closes once the row leaves In medical without an alert (my own Reunited)', async () => {
     const mine = makeRow(4, { createdBy: STAFF.dana.staff });
     const server = new FakeServer([mine]);
     const { a, n } = bootWith(server);
@@ -204,10 +204,10 @@ describe('alerts in the background are system notifications', () => {
     server.change(mine.id, { status: STATUS.waiting }); // the liaison's Undo, seen on the next poll
     await advance(6_000);
     expect(n.shown.map((x) => [x.title, x.tag, x.key])).toEqual([
-      ['T.R. · In medical', `lp-${mine.id}`, `${mine.id}:2`],
+      ['T.R. · Located', `lp-${mine.id}`, `${mine.id}:2`],
       ['T.R. · Waiting for check', `lp-${mine.id}`, `${mine.id}:3`],
     ]);
-    // The out-of-date "In medical" may be closed by its own key; the new one never is.
+    // The out-of-date "Located" may be closed by its own key; the new one never is.
     expect(n.closed.every((c) => c.tag === mine.id && c.key === `${mine.id}:2`)).toBe(true);
   });
 

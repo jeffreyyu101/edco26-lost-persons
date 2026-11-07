@@ -1,4 +1,4 @@
-// F5: the "Not found yet" hold (rework SQL step 1d and lp_set_status; design/screens/updates.html #recheck),
+// F5: the "Not located yet" hold (rework SQL step 1d and lp_set_status; design/screens/updates.html #recheck),
 // through the API and SQL on the local stack: the first Not found holds (status stays 'Added', recheck in 20
 // minutes, 1 check), the second is final (2 checks), Undo clears or puts back exactly what was there, In medical
 // clears the recheck, Back to Waiting clears both, a due hold never closes itself, a build from before this
@@ -39,7 +39,7 @@ async function statusEvents(staff: Staff, id: string) {
   return detail.audit.filter((e): e is Extract<AuditEvent, { action: 'status' }> => e.action === 'status');
 }
 
-describe('the "Not found yet" hold', () => {
+describe('the "Not located yet" hold', () => {
   it('the first Not found holds: still Waiting for check, recheck in 20 minutes, 1 check, one audit entry', async () => {
     const creator = newStaff();
     const r = await createRequest(creator);
@@ -196,7 +196,7 @@ describe('builds from before the hold', () => {
     // Every key the old server reads is still there with its old meaning; the new ones are extra.
     for (const key of ['id', 'status', 'row_version', 'created_at', 'updated_at', 'found_at', 'closed_at', 'medical_location']) expect(out.row).toHaveProperty(key);
     expect(out.row).toMatchObject({ not_found_checks: 1 });
-    // The old client's Undo of what it thinks was "Not in medical" (back to Waiting, kind undo) clears the hold.
+    // The old client's Undo of what it thinks was "Not located" (back to Waiting, kind undo) clears the hold.
     const undo = await answer(medical, r.id, STATUS.waiting, Number(out.row.row_version), 'undo');
     expect(undo.body).toMatchObject({ changed: true, request: { status: STATUS.waiting, recheckAt: null, notFoundChecks: 0 } });
   });

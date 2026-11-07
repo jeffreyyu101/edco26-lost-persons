@@ -7,7 +7,7 @@
   gap: 14px;
 }
 
-/* "B.W. is in medical": the green glyph and line (the dialog's title). Doubled: it overrides the Radix
+/* "B.W. located": the green glyph and line (the dialog's title). Doubled: it overrides the Radix
    Heading the sheet title renders as. */
 .done.done {
   display: flex;

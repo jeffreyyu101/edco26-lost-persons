@@ -1122,6 +1122,23 @@ button.lr:focus-visible {
   font-weight: 500;
 }
 
+/* (2026-11-07, Located / Not located) The left answer keeps one width and place in both states (Pending v9.1):
+   "⧗ Not located yet" is wider than an equal share of a phone card's row beside Message and "✓ Located", so its
+   label reserves the longer label's width (data-size-as) with an invisible copy of no height; "× Not located"
+   then takes the same width. Not in the accessibility tree (visibility: hidden; the button has its aria-label). */
+.ansLabel {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.ansLabel::after {
+  content: attr(data-size-as);
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+
 /* On the desk board each column is a size container (components/desk/pending-board.module.css .col; nothing above
    a phone's cards is one, so none of this applies there). A column under 340 px (a 768 px iPad, a request docked
    beside the board) tightens the card so "⧗ Not found yet" keeps its one line; under 290 px (a request docked

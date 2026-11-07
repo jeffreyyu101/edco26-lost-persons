@@ -692,7 +692,7 @@ test.describe('desktop 1440 × 900', () => {
     await setStatus(page, row!, 'Found – Awaiting Reunion', 'answer');
     await page.goto(`/?r=${row!.id}`);
     const pane = page.getByTestId('desk-pane');
-    await expect(pane.getByTestId('status-block')).toContainText('In medical', { timeout: 15_000 });
+    await expect(pane.getByTestId('status-block')).toContainText('Located', { timeout: 15_000 });
     for (const id of ['desk-prev', 'desk-next', 'desk-more', 'desk-close']) await expect(page.getByTestId(id)).toBeVisible();
 
     // Right under the status block and before the details (desktop-log.html): two equal buttons.
@@ -711,7 +711,7 @@ test.describe('desktop 1440 × 900', () => {
     // Change answer: the other answer and Back to Waiting for check, each with its glyph, opening downwards.
     await change.click();
     const menu = page.getByTestId('change-answer-menu');
-    await expect(menu.getByRole('menuitem')).toHaveText(['Not found', 'Back to Waiting for check']);
+    await expect(menu.getByRole('menuitem')).toHaveText(['Not located', 'Back to Waiting for check']);
     expect((await menu.boundingBox())!.y).toBeGreaterThanOrEqual(cb.y + cb.height - 1);
     await page.keyboard.press('Escape');
     await expect(menu).toHaveCount(0);
@@ -733,7 +733,7 @@ test.describe('desktop 1440 × 900', () => {
     expect(at.box.x).toBeGreaterThanOrEqual(at.column.x);
     expect(at.box.x + at.box.width).toBeLessThanOrEqual(at.pane.x);
     await page.getByRole('button', { name: 'Undo' }).click();
-    await expect(pane.getByTestId('status-block')).toContainText('In medical');
+    await expect(pane.getByTestId('status-block')).toContainText('Located');
     await expect(actions.getByRole('button', { name: 'Reunited' })).toBeVisible();
   });
 
@@ -847,7 +847,7 @@ test.describe('iPad landscape 1180 × 820, the pane\'s actions', () => {
     expect(at.box.x).toBeGreaterThanOrEqual(at.column.x);
     expect(at.box.x + at.box.width).toBeLessThanOrEqual(at.pane.x);
     await page.getByRole('button', { name: 'Undo' }).click();
-    await expect(pane.getByTestId('status-block')).toContainText('In medical');
+    await expect(pane.getByTestId('status-block')).toContainText('Located');
   });
 });
 
@@ -957,13 +957,13 @@ test.describe('iPad portrait 820 × 1180 (touch)', () => {
     await page.goto(`/?r=${one!.id}`);
     const pane = page.getByTestId('desk-pane');
     const actions = pane.getByTestId('profile-actions');
-    // (Pending v9.1) The left answer of a request never held: "Not found yet", the hold.
-    await expect(actions.getByTestId('not-found-answer')).toHaveText('Not found yet', { timeout: 15_000 });
+    // (Pending v9.1) The left answer of a request never held: "Not located yet", the hold.
+    await expect(actions.getByTestId('not-found-answer')).toHaveText('Not located yet', { timeout: 15_000 });
     const status = (await pane.getByTestId('status-block').boundingBox())!;
     expect((await actions.boundingBox())!.y).toBeGreaterThanOrEqual(status.y + status.height);
     await actions.getByTestId('not-found-answer').click();
-    // (F5) A first Not found puts the request on a "Not found yet" hold.
-    await expect(pane.getByTestId('status-block')).toContainText('Not found yet');
+    // (F5) A first Not found puts the request on a "Not located yet" hold.
+    await expect(pane.getByTestId('status-block')).toContainText('Not located yet');
 
     // The list beside the sheet is too narrow for it: the bar sits at the foot of the sheet, inside it.
     const at = await snackPlacement(page);
