@@ -21,6 +21,7 @@ import { holdDetail } from '@/lib/hold-detail';
 import {
   ACTIVITY_KINDS,
   activityAriaLabel,
+  activityGlyph,
   activityLine2,
   backToWaitingDetail,
   closedDetail,
@@ -75,13 +76,15 @@ function everyRow(): RequestSummary[] {
 }
 
 describe('Located / Not located: no status wording says "medical"', () => {
-  it('the labels: Located, Located · friend coming, Not located, Not located yet; the answers ✓ Located, × Not located', () => {
+  it('the labels: Located, Located · friend coming, Not located, the Pending hold; the answers ✓ Located, × Not located, ⧗ Pending', () => {
     expect(ANSWER_LABEL).toEqual({ notFound: 'Not located', inMedical: 'Located' });
     expect(STATUS_META[STATUS.inMedical]).toMatchObject({ label: 'Located · friend coming', shortLabel: 'Located' });
     expect(STATUS_META[STATUS.legacyBringFriend]).toMatchObject({ label: 'Located · friend coming', shortLabel: 'Located' });
     expect(STATUS_META[STATUS.notInMedical]).toMatchObject({ label: 'Not located', shortLabel: 'Not located' });
-    expect(NOT_FOUND_YET_LABEL).toBe('Not located yet');
-    expect(STAGE_META.notFoundYet.label).toBe('Not located yet');
+    expect(NOT_FOUND_YET_LABEL).toBe('Pending');
+    expect(STAGE_META.notFoundYet.label).toBe('Pending');
+    // (2026-11-07 12:29) The 20-minute hold is the third answer, "Pending" (it was "Not located yet").
+    expect(notFoundAnswer(makeRow(1, { status: STATUS.waiting })).label).toBe('Pending');
     expect(RECHECK_DUE_LABEL).toBe('Recheck due');
     expect(NOT_FOUND_FINAL_LABEL).toBe('Not located');
     // The database values never change.
@@ -122,14 +125,14 @@ describe('Located / Not located: no status wording says "medical"', () => {
       expect(saysMedical([notice.title, notice.body]), row.status).toEqual([]);
     }
     const held = makeRow(30, { status: STATUS.waiting, recheckAt: RECHECK, notFoundChecks: 1 });
-    expect(holdAlert(held, TZ)).toMatchObject({ title: 'T.R.', subtitle: 'Not located yet · recheck 10:20 PM' });
+    expect(holdAlert(held, TZ)).toMatchObject({ title: 'T.R.', subtitle: 'Pending · recheck 10:20 PM' });
     expect(statusAlert(makeRow(31, { status: STATUS.inMedical }), TZ).title).toBe('LP-1031 · T.R. located');
     expect(statusAlert(makeRow(32, { status: STATUS.notInMedical }), TZ).title).toBe('LP-1032 · T.R. — not located');
   });
 
   it('the Undo bar after a Not located answer', () => {
     const held = makeRow(40, { status: STATUS.waiting, recheckAt: RECHECK, notFoundChecks: 1 });
-    expect(notFoundSnack(held, STATUS.notInMedical)).toEqual({ message: 'Not located yet · recheck in 20 min', said: 'Not located yet, recheck in 20 minutes.' });
+    expect(notFoundSnack(held, STATUS.notInMedical)).toEqual({ message: 'Pending · recheck in 20 min', said: 'Pending, recheck in 20 minutes.' });
     const closed = makeRow(41, { status: STATUS.notInMedical, notFoundChecks: 2, firstName: 'B.', lastName: 'W.' });
     expect(notFoundSnack(closed, STATUS.notInMedical)).toEqual({ message: 'B.W. closed · not located', said: 'B.W. closed, not located.' });
   });
@@ -152,7 +155,7 @@ describe('Located / Not located: no status wording says "medical"', () => {
     ];
     expect(saysMedical(details)).toEqual([]);
     expect(details.slice(0, 2)).toEqual(['Located', 'Located · Chair 9']);
-    expect(details.slice(7, 11)).toEqual(['Not located yet · recheck 10:20 PM', 'Not located yet', 'Not located yet · recheck 10:20 PM', 'Not located']);
+    expect(details.slice(7, 11)).toEqual(['Pending · recheck 10:20 PM', 'Pending', 'Pending · recheck 10:20 PM', 'Not located']);
     for (const kind of ACTIVITY_KINDS) {
       for (const detail of details) {
         const p = pushPayload({ requestId: 'r1', kind, detail }, 'J.D.', 1);
@@ -183,13 +186,16 @@ describe('Activity rows written before the rename read with the new words', () =
   it('rewrites only an old status word at the start of a status row', () => {
     expect(currentDetail('in_medical', 'In medical')).toBe('Located');
     expect(currentDetail('in_medical', 'In medical · Chair 9')).toBe('Located · Chair 9');
-    expect(currentDetail('not_in_medical', 'Not found yet · recheck 4:40 PM')).toBe('Not located yet · recheck 4:40 PM');
-    expect(currentDetail('not_in_medical', 'Not found yet')).toBe('Not located yet');
+    expect(currentDetail('not_in_medical', 'Not found yet · recheck 4:40 PM')).toBe('Pending · recheck 4:40 PM');
+    expect(currentDetail('not_in_medical', 'Not found yet')).toBe('Pending');
+    // A row written by the Located build, before the hold became Pending.
+    expect(currentDetail('not_in_medical', 'Not located yet · recheck 4:40 PM')).toBe('Pending · recheck 4:40 PM');
+    expect(currentDetail('not_in_medical', 'Not located yet')).toBe('Pending');
     expect(currentDetail('not_in_medical', 'Not found in medical')).toBe('Not located');
     expect(currentDetail('not_in_medical', 'Not in medical')).toBe('Not located');
     // New rows, other kinds and anything else are left as written.
     expect(currentDetail('in_medical', 'Located · Chair 9')).toBe('Located · Chair 9');
-    expect(currentDetail('not_in_medical', 'Not located yet · recheck 4:40 PM')).toBe('Not located yet · recheck 4:40 PM');
+    expect(currentDetail('not_in_medical', 'Pending · recheck 4:40 PM')).toBe('Pending · recheck 4:40 PM');
     expect(currentDetail('message', 'Rae C.: In medical · Bed 3?')).toBe('Rae C.: In medical · Bed 3?');
     expect(currentDetail('moved', 'In medical tent → Bed 3')).toBe('In medical tent → Bed 3');
     expect(currentDetail('in_medical', 'In medicalish')).toBe('In medicalish');
@@ -200,10 +206,13 @@ describe('Activity rows written before the rename read with the new words', () =
     const located = mapActivityRow(raw('in_medical', 'In medical · Chair 9'));
     expect(located).toMatchObject({ kind: 'in_medical', detail: 'Located · Chair 9' });
     const held = mapActivityRow(raw('not_in_medical', 'Not found yet · recheck 4:40 PM'));
-    expect(held?.detail).toBe('Not located yet · recheck 4:40 PM');
+    expect(held?.detail).toBe('Pending · recheck 4:40 PM');
     const final = mapActivityRow(raw('not_in_medical', 'Not found in medical'));
     expect(final?.detail).toBe('Not located');
-    for (const row of [located, held, final]) {
+    const heldLocated = mapActivityRow(raw('not_in_medical', 'Not located yet · recheck 4:40 PM'));
+    expect(heldLocated?.detail).toBe('Pending · recheck 4:40 PM');
+    expect(activityGlyph('not_in_medical', heldLocated?.detail ?? '')).toEqual({ icon: 'hourglass', tone: 'violet' });
+    for (const row of [located, held, final, heldLocated]) {
       expect(row).not.toBeNull();
       if (!row) continue;
       expect(saysMedical([activityLine2(row), activityAriaLabel(row, NOW)])).toEqual([]);

@@ -83,6 +83,9 @@ async function openComing(page: Page): Promise<void> {
 const messages = (page: Page) => page.getByTestId('messages');
 const SYNC = { timeout: 20_000 };
 
+/** The composer's selection [start, end]. */
+const caret = (input: Locator) => input.evaluate((el) => [(el as HTMLTextAreaElement).selectionStart, (el as HTMLTextAreaElement).selectionEnd]);
+
 async function send(page: Page, text: string): Promise<void> {
   const input = messages(page).getByTestId('composer-input');
   await input.fill(text);
@@ -116,8 +119,16 @@ test('medical asks from To check; front of house replies; read; en route, change
     await acts.click();
     await expect(med).toHaveURL(new RegExp(`r=${r.id}`));
     await expect(messages(med).getByTestId('thread-empty')).toHaveAttribute('aria-label', 'No messages yet');
-    // The quick line sends at once.
-    await messages(med).getByRole('button', { name: 'Send: Any tattoos or marks?' }).click();
+    // (2026-11-07) The quick line fills the field, focused, caret at the end; nothing is posted until Send.
+    const medInput = messages(med).getByTestId('composer-input');
+    await messages(med).getByRole('button', { name: 'Add to message: Any tattoos or marks?' }).click();
+    await expect(medInput).toHaveValue('Any tattoos or marks?');
+    await expect(medInput).toBeFocused();
+    expect(await caret(medInput)).toEqual([21, 21]);
+    await expect(messages(med).getByTestId('composer-send')).toBeEnabled();
+    await expect(messages(med).getByTestId('bubble-mine')).toHaveCount(0);
+    await messages(med).getByTestId('composer-send').click();
+    await expect(medInput).toHaveValue('');
     await expect(messages(med).getByTestId('bubble-mine')).toHaveText('Any tattoos or marks?');
     await expect(messages(med).getByTestId('receipt')).toHaveText('Delivered', SYNC);
 
@@ -189,7 +200,8 @@ test('medical asks from To check; front of house replies; read; en route, change
     // The request's quick lines no longer offer En route (or Arrived) once the friend arrived, as on the card.
     await page.goto(`/?r=${r.id}`);
     await expect(page.getByTestId('status-block').getByTestId('enroute-row')).toContainText('Friend arrived', SYNC);
-    await expect(messages(page).getByTestId('quick-lines').getByRole('button')).toHaveText(["Can't find them", 'Friend left the area']);
+    // (2026-11-07) "Can't find them" is gone.
+    await expect(messages(page).getByTestId('quick-lines').getByRole('button')).toHaveText(['Friend left the area']);
 
     // Reunited clears it.
     await openMine(page, r.id);
@@ -198,6 +210,40 @@ test('medical asks from To check; front of house replies; read; en route, change
   } finally {
     await medCtx.close();
   }
+});
+
+test('quick lines fill the box (2026-11-07): typed text is kept, two taps append, an edit is sent as edited, nothing posts until Send', async ({ page }) => {
+  const r = await createRequest(page.request);
+  await page.goto(`/?r=${r.id}`);
+  await expect(messages(page).getByTestId('thread-empty')).toBeVisible(SYNC);
+  const input = messages(page).getByTestId('composer-input');
+  const line = (text: string) => messages(page).getByTestId('quick-lines').getByRole('button', { name: `Add to message: ${text}` });
+  const posted = async () => (await call<ThreadPage>(page.request, 'GET', `/api/requests/${r.id}/messages`)).messages.map((m) => m.body);
+
+  // Typed text first: the line goes after it, a space between; a second tap appends again.
+  await input.fill('Update:');
+  await line('Friend is still here').click();
+  await expect(input).toHaveValue('Update: Friend is still here');
+  await line('Friend left the area').click();
+  await expect(input).toHaveValue('Update: Friend is still here Friend left the area');
+  await expect(input).toBeFocused();
+  expect(await caret(input)).toEqual([49, 49]);
+  await expect(messages(page).getByTestId('bubble-mine')).toHaveCount(0);
+  expect(await posted()).toEqual([]);
+
+  // Empty field: the tap sets it; the caret is at the end, so typing edits it; Send posts the edited text once.
+  await input.fill('');
+  await expect(messages(page).getByTestId('composer-send')).toBeDisabled();
+  await line('Friend is still here').click();
+  await expect(input).toHaveValue('Friend is still here');
+  await expect(messages(page).getByTestId('composer-send')).toBeEnabled();
+  await page.keyboard.type(', by the Ferris wheel');
+  await expect(input).toHaveValue('Friend is still here, by the Ferris wheel');
+  expect(await posted()).toEqual([]);
+  await messages(page).getByTestId('composer-send').click();
+  await expect(input).toHaveValue('');
+  await expect(messages(page).getByTestId('bubble-mine')).toHaveText('Friend is still here, by the Ferris wheel');
+  await expect.poll(posted, SYNC).toEqual(['Friend is still here, by the Ferris wheel']);
 });
 
 test('a message written offline shows "Sending…" and is sent exactly once when the signal is back', async ({ page, context }) => {

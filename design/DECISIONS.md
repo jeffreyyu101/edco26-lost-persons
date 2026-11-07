@@ -379,13 +379,13 @@ Staff were still relaying "this pt is being worked up, only bring one" and "ok o
 
 - **Messages on every request, at every status** (Waiting for check, held, In medical, Not in medical, closed). The main use before an answer is medical asking the requester to confirm it is the right patient. A reopened request keeps its thread.
 - **The thread is bubbles only**: no system lines, no timestamps. Theirs grey (gray-4), mine blue; grouped like iMessage, with "Rae C. · Medical" small above the first bubble of someone else's run (first name and last initial, the short team). Under **my latest** message, in words: "Delivered", or "Read 4:14 PM" once someone other than me opened the thread after it. No tick icons. Plain text only (no links, no HTML), 500 characters, with a counter only from 400.
-- **The composer** is one rounded field (Radix TextArea, growing up to six lines) with the send arrow inside it (blue when there is text), and soft quick-line pills above it that scroll sideways. A quick line is one tap: it sends.
+- **The composer** is one rounded field (Radix TextArea, growing up to six lines) with the send arrow inside it (blue when there is text), and soft quick-line pills above it that scroll sideways. ~~A quick line is one tap: it sends.~~ Superseded 2026-11-07: a quick line fills the box; Send posts it (see "Pending, no 'Can't find them', quick lines fill the box").
 - **Quick lines by status and side** (medical = the Medical team; every other team is front of house):
 
   | | Medical | Front of house |
   |---|---|---|
   | Waiting for check (and Not found yet) | Any tattoos or marks? · What are they wearing? · Do you have a photo? | Friend is still here · Friend left the area |
-  | In medical | Bring 1 person only · Being worked up — wait · Ready for them · Hold — not ready yet | En route (before) or Arrived (while en route) · Can't find them · Friend left the area |
+  | In medical | Bring 1 person only · Being worked up — wait · Ready for them · Hold — not ready yet | En route (before) or Arrived (while en route) · Friend left the area ("Can't find them" removed 2026-11-07) |
   | Closed | none (free text) | none (free text) |
 
   Every quick line is just a message, except En route (opens the en route sheet) and Arrived.
@@ -502,3 +502,9 @@ Friend coming backs up because staff don't tap Reunited. A request In medical wi
 ## Located / Not located wording, HIPAA, 2026-11-07, Brian approved
 
 The ops lead (group chat, 11:59): "in main medical" / "not in main medical" become "located" / "not located", so staff can use first names and last initials without the status saying a named person is in medical. Brian: "Absolutely, please do this." Labels only: the database values (`Found – Awaiting Reunion`, `Checked – Not Found`, `Added`), the colours and the glyphs are unchanged. "In medical" → **"Located"** ("Located · friend coming", answer "✓ Located"); "Not found in medical" → **"Not located"** (answer "× Not located"; the same words under 430 px); "Not found yet" → **"Not located yet"** ("⧗ Not located yet"); "Recheck due" stays. It flows everywhere a status is named: cards, the log and desk table, the request page and Change answer, the audit trail, Undo bars, in-app alerts ("LP-1004 · S.L. located"), system notifications, Web Push and Activity, the dashboard, filter chips, the export and screen-reader sentences. Activity rows written before the change read with the new words. Kept: the Medical team's name, the app's title, and free text (locations, messages, quick lines). Spec: `docs/BUILD_SPEC.md` "Located / Not located amendment" (A104).
+
+## Pending, no "Can't find them", quick lines fill the box (group chat with the ops lead, 2026-11-07; Brian approved each)
+
+- **"Pending" (12:29, "add a third option that says 'pending'").** Brian: the F5 20-minute hold is Pending. "Not located yet" → **"Pending"** wherever the hold is named: the first-check answer "⧗ Pending", the violet chip, the Undo bar "Pending · recheck in 20 min", push / Activity / system notification "Pending · recheck 4:40 PM", the audit trail ("Waiting for check → Pending", "Pending → Not located"), the desk status cell ("Pending · 12m"), screen-reader sentences. "Recheck due", the violet colour, the 20 minutes, the behaviour and the database are unchanged; the Pending tab keeps its name. Activity rows written as "Not found yet …" or "Not located yet …" read "Pending …".
+- **No "Can't find them" (13:52).** Front of house's In medical quick lines are En route (or Arrived) and "Friend left the area". Old messages with that text stay as written.
+- **Quick lines fill the box (Brian 13:55, "it should fill in the text box, not automatically send it").** A tap on a message quick line puts its words in the composer (empty: set; typed text: appended after a space, never replaced), focused with the caret at the end and the send arrow live; nothing is posted until Send. En route (its sheet) and Arrived act as before. **Supersedes "A quick line is one tap: it sends"** (F3 above). Spec: `docs/BUILD_SPEC.md` A105.

@@ -8,19 +8,21 @@
 //
 // The thread scrolls in its own box and opens at the newest message; "New messages" shows when new ones
 // arrive while it is scrolled up; screen readers hear new incoming messages (polite). The composer is one
-// rounded field with the send arrow inside it and the quick lines for this status and side above it.
+// rounded field with the send arrow inside it and the quick lines for this status and side above it. A message
+// quick line fills the field (appended after a space to anything typed), and nothing is posted until Send
+// (Brian 2026-11-07 13:55); En route opens its sheet and Arrived acts at once, as before.
 import { Button, ContextMenu, DropdownMenu, IconButton, Skeleton, TextArea, VisuallyHidden } from '@radix-ui/themes';
 import { ArrowDown, ArrowUp, Check, CloudOff, Copy, Ellipsis, MessageCircle, RotateCcw, Trash2, Undo2 } from 'lucide-react';
 import { WalkIcon } from './WalkIcon';
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import type { RequestSummary } from '@/lib/api-types';
 import { meFor } from '@/lib/client/messages-core';
 import { useMessaging, useOpenThread, useRequestJobs, useThread, takeThreadFocus } from '@/lib/client/messages-hooks';
 import { buildBubbles, receiptFor, type Bubble } from '@/lib/client/messages-logic';
 import { useActions, useEventTimezone, useNow, useSession } from '@/lib/client/store-contract';
 import { formatCreatedTime } from '@/lib/format';
-import { MESSAGE_COUNTER_FROM, MESSAGE_MAX, UNSEND_WINDOW_MS, messageLength, quickLines, quickStage, sideOfTeam } from '@/lib/messaging';
+import { MESSAGE_COUNTER_FROM, MESSAGE_MAX, UNSEND_WINDOW_MS, fillWithQuickLine, messageLength, quickLines, quickStage, sideOfTeam } from '@/lib/messaging';
 import { useEnrouteControl } from './Enroute';
 import s from './messages.module.css';
 
@@ -375,6 +377,17 @@ function Composer({
   }, [inputRef]);
   useLayoutEffect(fit, [value, fit]);
 
+  // A message quick line puts its words in the field (fillWithQuickLine: never replacing what is typed). The field
+  // takes focus with the caret at the end and the send arrow goes live; nothing is posted until Send.
+  const fill = (text: string) => {
+    const next = fillWithQuickLine(value, text);
+    flushSync(() => setValue(next));
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    el.setSelectionRange(next.length, next.length);
+  };
+
   const send = async () => {
     if (!ready) return;
     const text = value;
@@ -405,9 +418,9 @@ function Composer({
               onClick={() => {
                 if (l.kind === 'enroute') onEnroute();
                 else if (l.kind === 'arrived') onArrived();
-                else void onSendText(l.text);
+                else fill(l.text);
               }}
-              aria-label={l.kind === 'message' ? `Send: ${l.text}` : l.kind === 'enroute' ? 'En route: bringing the friend' : 'Arrived with the friend'}
+              aria-label={l.kind === 'message' ? `Add to message: ${l.text}` : l.kind === 'enroute' ? 'En route: bringing the friend' : 'Arrived with the friend'}
             >
               {l.kind === 'enroute' ? <WalkIcon size={15} strokeWidth={2} aria-hidden /> : null}
               {l.kind === 'arrived' ? <Check size={15} strokeWidth={2} aria-hidden /> : null}

@@ -73,7 +73,7 @@ describe('contract B: detail copy', () => {
     expect(scrubDetail('Rae C.: call (407) 555-0142 now')).toBe('Rae C.: call ••• now');
     expect(scrubDetail('Rae C.: +1 407 555 0142')).toBe('Rae C.: •••');
     expect(scrubDetail('T.R. · 24 M · FA 4')).toBe('T.R. · 24 M · FA 4');
-    expect(scrubDetail('Not located yet · recheck 4:40 PM')).toBe('Not located yet · recheck 4:40 PM');
+    expect(scrubDetail('Pending · recheck 4:40 PM')).toBe('Pending · recheck 4:40 PM');
     expect(scrubDetail('Friend en route · ~4 min')).toBe('Friend en route · ~4 min');
     expect(Array.from(scrubDetail('y'.repeat(500)))).toHaveLength(200);
   });
@@ -160,7 +160,7 @@ describe('the inbox', () => {
     expect(ACTIVITY_GLYPH.discharged).toEqual({ icon: 'check', tone: 'gray' });
     expect(ACTIVITY_GLYPH.cancelled).toEqual({ icon: 'x', tone: 'gray' });
     expect(ACTIVITY_GLYPH.edited).toEqual({ icon: 'pencil', tone: 'gray' });
-    expect(activityGlyph('not_in_medical', 'Not located yet · recheck 4:40 PM')).toEqual({ icon: 'hourglass', tone: 'violet' });
+    expect(activityGlyph('not_in_medical', 'Pending · recheck 4:40 PM')).toEqual({ icon: 'hourglass', tone: 'violet' });
     expect(activityGlyph('not_in_medical', 'Not located')).toEqual({ icon: 'x', tone: 'gray' });
   });
 

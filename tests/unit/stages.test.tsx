@@ -1,4 +1,4 @@
-// F5: the stage system (lib/stages displayStage + STAGE_META) and the "Not located yet" hold on the client: every
+// F5: the stage system (lib/stages displayStage + STAGE_META) and the "Pending" hold on the client: every
 // status × Needs info × hold (none / held / due) × en route, the colours' contrast in light and dark, the one
 // 20-minute constant shared with SQL, the labels (read from STATUS_META and the action definitions, so the "Not
 // found in medical" rename flows through), the optimistic overlay and Undo words, the alert, the mapper and the
@@ -116,7 +116,7 @@ describe('displayStage', () => {
     } else {
       expect(stage).toMatchObject({ label: 'Found – Transported', tone: 'gray', bucket: 'closed' });
     }
-    // The look says the same at the same clock; with no clock a due hold reads Not located yet.
+    // The look says the same at the same clock; with no clock a due hold reads Pending.
     expect(stageLook(source, NOW)).toMatchObject({ key, label: stage.label, tone: stage.tone, glyph: stage.glyph });
     expect(stageLook(source).key).toBe(key === 'recheckDue' ? 'notFoundYet' : key);
     // One line under the label, and what a desk cell puts after it.
@@ -148,7 +148,7 @@ describe('displayStage', () => {
         expect([stage.sub, stage.extra, stage.waitMinutes]).toEqual([`Recheck ${time}`, '· 9m', 9]);
         expect(stage.recheck).toBe(`Recheck ${time}`);
         expect(stage.due).toBe(hold === 'due');
-        expect(stage.said).toBe(hold === 'due' ? 'Recheck due' : 'Not located yet');
+        expect(stage.said).toBe(hold === 'due' ? 'Recheck due' : 'Pending');
         break;
       }
       case 'inMedical':
@@ -205,9 +205,9 @@ describe('displayStage', () => {
 
   it('the row sentence names the stage, with the status words for status stages (no recheck time)', () => {
     expect(stagePhrase({ status: STATUS.inMedical, createdAt: at(-5) })).toBe('Located, friend coming');
-    expect(stagePhrase({ status: STATUS.waiting, createdAt: at(-5), recheckAt: at(10) }, TZ)).toBe('Not located yet');
+    expect(stagePhrase({ status: STATUS.waiting, createdAt: at(-5), recheckAt: at(10) }, TZ)).toBe('Pending');
     expect(stagePhrase({ status: STATUS.waiting, createdAt: at(-5), recheckAt: at(-1) }, TZ, NOW)).toBe('Recheck due');
-    expect(logRowLabel(row({ recheckAt: at(10), notFoundChecks: 1 }), '4:11 PM', 'updated now', TZ)).toContain(', Not located yet, created 4:11 PM');
+    expect(logRowLabel(row({ recheckAt: at(10), notFoundChecks: 1 }), '4:11 PM', 'updated now', TZ)).toContain(', Pending, created 4:11 PM');
     expect(logRowLabel(row({ recheckAt: at(-1), notFoundChecks: 1 }), '4:11 PM', 'updated now', TZ, NOW)).toContain(', Recheck due, created 4:11 PM');
     // Needs info on hold: Needs info (the hold's time is the request's own block's).
     expect(stagePhrase({ status: STATUS.waiting, createdAt: at(-5), recheckAt: at(10), needsInfo: true }, TZ)).toBe('Needs info');
@@ -226,14 +226,14 @@ describe('labels', () => {
       expect(STAGE_META[key].tone).toBe(STATUS_META[status].tone);
     }
     expect(STAGE_META.needsInfo.label).toBe('Needs info');
-    expect(STAGE_META.notFoundYet.label).toBe('Not located yet');
+    expect(STAGE_META.notFoundYet.label).toBe('Pending');
     expect(STAGE_META.recheckDue.label).toBe('Recheck due');
     expect(STAGE_META.recheckDue.glyph).toBe('history');
     expect(STAGE_META.enroute.label).toBe('Friend en route');
     expect(STAGE_META.arrived.label).toBe('Friend arrived');
   });
 
-  it('colour = meaning: blue waiting, amber needs info, violet not located yet, green in medical / arrived, teal en route, grey closed', () => {
+  it('colour = meaning: blue waiting, amber needs info, violet pending, green in medical / arrived, teal en route, grey closed', () => {
     expect(Object.fromEntries(Object.entries(STAGE_META).map(([k, m]) => [k, m.tone]))).toEqual({
       waiting: 'blue',
       needsInfo: 'amber',
@@ -251,14 +251,14 @@ describe('labels', () => {
     for (const key of ['needsInfo', 'notFoundYet', 'recheckDue', 'enroute', 'arrived'] as const) expect(STAGE_META[key].bucket).toBe('open');
   });
 
-  it('the answer buttons and the Undo bar (Pending v9.1): "Not located yet · recheck in 20 min", then "<initials> closed · …"', () => {
+  it('the answer buttons and the Undo bar (Pending v9.1): "Pending · recheck in 20 min", then "<initials> closed · …"', () => {
     const [notFound, inMedical] = primaryActions(STATUS.waiting);
     expect(notFound?.label).toBe(actionLabel('notInMedical'));
     expect(inMedical?.label).toBe(actionLabel('inMedical'));
-    expect(notFoundAnswer(row()).label).toBe('Not located yet');
+    expect(notFoundAnswer(row()).label).toBe('Pending');
     const held = row({ recheckAt: '2026-11-06T21:40:00Z', notFoundChecks: 1 });
     expect(notFoundAnswer(held).label).toBe('Not located');
-    expect(holdSnackMessage(held, STATUS.notInMedical)).toBe(`Not located yet · recheck in ${RECHECK_MINUTES} min`);
+    expect(holdSnackMessage(held, STATUS.notInMedical)).toBe(`Pending · recheck in ${RECHECK_MINUTES} min`);
     expect(holdSnackMessage(held, STATUS.inMedical)).toBeNull();
     expect(holdSnackMessage(row(), STATUS.notInMedical)).toBeNull();
     const closed = row({ name: 'Bea Walsh', status: STATUS.notInMedical, notFoundChecks: 2 });
@@ -266,8 +266,8 @@ describe('labels', () => {
     expect(notFoundSnack(closed, STATUS.notInMedical)).toEqual({ message: `B.W. closed · ${words}`, said: `B.W. closed, ${words}.` });
   });
 
-  it('the notification detail: "Not located yet · recheck 4:40 PM", or the final status label from STATUS_META', () => {
-    expect(notFoundDetail(row({ recheckAt: '2026-11-06T21:40:00Z', notFoundChecks: 1 }), TZ)).toBe('Not located yet · recheck 4:40 PM');
+  it('the notification detail: "Pending · recheck 4:40 PM", or the final status label from STATUS_META', () => {
+    expect(notFoundDetail(row({ recheckAt: '2026-11-06T21:40:00Z', notFoundChecks: 1 }), TZ)).toBe('Pending · recheck 4:40 PM');
     expect(notFoundDetail(row({ status: STATUS.notInMedical, notFoundChecks: 2 }), TZ)).toBe(STATUS_META[STATUS.notInMedical].label);
     expect(notFoundDetail(row(), TZ)).toBeNull();
     // One builder for the server's detail and the client's alert.
@@ -406,13 +406,13 @@ describe('alerts', () => {
   const ctx = (): AlertContext => ({ sessionStaff: STUB_SESSION.staff, myIds: new Set(), ownMutationIds: new Set(), ownKeys: new Set(), bell: false, seen: new Set(), timeZone: TZ });
   const RAE = 'Rae Chen · Medical';
 
-  it('my request going on hold (someone else, status unchanged) alerts once: the initials, "Not located yet · recheck 4:50 PM"', () => {
+  it('my request going on hold (someone else, status unchanged) alerts once: the initials, "Pending · recheck 4:50 PM"', () => {
     const before = row({ createdBy: STUB_SESSION.staff, rowVersion: 3 });
     const after = row({ createdBy: STUB_SESSION.staff, rowVersion: 4, updatedBy: RAE, recheckAt: at(20), notFoundChecks: 1 });
     const c = ctx();
     const alerts = diffAlerts(new Map([[before.id, before]]), [after], c);
     expect(alerts).toEqual([holdAlert(after, TZ)]);
-    expect(alerts[0]).toMatchObject({ kind: 'status_changed', requestId: after.id, title: initials(after.name), subtitle: 'Not located yet · recheck 4:50 PM' });
+    expect(alerts[0]).toMatchObject({ kind: 'status_changed', requestId: after.id, title: initials(after.name), subtitle: 'Pending · recheck 4:50 PM' });
     expect(diffAlerts(new Map([[before.id, before]]), [after], c)).toEqual([]);
     // Not mine, or by me: nothing.
     expect(diffAlerts(new Map([[before.id, before]]), [{ ...after, createdBy: 'Lee Park · GC/HX - Base' }], ctx())).toEqual([]);
@@ -425,7 +425,7 @@ describe('alerts', () => {
     const notice = systemNotice(alert, () => held);
     expect({ title: notice.title, body: notice.body, tag: notice.tag, url: notice.url }).toEqual({
       title: initials(held.name),
-      body: 'Not located yet · recheck 4:50 PM',
+      body: 'Pending · recheck 4:50 PM',
       tag: `lp-${held.id}`,
       url: `/?r=${held.id}`,
     });
@@ -434,7 +434,7 @@ describe('alerts', () => {
     expect(holdAlert({ ...held, name: '' }, TZ).title).toBe(HOLD_ALERT_UNNAMED);
   });
 
-  it('the hold alert closes when its Undo takes the hold away (status unchanged), and an Undo that puts it back reads "Not located yet"', () => {
+  it('the hold alert closes when its Undo takes the hold away (status unchanged), and an Undo that puts it back reads "Pending"', () => {
     const before = row({ createdBy: STUB_SESSION.staff, rowVersion: 3 });
     const heldRow = row({ createdBy: STUB_SESSION.staff, rowVersion: 4, updatedBy: RAE, recheckAt: at(20), notFoundChecks: 1 });
     const undone = row({ createdBy: STUB_SESSION.staff, rowVersion: 5, updatedBy: RAE, recheckAt: null, notFoundChecks: 0 });
@@ -447,7 +447,7 @@ describe('alerts', () => {
     expect(alertStillCurrent(raised!.alert.kind, raised!.status, undone, raised!.held)).toBe(false);
     // Undoing that Undo raises nothing new for the status (unchanged) but the hold alert again.
     expect(diffAlerts(new Map([[undone.id, undone]]), [{ ...heldRow, rowVersion: 6 }], ctx())).toEqual([holdAlert(heldRow, TZ)]);
-    // An Undo of the final Not found (or of In medical) puts the hold back: "Not located yet", not "waiting for check".
+    // An Undo of the final Not found (or of In medical) puts the hold back: "Pending", not "waiting for check".
     const final = row({ createdBy: STUB_SESSION.staff, status: STATUS.notInMedical, rowVersion: 6, recheckAt: null, notFoundChecks: 2 });
     const back = { ...heldRow, rowVersion: 7 };
     const [again] = diffRaisedAlerts(new Map([[final.id, final]]), [back], ctx());
@@ -497,11 +497,11 @@ describe('mapper and audit trail', () => {
     expect(legacy).toEqual({ id: 'l', at: at(-5), staff: 'Rae Chen · Medical', notes: null, action: 'status', previous: { status: STATUS.waiting }, next: { status: STATUS.inMedical, kind: 'answer' } });
   });
 
-  it('the trail reads "Waiting for check → Not located yet · Recheck 4:30 PM", then "Not located yet → Not located"', () => {
+  it('the trail reads "Waiting for check → Pending · Recheck 4:30 PM", then "Pending → Not located"', () => {
     const items = buildAuditTrail([hold, final], TZ);
-    expect(items[1]?.status).toMatchObject({ fromLabel: STATUS_META[STATUS.waiting].shortLabel, toLabel: 'Not located yet', toGlyph: 'hourglass', toTone: 'violet' });
+    expect(items[1]?.status).toMatchObject({ fromLabel: STATUS_META[STATUS.waiting].shortLabel, toLabel: 'Pending', toGlyph: 'hourglass', toTone: 'violet' });
     expect(items[1]?.note).toBe('Recheck 4:30 PM');
-    expect(items[0]?.status).toMatchObject({ fromLabel: 'Not located yet', fromGlyph: 'hourglass', toLabel: STATUS_META[STATUS.notInMedical].shortLabel });
+    expect(items[0]?.status).toMatchObject({ fromLabel: 'Pending', fromGlyph: 'hourglass', toLabel: STATUS_META[STATUS.notInMedical].shortLabel });
     expect(holdOrigin([hold, final])).toEqual({ staffName: 'Rae Chen', at: at(-20) });
   });
 });
@@ -549,7 +549,7 @@ function heldStore(session: Partial<StoreState['session']> = {}) {
 }
 
 describe('renders', () => {
-  it('All (phone): a held request reads "Not located yet" (violet hourglass), a due one "Recheck due" (violet history), never "Waiting"', () => {
+  it('All (phone): a held request reads "Pending" (violet hourglass), a due one "Recheck due" (violet history), never "Waiting"', () => {
     const store = heldStore();
     const held = [...store.getState().confirmed.values()].filter((r) => isHeld(r));
     expect(held).toHaveLength(2);
@@ -560,20 +560,20 @@ describe('renders', () => {
       const rowHtml = html.slice(i, html.indexOf('</button>', i));
       expect(rowHtml).toContain('data-tone="violet"');
       expect(rowHtml).toContain(due ? 'data-glyph="history"' : 'data-glyph="hourglass"');
-      expect(rowHtml).toContain(due ? '>Recheck due<' : '>Not located yet<');
+      expect(rowHtml).toContain(due ? '>Recheck due<' : '>Pending<');
       expect(rowHtml).not.toContain('Waiting');
       expect(rowHtml).not.toMatch(/recheck at/);
     }
   });
 
-  it('desk table: "Not located yet · 12m" / "Recheck due · 40m": the wait after the label, never the recheck time', () => {
+  it('desk table: "Pending · 12m" / "Recheck due · 40m": the wait after the label, never the recheck time', () => {
     const store = heldStore();
     const held = [...store.getState().confirmed.values()].filter((r) => isHeld(r));
     const html = render(store, <DeskAllTable status={null} post={null} />, true);
     for (const r of held) {
       const i = html.indexOf(`data-request-id="${r.id}"`);
       const cell = html.slice(html.indexOf('data-col="status"', i), html.indexOf('data-col="post"', i)).replace(/<[^>]+>/g, '');
-      const label = isRecheckDue(r, RECHECK_NOW) ? 'Recheck due' : 'Not located yet';
+      const label = isRecheckDue(r, RECHECK_NOW) ? 'Recheck due' : 'Pending';
       expect(cell).toMatch(new RegExp(`${label}· (now|\\d+m)<`));
       expect(cell).not.toContain(formatClockAmPm(r.recheckAt as string, TZ));
     }
@@ -588,7 +588,7 @@ describe('renders', () => {
     expect(html).not.toContain('data-testid="later-group"');
     expect(html).not.toContain('data-testid="recheck-chip"');
     expect(html).toContain('>Recheck due<');
-    expect(html).toContain('>Not located yet<');
+    expect(html).toMatch(/data-testid="hold-chip"[^>]*>(?:(?!<\/span>).)*Pending<\/span>/);
   });
 
   it('desk board: the same cards in the Waiting for check column', () => {
@@ -621,7 +621,7 @@ describe('renders', () => {
     const i = html.indexOf('data-testid="status-block"');
     const block = html.slice(html.lastIndexOf('<div', i), html.indexOf('data-testid="person-details"') > 0 ? html.indexOf('data-testid="person-details"') : i + 4000);
     expect(block).toContain('data-tone="violet"');
-    expect(block).toContain('>Not located yet<');
+    expect(block).toContain('>Pending<');
     expect(block).toContain(`Recheck ${formatClockAmPm(held.recheckAt!, TZ)}`);
     // (Pending v9.1 GLYPHS) Recheck is lucide history, as on the chip and the heading; refresh-cw is the live line's.
     const recheck = block.slice(block.indexOf('data-testid="recheck-row"'), block.indexOf('data-testid="recheck-row"') + 1200);
@@ -672,9 +672,9 @@ describe('renders', () => {
     const next = mine.indexOf('data-testid="mine-card"', i + 1);
     const card = mine.slice(mine.lastIndexOf('data-testid="mine-card"', i), next > 0 ? next : undefined);
     expect(card).toMatch(/data-testid="stage-chip"[^>]*>.*Needs info/);
-    expect(card).toMatch(/data-testid="hold-chip"[^>]*>.*Not located yet/);
+    expect(card).toMatch(/data-testid="hold-chip"[^>]*>(?:(?!<\/span>).)*Pending<\/span>/);
     expect(card).not.toContain(time);
-    expect(card).toMatch(/aria-label="[^"]*Needs info, Rae C\. asked at [^"]*, not located yet, waiting /);
+    expect(card).toMatch(/aria-label="[^"]*Needs info, Rae C\. asked at [^"]*, pending, waiting /);
     const desk = render(store, <DeskAllTable status={null} post={null} />, true);
     const j = desk.indexOf(`data-request-id="${held.id}"`);
     const cell = desk.slice(desk.indexOf('data-col="status"', j), desk.indexOf('data-col="post"', j));
@@ -684,7 +684,7 @@ describe('renders', () => {
     expect(cell).not.toContain(time);
   });
 
-  it('My requests: the wait in the corner and the violet "Not located yet" chip under the name; no recheck time', () => {
+  it('My requests: the wait in the corner and the violet "Pending" chip under the name; no recheck time', () => {
     // One of this phone's own requests, put on hold.
     const store = storeWith((all) => {
       const mineId = all.find((r) => r.createdBy === STUB_SESSION.staff && r.status !== STATUS.cancelled)!.id;
@@ -694,9 +694,9 @@ describe('renders', () => {
     const html = render(store, <MineView />);
     const i = html.indexOf(`data-request-id="${held.id}"`);
     const card = html.slice(html.lastIndexOf('data-testid="mine-card"', i), html.indexOf('data-testid="mine-card"', i + 1) > 0 ? html.indexOf('data-testid="mine-card"', i + 1) : undefined);
-    expect(card).toMatch(/data-testid="hold-chip"[^>]*>.*Not located yet/);
+    expect(card).toMatch(/data-testid="hold-chip"[^>]*>(?:(?!<\/span>).)*Pending<\/span>/);
     expect(card).not.toContain('data-testid="stage-chip"');
     expect(card).not.toContain(`Recheck ${formatClockAmPm(held.recheckAt!, TZ)}`);
-    expect(card).toMatch(/aria-label="[^"]*\. Not located yet, waiting /);
+    expect(card).toMatch(/aria-label="[^"]*\. Pending, waiting /);
   });
 });

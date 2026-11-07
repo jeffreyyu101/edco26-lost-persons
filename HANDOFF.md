@@ -139,6 +139,10 @@ screenshots.
   answer ("✓ Located", "× Not located", "⧗ Not located yet", alerts, notifications, Activity, dashboard, export), for
   HIPAA (ops lead, Brian approved). Labels only: no migration, database values unchanged; deploy as usual. Old Activity
   rows read with the new words; pushes already on lock screens keep theirs. The app's title is unchanged.
+- **On top (`hotfix/located-pending`): the 20-minute hold reads "Pending"** ("⧗ Pending", the violet chip, "Pending ·
+  recheck 4:40 PM", "Waiting for check → Pending"; "Recheck due" unchanged), front of house's "Can't find them" quick
+  line is gone, and **a quick line now fills the message box** (Send posts it; En route / Arrived unchanged). Client
+  only, no migration.
 
 ### 2026-11-07 (F6 inactivity auto-close, `feat/f6-inactive`, ships after F3 + F4)
 

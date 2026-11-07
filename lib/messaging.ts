@@ -87,12 +87,12 @@ export function messageLength(body: string): number {
 export type QuickLineKind = 'message' | 'enroute' | 'arrived';
 
 export interface QuickLine {
-  /** The text sent (for 'message'), and the pill's label. */
+  /** The text a tap puts in the composer (for 'message'), and the pill's label. */
   text: string;
   kind: QuickLineKind;
 }
 
-/** Where a request is for the quick lines: waiting (incl. the Not found yet hold), in medical, or closed. */
+/** Where a request is for the quick lines: waiting (incl. the Pending hold), in medical, or closed. */
 export type QuickStage = 'waiting' | 'in_medical' | 'closed';
 
 /**
@@ -121,21 +121,33 @@ export const FOH_WAITING_LINES: readonly QuickLine[] = [msg('Friend is still her
 
 /**
  * The quick lines for a request, a side, whether I am en route on it now, and whether the friend has
- * arrived. Every quick line is just a message except En route (opens the en route sheet) and Arrived.
- *   Waiting (incl. Not found yet): medical asks; front of house says whether the friend is still here.
+ * arrived. Every quick line is just a message (a tap fills the composer; Send posts it) except En route
+ * (opens the en route sheet) and Arrived.
+ *   Waiting (incl. the Pending hold): medical asks; front of house says whether the friend is still here.
  *   In medical: medical's handover lines; front of house "En route" (before) or "Arrived" (while en route),
- *   neither once the friend arrived (as on the cards), then "Can't find them", "Friend left the area".
+ *   neither once the friend arrived (as on the cards), then "Friend left the area" ("Can't find them" was
+ *   removed 2026-11-07, the ops lead + Brian; old messages with it stay as written).
  *   Closed: none (free text only).
  */
 export function quickLines(stage: QuickStage, side: Side, enrouteMine: boolean, arrived = false): readonly QuickLine[] {
   if (side === 'medical') return MEDICAL_LINES[stage];
   if (stage === 'waiting') return FOH_WAITING_LINES;
   if (stage === 'in_medical') {
-    const rest = [msg("Can't find them"), msg('Friend left the area')];
+    const rest = [msg('Friend left the area')];
     if (arrived) return rest;
     return [enrouteMine ? { text: 'Arrived', kind: 'arrived' } : { text: 'En route', kind: 'enroute' }, ...rest];
   }
   return [];
+}
+
+/**
+ * What the composer holds after a tap on a message quick line (Brian 2026-11-07 13:55: "it should fill in the text
+ * box, not automatically send it"): the line when nothing (or only spaces) is typed, else the typed text, a space,
+ * and the line (no second space when the text already ends in one). Typed text is never replaced or lost.
+ */
+export function fillWithQuickLine(typed: string, line: string): string {
+  if (typed.trim() === '') return line;
+  return /\s$/.test(typed) ? `${typed}${line}` : `${typed} ${line}`;
 }
 
 // ---------------------------------------------------------------------------------------------------

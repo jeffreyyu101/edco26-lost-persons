@@ -1,4 +1,4 @@
-// F5: the "Not located yet" hold (rework SQL step 1d and lp_set_status; design/screens/updates.html #recheck),
+// F5: the "Pending" hold (rework SQL step 1d and lp_set_status; design/screens/updates.html #recheck),
 // through the API and SQL on the local stack: the first Not found holds (status stays 'Added', recheck in 20
 // minutes, 1 check), the second is final (2 checks), Undo clears or puts back exactly what was there, In medical
 // clears the recheck, Back to Waiting clears both, a due hold never closes itself, a build from before this
@@ -39,7 +39,7 @@ async function statusEvents(staff: Staff, id: string) {
   return detail.audit.filter((e): e is Extract<AuditEvent, { action: 'status' }> => e.action === 'status');
 }
 
-describe('the "Not located yet" hold', () => {
+describe('the "Pending" hold', () => {
   it('the first Not found holds: still Waiting for check, recheck in 20 minutes, 1 check, one audit entry', async () => {
     const creator = newStaff();
     const r = await createRequest(creator);

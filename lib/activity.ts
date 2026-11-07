@@ -67,14 +67,16 @@ export interface ActivityRow {
 }
 
 /**
- * (2026-11-07, Located / Not located) lp_activity keeps each row's detail as it was written, so a row from before
- * the rename can still start with an old status word: "In medical · Chair 9", "Not found yet · recheck 4:40 PM",
- * "Not found in medical". Read back, a status row (in_medical / not_in_medical) whose detail is exactly such a
- * word, or starts with it and " · ", reads with today's label; every other row and detail is left as written.
+ * (2026-11-07, Located / Not located; Pending) lp_activity keeps each row's detail as it was written, so a row from
+ * before the rename can still start with an old status word: "In medical · Chair 9", "Not found yet · recheck
+ * 4:40 PM", "Not located yet · recheck 4:40 PM", "Not found in medical". Read back, a status row (in_medical /
+ * not_in_medical) whose detail is exactly such a word, or starts with it and " · ", reads with today's label;
+ * every other row and detail is left as written.
  */
 const LEGACY_STATUS_WORDS: ReadonlyArray<readonly [ActivityKind, string, string]> = [
   ['in_medical', 'In medical', STATUS_META[STATUS.inMedical].shortLabel],
   ['not_in_medical', 'Not found yet', NOT_FOUND_YET_LABEL],
+  ['not_in_medical', 'Not located yet', NOT_FOUND_YET_LABEL],
   ['not_in_medical', 'Not found in medical', STATUS_META[STATUS.notInMedical].label],
   ['not_in_medical', 'Not in medical', STATUS_META[STATUS.notInMedical].label],
 ];
@@ -373,7 +375,7 @@ export const ACTIVITY_GLYPH: Readonly<Record<ActivityKind, ActivityGlyph>> = {
   closed_inactive: { icon: 'timer-off', tone: 'gray' },
 };
 
-/** The "Not found yet" hold (F5): its detail starts with these words (lib/domain's label, so a rename flows through). */
+/** The Pending hold (F5's "Not found yet"): its detail starts with these words (lib/domain's label, so a rename flows through). */
 export const NOT_FOUND_YET = NOT_FOUND_YET_LABEL;
 
 export function activityGlyph(kind: ActivityKind, detail: string): ActivityGlyph {

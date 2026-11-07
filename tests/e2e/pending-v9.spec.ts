@@ -251,10 +251,10 @@ test.describe('fixture', () => {
         expect(text).not.toMatch(/\d:\d\d|Recheck \d|not located \d/i);
       }
 
-      // The left answer: "Not located yet" (the hold) on a fresh card, "× Not located" (closes it) once held or due.
+      // The left answer: "Pending" (the hold) on a fresh card, "× Not located" (closes it) once held or due.
       const answer = (n: string) => card(n).getByTestId('not-found-answer');
       await expect(answer('B.W.')).toHaveText(NOT_FOUND_YET_LABEL);
-      await expect(answer('B.W.')).toHaveAccessibleName('Not located yet. Keeps this request open and schedules a recheck');
+      await expect(answer('B.W.')).toHaveAccessibleName('Pending. Keeps this request open and schedules a recheck');
       await expect(answer('P.V.')).toHaveText(NOT_FOUND_FINAL_LABEL);
       await expect(answer('P.V.')).toHaveAccessibleName(`Not located. Closes this request as ${CLOSED_WORDS}`);
       await expect(answer('M.R.')).toHaveText(NOT_FOUND_FINAL_LABEL);
@@ -510,7 +510,7 @@ test.describe('fixture', () => {
       expect(await rowIds(list)).toEqual(ids(['P.V.', 'S.O.', 'M.R.', 'B.W.', 'K.T.', 'J.D.', 'E.N.', 'M.P.', 'A.L.', 'R.P.']));
       await expect(page.getByTestId('closed-fold')).toHaveAccessibleName('Archived 3 requests');
       await expect(page.getByTestId('closed-fold')).toHaveAttribute('aria-expanded', 'false');
-      // The status cell is the stage label: held → Not located yet, due → Recheck due (violet).
+      // The status cell is the stage label: held → Pending, due → Recheck due (violet).
       const cell = (n: string) => list.locator(`[data-request-id="${idOf(n)}"] [data-col="status"]`);
       await expect(cell('P.V.')).toHaveText(NOT_FOUND_YET_LABEL);
       await expect(cell('M.R.')).toHaveText(RECHECK_DUE_LABEL);
@@ -691,7 +691,7 @@ test.describe('fixture', () => {
       const cell = (n: string) => table.locator(`[data-request-id="${idOf(n)}"] [data-col="status"]`);
       await expect(cell('B.W.')).toHaveText('Waiting for check· 27m');
       await expect(cell('J.D.')).toHaveText('Needs info· 9m');
-      await expect(cell('P.V.')).toHaveText('Not located yet· 51m');
+      await expect(cell('P.V.')).toHaveText('Pending· 51m');
       await expect(cell('M.R.')).toHaveText('Recheck due· 40m');
       await expect(cell('P.V.').locator('[data-tone="red"]')).toHaveCount(1);
       await expect(cell('A.L.')).toHaveText('Friend en route· ~4 min');
@@ -928,7 +928,7 @@ test.describe('real flow', () => {
 
     // The first Not found: the hold. The chip, the other left answer, the toast; the card stays where it was.
     await answer.click();
-    await expect(page.locator('.lp-snack')).toContainText('Not located yet · recheck in 20 min');
+    await expect(page.locator('.lp-snack')).toContainText('Pending · recheck in 20 min');
     await expect(card.getByTestId('hold-chip')).toHaveText(NOT_FOUND_YET_LABEL);
     await expect(answer).toHaveText(NOT_FOUND_FINAL_LABEL);
     await expect(answer).toHaveAccessibleName(`Not located. Closes this request as ${CLOSED_WORDS}`);

@@ -807,8 +807,8 @@ describe('list views render', () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(order[3]).toBeLessThan(coming);
     // The left answer of a request never held is the first Not found (the hold).
-    expect(html).toContain('>Not located yet<');
-    expect(html).toContain('aria-label="Not located yet. Keeps this request open and schedules a recheck"');
+    expect(html).toContain('>Pending<');
+    expect(html).toContain('aria-label="Pending. Keeps this request open and schedules a recheck"');
     // Never held: no final "Not located" answer yet (it closes the request; the status reads the same words).
     expect(html).not.toContain('>Not located<');
   });

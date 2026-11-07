@@ -62,7 +62,7 @@ function bootWith(server: FakeServer, route: AlertRoute = 'system') {
 
 const alertTitles = (s: () => { toasts: readonly { title: string }[] }) => s().toasts.map((t) => t.title);
 
-describe('(F5) my request going on the "Not located yet" hold', () => {
+describe('(F5) my request going on the "Pending" hold', () => {
   const RECHECK = '2026-11-07T04:40:00Z'; // 11:40 PM in New York
   const hold = { recheckAt: RECHECK, notFoundChecks: 1 };
   const undo = { recheckAt: null, notFoundChecks: 0 };
@@ -75,7 +75,7 @@ describe('(F5) my request going on the "Not located yet" hold', () => {
     server.change(mine.id, hold);
     await advance(6_000);
     expect(n.shown).toEqual([
-      { title: 'S.L.', body: 'Not located yet · recheck 11:40 PM', tag: `lp-${mine.id}`, url: `/?r=${mine.id}`, key: `${mine.id}:2`, requireInteraction: false },
+      { title: 'S.L.', body: 'Pending · recheck 11:40 PM', tag: `lp-${mine.id}`, url: `/?r=${mine.id}`, key: `${mine.id}:2`, requireInteraction: false },
     ]);
     expect(s().toasts).toEqual([]);
     // The 10 s Undo lands after the alert: the request is plain Waiting for check again, status unchanged.
@@ -85,14 +85,14 @@ describe('(F5) my request going on the "Not located yet" hold', () => {
     expect(n.shown).toHaveLength(1);
   });
 
-  it('in front: the toast "S.L." / "Not located yet · recheck 11:40 PM" goes when the hold is undone; an Undo that puts it back says "Not located yet" again', async () => {
+  it('in front: the toast "S.L." / "Pending · recheck 11:40 PM" goes when the hold is undone; an Undo that puts it back says "Pending" again', async () => {
     const mine = makeRow(4, { firstName: 'Sofia', lastName: 'Lopez', createdBy: STAFF.dana.staff });
     const server = new FakeServer([mine]);
     const { s, heard } = bootWith(server, 'toast');
     await ready();
     server.change(mine.id, hold);
     await advance(6_000);
-    expect(s().toasts.map((t) => [t.title, t.subtitle])).toEqual([['S.L.', 'Not located yet · recheck 11:40 PM']]);
+    expect(s().toasts.map((t) => [t.title, t.subtitle])).toEqual([['S.L.', 'Pending · recheck 11:40 PM']]);
     expect(heard.map((e) => e.title)).toEqual(['S.L.']);
     server.change(mine.id, undo);
     await advance(6_000);
@@ -105,7 +105,7 @@ describe('(F5) my request going on the "Not located yet" hold', () => {
     expect(alertTitles(s)).toEqual(['LP-1004 · S.L. — not located']);
     server.change(mine.id, { status: STATUS.waiting, ...hold });
     await advance(6_000);
-    expect(s().toasts.map((t) => [t.title, t.subtitle])).toEqual([['S.L.', 'Not located yet · recheck 11:40 PM']]);
+    expect(s().toasts.map((t) => [t.title, t.subtitle])).toEqual([['S.L.', 'Pending · recheck 11:40 PM']]);
   });
 });
 
