@@ -3,9 +3,12 @@
    panel in light mode (spec §7, DECISIONS "Accessibility pass"). Glyphs are bare outlines (no containers). */
 
 /* ---- The bell ---- */
-.bell {
+.bell.bell {
   position: relative;
   flex: none;
+  width: 36px;
+  height: 36px;
+  margin: 0;
 }
 .bell svg {
   color: var(--gray-11);
@@ -218,7 +221,8 @@
   outline-offset: -4px;
 }
 
-/* ---- Phone: a full-height sheet on Dialog ---- */
+/* ---- Phone: a full-height sheet on Dialog (Escape, the scrim and a swipe close it, as the app's other
+   sheets) ---- */
 .sheet.sheet {
   position: fixed;
   left: 0;

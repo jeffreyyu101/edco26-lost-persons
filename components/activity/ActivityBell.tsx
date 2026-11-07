@@ -35,7 +35,6 @@ function BellButton({ unread, ...rest }: { unread: number } & Omit<ComponentProp
       variant="ghost"
       color="gray"
       size="3"
-      radius="full"
       className={`${s.bell} lp-hit`}
       aria-label={bellLabel(unread)}
       data-testid="activity-bell"
@@ -68,11 +67,6 @@ function ActivitySheet({ open, onOpenChange }: { open: boolean; onOpenChange: (o
             )}
           />
         </div>
-        <VisuallyHidden>
-          <Dialog.Close>
-            <button type="button">Close Activity</button>
-          </Dialog.Close>
-        </VisuallyHidden>
       </Dialog.Content>
     </Dialog.Root>
   );
@@ -131,20 +125,19 @@ export function ActivityNavItem() {
     <button
       type="button"
       className={s.navItem}
-      aria-label={bellLabel(activity.unread)}
       aria-haspopup="dialog"
       aria-expanded={activity.open}
       onClick={() => activityClient().setOpen(true)}
       data-testid="desk-activity"
     >
       <Bell size={16} strokeWidth={1.75} aria-hidden />
-      <span className={s.navLabel} aria-hidden>
-        Activity
-      </span>
+      {/* Named by what it shows, "Activity 3", then " unread" for screen readers (WCAG 2.5.3). */}
+      <span className={s.navLabel}>Activity</span>{' '}
       {text ? (
-        <span className={s.navBadge} aria-hidden>
-          {text}
-        </span>
+        <>
+          <span className={s.navBadge}>{text}</span>
+          <VisuallyHidden> unread</VisuallyHidden>
+        </>
       ) : null}
     </button>
   );

@@ -228,12 +228,15 @@ test('brand card over All requests: logos, event, the big title, the credit; dar
   await expect(page.getByRole('button', { name: 'Search' })).toBeInViewport();
   await expect(page.getByTestId('account-trigger')).toBeInViewport();
 
-  // Pending and My requests open with just their large title (Pending v8), at the top of the page.
+  // Pending and My requests open with just their large title (Pending v8), at the top of the page — under
+  // the alerts reminder while alerts don't work on this phone yet (F4: here, a Safari tab).
   for (const url of ['/?view=pending', '/?view=mine']) {
     await page.goto(url);
     await expect(page.getByTestId('view-switcher')).toBeVisible();
     await expect(brand(page), url).toHaveCount(0);
-    expect((await page.getByTestId('view-switcher').boundingBox())!.y, url).toBeLessThan(40);
+    const reminder = page.getByTestId('alerts-banner');
+    const top = (await reminder.count()) ? (await reminder.boundingBox())!.y + (await reminder.boundingBox())!.height : 0;
+    expect((await page.getByTestId('view-switcher').boundingBox())!.y - top, url).toBeLessThan(40);
   }
 
   // Search keeps its own bar, with no card.

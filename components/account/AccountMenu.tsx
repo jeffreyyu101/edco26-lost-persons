@@ -166,12 +166,11 @@ export function AccountMenu({ size = '2' }: AccountMenuProps) {
               ))}
             </SegmentedControl.Root>
           </div>
-          {/* Opens the Alerts sheet (F4). The name says this device's state once, in full. */}
+          {/* Opens the Alerts sheet (F4). Named by what it shows: "Alerts Off" (WCAG 2.5.3). */}
           <button
             type="button"
             className={s.mitem}
             aria-haspopup="dialog"
-            aria-label={alertsShown ? `Alerts, ${alertsShown}` : 'Alerts'}
             onClick={() => {
               setOpen(false);
               openAlertsSheet();
@@ -179,11 +178,9 @@ export function AccountMenu({ size = '2' }: AccountMenuProps) {
             data-testid="alerts-menu"
           >
             {alertsOn ? <BellRing size={16} aria-hidden /> : <BellOff size={16} aria-hidden />}
-            <span className={s.sp} aria-hidden>
-              Alerts
-            </span>
+            <span className={s.sp}>Alerts</span>{' '}
             {alertsShown ? (
-              <span className={s.mval} data-on={alertsOn ? '' : undefined} aria-hidden>
+              <span className={s.mval} data-on={alertsOn ? '' : undefined}>
                 {alertsShown}
               </span>
             ) : null}

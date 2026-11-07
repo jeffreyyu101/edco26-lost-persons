@@ -125,8 +125,9 @@ function SwitchRow({ label, sub, checked, onChange, testId }: { label: string; s
         <span className={s.switchLabel}>{label}</span>
         <span className={s.switchSub}>{sub}</span>
       </span>
-      {/* The whole row (the label, at least 56 px tall) is the target; no lp-hit here: the switch draws its track with ::before. */}
-      <Switch id={id} size="3" color="green" checked={checked} onCheckedChange={onChange} data-testid={testId} />
+      {/* The whole row (at least 56 px tall) is the target; the switch itself gets a 44 px hit area with ::after
+          (lp-hit would take ::before, which draws the switch's track). */}
+      <Switch id={id} size="3" color="green" checked={checked} onCheckedChange={onChange} data-testid={testId} className={s.switchHit} />
     </label>
   );
 }

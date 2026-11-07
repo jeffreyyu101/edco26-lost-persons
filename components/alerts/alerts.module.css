@@ -188,3 +188,12 @@
 .notifyRow {
   margin-top: 12px;
 }
+/* A 44 px hit area for the switch (its ::before is the track). */
+.switchHit {
+  position: relative;
+}
+.switchHit::after {
+  content: '';
+  position: absolute;
+  inset: min(0px, calc((100% - 44px) / 2));
+}

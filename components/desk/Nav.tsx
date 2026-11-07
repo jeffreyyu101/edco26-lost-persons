@@ -89,20 +89,14 @@ function AlertsSwitch() {
       type="button"
       className={d.bell}
       aria-haspopup="dialog"
-      aria-label={value ? `Alerts, ${value}` : 'Alerts'}
       data-on={on ? '' : undefined}
       onClick={openAlertsSheet}
       data-testid="desk-alerts"
     >
       {on ? <BellRing size={16} strokeWidth={1.75} aria-hidden /> : <BellOff size={16} strokeWidth={1.75} aria-hidden />}
-      <span className={d.nl} aria-hidden>
-        Alerts
-      </span>
-      {value ? (
-        <span className={d.nc} aria-hidden>
-          {value}
-        </span>
-      ) : null}
+      {/* Named by what it shows: "Alerts On" (WCAG 2.5.3). */}
+      <span className={d.nl}>Alerts</span>{' '}
+      {value ? <span className={d.nc}>{value}</span> : null}
     </button>
   );
 }

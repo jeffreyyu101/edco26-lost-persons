@@ -160,7 +160,9 @@ test.describe('desktop 1440 × 900', () => {
     for (const name of [/^All requests \d+$/, /^Pending \d+$/, /^My requests \d+$/, /^Dashboard$/]) {
       await expect(sidebar.getByRole('link', { name })).toBeVisible();
     }
-    await expect(sidebar.getByRole('switch', { name: 'Alerts' })).toBeVisible();
+    // F4: Alerts opens the Alerts sheet (named by what it shows, "Alerts Off"); Activity sits under the views.
+    await expect(sidebar.getByRole('button', { name: /^Alerts/ })).toBeVisible();
+    await expect(sidebar.getByTestId('desk-activity')).toBeVisible();
     await expect(page.getByRole('heading', { level: 1, name: 'Search' })).toBeVisible();
     await expect(page.getByRole('searchbox', { name: 'Search requests' })).toHaveValue(tag);
     await expect(page.getByRole('button', { name: /^New request/ })).toHaveCount(1);

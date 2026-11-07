@@ -196,7 +196,7 @@ test.describe('desktop (Chromium)', () => {
       // The grant is real for this origin (see installSpy for the headless-shell getter).
       expect(await page.evaluate(() => navigator.permissions.query({ name: 'notifications' }).then((s) => s.state))).toBe('granted');
       // Once the service worker is active the menu shows the granted state (no "Allow" button).
-      await page.getByTestId('account-trigger').click();
+      await page.getByTestId('account-trigger').filter({ visible: true }).click();
       const menu = page.getByRole('dialog', { name: 'Account' });
       await expect(menu.getByTestId('notify-state')).toHaveAttribute('data-state', 'granted', { timeout: 30_000 });
       await expect(menu.getByTestId('notify-state')).toHaveText('System notifications on');
@@ -261,7 +261,7 @@ test.describe('desktop (Chromium)', () => {
       await openApp(other);
       // Both have system notifications on (their worker answers lp-caps).
       for (const page of [list, other]) {
-        await page.getByTestId('account-trigger').click();
+        await page.getByTestId('account-trigger').filter({ visible: true }).click();
         const menu = page.getByRole('dialog', { name: 'Account' });
         await expect(menu.getByTestId('notify-state')).toHaveAttribute('data-state', 'granted', { timeout: 30_000 });
         await page.keyboard.press('Escape');
@@ -312,7 +312,7 @@ test.describe('desktop (Chromium)', () => {
       const page = await desk.newPage();
       watch(page);
       await openApp(page);
-      await page.getByTestId('account-trigger').click();
+      await page.getByTestId('account-trigger').filter({ visible: true }).click();
       const menu = page.getByRole('dialog', { name: 'Account' });
       const state = menu.getByTestId('notify-state');
       await expect(state).toHaveAttribute('data-state', 'denied', { timeout: 30_000 });
@@ -325,7 +325,7 @@ test.describe('desktop (Chromium)', () => {
       const sheet = page.getByRole('dialog', { name: 'Alerts' });
       await expect(sheet).toBeVisible();
       await expect(sheet.getByTestId('notify-state')).toHaveAttribute('data-state', 'denied');
-      await expect(sheet.getByText('Add to Home Screen')).toHaveCount(0);
+      await expect(sheet.getByText('Add to Home Screen', { exact: true })).toHaveCount(0);
       await sheet.getByRole('switch', { name: /New requests/ }).click();
       await expect(sheet.getByRole('switch', { name: /New requests/ })).toHaveAttribute('aria-checked', 'true');
       expect(await page.evaluate(() => window.__lpAsked)).toBe(0);
@@ -350,7 +350,7 @@ test.describe('desktop (Chromium)', () => {
       const page = await desk.newPage();
       watch(page);
       await openApp(page);
-      await page.getByTestId('account-trigger').click();
+      await page.getByTestId('account-trigger').filter({ visible: true }).click();
       const menu = page.getByRole('dialog', { name: 'Account' });
       const allow = menu.getByTestId('notify-allow');
       await expect(allow).toBeVisible({ timeout: 30_000 });
@@ -371,7 +371,7 @@ test.describe('desktop (Chromium)', () => {
       await page.keyboard.press('Escape');
       await expect(sheet).toHaveCount(0);
 
-      await page.getByTestId('account-trigger').click();
+      await page.getByTestId('account-trigger').filter({ visible: true }).click();
       await expect(menu.getByTestId('notify-state')).toHaveAttribute('data-state', 'granted');
       await expect(menu.getByTestId('notify-allow')).toHaveCount(0);
       expect(await page.evaluate(() => window.__lpAsked)).toBe(1);
@@ -389,15 +389,15 @@ test('iPhone (a Safari tab): the avatar menu and the Alerts sheet show the Home 
   await page.evaluate(() =>
     Promise.race([navigator.serviceWorker?.ready.then(() => true) ?? Promise.resolve(false), new Promise((resolve) => setTimeout(resolve, 8_000))]),
   );
-  await page.getByTestId('account-trigger').click();
+  await page.getByTestId('account-trigger').filter({ visible: true }).click();
   const menu = page.getByRole('dialog', { name: 'Account' });
-  await expect(menu.getByRole('button', { name: 'Alerts, Off' })).toBeVisible({ timeout: 15_000 });
+  await expect(menu.getByRole('button', { name: 'Alerts Off' })).toBeVisible({ timeout: 15_000 });
   await expect(menu.getByTestId('notify-allow')).toHaveCount(0);
   await expect(menu.getByTestId('notify-state')).toHaveCount(0);
   await menu.getByTestId('alerts-menu').click();
   const sheet = page.getByRole('dialog', { name: 'Alerts' });
   await expect(sheet).toBeVisible();
-  await expect(sheet.getByText('Add to Home Screen')).toBeVisible();
+  await expect(sheet.getByText('Add to Home Screen', { exact: true })).toBeVisible();
   await expect(sheet.getByTestId('notify-allow')).toHaveCount(0);
   await expect(sheet.getByTestId('notify-state')).toHaveCount(0);
   expect(await page.evaluate(() => window.__lpAsked)).toBe(0);

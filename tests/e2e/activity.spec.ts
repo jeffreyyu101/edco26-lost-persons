@@ -198,15 +198,16 @@ test.describe('desk', () => {
       const top = page.getByTestId('desk-topbar').getByTestId('activity-bell');
       await expect(top).toHaveAccessibleName('Activity, 1 unread', { timeout: 20_000 });
       const side = page.getByTestId('desk-activity');
-      await expect(side).toHaveAccessibleName('Activity, 1 unread');
+      await expect(side).toHaveAccessibleName('Activity 1 unread');
       await expect(side).toContainText('1');
 
       await side.click();
       const pop = page.getByTestId('activity-popover');
       await expect(pop).toBeVisible();
-      const box = await pop.boundingBox();
-      expect(box?.width).toBe(380);
-      expect(box?.height ?? 0).toBeLessThanOrEqual(480);
+      // Layout size (the open animation scales it for a moment).
+      const size = await pop.evaluate((el) => ({ w: (el as HTMLElement).offsetWidth, h: (el as HTMLElement).offsetHeight }));
+      expect(size.w).toBe(380);
+      expect(size.h).toBeLessThanOrEqual(480);
       await page.keyboard.press('Escape');
       await expect(pop).toHaveCount(0);
 

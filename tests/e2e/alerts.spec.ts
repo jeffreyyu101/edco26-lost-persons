@@ -192,12 +192,13 @@ test.describe('no double alerts (F4 + system notifications)', () => {
       await openApp(page);
       await workerReady(page);
       // Subscribed and told the server: no banner.
-      await expect(page.getByTestId('desk-sidebar').getByTestId('desk-alerts')).toHaveAccessibleName('Alerts, On', { timeout: 20_000 });
+      await expect(page.getByTestId('desk-sidebar').getByTestId('desk-alerts')).toHaveAccessibleName('Alerts On', { timeout: 20_000 });
       await page.bringToFront();
 
       // A push arrives while the window is visible and focused: this build's worker runs its push handler (a
       // PushEvent dispatched in the worker: headless Chromium has no push service), shows nothing, and the page
-      // syncs at once.
+      // syncs at once. No badge in this payload: navigator.setAppBadge in a worker crashes the headless shell
+      // (the badge itself is unit-tested).
       const worker = ctx.serviceWorkers().find((w) => w.url().startsWith(`${BASE}/sw.js`)) ?? (await ctx.waitForEvent('serviceworker'));
       const id = randomUUID();
       const synced = page.waitForRequest((r) => r.url().includes('/api/sync'), { timeout: 10_000 });
@@ -221,7 +222,7 @@ test.describe('no double alerts (F4 + system notifications)', () => {
         sw.dispatchEvent(event);
         await Promise.all(waits);
         return (await sw.registration.getNotifications()).length;
-      }, { v: 1, title: 'J.D.', body: 'In medical', tag: `lp-${id}`, url: `/?r=${id}`, kind: 'in_medical', requestId: id, renotify: false, badge: 1 });
+      }, { v: 1, title: 'J.D.', body: 'In medical', tag: `lp-${id}`, url: `/?r=${id}`, kind: 'in_medical', requestId: id, renotify: false, badge: null });
       expect(shown).toBe(0);
       await synced;
 
