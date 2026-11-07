@@ -71,6 +71,34 @@ export function useStickyHeight(): { rootRef: RefObject<HTMLDivElement | null>; 
 }
 
 /**
+ * (F3 + F4 release) Keeps the CSS variable `name` on `rootRef`'s element at the height of the returned ref's
+ * element (0 while it is not rendered): the desk's alerts banner (--lp-alerts-h), which the Pending board
+ * subtracts from the window so the page never scrolls.
+ */
+export function useHeightVar(rootRef: RefObject<HTMLDivElement | null>, name: string): RefObject<HTMLDivElement | null> {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const el = ref.current;
+    if (!root) return;
+    if (!el) {
+      root.style.removeProperty(name);
+      return;
+    }
+    const apply = () => root.style.setProperty(name, `${el.offsetHeight}px`);
+    apply();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty(name);
+    };
+  });
+  return ref;
+}
+
+/**
  * iOS only opens the keyboard for a focus() made inside the tap itself, and the search field mounts a
  * moment later (a new view). Focusing a throwaway input during the tap opens the keyboard; the search
  * field then takes focus from it on mount and the keyboard stays up.

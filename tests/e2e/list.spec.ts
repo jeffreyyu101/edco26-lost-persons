@@ -313,10 +313,13 @@ test('the X hides the brand row on this device: it stays hidden after a reload (
 
   await brand(page).getByRole('button', { name: 'Hide header' }).click();
   await expect(brand(page)).toHaveCount(0);
-  // The view starts at its title now.
+  // The view starts at its title now (under F4's alerts reminder while alerts don't work on this phone yet: here,
+  // a Safari tab on an iPhone).
   const after = (await page.getByTestId('view-switcher').boundingBox())!;
   expect(after.y).toBeLessThan(before.y);
-  expect(after.y).toBeLessThan(40);
+  const reminder = page.getByTestId('alerts-banner');
+  const top = (await reminder.count()) ? (await reminder.boundingBox())!.y + (await reminder.boundingBox())!.height : 0;
+  expect(after.y - top).toBeLessThan(40);
   expect(await page.evaluate(() => localStorage.getItem('lp-brand-hidden'))).toBe('1');
 
   // After a reload it is never drawn, not even for a frame before the prefs are read. Checked before every

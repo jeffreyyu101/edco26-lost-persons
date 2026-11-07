@@ -209,6 +209,12 @@
   inset: -12px -6px 0;
 }
 
+/* (F3 + F4 release) F4's Activity bell, between search and the avatar, grows its 44 px hit area the same way:
+   8 px up, 4 px to each side, none down, so it never reaches the "⇅" toggle's under it. */
+.icons [data-testid='activity-bell']::before {
+  inset: -8px -4px 0;
+}
+
 .ib:active {
   background: var(--gray-a3);
 }
@@ -591,6 +597,12 @@ button.lr:focus-visible {
   max-width: 10.5em;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* (F3 + F4 release) The desk's alerts banner (F4) sits in the main column above the view; its height is mirrored
+   into --lp-alerts-h on the view's root (hooks.ts useHeightVar) so the Pending board still fits the window. */
+.alertsWrap {
+  display: flow-root;
 }
 
 /* Under 430 px "Waiting for check" reads "Waiting" (list-helpers.narrowStatusLabel): with a created time

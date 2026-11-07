@@ -709,9 +709,23 @@ button.enr:focus-visible {
   border-radius: 10px;
 }
 
-/* Pending → To check: Message | Not in medical | In medical. */
+/* Pending → Waiting for check: Message | Pending v9.1's left answer ("⧗ Not found yet" / "× Not found") | In medical.
+   (F3 + F4 release) The answers share the row equally but never get narrower than their one-line label: where
+   the three don't fit (a phone under about 375 px, a board column with a request docked beside it) In medical
+   wraps to its own full-width row under Message | Not found, and in the narrowest column each takes a row.
+   Nothing is ever cut. */
 .checkActs {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.checkActs.checkActs > * {
+  flex: 1 1 0;
+  min-width: max-content;
+}
+
+.checkActs.checkActs > .iconBtn {
+  flex: none;
+  min-width: 44px;
 }

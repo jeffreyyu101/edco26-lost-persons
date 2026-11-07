@@ -66,7 +66,7 @@ import { MineCard, OutboxCard } from './cards';
 import { displayName } from './list-helpers';
 import { PendingQueues, useLeaving } from './PendingQueues';
 import { SortToggle } from './SortToggle';
-import { primeKeyboard, useScrollMemory, useStatusTap, useStickyHeight } from './hooks';
+import { primeKeyboard, useHeightVar, useScrollMemory, useStatusTap, useStickyHeight } from './hooks';
 import { mineFreshTone, resultCount, searchDisplay, stageClock, updatedSince } from './list-helpers';
 import { AllSkeleton, MineSkeleton, PendingSkeleton } from './ListSkeletons';
 import { ArchivedFold, ArchivedRows, ColumnHeader, GroupDivider, LogGrid, LogRow, OutboxLogRow, SearchLogRow } from './rows';
@@ -113,6 +113,7 @@ function Chrome({ view, sort = null, chips, filtered = false, skeleton, children
   const snackbar = useSnackbar();
   const prefs = usePrefs();
   const { rootRef, stickyRef } = useStickyHeight();
+  const alertsRef = useHeightVar(rootRef, '--lp-alerts-h');
   // From 768 px the desk shell draws the brand row (above its top bar) and this view's chrome, the line under
   // the title included (in its top bar): the list's own brand row and line are phone only.
   const inDesk = useInDesk();
@@ -188,7 +189,11 @@ function Chrome({ view, sort = null, chips, filtered = false, skeleton, children
         {chips}
       </div>
       <main className={s.body}>
-        {inDesk ? <AlertsBanner /> : null}
+        {inDesk ? (
+          <div className={s.alertsWrap} ref={alertsRef}>
+            <AlertsBanner />
+          </div>
+        ) : null}
         {body}
       </main>
       {snackbar ? null : <NewRequestButton />}
