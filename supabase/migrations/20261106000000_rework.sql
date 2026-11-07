@@ -2256,16 +2256,18 @@ begin
     select m.request_id as id from public.lp_messages m where m.request_id = any (v_ids)
     union
     select e.request_id from public.lp_enroute e where e.request_id = any (v_ids)
-  ), wanted as (
-    select c.id from changed c where c.id is not null
-    union
-    select a.id from active a
   )
+  -- A changed request whose own row changed since p_since − 30 s is in lp_sync's delta (on this page or a
+  -- later one) and gets its activity there; only the others come back as extra rows, so a paged delta never
+  -- returns a row twice.
   select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('id', p.id) || public.lp_messages_activity(p.id, v_key, p.status)), '[]'::jsonb),
          coalesce(pg_catalog.jsonb_agg(public.lp_row(p)) filter (where not (p.id = any (v_ids))), '[]'::jsonb)
     into v_threads, v_rows
   from public.patients p
-  where p.id in (select w.id from wanted w);
+  where p.id in (select a.id from active a)
+     or (p.id in (select c.id from changed c where c.id is not null)
+         and not (p.id = any (v_ids))
+         and p.updated_at <= v_from);
 
   return pg_catalog.jsonb_build_object('threads', v_threads, 'rows', v_rows);
 end
