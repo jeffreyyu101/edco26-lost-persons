@@ -287,3 +287,7 @@ The F2 release puts together wave 2 (the desk and tablet layout, Pending v8 and 
 - **Supersedes:** "Not in medical" as a label and as the answer button (Requests screen, Request profile, v2.2 rows 1 and 8, Pending v8); wave 2's tall brand card on the desk with its kicker, credit line and rings (already superseded on the phone by item 10); the desk top bar's Offline / Retrying chip on the dashboard (item 13 had removed it on the phone).
 - **Unchanged:** what Not found in medical means and does (closed, grey, Change answer only, never in Pending), the database values, and every behaviour of items 10–17 on a phone.
 - **Numbering.** Three branches each continued the decision numbers from 9: system notifications (row 10 of the v2.2 morning table), the brand row and live line (items 10–17), and photos (10a–10c). They are told apart by their section; the numbers here continue from 17. In `docs/BUILD_SPEC.md` system notifications are A52 and photos A53.
+
+## Pending order hotfix (Brian, 2026-11-06 19:40)
+
+- **Waiting for check comes first on Pending, then Friend coming.** Waiting for check is the priority. This supersedes "Friend coming section at the top of To check" (Friend coming, above). Both sections stay oldest first. The F2 release keeps the same priority: To check is the default tab on the phone and the left column on the desk (the F2 Pending view supersedes the hotfix's stacked order).
