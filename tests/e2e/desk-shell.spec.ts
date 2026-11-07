@@ -146,6 +146,32 @@ async function openSearchResults(page: Page, tag: string) {
 test.describe('desktop 1440 × 900', () => {
   test.use({ viewport: { width: 1440, height: 900 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
 
+  test('a request docked beside All: the top bar keeps the title, its count and the line whole; the search field gives way', async ({ page }) => {
+    const [one] = await createRequests(page, 1);
+    const bar = page.getByTestId('desk-topbar');
+    for (const width of [1440, 1366, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(`/?r=${one!.id}`);
+      await expect(page.getByTestId('desk-pane')).toBeVisible({ timeout: 15_000 });
+      await expect(bar.getByRole('heading', { level: 1 })).toHaveText(/^All requests \d+$/);
+      await expect(bar.getByTestId('live-text')).toHaveText('Updated just now');
+      // Nothing cut (at 1440 the title read "All requests…" and the line "Updated just …" beside a 260 px field).
+      const cut = await page.evaluate(() => {
+        const top = document.querySelector('[data-testid="desk-topbar"]')!;
+        const isCut = (el: Element | null) => !!el && el.scrollWidth > el.clientWidth + 0.5;
+        return { title: isCut(top.querySelector('h1')), line: isCut(top.querySelector('[data-testid="live-text"]')) };
+      });
+      expect(cut, `${width}`).toEqual({ title: false, line: false });
+      // In order and apart: the line, then search (the field, or its icon), then New request.
+      const line = (await bar.getByTestId('live-indicator').boundingBox())!;
+      const field = bar.getByRole('searchbox', { name: 'Search requests' });
+      const search = (await ((await field.isVisible()) ? field : bar.getByRole('button', { name: 'Search' })).boundingBox())!;
+      const add = (await page.getByTestId('desk-new').boundingBox())!;
+      expect(line.x + line.width, `${width}`).toBeLessThanOrEqual(search.x);
+      expect(search.x + search.width, `${width}`).toBeLessThanOrEqual(add.x);
+    }
+  });
+
   test('sidebar, top bar and a request docked beside the list; J/K, Esc back to the row', async ({ page }) => {
     const tag = nextTag();
     const rows = await createRequests(page, 3, tag);

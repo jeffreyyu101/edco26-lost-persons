@@ -465,7 +465,9 @@
   padding: 0 calc(20px + env(safe-area-inset-right)) 0 24px;
 }
 
+/* The title and its count are never cut (a value); what gives way is the search field, then the line's words. */
 .title {
+  flex: none;
   margin: 0;
   min-width: 0;
   font-size: 17px;
@@ -486,10 +488,12 @@
 }
 
 /* The live line next to the title (components/ui/LiveIndicator.tsx; live-indicator.html Desktop frame: the dot
-   10 px after the count). It gives way first when the column is narrow: its words clip with an ellipsis, the
-   dot and Refresh now stay. (Not `.live`: that is the lockup's corner dot above.) */
+   10 px after the count). When the bar is short of room the search field narrows first (to 160 px, below); only
+   then do the line's words clip with an ellipsis, the dot and Refresh now staying. Flex shrink is weighted by
+   size, so the line's tiny factor leaves nearly all of it to the field until the field is at its minimum.
+   (Not `.live`: that is the lockup's corner dot above.) */
 .liveLine {
-  flex: 0 1 auto;
+  flex: 0 0.02 auto;
   margin-left: 4px;
 }
 
@@ -639,6 +643,8 @@
 @container (min-width: 680px) {
   .search {
     display: flex;
+    flex: 0 1 260px;
+    min-width: 160px;
   }
   .searchIcon {
     display: none;
