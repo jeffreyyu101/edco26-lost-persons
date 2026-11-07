@@ -116,6 +116,8 @@ export function attachSheetSwipe(sheet: HTMLElement, dismiss: () => void): () =>
     const t = e.target;
     if (!(t instanceof Element) || !sheet.contains(t) || sheet.dataset.state !== 'open') return;
     if (e.defaultPrevented || !e.isPrimary || e.button > 0) return;
+    // Touch and pen only: a mouse drag on a desk sheet selects text and clicks as before (Escape and the scrim close it).
+    if (e.pointerType === 'mouse') return;
     if (isTextField(t.closest('input, textarea, [contenteditable]')) || t.closest('input[type=range], select, [role=slider], [data-sheet-nodrag]')) return;
     if (scrollers(t, sheet, 'x').length > 0) return;
     g = { id: e.pointerId, x: e.clientX, y: e.clientY, grab: !!t.closest('[data-sheet-grab]'), scrollers: scrollers(t, sheet, 'y'), from: null, offset: 0, samples: [] };

@@ -157,6 +157,19 @@ test.describe('Activity sheet', () => {
     await expect(sheet).toHaveCount(0);
   });
 
+  test('a mouse drag is not a swipe: the sheet stays put and open (desk sheets select text and click as before)', async ({ page }) => {
+    await mockActivity(page, 30);
+    const { sheet, height } = await openActivity(page);
+    const box = (await sheet.getByTestId('activity-grabber').boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + height * 0.5, { steps: 10 });
+    expect(await transformY(sheet), 'it never followed the mouse').toBe(0);
+    await page.mouse.up();
+    await expect(sheet).toBeVisible();
+    expect(await transformY(sheet)).toBe(0);
+  });
+
   test('in the list: scrolled down, a drag down is the list’s; at the top it pulls the sheet; up is always the list’s', async ({ page }) => {
     await mockActivity(page, 30);
     const { sheet, scroller, height } = await openActivity(page);
