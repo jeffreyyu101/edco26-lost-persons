@@ -9,11 +9,12 @@
 //     writePref(key, value), then updates the state. So setPref('theme', t) also applies the theme
 //     (applyTheme in lib/theme.ts). Screens inside the app call only setPref and never applyTheme.
 //   * SignInFlow (/signin). readPrefs() gives the remembered name and team (skip to step 2, and the step-2
-//     prefill after a 401). It calls writeRememberedIdentity() after a successful sign-in, with the
-//     POST /api/session response's staffName and team, and clearRememberedIdentity() on "Change". The
-//     theme toggle calls setThemePref().
+//     prefill after a 401). It calls forgetBellForOtherStaff() then writeRememberedIdentity() after a
+//     successful sign-in, with the POST /api/session response's staffName and team, and
+//     clearRememberedIdentity() on "Change". The theme toggle calls setThemePref().
 //   * Phone-created request ids are NOT stored here. They live in IndexedDB next to the store's cache
-//     (spec §4 "Staff identity and ownership") and are cleared on sign-out. Prefs survive sign-out.
+//     (spec §4 "Staff identity and ownership") and are cleared on sign-out. Prefs survive sign-out, except the
+//     bell (F6 follow-up): it is a copy of the signed-out staff member's server switch (forgetBell).
 //   * One pref lasts for the browser session only: `closedExpanded` (the All requests "Closed" fold, log
 //     option B, 2026-11-06) lives in sessionStorage.
 //   * `brandHidden` (v2.2, 2026-11-06 afternoon): the brand row over All requests was hidden with its X on
@@ -28,6 +29,8 @@ import {
   STAFF_NAME_MIN,
   canonicalTeam,
   isPostValue,
+  sameStaff,
+  staffString,
   type PostValue,
 } from '../domain';
 import { BRAND_HIDDEN_STORAGE_KEY, markBrandHidden } from '../brand-pref';
@@ -232,6 +235,42 @@ export function setBell(on: boolean): void {
 
 export function setBellIntroSeen(seen: boolean): void {
   write(PREF_STORAGE_KEYS.bellIntroSeen, seen ? '1' : null);
+}
+
+/**
+ * (F6 follow-up) '1' once the server's "New requests" switch has taken this device's bell over: the server
+ * answered POST /api/push/prefs (or subscribe), which also took the old bell, if any, as the switch's default.
+ * From then on the bell is only a copy of the signed-in staff member's switch (ActivityHost) and is never sent
+ * as an old bell again: on a shared phone it would turn New requests on for whoever signs in next (Medical's
+ * team default copied to the device, say).
+ */
+export const BELL_FROM_SERVER_KEY = 'lp-bell-server';
+
+/** The old "Alerts" bell, sent as the default of New requests: on, and set on this phone, never a server copy. */
+export function readOldBell(): boolean {
+  return read(PREF_STORAGE_KEYS.bell) === '1' && read(BELL_FROM_SERVER_KEY) === null;
+}
+
+/** The server answered with this staff member's switches: the bell is theirs from now on (see BELL_FROM_SERVER_KEY). */
+export function markBellFromServer(): void {
+  write(BELL_FROM_SERVER_KEY, '1');
+}
+
+/** Sign-out, or a different staff member signing in: the bell and its intro were the previous staff member's. */
+export function forgetBell(): void {
+  write(PREF_STORAGE_KEYS.bell, null);
+  write(PREF_STORAGE_KEYS.bellIntroSeen, null);
+  write(BELL_FROM_SERVER_KEY, null);
+}
+
+/**
+ * Right after a sign-in, before writeRememberedIdentity: anyone but the staff member remembered on this phone
+ * (or with nobody remembered, after "Change") starts without the previous one's bell.
+ */
+export function forgetBellForOtherStaff(name: string, team: string): void {
+  const { rememberedName, rememberedTeam } = readPrefs();
+  const before = rememberedName !== null && rememberedTeam !== null ? staffString(rememberedName, rememberedTeam) : null;
+  if (!sameStaff(before, staffString(name, canonicalTeam(team)))) forgetBell();
 }
 
 /** Hide (true) or show again (false) the brand row over All requests on this device. */

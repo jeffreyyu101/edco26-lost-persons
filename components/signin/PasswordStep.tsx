@@ -8,7 +8,7 @@
 import { Avatar, Button, Flex, IconButton, Text, TextField } from '@radix-ui/themes';
 import { Eye, EyeOff } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
-import { writeRememberedIdentity } from '@/lib/client/prefs';
+import { forgetBellForOtherStaff, writeRememberedIdentity } from '@/lib/client/prefs';
 import { announceSignIn } from '@/lib/client/session-signals';
 import { avatarInitials, teamShort } from '@/lib/domain';
 import { safeNextPath } from '@/lib/safe-next';
@@ -95,7 +95,9 @@ export function PasswordStep({ identity, onChange, next, autoFocus }: PasswordSt
     if (!alive.current) return;
 
     if (outcome.kind === 'ok') {
-      // Remember what the server stored (canonical team), then open the app with the new cookie.
+      // Remember what the server stored (canonical team), then open the app with the new cookie. Someone else
+      // than the remembered staff member starts without their bell (F6 follow-up).
+      forgetBellForOtherStaff(outcome.session?.staffName ?? identity.name, outcome.session?.team ?? identity.team);
       writeRememberedIdentity(outcome.session?.staffName ?? identity.name, outcome.session?.team ?? identity.team);
       // A sign-out left pending must not end this new session; open tabs re-check who is signed in.
       announceSignIn();

@@ -264,8 +264,9 @@ export function createMessaging(host: MessagingHost): MessagingEngine {
           receipt: page.receipt,
           loadedAt: now(),
         };
-        patchThread(id, next);
+        // The row's activity first: a screen that sees the thread loaded sees the unread count it came with.
         if (page.activity) host.patchActivity(id, page.activity);
+        patchThread(id, next);
         host.markLive();
         writeThreadCache(id, next);
         return;

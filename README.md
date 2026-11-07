@@ -116,7 +116,9 @@ npm run start:test                       # http://127.0.0.1:3100
 | `npm run db:verify-migration` | Applies the rework migration twice to the local database (`SUPABASE_DB_URL` when set, else the stack `supabase status` reports) and to an upgrade fixture built from Jeffrey's original schema, then smoke-tests the functions. |
 | `node scripts/load-test.mjs` | 30 simulated phones polling for 2 minutes against a running local production build (see the file header). |
 
-End-to-end runs take a lock (`/tmp/lp-e2e.lock`), so two suites never share the local stack at once. Every
+End-to-end runs take a lock per stack (`LP_E2E_LOCK_DIR`, else `/tmp/lp-e2e.lock-<port of .env.test's Supabase URL>`;
+`/tmp/lp-e2e.lock` on the shared stack), so two suites never share a local stack at once; a run that waits 2 minutes
+fails naming the holder's pid and cwd. Every
 spec signs in through `POST /api/session` once per identity and reuses that session (`storageState`).
 Integration tests close the requests they create when each file ends, so nothing they leave shows in
 Pending.
@@ -170,6 +172,10 @@ Pending.
   back. Front of house can say **Friend en route** (optional ETA) and **Arrived**; one teal row shows it, with
   no names. Any status change out of In medical clears it (an Undo within 30 s puts it back). An En route
   tap that could not be sent shows "Not delivered · Retry" under the row.
+- **Request page order** (2026-11-07). A request reads status, details, photos, then Messages, then the audit
+  trail. While it needs info or has unread messages, one line under the status shows the latest message; it, a
+  Message button, a desk row's unread badge, a message's Activity row, toast or notification open the request at
+  its thread (the composer focused on a computer only). See `design/DECISIONS.md` "Request page order".
 - **Alerts.** With the app in front, an alert is a toast with a chime: changes to your requests by someone
   else, and new requests when "New requests" is on. **Lock-screen alerts (Web Push, F4)** reach a locked
   phone or a closed laptop app once "Turn on" was tapped on that device (desktop browsers, Android Chrome,

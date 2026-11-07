@@ -112,7 +112,9 @@ const msg = (text: string): QuickLine => ({ text, kind: 'message' });
 /** The medical side's quick lines by stage. */
 export const MEDICAL_LINES: Readonly<Record<QuickStage, readonly QuickLine[]>> = {
   waiting: [msg('Any tattoos or marks?'), msg('What are they wearing?'), msg('Do you have a photo?')],
-  in_medical: [msg('Bring 1 person only'), msg('Being worked up — wait'), msg('Ready for them'), msg('Hold — not ready yet')],
+  // (HIPAA, Brian 2026-11-07 14:18) "Not ready yet — wait" (was "Being worked up — wait": it described care), and
+  // "Hold — not ready yet" went with it (the same words twice).
+  in_medical: [msg('Bring 1 person only'), msg('Not ready yet — wait'), msg('Ready for them')],
   closed: [],
 };
 
@@ -285,6 +287,16 @@ export function enrouteDetail(etaAt: string | null | undefined, now: number): st
 /** "You: Any tattoos or marks?" / "Rae C.: Butterfly tattoo, left wrist". */
 export function previewText(last: LastMessage): { who: string; text: string } {
   return { who: last.mine ? 'You' : last.by || 'Staff', text: last.text };
+}
+
+/**
+ * (Request page order R1, Brian 2026-11-07) The request page's latest-message line under the status block shows
+ * only while the request needs info, or while it has unread messages for me. The thread marks itself read as
+ * soon as it loads, so the page passes `seenUnread`: unread messages from someone else came in while it was
+ * open (on arrival included). It goes once my own message is the latest (I answered).
+ */
+export function threadPreviewShown(needsInfo: boolean, seenUnread: boolean, last: Pick<LastMessage, 'mine'> | null | undefined): boolean {
+  return needsInfo || (seenUnread && !!last && !last.mine);
 }
 
 // The activity fields, EMPTY_ACTIVITY, hasActivity and unreadOf live in ./messaging-activity (the store's

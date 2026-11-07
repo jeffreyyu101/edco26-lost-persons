@@ -6,6 +6,10 @@
 // "Sending…"; failed ones say "Not delivered · Retry". Long-press (or right-click, or the ⋯ on a desktop)
 // gives Copy, and Unsend for my own within 15 minutes. Plain text only.
 //
+// (R1, Brian 2026-11-07) It sits below the request's details and photos. A jump (R2: a Message button, a desk
+// row's unread badge, a message's Activity row, toast or notification, the page's own preview line) brings it
+// into view at its newest message, and focuses the composer on a computer only.
+//
 // The thread scrolls in its own box and opens at the newest message; "New messages" shows when new ones
 // arrive while it is scrolled up; screen readers hear new incoming messages (polite). The composer is one
 // rounded field with the send arrow inside it and the quick lines for this status and side above it. A message
@@ -18,11 +22,13 @@ import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useR
 import { createPortal, flushSync } from 'react-dom';
 import type { RequestSummary } from '@/lib/api-types';
 import { meFor } from '@/lib/client/messages-core';
-import { useMessaging, useOpenThread, useRequestJobs, useThread, takeThreadFocus } from '@/lib/client/messages-hooks';
+import { useMessaging, useOpenThread, useRequestJobs, useThread } from '@/lib/client/messages-hooks';
 import { buildBubbles, receiptFor, type Bubble } from '@/lib/client/messages-logic';
 import { useActions, useEventTimezone, useNow, useSession } from '@/lib/client/store-contract';
 import { formatCreatedTime } from '@/lib/format';
 import { MESSAGE_COUNTER_FROM, MESSAGE_MAX, UNSEND_WINDOW_MS, fillWithQuickLine, messageLength, quickLines, quickStage, sideOfTeam } from '@/lib/messaging';
+import { dropOtherThreadJump, subscribeThreadJump, takeThreadJump, threadJumpWaiting } from '@/lib/client/thread-jump';
+import { DESK_QUERY } from '@/components/desk/breakpoints';
 import { useEnrouteControl } from './Enroute';
 import s from './messages.module.css';
 
@@ -34,6 +40,9 @@ export interface MessagesSectionProps {
 
 const AT_BOTTOM_PX = 32;
 const FINE_POINTER = '(hover: hover) and (pointer: fine)';
+/** (R2) A jump focuses the composer here only: the desk layout with a mouse or trackpad. */
+const COMPUTER = `${DESK_QUERY} and ${FINE_POINTER}`;
+const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
 
 export function MessagesSection({ row, panel = false }: MessagesSectionProps) {
   const api = useMessaging();
@@ -61,6 +70,7 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
   const scroller = useRef<HTMLDivElement>(null);
   const section = useRef<HTMLElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
   const live = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
   const lastKey = useRef<string | null>(null);
@@ -130,12 +140,32 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
     api?.refresh(row.id);
   }, [api, row.id, lastAt, count]);
 
-  // --- a Message button opened this request: bring the thread into view, focus the field ----------------
+  // --- (R2) a jump to the thread (lib/client/thread-jump): into view, at its newest; the composer focused on a
+  // computer only (a phone keeps its keyboard down: the heading takes the focus) --------------------------
   useEffect(() => {
-    if (!takeThreadFocus(row.id)) return;
-    section.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-    input.current?.focus({ preventScroll: true });
-  }, [row.id]);
+    const id = row.id;
+    let frame = 0;
+    const land = () => {
+      if (!threadJumpWaiting(id) || frame) return;
+      // After this commit's other effects (the page and the desk pane start a request at its top).
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        if (!takeThreadJump(id)) return;
+        if (section.current) scrollToSection(section.current, window.matchMedia(REDUCED_MOTION).matches ? 'auto' : 'smooth');
+        scrollToEnd(false);
+        setNewPill(false);
+        if (window.matchMedia(COMPUTER).matches) input.current?.focus({ preventScroll: true });
+        else heading.current?.focus({ preventScroll: true });
+      });
+    };
+    dropOtherThreadJump(id);
+    land();
+    const off = subscribeThreadJump(land);
+    return () => {
+      off();
+      cancelAnimationFrame(frame);
+    };
+  }, [row.id, scrollToEnd]);
 
   const side = sideOfTeam(session.team);
   const lines = quickLines(quickStage(row), side, enroute.mine, enroute.enroute?.state === 'arrived');
@@ -152,7 +182,7 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
 
   return (
     <section ref={section} className={panel ? `${s.section} ${s.panel}` : s.section} aria-labelledby={headingId} data-testid="messages">
-      <h2 className={s.head} id={headingId}>
+      <h2 className={s.head} id={headingId} ref={heading} tabIndex={-1}>
         Messages
       </h2>
       <div className={s.scroller} ref={scroller} onScroll={onScroll} data-testid="thread">
@@ -261,6 +291,21 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
       {enroute.sheet}
     </section>
   );
+}
+
+/**
+ * (R2) Scrolls the request's own scroller (the desk pane's body, else the page) so the section's top sits under its
+ * scroll-margin. Not scrollIntoView: that moves every scroller around it, the desk's list included.
+ */
+function scrollToSection(el: HTMLElement, behavior: ScrollBehavior): void {
+  const margin = parseFloat(getComputedStyle(el).scrollMarginTop) || 0;
+  for (let box = el.parentElement; box && box !== document.body && box !== document.documentElement; box = box.parentElement) {
+    const overflow = getComputedStyle(box).overflowY;
+    if (overflow !== 'auto' && overflow !== 'scroll') continue;
+    box.scrollTo({ top: box.scrollTop + el.getBoundingClientRect().top - box.getBoundingClientRect().top - margin, behavior });
+    return;
+  }
+  window.scrollTo({ top: window.scrollY + el.getBoundingClientRect().top - margin, behavior });
 }
 
 // ---------------------------------------------------------------------------------------------------

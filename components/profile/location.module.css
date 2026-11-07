@@ -115,10 +115,6 @@
   z-index: 61;
 }
 
-.sheetBody {
-  touch-action: pan-x;
-}
-
 /* The desk popover: Radix copies this z-index to its positioned wrapper (above the Undo bar too). */
 .pop {
   z-index: 61;

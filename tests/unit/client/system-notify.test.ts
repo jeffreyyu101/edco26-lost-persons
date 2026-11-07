@@ -128,7 +128,7 @@ describe('what a notification shows', () => {
     const n = systemNotice(statusAlert(sofia), rowOf);
     expect(n).toEqual({
       title: 'S.L. · Located',
-      body: 'FA 3\nBring the friend to Main Med',
+      body: 'FA 3\nFriend can head over',
       tag: `lp-${sofia.id}`,
       url: `/?r=${sofia.id}`,
       key: `${sofia.id}:3`,
@@ -347,7 +347,7 @@ describe('the notifier', () => {
     const shown = system.show(alert, () => row, [alert]);
     row = undefined; // the store moves on; the notification was already built
     expect(await shown).toBe(true);
-    expect(f.shows[0]).toMatchObject({ title: 'S.L. · Located', options: { body: 'FA 4\nBring the friend to Main Med', data: { key: `${alert.requestId}:2` } } });
+    expect(f.shows[0]).toMatchObject({ title: 'S.L. · Located', options: { body: 'FA 4\nFriend can head over', data: { key: `${alert.requestId}:2` } } });
   });
 
   it('reports failure so the store can toast instead: no permission, no worker, or showNotification throws', async () => {

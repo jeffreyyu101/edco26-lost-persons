@@ -18,7 +18,7 @@
 import { Skeleton } from '@radix-ui/themes';
 import { ArrowDown, ArrowUpDown, ChevronDown, ChevronRight, CircleAlert } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
-import { UnreadBadge, unreadSentence } from '@/components/messages/CardActivity';
+import { UnreadBadge, openRowAt, unreadSentence } from '@/components/messages/CardActivity';
 import { StageGlyph } from '@/components/ui/StageGlyph';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
@@ -302,7 +302,7 @@ export const TableRow = memo(function TableRow({ row, times, selected, stage, ti
       data-closed={closed ? '' : undefined}
       data-selected={selected ? '' : undefined}
       aria-current={selected ? 'true' : undefined}
-      onClick={() => navigate({ r: row.id })}
+      onClick={(e) => openRowAt(row.id, e.target)}
     >
       <Vh>
         {tableRowLabel(row, times, timeZone, now)}
@@ -359,7 +359,7 @@ export const SearchRow = memo(function SearchRow({ hit, times, selected, stage, 
       data-closed={closed ? '' : undefined}
       data-selected={selected ? '' : undefined}
       aria-current={selected ? 'true' : undefined}
-      onClick={() => navigate({ r: row.id })}
+      onClick={(e) => openRowAt(row.id, e.target)}
     >
       <Vh>
         {searchRowLabel(row, times, line, timeZone, now)}

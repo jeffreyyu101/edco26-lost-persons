@@ -6,7 +6,7 @@ import { loadTestEnv, testBaseUrl } from '../../scripts/test-env.mjs';
 import { confirmCrop } from './helpers/photo';
 import { syntheticPng } from './helpers/png';
 import { newSignedInContext, signedInAs } from './helpers/session';
-import { syncRows } from './helpers/sync';
+import { answerSaved, syncRows } from './helpers/sync';
 
 // List views end to end (spec §8 List views, §9.4 "it appears in All and My requests", "a second context
 // sees it in Pending … taps In medical", "Friend coming → Reunited", "undo", "search", "a tile filtering
@@ -883,8 +883,9 @@ test('Not found leaves Pending; ?status= shows a filter chip that clears to All'
   const r = await createRequest(page);
   await page.goto('/?view=pending');
   await expect(checkCard(page, r.id)).toBeVisible({ timeout: 10_000 });
-  // (v9.1) The first Not found holds it, in place with a "Pending" chip; the second closes it.
-  await checkCard(page, r.id).getByTestId('not-found-answer').click();
+  // (v9.1) The first Not found holds it, in place with a "Pending" chip; the second closes it (once the first is
+  // saved: sooner it is a double tap).
+  await answerSaved(page, r.id, () => checkCard(page, r.id).getByTestId('not-found-answer').click());
   await expect(checkCard(page, r.id).getByTestId('hold-chip')).toHaveText('Pending');
   await checkCard(page, r.id).getByTestId('not-found-answer').click();
   await expect(checkCard(page, r.id)).toHaveCount(0);
@@ -996,11 +997,11 @@ test('front of house logs a request with a photo; the liaison sees it in Pending
     const toast = a.locator('.lp-toast').filter({ hasText: new RegExp(`${lpText} · [^—]+ located`) });
     await expect(toast).toBeVisible({ timeout: 15_000 });
     await expect(toast).toContainText(/LP-\d+ · .+ located/);
-    await expect(toast).toContainText('Bring the friend to Main Med');
+    await expect(toast).toContainText('Friend can head over');
     await expect.poll(async () => ((await (await a.request.get(`/api/requests/${id}`)).json()) as RequestDetail).photos.length).toBe(1);
 
     // Regression: B changes the answer (past the Undo window). A's sticky "is in medical" must not outlive
-    // it: on A's next poll the new answer replaces it, so nobody walks the friend to Main Med for nothing.
+    // it: on A's next poll the new answer replaces it, so nobody walks the friend over for nothing.
     await page.waitForTimeout(6_500);
     const inMedical = (await (await page.request.get(`/api/requests/${id}`)).json()) as RequestDetail;
     const changed = await page.request.post(`/api/requests/${id}/status`, {
@@ -1011,7 +1012,7 @@ test('front of house logs a request with a photo; the liaison sees it in Pending
     const notInMedical = a.locator('.lp-toast').filter({ hasText: new RegExp(`${lpText} · .+ — not located`) });
     await expect(notInMedical).toBeVisible({ timeout: 15_000 });
     await expect(toast).toHaveCount(0);
-    await expect(a.locator('.lp-toast').filter({ hasText: 'Bring the friend to Main Med' })).toHaveCount(0);
+    await expect(a.locator('.lp-toast').filter({ hasText: 'Friend can head over' })).toHaveCount(0);
   } finally {
     if (id) {
       // Leave nothing open for the other specs.

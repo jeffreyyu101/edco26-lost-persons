@@ -1,7 +1,9 @@
 'use client';
 // The Activity bell (design/screens/f34-states.html, f34-v2-1 and 9): an IconButton next to search on every
 // main view, with a monochrome count (hidden at 0, then 1–9, "9+"); "Activity, 3 unread" for screen readers.
-//   * Phone (< 768 px, place "phone", in the list header): opens a full-height sheet (Radix Dialog).
+//   * Phone (< 768 px, place "phone", in the list header): opens a tall sheet (Radix Dialog) with a strip of
+//     dimmed page above it (a tap there closes it), ✕ in its header, and a swipe down from its grabber or
+//     header (or its list scrolled to the top) closes it; focus goes back to the bell.
 //   * Desk (place "desk", in the top bar): a Popover anchored to the bell, 380 wide, at most 480 tall. The
 //     sidebar's Activity item (ActivityNavItem) and the rail's (DeskRailActivity) open the same popover.
 //     Opened from any of them, focus moves into the popover (it is portalled to the end of the page, so Tab
@@ -9,8 +11,10 @@
 //     whatever opened it.
 // The open state is shared (lib/client/activity-client.ts), so the bell and the sidebar item are one control.
 import { Dialog, IconButton, Popover, VisuallyHidden } from '@radix-ui/themes';
-import { useEffect, useRef, type ComponentPropsWithRef } from 'react';
+import { X } from 'lucide-react';
+import { useEffect, useRef, useState, type ComponentPropsWithRef, type ReactElement } from 'react';
 import { useInDesk } from '@/components/desk/desk-context';
+import { useSheetSwipe } from '@/components/ui/use-sheet-swipe';
 import { badgeText } from '@/lib/activity';
 import { activityClient, useActivity } from '@/lib/client/activity-client';
 import { ActivityPanel } from './ActivityPanel';
@@ -54,16 +58,28 @@ function BellButton({ unread, ...rest }: { unread: number } & Omit<ComponentProp
 }
 
 /**
- * The phone's sheet: full height, named by its visible "Activity" heading. The grabber is its close button
- * (a tap, VoiceOver, Switch Control); Escape and the strip of scrim above it close it too.
+ * The phone's sheet, named by its visible "Activity" heading, opened by the bell (its trigger, so focus goes back
+ * to it). ✕ "Close Activity" (focused when it opens), Escape, the strip of scrim above it and a swipe down close
+ * it; the grabber is only something to drag.
  */
-function ActivitySheet({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+function ActivitySheet({ open, onOpenChange, bell }: { open: boolean; onOpenChange: (open: boolean) => void; bell: ReactElement }) {
+  const [node, setNode] = useState<HTMLDivElement | null>(null);
+  const close = useRef<HTMLButtonElement>(null);
+  useSheetSwipe(node, () => onOpenChange(false));
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content className={`lp-activity-sheet ${s.sheet}`} aria-describedby={undefined} data-testid="activity-sheet">
-        <Dialog.Close>
-          <button type="button" className={`${s.handle} lp-hit`} aria-label="Close Activity" data-testid="activity-close" />
-        </Dialog.Close>
+      <Dialog.Trigger>{bell}</Dialog.Trigger>
+      <Dialog.Content
+        ref={setNode}
+        className={`lp-activity-sheet ${s.sheet}`}
+        aria-describedby={undefined}
+        data-testid="activity-sheet"
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          close.current?.focus();
+        }}
+      >
+        <div className={`${s.handle} lp-hit`} aria-hidden data-sheet-grab="" data-testid="activity-grabber" />
         <div className={s.sheetScroll}>
           <ActivityPanel
             variant="sheet"
@@ -73,6 +89,13 @@ function ActivitySheet({ open, onOpenChange }: { open: boolean; onOpenChange: (o
                 {children}
               </Dialog.Title>
             )}
+            headEnd={
+              <Dialog.Close>
+                <IconButton ref={close} variant="ghost" color="gray" size="3" className={s.close} aria-label="Close Activity" data-testid="activity-close">
+                  <X size={20} strokeWidth={2} aria-hidden />
+                </IconButton>
+              </Dialog.Close>
+            }
           />
         </div>
       </Dialog.Content>
@@ -96,12 +119,7 @@ export function ActivityBell({ place }: ActivityBellProps) {
   // In the desk the list header is hidden phone chrome: the top bar's bell is the one.
   if (place === 'phone' && inDesk) return null;
   if (place === 'phone') {
-    return (
-      <>
-        <BellButton unread={activity.unread} onClick={() => client.setOpen(true)} />
-        <ActivitySheet open={activity.open} onOpenChange={(o) => client.setOpen(o)} />
-      </>
-    );
+    return <ActivitySheet open={activity.open} onOpenChange={(o) => client.setOpen(o)} bell={<BellButton unread={activity.unread} />} />;
   }
   return (
     <Popover.Root open={activity.open} onOpenChange={(o) => client.setOpen(o)}>

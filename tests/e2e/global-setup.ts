@@ -1,27 +1,27 @@
 // Playwright global setup (v2.1 A17):
 //   * refuses to run unless .env.test points at local Supabase
-//   * takes a cross-process lock (mkdir /tmp/lp-e2e.lock, or LP_E2E_LOCK_DIR, holding the owner's pid), waiting up to 20
-//     minutes, so agents on different ports never run end-to-end suites against the shared local stack at
-//     the same time. A lock whose owner process is alive is never taken over, however long it is held.
+//   * takes a cross-process lock (mkdir, holding the owner's pid and cwd) so two suites never run against one local
+//     stack at the same time: LP_E2E_LOCK_DIR, else one per stack (/tmp/lp-e2e.lock-<port of .env.test's Supabase
+//     URL>; the shared stack keeps /tmp/lp-e2e.lock). It waits up to 2 minutes, then fails naming the holder's pid
+//     and cwd. A lock whose owner process is alive is never taken over, however long it is held.
 // Released in global-teardown.ts. Nobody truncates tables globally; specs create unique synthetic rows.
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { loadTestEnv, pauseInactiveJob } from '../../scripts/test-env.mjs';
+import { DEFAULT_E2E_LOCK_DIR, E2E_LOCK_WAIT_MS, e2eLockDir, e2eLockHolder, loadTestEnv, pauseInactiveJob } from '../../scripts/test-env.mjs';
 
-/** The lock's path when LP_E2E_LOCK_DIR is unset: the one every checkout on the shared local stack takes. */
-export const DEFAULT_LOCK_DIR = '/tmp/lp-e2e.lock';
+/** The shared local stack's lock (scripts/test-env.mjs DEFAULT_E2E_LOCK_DIR). */
+export const DEFAULT_LOCK_DIR = DEFAULT_E2E_LOCK_DIR;
 
 /**
- * The lock directory: LP_E2E_LOCK_DIR when set (a run on its own isolated stack takes a lock of its own, e.g.
- * /tmp/lp-e2e.lock-s4, so it never waits on runs against other stacks), else DEFAULT_LOCK_DIR.
+ * The lock directory (scripts/test-env.mjs e2eLockDir, which scripts/with-e2e-lock.mjs uses too): LP_E2E_LOCK_DIR
+ * when set, else per stack from `supabaseUrl` (default: .env.test's NEXT_PUBLIC_SUPABASE_URL).
  */
-export function lockDirFrom(env: Record<string, string | undefined> = process.env): string {
-  const dir = env.LP_E2E_LOCK_DIR?.trim();
-  return dir ? dir : DEFAULT_LOCK_DIR;
+export function lockDirFrom(env: Record<string, string | undefined> = process.env, supabaseUrl?: string): string {
+  return e2eLockDir(env, supabaseUrl); // undefined: .env.test's URL
 }
 
 export const LOCK_DIR = lockDirFrom();
-const WAIT_MS = 20 * 60_000;
+const WAIT_MS = E2E_LOCK_WAIT_MS;
 /** mkdir and the pid write are two steps: a lock without a pid is only abandoned after this long. */
 const NO_PID_GRACE_MS = 10_000;
 
@@ -85,6 +85,8 @@ export async function acquireLock(dir: string = LOCK_DIR, waitMs = WAIT_MS, poll
   for (;;) {
     try {
       mkdirSync(dir);
+      // The cwd first: a waiter that gives up names the checkout holding the lock.
+      writeFileSync(`${dir}/cwd`, process.cwd());
       writeFileSync(`${dir}/pid`, String(process.pid));
       return;
     } catch (error) {
@@ -93,8 +95,8 @@ export async function acquireLock(dir: string = LOCK_DIR, waitMs = WAIT_MS, poll
     if (removeStaleLock(dir)) continue;
     if (Date.now() - started > waitMs) {
       throw new Error(
-        `Timed out after ${Math.round(waitMs / 60_000)} minutes waiting for ${dir} (held by pid ${ownerPid(dir) ?? 'unknown'}). ` +
-          `If that process is not an e2e run, delete ${dir}.`,
+        `Timed out after ${Math.round(waitMs / 1000)} s waiting for ${dir} (held by ${e2eLockHolder(dir)}). ` +
+          `If that process is not an e2e run on this stack, delete ${dir}.`,
       );
     }
     await new Promise((resolve) => setTimeout(resolve, pollMs));

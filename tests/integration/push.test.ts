@@ -11,10 +11,13 @@
 //     device of a staff member came first; an edit's event is its own author's.
 //   * A hanging push service never slows the API response.
 // Synthetic data only; every request is closed afterwards.
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { RequestSummary, SyncResponse } from '@/lib/api-types';
+import { apiRequest } from '@/lib/client/http';
+import { forgetBell, forgetBellForOtherStaff, readPrefs, setBell, setBellIntroSeen, writeRememberedIdentity } from '@/lib/client/prefs';
+import { createPushClient, type PushHost } from '@/lib/client/push-client';
 import { STATUS_META } from '@/lib/domain';
-import { admin, api, cookieFor, createRequest, newStaff, staffOf, withTestServer, type Staff } from './harness';
+import { BASE, ORIGIN, admin, api, cookieFor, createRequest, newStaff, staffOf, withTestServer, type Staff } from './harness';
 import { eventually, startPushService, type FakeDevice, type PushService } from './push-service';
 
 withTestServer();
@@ -185,6 +188,116 @@ describe('POST /api/push/prefs', () => {
   it('refuses unknown fields', async () => {
     expect((await api('/api/push/prefs', { json: { newRequests: 'yes' }, cookie: await cookieFor(newStaff()) })).status).toBe(422);
     expect((await api('/api/push/prefs', { json: { other: true }, cookie: await cookieFor(newStaff()) })).status).toBe(422);
+  });
+});
+
+// F6 follow-up (release review): on a shared phone or iPad the bell holds a copy of the signed-in staff member's
+// server switch (ActivityHost). Sent back as the "old bell" it gave the next staff member New requests for good,
+// and a new Medical staff member Activity rows for every new request. The page's real push client (lib/client/
+// push-client.ts) and prefs (lib/client/prefs.ts, a fake localStorage) against the real routes.
+describe('a shared phone: a copy of the server switch is never an old bell (F6 follow-up)', () => {
+  const local = new Map<string, string>();
+  let cookie = '';
+  const host: PushHost = {
+    device: () => ({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1', platform: 'iPhone', maxTouchPoints: 5, standalone: true }),
+    // No worker in this test: the client only reads the switches (POST /api/push/prefs), as at every start.
+    hasServiceWorker: () => false,
+    hasPushManager: () => false,
+    hasNotification: () => false,
+    permission: () => 'default',
+    requestPermission: async () => 'default',
+    ready: () => null,
+    workerShowsPush: async () => false,
+    getSubscription: async () => null,
+    subscribe: () => Promise.reject(new Error('no push in this test')),
+    request: (path, opts) =>
+      apiRequest((input, init) => fetch(`${BASE}${input}`, { ...init, headers: { ...(init?.headers as Record<string, string>), cookie, origin: ORIGIN } }), path, opts),
+    storage: () => null,
+    watch: () => () => undefined,
+    setBadge: () => undefined,
+  };
+
+  beforeAll(() => {
+    vi.stubGlobal('window', {
+      localStorage: { getItem: (k: string) => local.get(k) ?? null, setItem: (k: string, v: string) => void local.set(k, v), removeItem: (k: string) => void local.delete(k) },
+    });
+  });
+  afterAll(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** Signs `staff` in on this phone (the sign-in page), starts the push client and copies the switch (ActivityHost). */
+  async function signIn(staff: Staff, opts: { signInPage?: boolean } = {}) {
+    if (opts.signInPage !== false) {
+      forgetBellForOtherStaff(staff.staffName, staff.team);
+      writeRememberedIdentity(staff.staffName, staff.team);
+    }
+    cookie = await cookieFor(staff);
+    const client = createPushClient(host);
+    client.start(staffOf(staff));
+    const prefs = await eventually(() => client.getState().prefs);
+    setBellIntroSeen(true);
+    setBell(prefs.newRequests);
+    return prefs;
+  }
+
+  async function prefsRow(staff: Staff) {
+    const { data, error } = await admin().from('lp_push_prefs').select('new_requests, new_requests_set, new_requests_team_default').eq('staff', canon(staff)).maybeSingle();
+    if (error) throw new Error(error.code);
+    return data as { new_requests: boolean; new_requests_set: boolean; new_requests_team_default: boolean } | null;
+  }
+
+  it('Medical A signs out; new Medical B stays push-only (the team default), never-set front of house C stays off', async () => {
+    local.clear();
+    const a = medical();
+    expect(await signIn(a)).toMatchObject({ newRequests: true });
+    expect(readPrefs().bell).toBe(true); // the device now shows A's switch
+    forgetBell(); // A signs out (the store's sign-out)
+    const b = medical();
+    expect(await signIn(b)).toMatchObject({ newRequests: true });
+    expect(await prefsRow(b)).toEqual({ new_requests: true, new_requests_set: false, new_requests_team_default: true });
+    forgetBell();
+    const c = newStaff('GC/HX - Base');
+    expect(await signIn(c)).toMatchObject({ newRequests: false });
+    expect(await prefsRow(c)).toMatchObject({ new_requests: false, new_requests_set: false });
+  });
+
+  it('…and the same with no sign-out in between (the session ran out, someone else signed in), on the copy mark alone', async () => {
+    local.clear();
+    const a = medical();
+    expect(await signIn(a)).toMatchObject({ newRequests: true });
+    expect(local.get('lp-bell')).toBe('1');
+    const b = medical();
+    expect(await signIn(b, { signInPage: false })).toMatchObject({ newRequests: true });
+    expect(await prefsRow(b)).toMatchObject({ new_requests: true, new_requests_team_default: true });
+    const c = newStaff('GC/HX - Base');
+    expect(local.get('lp-bell')).toBe('1'); // still B's copy on the device
+    expect(await signIn(c, { signInPage: false })).toMatchObject({ newRequests: false });
+    expect(await prefsRow(c)).toMatchObject({ new_requests: false, new_requests_set: false });
+    // What the old build did: that copy sent as an old bell turns New requests on for good (the bug).
+    const d = newStaff('GC/HX - Base');
+    expect((await api('/api/push/prefs', { json: { bell: true }, cookie: await cookieFor(d) })).body).toMatchObject({ newRequests: true });
+  });
+
+  it('a bell left by the build that is live now (no mark) is forgotten when someone else signs in', async () => {
+    local.clear();
+    const a = medical();
+    writeRememberedIdentity(a.staffName, a.team);
+    local.set('lp-bell', '1'); // A's switch, copied by the live build, never marked; A signed out there
+    local.set('lp-bell-intro-seen', '1');
+    const c = newStaff('GC/HX - Base');
+    expect(await signIn(c)).toMatchObject({ newRequests: false });
+    expect(await prefsRow(c)).toMatchObject({ new_requests: false, new_requests_set: false });
+  });
+
+  it("a phone's own old bell (set before the server switch) still turns New requests on for its staff member", async () => {
+    local.clear();
+    const e = newStaff('GC/HX - Base');
+    writeRememberedIdentity(e.staffName, e.team);
+    local.set('lp-bell', '1');
+    expect(await signIn(e)).toMatchObject({ newRequests: true });
+    expect(await prefsRow(e)).toMatchObject({ new_requests: true, new_requests_team_default: false });
+    expect(local.get('lp-bell-server')).toBe('1');
   });
 });
 

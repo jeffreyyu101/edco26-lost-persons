@@ -6,8 +6,8 @@
 // prefilled). On success, go to `next` (already validated same-origin) or "/".
 // Remembered identity and theme: lib/client/prefs.ts (this route has no StoreProvider). readPrefs() gives
 // rememberedName / rememberedTeam (both or neither) to skip to step 2; after a successful POST
-// /api/session call writeRememberedIdentity(staffName, team) with the response; "Change" calls
-// clearRememberedIdentity(); the theme toggle calls setThemePref(). Never pick other storage keys.
+// /api/session call forgetBellForOtherStaff then writeRememberedIdentity(staffName, team) with the response;
+// "Change" calls clearRememberedIdentity(); the theme toggle calls setThemePref(). Never pick other storage keys.
 //
 // The steps render only on the client: which step to show lives in localStorage, and rendering step 1 on the
 // server would flash it (or accept typing that hydration then drops) for everyone who is remembered.
@@ -24,7 +24,7 @@
 import { VisuallyHidden } from '@radix-ui/themes';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { SessionInfo } from '@/lib/api-types';
-import { clearRememberedIdentity, readPrefs, writeRememberedIdentity } from '@/lib/client/prefs';
+import { clearRememberedIdentity, forgetBellForOtherStaff, readPrefs, writeRememberedIdentity } from '@/lib/client/prefs';
 import { announceSignIn } from '@/lib/client/session-signals';
 import { captureJoinCode, forgetJoinCode } from '@/lib/join-link';
 import { safeNextPath } from '@/lib/safe-next';
@@ -79,7 +79,9 @@ function initialState(withLink: boolean): StepState {
 
 /** After a successful POST /api/session with the link (PasswordStep does the same after the password). */
 function openApp(session: SessionInfo | null, identity: Identity, next: string | null): void {
-  // Remember what the server stored (canonical team), then open the app with the new cookie.
+  // Remember what the server stored (canonical team), then open the app with the new cookie. Someone else than
+  // the remembered staff member starts without their bell (F6 follow-up: it copies their server switch).
+  forgetBellForOtherStaff(session?.staffName ?? identity.name, session?.team ?? identity.team);
   writeRememberedIdentity(session?.staffName ?? identity.name, session?.team ?? identity.team);
   // A sign-out left pending must not end this new session; open tabs re-check who is signed in.
   announceSignIn();
