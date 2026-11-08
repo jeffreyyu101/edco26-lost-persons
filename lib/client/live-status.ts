@@ -4,6 +4,9 @@
 //
 //   healthy       syncs land: green dot, "Updated just now" (last good sync under 60 s old), then
 //                 "Updated 1 min ago", "Updated 5 min ago", "Updated 1 hr ago". Minutes only, never seconds.
+//                 (2026-11-08, network fix 1d) "Updating…" with a turning arrow in the dot's place while the list
+//                 shown is not this visit's yet: nothing synced this load, or the last sync landed before the page
+//                 came back into view and is at least 15 s old. The age shows again once that sync lands.
 //   reconnecting  the phone reports a connection, but syncs fail (the store's connection is 'error', or
 //                 'offline' after failed requests), the view's own fetches fail by the same thresholds (the
 //                 dashboard's stats: 2 network failures or 3 server errors in a row), or nothing has landed
@@ -23,6 +26,8 @@ export type LiveState = 'healthy' | 'reconnecting' | 'offline';
 
 /** No successful sync for longer than this (while the page is visible) reads as Reconnecting. */
 export const STALE_AFTER_MS = 30_000;
+/** A sync that landed before the page came back into view and is at least this old reads "Updating…" (fix 1d). */
+export const UPDATING_AFTER_MS = 15_000;
 /** The line's granularity: "just now" under one minute, then whole minutes, then whole hours. */
 export const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
@@ -65,6 +70,19 @@ export function liveState(input: LiveInput): LiveState {
   return 'healthy';
 }
 
+/**
+ * (network fix 1d, 2026-11-08) The line reads "Updating…": healthy (an offline or reconnecting phone keeps its banner
+ * and clock time), visible, and either nothing has synced this load, or the last sync landed before the page came
+ * back into view and is at least UPDATING_AFTER_MS old (its resume sync is on its way). A glance back within 15 s
+ * never flickers; 30 s of visible time with nothing landed reads Reconnecting, as before.
+ */
+export function isUpdating(input: LiveInput): boolean {
+  const { syncedAt, now, visibleSince = null, hidden = false } = input;
+  if (hidden || liveState(input) !== 'healthy') return false;
+  if (syncedAt === null) return true;
+  return visibleSince !== null && syncedAt < visibleSince && now - syncedAt >= UPDATING_AFTER_MS;
+}
+
 /** "just now" under a minute (a sync that lands between two renders, a negative age, too), "5 min ago", "1 hr ago". */
 export function updatedAgo(ageMs: number): string {
   if (ageMs < MINUTE_MS) return 'just now';
@@ -83,10 +101,12 @@ export function updatedAgoSpoken(ageMs: number): string {
 
 export interface LiveLine {
   state: LiveState;
-  /** The visible words: "Updated just now", "Last updated 3:42 PM"; null before the first sync. */
+  /** The visible words: "Updated just now", "Last updated 3:42 PM", "Updating…"; null before the first sync while a banner shows. */
   text: string | null;
-  /** The same as one sentence for screen readers: "Reconnecting. List last updated at 3:42 PM." */
+  /** The same as one sentence for screen readers: "Reconnecting. List last updated at 3:42 PM.", "Updating the list." */
   sentence: string | null;
+  /** "Updating…" (isUpdating): the line shows a turning arrow in the dot's place. */
+  updating?: boolean;
 }
 
 export interface LiveWords {
@@ -105,6 +125,7 @@ const LEAD: Readonly<Record<Exclude<LiveState, 'healthy'>, string>> = { reconnec
 export function liveLine(input: LiveInput, { subject = 'List', timeZone }: LiveWords): LiveLine {
   const state = liveState(input);
   const { syncedAt, now } = input;
+  if (isUpdating(input)) return { state, text: 'Updating…', sentence: `Updating the ${subject.toLowerCase()}.`, updating: true };
   if (syncedAt === null) return { state, text: null, sentence: null };
   if (state === 'healthy') {
     const age = now - syncedAt;
@@ -119,17 +140,21 @@ export const sameLine = (a: LiveLine, b: LiveLine) => a === b || (a.state === b.
 /**
  * When the line's words can next change with no new event (epoch ms), or null when only an event (a sync, the
  * connection, online / offline, visibility) can change them. Healthy: the next minute boundary since the last
- * sync, or the moment it turns stale, whichever comes first. A banner state shows a fixed clock time: nothing.
+ * sync, the moment it turns stale, or (back in view with a sync not yet 15 s old) the moment it reads Updating…,
+ * whichever comes first. Updating… waits for its sync or the stale moment. A banner state shows a fixed clock
+ * time: nothing.
  */
 export function nextLiveChange(input: LiveInput): number | null {
-  const { syncedAt, now, hidden = false } = input;
+  const { syncedAt, now, hidden = false, visibleSince = null } = input;
   if (hidden || liveState(input) !== 'healthy') return null;
   const since = staleFrom(input);
   const stale = since === null ? Infinity : since + STALE_AFTER_MS + 1;
   if (syncedAt === null) return since === null ? null : stale;
+  if (isUpdating(input)) return stale;
   const age = now - syncedAt;
   const nextMinute = syncedAt + (age < 0 ? MINUTE_MS : (Math.floor(age / MINUTE_MS) + 1) * MINUTE_MS);
-  return Math.min(nextMinute, stale);
+  const updatingAt = visibleSince !== null && syncedAt < visibleSince ? syncedAt + UPDATING_AFTER_MS : Infinity;
+  return Math.min(nextMinute, stale, updatingAt);
 }
 
 export interface StateCue {

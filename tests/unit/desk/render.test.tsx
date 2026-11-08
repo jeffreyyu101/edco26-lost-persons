@@ -203,14 +203,14 @@ describe('DeskTop', () => {
       expect(html, query).toContain('aria-label="Refresh now"');
       expect(html, query).not.toMatch(/\ds ago|seconds/);
     }
-    // Before the first sync: the line keeps its place and shows nothing.
+    // Before the first sync: the line keeps its place and reads "Updating…" (network fix 1d; it showed nothing before).
     expect(render(<DeskTop main={ALL_VIEW} />, storeWith((s) => ({ ...s, lastSyncLocalAt: null })))).toMatch(
-      /<\/h1><div class="[^"]*live[^"]*" data-state="none" data-testid="live-indicator"><\/div>/,
+      /<\/h1><div class="[^"]*live[^"]*" data-state="healthy" data-updating="" data-testid="live-indicator"><svg[^>]*class="[^"]*liveSpin[^"]*"[^>]*>(?:<path[^>]*><\/path>)+<\/svg><span[^>]*data-testid="live-text">Updating…<\/span><span[^>]*>Updating the list\.<\/span><\/div>/,
     );
 
-    // The dashboard: from its own last stats fetch, which the open dashboard publishes (nothing before it does).
+    // The dashboard: from its own last stats fetch, which the open dashboard publishes ("Updating…" before it does).
     const dash = () => render(<DeskTop main={main('dashboard=1')} />, synced);
-    expect(dash()).toMatch(/<h1[^>]*>Dashboard<\/h1><div class="[^"]*live[^"]*" data-state="none" data-testid="live-indicator"><\/div>/);
+    expect(dash()).toMatch(/<h1[^>]*>Dashboard<\/h1><div class="[^"]*live[^"]*" data-state="healthy" data-updating="" data-testid="live-indicator"><svg[^>]*class="[^"]*liveSpin[^"]*"[^>]*>(?:<path[^>]*><\/path>)+<\/svg><span[^>]*data-testid="live-text">Updating…<\/span><span[^>]*>Updating the dashboard\.<\/span><\/div>/);
     const refresh = () => Promise.resolve();
     try {
       setDashboardLive({ syncedAt: Date.now() - 20_000, failing: false, refresh });

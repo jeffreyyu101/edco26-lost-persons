@@ -7,6 +7,7 @@ import { spinStopDelay, SPIN_MS } from '@/components/ui/LiveIndicator';
 import {
   MINUTE_MS,
   STALE_AFTER_MS,
+  UPDATING_AFTER_MS,
   createLiveSource,
   liveAnnouncement,
   liveLine,
@@ -165,11 +166,19 @@ describe('liveLine: what the line shows and says', () => {
       text: 'Updated just now',
       sentence: 'List updated just now.',
     });
-    // Back from the lock screen: healthy for 30 s while the catch-up sync runs, the age in minutes.
+    // The dashboard: its stats a minute old while the lists' syncs land, the age in minutes.
+    expect(liveLine({ syncedAt: T0, aliveAt: T0 + s(65), connection: 'live', now: T0 + s(70) }, { ...words, subject: 'Dashboard' })).toEqual({
+      state: 'healthy',
+      text: 'Updated 1 min ago',
+      sentence: 'Dashboard updated 1 minute ago.',
+    });
+    // (fix 1d) Back from the lock screen with a 5-minute-old sync: healthy for 30 s while the catch-up sync runs, and
+    // the line says it is updating instead of showing the old age.
     expect(liveLine({ syncedAt: T0, connection: 'live', now: T0 + min(5) + s(10), visibleSince: T0 + min(5) }, { ...words, subject: 'Dashboard' })).toEqual({
       state: 'healthy',
-      text: 'Updated 5 min ago',
-      sentence: 'Dashboard updated 5 minutes ago.',
+      text: 'Updating…',
+      sentence: 'Updating the dashboard.',
+      updating: true,
     });
   });
 
@@ -189,18 +198,46 @@ describe('liveLine: what the line shows and says', () => {
     expect(liveLine({ syncedAt: T0, connection: 'error', now: T0 + min(60) }, words).text).toBe('Last updated 3:42 PM');
   });
 
-  it('nothing to show before the first sync (the state still drives the banner)', () => {
-    expect(liveLine({ syncedAt: null, connection: 'live', now: T0 }, words)).toEqual({ state: 'healthy', text: null, sentence: null });
+  it('before the first sync: "Updating…" while it is on its way (fix 1d); nothing while a banner shows', () => {
+    expect(liveLine({ syncedAt: null, connection: 'live', now: T0 }, words)).toEqual({ state: 'healthy', text: 'Updating…', sentence: 'Updating the list.', updating: true });
     expect(liveLine({ syncedAt: null, connection: 'offline', online: false, now: T0 }, words)).toEqual({ state: 'offline', text: null, sentence: null });
+    expect(liveLine({ syncedAt: null, connection: 'offline', now: T0 }, words)).toEqual({ state: 'reconnecting', text: null, sentence: null });
+    // A hidden page shows nothing new (it re-reads when it comes back).
+    expect(liveLine({ syncedAt: null, connection: 'live', now: T0, hidden: true }, words).text).toBeNull();
+  });
+
+  it('(fix 1d) back in view: "Updating…" until the sync lands when the last one is 15 s old or more; no flicker for a glance', () => {
+    const back = (hiddenFor: number, visibleFor = 0) => ({ syncedAt: T0, connection: 'live' as Connection, visibleSince: T0 + hiddenFor, now: T0 + hiddenFor + visibleFor });
+    // 10 minutes hidden: Updating… at once, and for as long as the catch-up sync takes (up to the 30 s rule).
+    expect(liveLine(back(min(10)), words)).toMatchObject({ state: 'healthy', text: 'Updating…', updating: true });
+    expect(liveLine(back(min(10), s(29)), words)).toMatchObject({ state: 'healthy', text: 'Updating…' });
+    // Nothing landed in 30 s of visible time: Reconnecting, with the clock time, as before.
+    expect(liveLine(back(min(10), s(31)), words)).toMatchObject({ state: 'reconnecting', text: 'Last updated 3:42 PM' });
+    // The sync lands: the age again.
+    expect(liveLine({ ...back(min(10), s(2)), syncedAt: T0 + min(10) + s(1) }, words)).toMatchObject({ text: 'Updated just now' });
+    expect(liveLine({ ...back(min(10), s(2)), syncedAt: T0 + min(10) + s(1) }, words).updating).toBeUndefined();
+    // A 10 s glance away (data 10 s old): no flicker.
+    expect(liveLine(back(s(10)), words)).toMatchObject({ text: 'Updated just now' });
+    // …but if its catch-up sync is still not in at 15 s, Updating…
+    expect(liveLine(back(s(10), s(5)), words)).toMatchObject({ text: 'Updating…' });
+    // A sync that landed after the page came back is this visit's: never Updating…, however old it gets.
+    expect(liveLine({ syncedAt: T0 + s(5), connection: 'live', visibleSince: T0, now: T0 + s(25) }, words)).toMatchObject({ text: 'Updated just now' });
+    // Visible since load (no return): the age, as before.
+    expect(liveLine({ syncedAt: T0, connection: 'live', now: T0 + s(20) }, words)).toMatchObject({ text: 'Updated just now' });
+    // Offline: unchanged.
+    expect(liveLine({ ...back(min(10)), online: false }, words)).toMatchObject({ state: 'offline', text: 'Last updated 3:42 PM' });
   });
 
   it('nextLiveChange: the next minute boundary since the last sync, or the stale moment; nothing while a banner shows', () => {
     // Healthy and fresh: the stale moment (30 s) comes before the first minute boundary.
     expect(nextLiveChange({ syncedAt: T0, connection: 'live', now: T0 + s(6) })).toBe(T0 + STALE_AFTER_MS + 1);
-    // Back from the lock screen at 4:59 old: the 5-minute boundary first, then the stale moment.
+    // Back from the lock screen at 4:59 old: Updating… (fix 1d), whose words wait for the sync or the stale moment.
     const back = { syncedAt: T0, connection: 'live' as Connection, visibleSince: T0 + min(5) - s(1) };
-    expect(nextLiveChange({ ...back, now: back.visibleSince })).toBe(T0 + min(5));
-    expect(nextLiveChange({ ...back, now: T0 + min(5) })).toBe(back.visibleSince + STALE_AFTER_MS + 1);
+    expect(nextLiveChange({ ...back, now: back.visibleSince })).toBe(back.visibleSince + STALE_AFTER_MS + 1);
+    // Back after a 5 s glance: it reads Updating… 15 s after the last sync if the catch-up sync is not in by then.
+    expect(nextLiveChange({ syncedAt: T0, connection: 'live', visibleSince: T0 + s(5), now: T0 + s(5) })).toBe(T0 + UPDATING_AFTER_MS);
+    // The dashboard, visible since load: the stats' minute boundary.
+    expect(nextLiveChange({ syncedAt: T0, aliveAt: T0 + min(4) + s(50), connection: 'live', now: T0 + min(4) + s(59) })).toBe(T0 + min(5));
     // A sync stamped a moment ahead of this clock: the first boundary is a minute after it.
     expect(nextLiveChange({ syncedAt: T0 + 500, connection: 'live', now: T0, visibleSince: T0 + 500 })).toBe(T0 + 500 + STALE_AFTER_MS + 1);
     // Banner states show a fixed time; hidden pages and the first load wait for an event.
@@ -309,10 +346,9 @@ describe('the live source in fake time', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('ticks on minute boundaries since the last sync, never per second (back from the lock screen at 4:59)', () => {
+  it('ticks on minute boundaries since the last sync, never per second (the dashboard: stats at 4:59 old, lists live)', () => {
     const syncedAt = T0 - min(5) + s(1);
-    const h = harness({ syncedAt, connection: 'live' });
-    h.setPage({ since: Date.now() });
+    const h = harness({ syncedAt, aliveAt: Date.now(), connection: 'live' });
     expect(h.renders.at(-1)?.text).toBe('Updated 4 min ago');
     const rendersBefore = h.renders.length;
     // 999 ms later: no wake, no render.
@@ -323,7 +359,7 @@ describe('the live source in fake time', () => {
     vi.advanceTimersByTime(1);
     expect(h.wakes).toBe(1);
     expect(h.renders.at(-1)?.text).toBe('Updated 5 min ago');
-    // Nothing more until it turns stale, 30 s after the page came back.
+    // Nothing more until it turns stale, 30 s after the lists' last sync.
     vi.advanceTimersByTime(s(28));
     expect(h.wakes).toBe(1);
     vi.advanceTimersByTime(s(1) + 1);
@@ -341,13 +377,13 @@ describe('the live source in fake time', () => {
   });
 
   it('a healthy line renders at most once a minute (minute labels are stable between boundaries)', () => {
-    // A long healthy stretch with an old sync is only possible with the page coming back now and then: each
-    // return gives 30 s of grace. Over 10 minutes the label may change only on minute boundaries.
-    const h = harness({ syncedAt: Date.now(), connection: 'live' });
+    // A long healthy stretch with an old sync: the dashboard, its stats not moving while the lists' syncs land.
+    // Over 10 minutes the label may change only on minute boundaries.
+    const h = harness({ syncedAt: Date.now(), aliveAt: Date.now(), connection: 'live' });
     const changes: number[] = [];
     let seen = h.renders.length;
     for (let t = 0; t < min(10); t += s(1)) {
-      if (t % s(20) === 0) h.setPage({ since: Date.now() }); // back in view every 20 s: never stale
+      if (t % s(20) === 0) h.setData({ aliveAt: Date.now() }); // the lists sync: never stale
       vi.advanceTimersByTime(s(1));
       if (h.renders.length !== seen) {
         changes.push(Date.now() - T0);
@@ -369,9 +405,35 @@ describe('the live source in fake time', () => {
     vi.advanceTimersByTime(min(10));
     expect(h.renders.at(-1)?.state).toBe('healthy');
     h.setPage({ hidden: false, since: Date.now() });
-    expect(h.renders.at(-1)).toMatchObject({ state: 'healthy', text: 'Updated 10 min ago' });
+    // (fix 1d) 10 minutes away: Updating… while the catch-up sync runs, not "Updated 10 min ago".
+    expect(h.renders.at(-1)).toMatchObject({ state: 'healthy', text: 'Updating…', updating: true });
     vi.advanceTimersByTime(STALE_AFTER_MS + 1);
     expect(h.renders.at(-1)?.state).toBe('reconnecting');
+    h.off();
+  });
+
+  it('(fix 1d) 10 minutes hidden: Updating… until the sync lands, then "Updated just now"; a 10 s glance never flickers', () => {
+    const h = harness({ syncedAt: Date.now(), connection: 'live' });
+    h.setPage({ hidden: true });
+    vi.advanceTimersByTime(min(10));
+    h.setPage({ hidden: false, since: Date.now() });
+    expect(h.renders.at(-1)?.text).toBe('Updating…');
+    vi.advanceTimersByTime(s(2));
+    h.setData({ syncedAt: Date.now() });
+    expect(h.renders.at(-1)).toMatchObject({ state: 'healthy', text: 'Updated just now' });
+    const settled = h.renders.length;
+    // A 10 s glance away and back: the same words, no render.
+    h.setPage({ hidden: true });
+    vi.advanceTimersByTime(s(10));
+    h.setPage({ hidden: false, since: Date.now() });
+    expect(h.renders).toHaveLength(settled);
+    // Its catch-up sync is slow: at 15 s since the last sync the line wakes and reads Updating…
+    vi.advanceTimersByTime(s(5) - 1);
+    expect(h.renders).toHaveLength(settled);
+    vi.advanceTimersByTime(1);
+    expect(h.renders.at(-1)?.text).toBe('Updating…');
+    h.setData({ syncedAt: Date.now() });
+    expect(h.renders.at(-1)?.text).toBe('Updated just now');
     h.off();
   });
 
