@@ -14,7 +14,7 @@
 //     so no TEST-S row is left open in Pending.
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { existsSync, openSync, readFileSync, closeSync } from 'node:fs';
+import { existsSync, openSync, readFileSync, readdirSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, expect } from 'vitest';
@@ -356,6 +356,18 @@ export async function forceStatus(id: string, status: string): Promise<number> {
   const { data, error } = await admin().from('patients').update({ status }).eq('id', id).select('row_version').single();
   if (error) throw new Error(`forceStatus failed: ${error.code} ${error.message}`);
   return Number((data as { row_version: number }).row_version);
+}
+
+/**
+ * (Companion) Re-applies every migration after the rework file, in order, on the app database: a test that pastes
+ * the rework file again (it replaces lp_set_status, lp_row, … with its own versions) calls this right after, so
+ * the stack stays on the whole chain for the files running beside it.
+ */
+export function reapplyAfterRework(): void {
+  const dir = join(ROOT, 'supabase', 'migrations');
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql') && f > '20261106000000_rework.sql').sort()) {
+    execFileSync('psql', [dbUrl(), '-v', 'ON_ERROR_STOP=1', '-q', '-f', join(dir, file)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PGOPTIONS: '-c client_min_messages=warning' } });
+  }
 }
 
 export async function rowVersion(id: string): Promise<number> {

@@ -40,12 +40,14 @@ import {
 
 const ROOT = join(__dirname, '..', '..');
 const MIGRATION = readFileSync(join(ROOT, 'supabase/migrations/20261106000000_rework.sql'), 'utf8');
+/** (Companion) The latest lp_set_status, lp_clean_fields and status CHECK. */
+const COMPANION = readFileSync(join(ROOT, 'supabase/migrations/20261108120000_companion.sql'), 'utf8');
 
-function sqlBlock(marker: string): string {
-  const start = MIGRATION.indexOf(`-- ${marker}:BEGIN`);
-  const end = MIGRATION.indexOf(`-- ${marker}:END`);
+function sqlBlock(marker: string, source = MIGRATION): string {
+  const start = source.indexOf(`-- ${marker}:BEGIN`);
+  const end = source.indexOf(`-- ${marker}:END`);
   expect(start, `${marker} block in the migration`).toBeGreaterThan(0);
-  return MIGRATION.slice(start, end);
+  return source.slice(start, end);
 }
 
 describe('statuses', () => {
@@ -81,17 +83,20 @@ describe('statuses', () => {
         'Added', 'Bring friend to medical', 'Cancelled', 'Checked – Not Found', 'Found – Awaiting Reunion', 'Found – Discharged', 'Reunited – Closed',
         // (F6) Only the server's inactivity auto-close writes it.
         'Closed – Inactive',
+        // (Companion)
+        'Found – Accompanied',
+        'Closed – Friend Informed',
       ].sort(),
     );
-    // The same values, in the same order, as rework step 2's v_statuses (the CHECK's needed values).
-    const sql = /v_statuses constant text\[\] := array\[([^\]]*)\]/.exec(MIGRATION)?.[1] ?? '';
+    // The same values, in the same order, as the companion migration's v_statuses (the CHECK's needed values).
+    const sql = /v_statuses constant text\[\] := array\[([^\]]*)\]/.exec(COMPANION)?.[1] ?? '';
     expect([...sql.matchAll(/'([^']+)'/g)].map((m) => m[1])).toEqual([...STATUSES]);
   });
 });
 
 describe('transitions', () => {
   it('match the lp_set_status CASE in the migration exactly', () => {
-    const block = sqlBlock('TRANSITIONS');
+    const block = sqlBlock('TRANSITIONS', COMPANION);
     const fromSql: Record<string, string[]> = {};
     for (const m of block.matchAll(/when '([^']+)' then p_status in \(([^)]*)\)/g)) {
       fromSql[m[1] as string] = [...(m[2] as string).matchAll(/'([^']+)'/g)].map((x) => x[1] as string).sort();
@@ -332,9 +337,9 @@ describe('names', () => {
   it('lp_clean_fields enforces exactly the LIMITS (age and gender are free text, ≤40)', () => {
     expect(LIMITS.age).toBe(40);
     expect(LIMITS.gender).toBe(40);
-    const start = MIGRATION.indexOf('v_limit := case v_key');
+    const start = COMPANION.indexOf('v_limit := case v_key');
     expect(start, 'the lp_clean_fields limit table').toBeGreaterThan(0);
-    const block = MIGRATION.slice(start, MIGRATION.indexOf('end;', start));
+    const block = COMPANION.slice(start, COMPANION.indexOf('end;', start));
     const sql = Object.fromEntries([...block.matchAll(/when '([a-z_]+)' then (\d+)/g)].map((m) => [m[1], Number(m[2])]));
     for (const [field, limit] of Object.entries(LIMITS)) {
       const column = field === 'name' ? 'first_name' : FIELD_COLUMNS[field as keyof typeof FIELD_COLUMNS];

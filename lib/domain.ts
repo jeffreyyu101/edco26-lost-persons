@@ -217,7 +217,7 @@ export const TRANSITIONS: Readonly<Record<Status, readonly Status[]>> = {
   [STATUS.cancelled]: [STATUS.waiting],
   [STATUS.legacyBringFriend]: [STATUS.reunited, STATUS.discharged, STATUS.notInMedical],
   // (F6) Reopen only (kind 'reopen', any staff).
-  [STATUS.inactive]: [STATUS.inMedical, STATUS.accompanied],
+  [STATUS.inactive]: [STATUS.inMedical],
   [STATUS.accompanied]: [STATUS.friendInformed, STATUS.inMedical, STATUS.notInMedical, STATUS.discharged, STATUS.waiting],
   [STATUS.friendInformed]: [STATUS.accompanied],
 };

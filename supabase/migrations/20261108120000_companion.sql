@@ -556,7 +556,7 @@ begin
     when 'Found – Discharged' then p_status in ('Found – Awaiting Reunion', 'Found – Accompanied')
     when 'Cancelled' then p_status in ('Added')
     when 'Bring friend to medical' then p_status in ('Reunited – Closed', 'Found – Discharged', 'Checked – Not Found')
-    when 'Closed – Inactive' then p_status in ('Found – Awaiting Reunion', 'Found – Accompanied')
+    when 'Closed – Inactive' then p_status in ('Found – Awaiting Reunion')
     when 'Found – Accompanied' then p_status in ('Closed – Friend Informed', 'Found – Awaiting Reunion', 'Checked – Not Found', 'Found – Discharged', 'Added')
     when 'Closed – Friend Informed' then p_status in ('Found – Accompanied')
     -- TRANSITIONS:END

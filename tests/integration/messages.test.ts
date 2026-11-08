@@ -11,7 +11,7 @@ import { syncPath } from '@/lib/client/api-paths';
 import { STATUS, canonStaff } from '@/lib/domain';
 import { shortStaffName } from '@/lib/messaging';
 import { ROOT } from '../../scripts/test-env.mjs';
-import { api, cookieFor, createRequest, dbUrl, newStaff, pii, psql, randomUUID, staffOf, uniq, withTestServer, type Staff } from './harness';
+import { api, cookieFor, createRequest, dbUrl, newStaff, pii, psql, randomUUID, reapplyAfterRework, staffOf, uniq, withTestServer, type Staff } from './harness';
 
 withTestServer();
 
@@ -445,6 +445,7 @@ describe('the migration', () => {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    reapplyAfterRework();
     expect(count()).toBe('1/1/1');
     // PostgREST reloads its schema; the API keeps answering.
     for (let i = 0; i < 40; i += 1) {
