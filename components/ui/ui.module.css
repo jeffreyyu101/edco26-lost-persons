@@ -17,6 +17,8 @@
 
 .toast {
   pointer-events: auto;
+  /* Swiped up or sideways to close (lib/client/toast-swipe.ts): the page never scrolls or zooms under a finger on it. */
+  touch-action: none;
   display: flex;
   gap: 12px;
   align-items: center;
