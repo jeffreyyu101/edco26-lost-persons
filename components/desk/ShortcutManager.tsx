@@ -1,7 +1,8 @@
 'use client';
 // The desk keyboard (from 768 px; rules in ./keyboard.ts): "/" search, N new request, J/K or ↓/↑ move
 // through the main column's requests (opening each one when a request is open), Enter opens the selected
-// request, Esc closes the open one and puts focus back on its row. A row clicked (or entered) while a
+// request, Esc closes the sidebar opened over the content, else the open request (focus back on its row), and
+// Cmd+B / Ctrl+B toggles the sidebar. A row clicked (or entered) while a
 // request is open replaces it in the pane, so one close always closes. When a form (New request, edit)
 // closes and leaves the focus on nothing, it goes back to where it was before the form opened (New
 // request, the row, the pane's ⋯). Renders nothing.
@@ -24,6 +25,7 @@ import {
   type ShortcutAction,
 } from './keyboard';
 import { neighbours } from './nav-model';
+import { closeSidebarOverlay, sidebarOverlayOpen, toggleSidebar } from './sidebar-state';
 import { isFormView, paneRequestId, type MainView } from './views';
 
 export interface DeskKeysProps {
@@ -107,6 +109,12 @@ export function DeskKeys({ view, main }: DeskKeysProps) {
         case 'close':
           closePane(latest.current);
           return;
+        case 'toggleSidebar':
+          toggleSidebar();
+          return;
+        case 'closeSidebar':
+          closeSidebarOverlay();
+          return;
         case 'open':
           if (!cursor.current || cursor.current === open || !rowElement(cursor.current)) return;
           if (open) openInPane(cursor.current);
@@ -125,7 +133,7 @@ export function DeskKeys({ view, main }: DeskKeysProps) {
           if (open) openInPane(target);
           // Focus follows, so Enter opens the row moved to and the row shows as selected. Only someone
           // working in the open request (a button in the pane) keeps their place there. Focus left on the
-          // sidebar, the rail or the top bar (a click there, New request closed) follows too: kept there, the
+          // sidebar or the top bar (a click there, New request closed) follows too: kept there, the
           // next Enter would re-run that control instead of opening the row.
           const active = document.activeElement;
           if (el && !active?.closest(PANE_SELECTOR)) focusRow(el);
@@ -135,7 +143,12 @@ export function DeskKeys({ view, main }: DeskKeysProps) {
     };
     const onKeyDown = (e: KeyboardEvent) => {
       const { open, form } = urlState();
-      const action = decideShortcut(e, describeTarget(e.target), { overlayOpen: overlayOpen(), formOpen: form, paneOpen: open !== null });
+      const action = decideShortcut(e, describeTarget(e.target), {
+        overlayOpen: overlayOpen(),
+        formOpen: form,
+        paneOpen: open !== null,
+        sidebarOverlay: sidebarOverlayOpen(),
+      });
       if (!action) return;
       e.preventDefault();
       run(action, open);

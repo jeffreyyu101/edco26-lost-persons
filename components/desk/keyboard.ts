@@ -1,12 +1,15 @@
 // Desk keyboard shortcuts (from 768 px): "/" search, N new request, J/K or ↓/↑ move through the main
-// column's requests, Enter opens the selected one, Esc closes the open request. The decision is pure
+// column's requests, Enter opens the selected one, Esc closes the sidebar opened over the content, else the open
+// request; Cmd+B / Ctrl+B toggles the sidebar (shadcn/ui's SIDEBAR_KEYBOARD_SHORTCUT). The decision is pure
 // (decideShortcut, unit-tested in tests/unit/desk/keyboard.test.ts); describeTarget reads the DOM.
 //
 // Never fires while typing (inputs, text areas, selects, contenteditable), while a dialog, sheet, menu or
-// popover is open or owns focus, while a form is open, or with Cmd / Ctrl / Alt held (the browser owns
-// Cmd+L/T/W/N; Cmd+Enter belongs to the form).
+// popover is open or owns focus, or while a form is open. Cmd / Ctrl / Alt held: nothing but Cmd+B / Ctrl+B (the
+// browser owns Cmd+L/T/W/N; Cmd+Enter belongs to the form). Cmd+B has no browser default in Chrome or Safari
+// (Firefox's bookmarks sidebar gives way, as shadcn's does); in a text field it is left alone (bold, or the field's
+// own shortcut), like every other key here.
 
-export type ShortcutAction = 'search' | 'new' | 'next' | 'prev' | 'open' | 'close';
+export type ShortcutAction = 'search' | 'new' | 'next' | 'prev' | 'open' | 'close' | 'toggleSidebar' | 'closeSidebar';
 
 /** What the key event landed on. */
 export interface TargetInfo {
@@ -37,12 +40,19 @@ export interface ShortcutContext {
   formOpen: boolean;
   /** A request is open in the detail pane. */
   paneOpen: boolean;
+  /** The sidebar is open over the content (with its scrim): Esc closes it first. */
+  sidebarOverlay?: boolean;
 }
 
 export function decideShortcut(e: KeyInput, target: TargetInfo, ctx: ShortcutContext): ShortcutAction | null {
   if (e.defaultPrevented || e.isComposing || e.key === 'Process' || e.key === 'Unidentified') return null;
-  if (e.metaKey || e.ctrlKey || e.altKey) return null;
-  if (target.editable || target.inOverlay || ctx.overlayOpen || ctx.formOpen) return null;
+  const quiet = target.editable || target.inOverlay || ctx.overlayOpen || ctx.formOpen;
+  if (e.metaKey || e.ctrlKey || e.altKey) {
+    // Cmd+B (Mac) or Ctrl+B: only those two, with nothing else held.
+    const sidebarKey = (e.key === 'b' || e.key === 'B') && !e.altKey && !e.shiftKey;
+    return sidebarKey && !quiet ? 'toggleSidebar' : null;
+  }
+  if (quiet) return null;
   switch (e.key) {
     case '/':
       return 'search';
@@ -64,7 +74,7 @@ export function decideShortcut(e: KeyInput, target: TargetInfo, ctx: ShortcutCon
     case 'Enter':
       return target.body && !e.shiftKey ? 'open' : null;
     case 'Escape':
-      return ctx.paneOpen ? 'close' : null;
+      return ctx.sidebarOverlay ? 'closeSidebar' : ctx.paneOpen ? 'close' : null;
     default:
       return null;
   }
