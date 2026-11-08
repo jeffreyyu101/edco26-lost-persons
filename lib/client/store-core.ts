@@ -1183,12 +1183,10 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const syncPages = async (gen: number): Promise<PollOutcome> => {
     const e = env;
     if (!e) return 'stale';
-    // Confirm who is signed in first when this tab can't be sure (never checked, a 401, resumed, or a
-    // sign-in in another tab): the cookie may now belong to someone else.
-    if (state.session.status !== 'active' || sessionCheckDue) {
-      const s = await confirmSession();
-      if (s !== 'ok') return s;
-    }
+    // When this tab can't be sure who is signed in (never checked, a 401, resumed, or a sign-in in another tab),
+    // GET /api/session goes out with the first page, and nothing is applied until it confirms the session: the
+    // cookie may now belong to someone else, and their session resets the cache and staffEpoch (stale() below).
+    const check = state.session.status !== 'active' || sessionCheckDue ? confirmSession() : null;
     // Every page is for this staff: if the data switches to another staff meanwhile (a write or the outbox
     // confirmed a new session), nothing more of this sync is applied, and the cursor is not written.
     const epoch = staffEpoch;
@@ -1204,6 +1202,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     for (let page = 0; page < MAX_SYNC_PAGES; page += 1) {
       const path = syncPathFor(since, page === 0 && reconcile, after);
       const res = await call<SyncResponse>(path, { timeoutMs: SYNC.requestTimeoutMs, signal: pollAbort?.signal });
+      if (check && (await check) !== 'ok') return check;
       if (stale()) return 'stale';
       if (!res.ok) return failureOutcome(res);
       const body = res.data;
