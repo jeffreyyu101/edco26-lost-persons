@@ -17,6 +17,9 @@ const COLOR: Readonly<Record<GlyphKind, string>> = {
   logged: 'var(--gray-10)',
   // (F6) gray-9, as the other closed glyphs (3:1 on the panel in both themes).
   inactive: 'var(--gray-9)',
+  // (Companion) lucide users: amber while accompanied, grey once the friend was informed.
+  accompanied: 'var(--amber-9)',
+  friendInformed: 'var(--gray-9)',
 };
 
 /** (F6) lucide timer-off (v1.70), on its 24 px grid: Closed · inactive. Drawn here so the first load needs no icon chunk. */

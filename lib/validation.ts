@@ -6,6 +6,7 @@
 // Age and gender are free text (Jeffrey, 2026-11-06 10:31; design/DECISIONS.md "New request: free text").
 import { z } from 'zod';
 import {
+  FRIEND_IN_MEDICAL,
   LIMITS,
   OTHER_LOCATION_MIN,
   OTHER_POST,
@@ -16,6 +17,7 @@ import {
   POST_VALUES,
   SETTABLE_STATUSES,
   STAFF_FORBIDDEN_CHARS,
+  SWAP_PLACES,
   STAFF_NAME_MAX,
   STAFF_NAME_MIN,
   STATUS,
@@ -85,6 +87,9 @@ const fieldShape = {
   contactRelationship: optionalText(LIMITS.contactRelationship).optional(),
   contactNotes: optionalText(LIMITS.contactNotes).optional(),
   otherLocation: otherLocationField.optional(),
+  /** (Companion) "Is a friend already with them in medical?" (default unsure) and, when yes, an optional name. */
+  friendInMedical: z.enum(FRIEND_IN_MEDICAL).optional(),
+  friendInMedicalName: optionalText(LIMITS.friendInMedicalName).optional(),
 };
 
 type PostFields = { reportingLocation?: string | undefined; otherLocation?: string | null | undefined };
@@ -169,6 +174,18 @@ export const setStatusSchema = z.strictObject({
   kind: z.enum(STATUS_KINDS),
 });
 export type SetStatusBody = z.input<typeof setStatusSchema>;
+
+/**
+ * (Companion) POST /api/requests/:id/swap: request a friend swap, approve it at the request's tent ('fa') or Main
+ * Med ('mm'), decline it, or withdraw it (the requester's Undo: nobody is told).
+ */
+export const swapSchema = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('request'), expectedVersion: expectedVersionSchema }),
+  z.strictObject({ action: z.literal('approve'), place: z.enum(SWAP_PLACES), expectedVersion: expectedVersionSchema }),
+  z.strictObject({ action: z.literal('decline'), expectedVersion: expectedVersionSchema }),
+  z.strictObject({ action: z.literal('withdraw'), expectedVersion: expectedVersionSchema }),
+]);
+export type SwapBody = z.input<typeof swapSchema>;
 
 /** POST /api/requests/:id/cancel */
 export const cancelSchema = z.strictObject({ expectedVersion: expectedVersionSchema });
