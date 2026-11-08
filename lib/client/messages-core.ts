@@ -288,6 +288,13 @@ export function createMessaging(host: MessagingHost): MessagingEngine {
     }
   };
 
+  // (network fix 4, 2026-11-08) A phone unlocked on a request page: its thread poll was suspended with the page, and
+  // an overdue tick can run before the page hears it is visible (then pollOpen skips it). Coming back into view
+  // polls the open threads at once, alongside the resume sync, instead of waiting up to a tick (6 s) or for the
+  // session check, the sync and the lastMessageAt refresh one after the other. pollOpen skips a thread loaded under
+  // 5.5 s ago, a hidden page and an offline phone, so the next tick never fetches it twice.
+  const doc = typeof document === 'undefined' ? null : document;
+
   const ensurePoll = () => {
     if (!running) return;
     if (openCounts.size > 0 && !pollTimer) pollTimer = setInterval(pollOpen, THREAD_POLL_MS);
@@ -667,10 +674,12 @@ export function createMessaging(host: MessagingHost): MessagingEngine {
       running = true;
       ensurePoll();
       scheduleWork();
+      doc?.addEventListener('visibilitychange', pollOpen);
     },
 
     stop() {
       running = false;
+      doc?.removeEventListener('visibilitychange', pollOpen);
       if (pollTimer) clearInterval(pollTimer);
       pollTimer = undefined;
       if (workTimer) clearTimeout(workTimer);
