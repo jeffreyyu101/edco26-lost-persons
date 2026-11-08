@@ -4,7 +4,7 @@
 // own requests, and the hidden page's beacon (only when the app is idle and it can be accepted; never kept after).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventBuffer, type StoredBatch } from '@/lib/client/telemetry/buffer';
-import { Sender, gzipText, nextHour, type SenderDeps } from '@/lib/client/telemetry/send';
+import { BEACON_MAX_BYTES, Sender, gzipText, nextHour, type SenderDeps } from '@/lib/client/telemetry/send';
 import { TEL_KEYS } from '@/lib/telemetry';
 import { FakeStorage, MemoryBatchStore } from './fakes';
 
@@ -325,5 +325,67 @@ describe('a hidden page', () => {
     await flush();
     expect(t.beacons).toHaveLength(0);
     expect([...t.store.map.values()][0]).toMatchObject({ tries: 0 } satisfies Partial<StoredBatch>);
+  });
+});
+
+// (network fix 8, 2026-11-08) The worst cases stay idle-only: a beacon never carries more than 8 KB (it could still be
+// uploading when the phone is reopened seconds later), and a batch that keeps stepping aside for the app is split.
+describe('worst cases (fix 8)', () => {
+  it('a batch over 8 KB is not beaconed: it waits in IndexedDB for an idle (gzip) send', async () => {
+    const t = setup();
+    for (let i = 0; i < 300; i += 1) t.buffer.push({ n: 'view', at: Date.now() + i });
+    t.sender.flushHidden();
+    await flush();
+    expect(t.beacons).toHaveLength(0);
+    const [stored] = [...t.store.map.values()];
+    expect(stored?.ev.length).toBeGreaterThan(0);
+    expect(JSON.stringify(stored?.ev).length).toBeGreaterThan(BEACON_MAX_BYTES);
+    t.sender.maybeSend();
+    await flush();
+    expect((t.posts[0]?.body as { b: string }).b).toBe(stored?.b);
+  });
+
+  it('a small batch is still beaconed', async () => {
+    const t = setup();
+    t.buffer.push({ n: 'view', at: Date.now() });
+    t.sender.flushHidden();
+    await flush();
+    expect(t.beacons).toHaveLength(1);
+  });
+
+  it('three yields in a row split the batch in two (the first half keeps the id); then each goes on its own', async () => {
+    const posts: Setup['posts'] = [];
+    const hang = async (url: string, init: RequestInit) => {
+      posts.push({ url, init, body: JSON.parse(String(init.body)) });
+      return new Promise<Response>((_, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))));
+    };
+    const t = setup({ fetch: hang });
+    for (let i = 0; i < 10; i += 1) t.buffer.push({ n: 'view', at: Date.now() + i });
+    for (let round = 0; round < 3; round += 1) {
+      if (round) vi.advanceTimersByTime(61_000);
+      t.sender.maybeSend();
+      await flush();
+      t.sender.yieldToApp();
+      await flush();
+    }
+    expect(posts).toHaveLength(3);
+    const id = (posts[0]?.body as { b: string }).b;
+    expect(posts.every((p) => (p.body as { b: string }).b === id)).toBe(true);
+    const stored = [...t.store.map.values()];
+    expect(stored).toHaveLength(2);
+    expect(stored.map((b) => b.ev.length).sort()).toEqual([5, 5]);
+    expect(stored.find((b) => b.b === id)?.ev.map((e) => e.at)).toEqual(Array.from({ length: 5 }, (_, i) => Date.now() - 2 * 61_000 + i));
+    expect(stored.every((b) => b.tries === 0)).toBe(true);
+    // Two yields only: not split.
+    const u = setup({ fetch: hang });
+    for (let i = 0; i < 10; i += 1) u.buffer.push({ n: 'view', at: Date.now() + i });
+    for (let round = 0; round < 2; round += 1) {
+      if (round) vi.advanceTimersByTime(61_000);
+      u.sender.maybeSend();
+      await flush();
+      u.sender.yieldToApp();
+      await flush();
+    }
+    expect([...u.store.map.values()]).toHaveLength(1);
   });
 });
