@@ -113,6 +113,14 @@ export function mainRowId(target: EventTarget | null): string | null {
   return row?.getAttribute?.('data-request-id') || null;
 }
 
+/**
+ * (Message lane) The click landed in a row's message lane (its mark carries data-thread-badge): it opens the request
+ * at its Messages, also while another request is open beside the table (components/messages/CardActivity openRowAt).
+ */
+export function inMessageLane(target: EventTarget | null): boolean {
+  return !!(target as ElementLike | null)?.closest?.('[data-thread-badge]');
+}
+
 /** Request ids in the order the main column shows them (each once). */
 export function readRowIds(root: ParentNode | null): string[] {
   if (!root) return [];

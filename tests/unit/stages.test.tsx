@@ -28,6 +28,7 @@ import { createStubStore } from '@/lib/client/store-stub';
 import { STUB_SESSION, stubRows } from '@/lib/client/stub-data';
 import { RECHECK_MINUTES, STATUS, STATUS_META, actionLabel, alertName, isHeld, isRecheckDue, primaryActions } from '@/lib/domain';
 import { holdDetail } from '@/lib/hold-detail';
+import { narrowStageLabel } from '@/components/list/rows';
 import { STAGE_META, displayStage, notFoundAnswer, etaText, holdAnsweredAt, isMedicalTeam, shortStaffName, stageLook, stagePhrase, type StageKey, type StageSource } from '@/lib/stages';
 import { formatClockAmPm } from '@/lib/format';
 import { mapAudit, mapRow } from '@/lib/server/mappers';
@@ -112,7 +113,7 @@ describe('displayStage', () => {
     const key = expectedKey(status, needsInfo, hold, enroute);
     expect(stage.key).toBe(key);
     if (key !== 'legacy') {
-      expect({ label: stage.label, tone: stage.tone, glyph: stage.glyph, bucket: stage.bucket }).toEqual(STAGE_META[key]);
+      expect({ label: stage.label, narrow: stage.narrow, tone: stage.tone, glyph: stage.glyph, bucket: stage.bucket }).toEqual(STAGE_META[key]);
     } else {
       expect(stage).toMatchObject({ label: 'Found – Transported', tone: 'gray', bucket: 'closed' });
     }
@@ -231,6 +232,25 @@ describe('labels', () => {
     expect(STAGE_META.recheckDue.glyph).toBe('history');
     expect(STAGE_META.enroute.label).toBe('Friend en route');
     expect(STAGE_META.arrived.label).toBe('Friend arrived');
+  });
+
+  it('(message lane) the narrow labels under 430 px: Waiting, En route, Arrived, Recheck, Inactive; the rest are short already', () => {
+    expect(Object.fromEntries(Object.entries(STAGE_META).filter(([, m]) => m.narrow).map(([k, m]) => [k, m.narrow]))).toEqual({
+      waiting: 'Waiting',
+      recheckDue: 'Recheck',
+      enroute: 'En route',
+      arrived: 'Arrived',
+      inactive: 'Inactive',
+    });
+    // The log row reads them through narrowStageLabel (legacy statuses keep their label).
+    for (const [key, narrow] of [['enroute', 'En route'], ['arrived', 'Arrived'], ['recheckDue', 'Recheck'], ['waiting', 'Waiting'], ['inactive', 'Inactive']] as const) {
+      expect(narrowStageLabel(key)).toBe(narrow);
+    }
+    for (const key of ['needsInfo', 'notFoundYet', 'inMedical', 'notInMedical', 'reunited', 'discharged', 'cancelled', 'legacy'] as const) {
+      expect(narrowStageLabel(key)).toBeNull();
+    }
+    // Every narrow label is shorter than its label.
+    for (const m of Object.values(STAGE_META)) if (m.narrow) expect(m.narrow.length).toBeLessThan(m.label.length);
   });
 
   it('colour = meaning: blue waiting, amber needs info, violet pending, green in medical / arrived, teal en route, grey closed', () => {

@@ -7,6 +7,7 @@
 // request, the row, the pane's ⋯). Renders nothing.
 import { useEffect, useRef } from 'react';
 import { navigate, parseView, type View } from '@/lib/client/nav';
+import { requestThreadJump } from '@/lib/client/thread-jump';
 import { closePane, forgetHistoryEntries, noteHistoryEntry, openInPane, takeClosedPane } from './DetailPane';
 import {
   FORM_LAYER_SELECTOR,
@@ -15,6 +16,7 @@ import {
   PANE_SELECTOR,
   decideShortcut,
   describeTarget,
+  inMessageLane,
   mainRowId,
   overlayOpen,
   readRowIds,
@@ -140,7 +142,9 @@ export function DeskKeys({ view, main }: DeskKeysProps) {
     };
     // A row clicked (or Enter on it) while a request is open opens in place, as J / K do: the rows push a
     // new entry each (the phone's screens), and the pane keeps one, so a single Esc or × closes it.
-    // Capture on window, ahead of React's listeners, so the row's own click never runs.
+    // Capture on window, ahead of React's listeners, so the row's own click never runs. (Message lane) A click in
+    // the row's message lane still lands at that request's Messages, as with nothing open (openRowAt): the jump
+    // waits for its thread (the request open already, or the one about to open in place).
     const onClick = (e: MouseEvent) => {
       const { open, form } = urlState();
       if (!open || form) return;
@@ -149,6 +153,7 @@ export function DeskKeys({ view, main }: DeskKeysProps) {
       e.preventDefault();
       e.stopPropagation();
       cursor.current = id;
+      if (inMessageLane(e.target)) requestThreadJump(id);
       if (id !== open) openInPane(id);
     };
     const onFocusIn = (e: FocusEvent) => {

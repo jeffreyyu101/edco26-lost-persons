@@ -740,52 +740,97 @@ button.enr:focus-visible {
   background: var(--blue-8);
 }
 
-/* A count after a name in a table row. */
-.rowBadge {
+/* ---- The message lane (design/screens/msg-indicator.html, Brian 2026-11-07) ---------------------------------
+   One mark leading a log row and a desk table row, lucide MessageSquare's silhouette at two strengths: the blue
+   bubble with the unread count, or the grey outline once read; an empty lane without messages. The lane is 31 px
+   (the "99+" bubble), so no count ever moves the names. Where the lane sits and its 44 px hit area are the row's
+   (list.module.css .lane, table.module.css .lane). */
+.lane {
+  display: flex;
+  align-items: center;
+  justify-self: start;
+  color: var(--gray-11);
+}
+
+/* MessageSquare's body starts 1.5 px into its box: the outline's left edge meets the bubble's. Shifted, not pulled
+   in with a margin, so the lane keeps the icon's whole width. */
+.laneIcon {
   flex: none;
+  position: relative;
+  left: -1.5px;
+}
+
+/* The unread mark (the message lane): its own class, never the chat's message-bubble class. A 17 px body with 4.5 px corners, square at the bottom left, and a 5 × 4.5 tail under that
+   corner; the badge blue (.badge: blue-11 light, blue-8 dark, white 12 / 700 on both, AA-checked). */
+.markBubble {
+  position: relative;
   display: inline-grid;
   place-items: center;
   min-width: 20px;
-  height: 20px;
-  margin-left: 8px;
-  padding: 0 6px;
-  border-radius: 999px;
+  height: 17px;
+  box-sizing: border-box;
+  padding: 0 4.5px;
+  border-radius: 4.5px 4.5px 4.5px 0;
   background: var(--blue-11);
   color: #fff;
   font-size: 12px;
   font-weight: 700;
-  font-variant-numeric: tabular-nums;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
 }
-:global(.dark) .rowBadge {
+
+:global(.dark) .markBubble {
   background: var(--blue-8);
 }
-/* (R2) A click on the badge opens the request at its Messages: a 44 px tall area around it, inside the row. */
-.rowBadge {
-  position: relative;
+
+/* "99+": tighter, so it stays inside the 31 px lane. */
+.markBubble[data-wide] {
+  padding: 0 3px;
+  letter-spacing: -0.04em;
 }
-.rowBadge::after {
+
+.markBubble::after {
   content: '';
   position: absolute;
-  inset: -12px -10px;
+  left: 0;
+  top: 100%;
+  width: 5px;
+  height: 4.5px;
+  background: inherit;
+  clip-path: polygon(0 0, 100% 0, 0 100%);
 }
 
-/* An unread dot after a tab or nav label. */
-.navDot {
+/* The filled bubble after a label (the nav's Pending, Pending's Friend coming header): "unread messages here", in
+   the badge blue. Tripled class (0,3,0): the nav's `.ni svg` and the current item's `.ni[aria-current='page'] svg`
+   (0,2,1) grey must not win. In dark mode it is blue-9, not the bubble's blue-8: blue-8 is chosen for the white
+   numerals inside a bubble, and this mark has none. On the current nav item (gray-a4 over gray-2) blue-8 is only
+   2.6:1, under the 3:1 a graphic needs (WCAG 1.4.11); blue-9 is 4.0:1 there, 5.4:1 on the plain nav. Light mode
+   keeps blue-11 (3.7:1 on the current item). */
+.unreadMark.unreadMark.unreadMark {
   flex: none;
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  margin-left: 6px;
-  border-radius: 50%;
-  background: var(--blue-9);
+  color: var(--blue-11);
 }
 
-.railDot {
+:global(.dark) .unreadMark.unreadMark.unreadMark {
+  color: var(--blue-9);
+}
+
+/* The sidebar: right after the label (the count keeps the right edge; the name still reads "Pending 4, Unread
+   messages"). */
+.navMark {
+  order: 1;
+  margin-left: -3px;
+}
+
+/* The icon rail: 12 px, on the icon's top left corner (the count badge has the right one). */
+.railMark {
   position: absolute;
-  top: 7px;
-  left: 7px;
-  margin: 0;
+  top: 6px;
+  left: 6px;
+  width: 12px;
+  height: 12px;
 }
 
 .iconBtn.iconBtn {

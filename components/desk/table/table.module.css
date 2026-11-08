@@ -6,13 +6,20 @@
    Columns (fixed widths, so every row lines up without measuring; the Friend column takes the rest). What
    fits is decided by the table's own width (a container query), except that a request docked beside it
    (from 1024 px) always leaves five, as the mockup's .withPanel:
-     nothing docked, under 1040 px    #  Friend  Status  Post  Created  Updated            (iPad portrait, 1024)
-     nothing docked, 1040 px and up   #  Friend  Status  Post  Created  Updated  Logged by (1180 and wider)
-     a request docked                 #  Friend  Status  Created  Updated                 (tighter at 1024–1279)
+     nothing docked, under 1040 px    ◻  #  Friend  Status  Post  Created  Updated            (iPad portrait, 1024)
+     nothing docked, 1040 px and up   ◻  #  Friend  Status  Post  Created  Updated  Logged by (1180 and wider)
+     a request docked, 1024–1319 px   ◻  Friend  Status  Created  Updated                    (tighter at 1024–1279)
+     a request docked, 1320 px and up ◻  #  Friend  Status  Created  Updated
+   ◻ is the message lane (design/screens/msg-indicator.html, Brian 2026-11-07): 31 px, no header, the phone log's
+   mark. Docked under 1320 px the # column goes (the pane's top bar carries the LP number): the spec drops it at
+   1024–1279, and at 1280–1319 the five columns with # (615 px at least: 31 + 48 + 96 + 184 + 96 + 56, 5 × 12 gaps,
+   44 padding) do not fit the 596–615 px main column with room for a 17 px classic scrollbar. From 1320 # is back
+   (the main column is 636 px or more; 756 at 1440, where the Friend column keeps about 189 px).
    At 768–1023 a request is a sheet over the table, not docked: the table keeps its columns behind it.
    (F5) With a request docked the Status column is minmax(184px, 232px) (176 px at least at 1024–1279, where
    F2's 96 px Created column leaves 8 px less): it takes its full width before the Friend column (kept at 96 px
-   or more) gets anything, so it is whole from 1080 px (1024–1279) and from 1304 px (1280+); only on the
+   or more) gets anything, so it is whole from about 1065 px (1024–1279), from about 1285 px (1280–1319; the
+   message lane in place of # gives it 13 and 17 px more) and from about 1347 px (1320 and up, # back); only on the
    narrower windows does what follows the label take its short form (.stxWide / .stxNarrow).
    The frame marks an open request with [data-pane] (components/desk/DeskFrame.tsx). */
 
@@ -32,8 +39,10 @@
    "Not found yet · 11:40 PM", "Friend en route · ~4 min", design/screens/colors-6.png) from a 1040 px table
    (240 px); beside Post under that (176 px, as docked at 1024–1279: with F2's 96 px Created the Friend column
    keeps more than 100 px at 768) what follows the label takes its short form instead of being cut. */
+/* (Message lane) To make room for the lane under 1040 px, # is 40 px (five digits), Post 104 px ("FA 3 – Kinetic")
+   and Updated 56 px: the Friend column keeps more than 100 px at 768. */
 .table {
-  --tbl-cols: 56px minmax(0, 1fr) 176px 120px 96px 64px;
+  --tbl-cols: 31px 40px minmax(0, 1fr) 176px 104px 96px 56px;
   --tbl-gap: 10px;
   --tbl-pad-l: 24px;
   --tbl-pad-r: calc(20px + env(safe-area-inset-right));
@@ -49,7 +58,7 @@
 /* A wide table: Logged by too (desktop-log.html .tbl). */
 @container (min-width: 1040px) {
   .table {
-    --tbl-cols: 64px minmax(0, 1fr) 240px 128px 104px 76px 150px;
+    --tbl-cols: 31px 64px minmax(0, 1fr) 240px 128px 104px 76px 150px;
     --tbl-gap: 12px;
   }
   .cBy {
@@ -60,7 +69,7 @@
 /* A request docked beside the table: five columns (desktop-log.html .withPanel .tbl). */
 @media (min-width: 1024px) {
   [data-pane] .table {
-    --tbl-cols: 48px minmax(96px, 1fr) minmax(184px, 232px) 96px 56px;
+    --tbl-cols: 31px minmax(96px, 1fr) minmax(184px, 232px) 96px 56px;
     --tbl-gap: 12px;
   }
   [data-pane] .cPost,
@@ -69,13 +78,36 @@
   }
 }
 
+/* Docked under 1320 px: no # column. A search that matched the number shows the LP number, highlighted, under the
+   name instead. */
+@media (min-width: 1024px) and (max-width: 1319.98px) {
+  [data-pane] .cNum {
+    display: none;
+  }
+  [data-pane] .numLine {
+    display: block;
+  }
+  [data-pane] .twoDocked {
+    min-height: 56px;
+    padding-top: 7px;
+    padding-bottom: 7px;
+  }
+}
+
+/* Docked from 1320 px: # is back, 48 px, as before the lane. */
+@media (min-width: 1320px) {
+  [data-pane] .table {
+    --tbl-cols: 31px 48px minmax(96px, 1fr) minmax(184px, 232px) 96px 56px;
+  }
+}
+
 /* Docked at 1024–1279, the main column is 544–799 px: the same five, tighter. The status column still takes
    "Not found in medical" on one line, uncut (the longest status, F2); what follows it takes its short form
-   (F5 .stxWide / .stxNarrow) before the Friend column goes under 96 px. 44 + 96 + 176 + 96 + 56 + 4 × 10 gaps
+   (F5 .stxWide / .stxNarrow) before the Friend column goes under 96 px. 31 + 109 + 176 + 96 + 56 + 4 × 10 gaps
    + 36 padding = 544 px, the main column at 1024. */
 @media (min-width: 1024px) and (max-width: 1279.98px) {
   [data-pane] .table {
-    --tbl-cols: 44px minmax(96px, 1fr) minmax(176px, 232px) 96px 56px;
+    --tbl-cols: 31px minmax(96px, 1fr) minmax(176px, 232px) 96px 56px;
     --tbl-gap: 10px;
     --tbl-pad-l: 20px;
     --tbl-pad-r: 16px;
@@ -318,6 +350,11 @@ button.row:focus-visible {
   color: var(--gray-11);
 }
 
+/* A number hit's LP number under the name: only while docked (the # column shows it otherwise). */
+.numLine {
+  display: none;
+}
+
 /* Status: glyph and label. Only the open states have colour (blue Waiting, green In medical). The cell is a
    size container: what follows the label picks its form from the cell's width (.stxWide / .stxNarrow). */
 .st {
@@ -421,9 +458,26 @@ button.row:focus-visible {
   text-overflow: ellipsis;
 }
 
-/* Closed rows: greyed without losing text contrast. */
+/* Closed rows: greyed without losing text contrast. The lane's read mark is gray-10, never faded; an unread
+   bubble stays full blue. */
 .closed .nm {
   color: var(--gray-11);
+}
+
+.closed .lane {
+  color: var(--gray-10);
+}
+
+/* (Message lane) With a mark, a click in the lane lands at the thread: its ::before covers the row's left edge, the
+   lane and half the gap after it, over the row's full height, its bottom hairline included (61 × 44 px, 56 × 44
+   docked at 1024–1279). */
+.lane[data-thread-badge]::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: -1px;
+  left: 0;
+  width: calc(var(--tbl-pad-l) + 31px + var(--tbl-gap) / 2);
 }
 
 .closed .glyph {
@@ -455,6 +509,7 @@ button.row:focus-visible {
 /* ---- Archived fold, group header ----------------------------------------------------------------- */
 
 .fold {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -490,6 +545,15 @@ button.fold:focus-visible {
 .fold[data-static] {
   margin-top: 8px;
   font-weight: inherit;
+}
+
+/* The fold leads with the message lane (the folded rows' unread total), so its label lines up with the next column. */
+.foldLane {
+  flex: none;
+  display: flex;
+  align-items: center;
+  width: 31px;
+  margin-right: calc(var(--tbl-gap) - 8px);
 }
 
 .foldLabel {

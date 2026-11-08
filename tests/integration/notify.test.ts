@@ -50,8 +50,10 @@ async function device(staff: Staff, tag: string) {
 }
 
 /**
- * The request's Activity rows, of `only` these staff when given: (F6 7b) every Medical identity on the shared stack
- * that never set New requests now has it on, so creating a request also writes their "New request" rows.
+ * The request's Activity rows, of `only` these staff when given: every identity on the shared stack that turned New
+ * requests on itself (the Alerts sheet, or a device's old bell) gets a "New request" row when someone else creates a
+ * request. (F6 7b, 2026-11-08) Everyone else who has a switch has New requests on by the team default, every team's
+ * now: their devices get the push, but no Activity row.
  */
 async function rows(requestId: string, only?: readonly Staff[]) {
   let query = admin().from('lp_activity').select('staff, kind, actor, detail, read_at').eq('request_id', requestId);

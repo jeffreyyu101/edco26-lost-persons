@@ -7,9 +7,10 @@
 // Queued bubbles are dimmed with "Sending…"; failed ones say "Not delivered · Retry". Long-press (or right-click,
 // or the ⋯ on a desktop) gives Copy, and Unsend for my own within 15 minutes. Plain text only.
 //
-// (R1, Brian 2026-11-07) It sits below the request's details and photos. A jump (R2: a Message button, a desk
-// row's unread badge, a message's Activity row, toast or notification, the page's own preview line) brings it
-// into view at its newest message, and focuses the composer on a computer only.
+// (R1, Brian 2026-11-07) It sits below the request's details and photos. A jump (R2: a Message button, a row's
+// message lane, a message's Activity row, toast or notification, the page's own preview line) brings it
+// into view at its newest message, and focuses the composer on a computer only. It lands as the message lane's
+// frame 5 (design/screens/msg-indicator-5.png), held there while the request settles (holdLanding).
 //
 // (2026-11-08) On a phone the thread is part of the page, not a box of its own: a swipe anywhere on it scrolls the
 // page, the newest message is at the bottom, and the page follows a new message while the reader is at the thread's
@@ -56,11 +57,15 @@ const FINE_POINTER = '(hover: hover) and (pointer: fine)';
 const COMPUTER = `${DESK_QUERY} and ${FINE_POINTER}`;
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
 /**
- * (2026-11-08) The reader's own input: a phone's jump that landed before the thread showed lands again when it shows,
- * however long that takes, unless one of these comes first (they are moving the page themselves).
+ * The reader's own input (they are moving the page themselves): it hands back a jump's hold on its landing
+ * (holdLanding), and (2026-11-08) ends a phone's wait for a thread that had not shown yet when its jump landed (it
+ * lands again when it shows, however long that takes, unless one of these comes first).
  */
 const READER_INPUT = ['touchstart', 'pointerdown', 'wheel', 'keydown'] as const;
-/** (2026-11-08) Room a phone's jump keeps between the message field and the request's sticky action bar. */
+/**
+ * Room a jump keeps under the composer: on a phone between the message field and the request's sticky action bar (or
+ * the keyboard), in the desk pane between the section's end and the pane's bottom edge.
+ */
 const KEEP_GAP_PX = 8;
 
 export function MessagesSection({ row, panel = false }: MessagesSectionProps) {
@@ -100,6 +105,8 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
   const settle = useRef(false);
   /** Ends `settle` and stops listening for the reader's input. */
   const unsettle = useRef<() => void>(() => undefined);
+  /** Releases the latest jump's hold on its landing (holdLanding). */
+  const holding = useRef<() => void>(() => undefined);
   /** (Phone) Until when the page's scroll events are this thread's own scroll to its end (they keep atBottom). */
   const ownScroll = useRef(0);
   /**
@@ -135,6 +142,23 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
     scrollToEnd(true);
     setNewPill(null);
   }, [scrollToEnd]);
+
+  /**
+   * (R2) Lands the section where a jump lands (landingTop: on a phone with the message field above the action bar) and
+   * holds it there while the request settles (holdLanding), in place of any earlier hold.
+   */
+  const landSection = useCallback(
+    (behavior: ScrollBehavior) => {
+      holding.current();
+      holding.current = () => undefined;
+      const el = section.current;
+      if (!el) return;
+      const keep = panel ? null : input.current;
+      scrollToSection(el, behavior, keep);
+      holding.current = holdLanding(el, keep);
+    },
+    [panel],
+  );
 
   /** Whether the thread's end is on screen (the pane: its scroller at its end; the phone: above the action bar). */
   const measureAtBottom = useCallback((): boolean => {
@@ -186,9 +210,10 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
       if (panel) scrollToEnd(false);
       else atBottom.current = measureAtBottom();
       // (2026-11-08) The thread came in under a phone's jump (however late, the reader hasn't moved the page since):
-      // land again, so the newest messages and the field end up above the bar, not under it.
+      // land again, so the newest messages and the field end up above the bar, not under it, held like the jump's own
+      // landing (a smooth scroll that stops short is aimed again without animation).
       if (section.current && settle.current) {
-        scrollToSection(section.current, motion(), input.current);
+        landSection(motion());
         atBottom.current = true;
         ownScroll.current = Date.now() + OWN_SCROLL_MS;
       }
@@ -207,7 +232,7 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
     const lift = pillLift();
     const frame = requestAnimationFrame(() => setNewPill(lift));
     return () => cancelAnimationFrame(frame);
-  }, [bubbles, scrollToEnd, measureAtBottom, pillLift, panel]);
+  }, [bubbles, scrollToEnd, measureAtBottom, pillLift, panel, landSection]);
 
   /** (Phone) The check after this thread's own scroll to its end has finished. */
   const later = useRef(0);
@@ -282,7 +307,8 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
   // lands with the message field above the sticky action bar and the newest messages over it, the heading going under
   // the top bar when the section can't fit; a jump that lands while the thread is still loading lands again when it
   // shows, however long that takes, unless the reader touches, scrolls or types first. The desk pane scrolls itself to
-  // the section and its thread to the newest. ----------------------------------------------------------------------
+  // the section and its thread to the newest. Either way the landing is held while the request settles (holdLanding:
+  // the thread replacing its skeleton, the details or a photo loading, a smooth scroll WebKit stopped short). --------
   useEffect(() => {
     const id = row.id;
     let frame = 0;
@@ -303,7 +329,7 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
           READER_INPUT.forEach((type) => window.addEventListener(type, off, { capture: true, passive: true }));
           unsettle.current = off;
         }
-        if (section.current) scrollToSection(section.current, motion(), panel ? null : input.current);
+        landSection(motion());
         if (panel) scrollToEnd(false);
         else {
           atBottom.current = true;
@@ -321,8 +347,9 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
       off();
       cancelAnimationFrame(frame);
       unsettle.current();
+      holding.current();
     };
-  }, [row.id, panel, scrollToEnd]);
+  }, [row.id, panel, scrollToEnd, landSection]);
 
   const side = sideOfTeam(session.team);
   const lines = quickLines(quickStage(row), side, enroute.mine, enroute.enroute?.state === 'arrived');
@@ -476,33 +503,127 @@ export function bubbleSaid(bubble: Pick<Bubble, 'by' | 'team' | 'mine' | 'body' 
 
 const motion = (): ScrollBehavior => (window.matchMedia(REDUCED_MOTION).matches ? 'auto' : 'smooth');
 
-/**
- * (R2) Scrolls the request's own scroller (the desk pane's body, else the page) so the section's top sits under its
- * scroll-margin. Not scrollIntoView: that moves every scroller around it, the desk's list included.
- * (2026-11-08) On the page (a phone), `keep` (the message field) ends at least KEEP_GAP_PX above the request's sticky
- * action bar: when the section is taller than the room between the bars, the page scrolls further down by the rest.
- */
-function scrollToSection(el: HTMLElement, behavior: ScrollBehavior, keep: HTMLElement | null = null): void {
-  const margin = parseFloat(getComputedStyle(el).scrollMarginTop) || 0;
+/** The request's own scroller: the desk pane's body, or null for the page. */
+function scrollBoxOf(el: HTMLElement): HTMLElement | null {
   for (let box = el.parentElement; box && box !== document.body && box !== document.documentElement; box = box.parentElement) {
     const overflow = getComputedStyle(box).overflowY;
-    if (overflow !== 'auto' && overflow !== 'scroll') continue;
-    box.scrollTo({ top: box.scrollTop + el.getBoundingClientRect().top - box.getBoundingClientRect().top - margin, behavior });
-    return;
+    if (overflow === 'auto' || overflow === 'scroll') return box;
   }
-  const top = el.getBoundingClientRect().top - margin;
-  const by = keep ? Math.max(top, keep.getBoundingClientRect().bottom - pageView(el).bottom) : top;
-  window.scrollTo({ top: window.scrollY + by, behavior });
+  return null;
+}
+
+/**
+ * (R2, design/screens/msg-indicator-5.png) Where a jump lands, as the scroller's scrollTop: the section's top under its
+ * scroll-margin (the Messages heading right under the phone's top bar, 4 px into the desk pane), or a little further
+ * where the screen is too short for the whole section. In the desk pane, so the section's end (the composer) clears
+ * the pane's bottom edge by KEEP_GAP_PX. (2026-11-08) On the page (a phone), so `keep` (the message field) ends at least
+ * KEEP_GAP_PX above the request's sticky action bar, or the keyboard while it is up (pageView): the newest messages sit
+ * right above it.
+ */
+function landingTop(el: HTMLElement, box: HTMLElement | null, keep: HTMLElement | null): number {
+  const margin = parseFloat(getComputedStyle(el).scrollMarginTop) || 0;
+  const rect = el.getBoundingClientRect();
+  if (box) {
+    const frame = box.getBoundingClientRect();
+    const foot = box.querySelector<HTMLElement>('[data-sticky-foot]');
+    const visibleBottom = frame.bottom - (foot ? foot.offsetHeight : 0);
+    return box.scrollTop + Math.max(rect.top - frame.top - margin, rect.bottom + KEEP_GAP_PX - visibleBottom);
+  }
+  const head = rect.top - margin;
+  return window.scrollY + (keep ? Math.max(head, keep.getBoundingClientRect().bottom - pageView(el).bottom) : head);
+}
+
+/**
+ * (R2) Scrolls the request's own scroller (the desk pane's body, else the page) so the section lands (landingTop).
+ * Not scrollIntoView: that moves every scroller around it, the desk's list included.
+ */
+function scrollToSection(el: HTMLElement, behavior: ScrollBehavior, keep: HTMLElement | null = null): void {
+  const box = scrollBoxOf(el);
+  const to = { top: landingTop(el, box, keep), behavior };
+  if (box) box.scrollTo(to);
+  else window.scrollTo(to);
+}
+
+/** How long a jump keeps its landing while the request settles. */
+const HOLD_MS = 5_000;
+/** A jump's smooth scroll has ended by now (or stopped short: WebKit stops one when the page grows under it). */
+const SETTLE_MS = 900;
+
+/**
+ * (R2) Holds a jump's landing while the request settles. What shows after the jump (the thread replacing its
+ * skeleton, the request's details, a photo) changes the height around the section, so a scroll aimed before that
+ * stops short (the page could not yet scroll that far) or lands off. Until the reader scrolls, taps or types
+ * (READER_INPUT), or HOLD_MS pass, every change of the layout aims it again, without animation, as does the end of
+ * the smooth scroll. A scroll from anywhere else (the status bar, a scrollbar, a script) hands it back too. Call it
+ * right after the jump's scrollToSection, with the same `keep`. Returns the release.
+ * (2026-11-08) A phone's thread that shows only after HOLD_MS still lands again, from MessagesSection's settle.
+ */
+function holdLanding(el: HTMLElement, keep: HTMLElement | null): () => void {
+  const box = scrollBoxOf(el);
+  const at = () => (box ? box.scrollTop : window.scrollY);
+  // The smooth scroll's goal, and where it has got to: it only ever closes in on the goal.
+  const goal = landingTop(el, box, keep);
+  let last = at();
+  // Where the section sits in what scrolls, and how tall that is: both stay put while it scrolls.
+  const layout = () => {
+    const top = el.getBoundingClientRect().top - (box ? box.getBoundingClientRect().top : 0) + at();
+    return `${Math.round(top)}|${Math.round(el.offsetHeight)}|${box ? box.scrollHeight : document.documentElement.scrollHeight}`;
+  };
+  let seen = layout();
+  /** Where the last aim left the scroller; null while the jump's smooth scroll runs. */
+  let aimed: number | null = null;
+  let done = false;
+  const aim = () => {
+    if (done || !el.isConnected) return;
+    seen = layout();
+    scrollToSection(el, 'auto', keep);
+    aimed = at();
+  };
+  const moved = () => {
+    if (done || layout() === seen) return false;
+    aim();
+    return true;
+  };
+  const onScroll = () => {
+    if (done || moved()) return;
+    const now = at();
+    if (aimed === null) {
+      if (Math.abs(now - goal) > Math.abs(last - goal) + 2) release();
+      else last = now;
+    } else if (Math.abs(now - aimed) > 2) release();
+  };
+  const settle = () => {
+    if (aimed === null) aim();
+  };
+  const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => void moved());
+  for (let node: HTMLElement | null = el; node && node !== box && node !== document.body; node = node.parentElement) observer?.observe(node);
+  const scroller: EventTarget = box ?? window;
+  scroller.addEventListener('scroll', onScroll, { passive: true });
+  scroller.addEventListener('scrollend', settle);
+  for (const type of READER_INPUT) window.addEventListener(type, release, { capture: true, passive: true });
+  const settleTimer = window.setTimeout(settle, SETTLE_MS);
+  const holdTimer = window.setTimeout(release, HOLD_MS);
+  function release() {
+    if (done) return;
+    done = true;
+    observer?.disconnect();
+    scroller.removeEventListener('scroll', onScroll);
+    scroller.removeEventListener('scrollend', settle);
+    for (const type of READER_INPUT) window.removeEventListener(type, release, { capture: true });
+    window.clearTimeout(settleTimer);
+    window.clearTimeout(holdTimer);
+  }
+  return release;
 }
 
 /**
  * (2026-11-08) What of the phone's page is on screen around the request's thread, in viewport px: from under the sticky
- * top bar (the section's scroll-margin) to KEEP_GAP_PX above the sticky action bar, or above the on-screen keyboard
- * while it is up (it covers the bar; the visual viewport is what shows).
+ * top bar (the section's scroll-margin) to KEEP_GAP_PX above the sticky action bar (ProfileView's [data-sticky-foot]),
+ * or above the on-screen keyboard while it is up (it covers the bar; the visual viewport is what shows).
  */
 function pageView(el: HTMLElement): { top: number; bottom: number } {
   const sec = el.closest<HTMLElement>('[data-testid="messages"]') ?? el;
-  const bar = el.closest('[data-testid="profile"]')?.querySelector<HTMLElement>('[data-testid="profile-actions"]');
+  const bar = el.closest('[data-testid="profile"]')?.querySelector<HTMLElement>('[data-sticky-foot]');
   const vv = window.visualViewport;
   const keyboard = vv ? keyboardBox(window.innerHeight, vv) : null;
   const shown = keyboard ? keyboard.top + keyboard.height : window.innerHeight;

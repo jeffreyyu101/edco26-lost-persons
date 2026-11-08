@@ -67,7 +67,7 @@ import { displayName } from './list-helpers';
 import { PendingQueues, useLeaving } from './PendingQueues';
 import { SortToggle } from './SortToggle';
 import { primeKeyboard, useHeightVar, useScrollMemory, useStatusTap, useStickyHeight } from './hooks';
-import { mineFreshTone, resultCount, searchDisplay, stageClock, updatedSince } from './list-helpers';
+import { mineFreshTone, resultCount, searchDisplay, stageClock, unreadTotal, updatedSince } from './list-helpers';
 import { AllSkeleton, MineSkeleton, PendingSkeleton } from './ListSkeletons';
 import { ArchivedFold, ArchivedRows, ColumnHeader, GroupDivider, LogGrid, LogRow, OutboxLogRow, SearchLogRow } from './rows';
 import type { ListViewName } from './ViewSwitcher';
@@ -321,7 +321,14 @@ export function AllView({ status, post, open = false }: AllViewProps) {
   const archived = (closedRows: readonly RequestSummary[]) =>
     closedRows.length > 0 ? (
       <>
-        <ArchivedFold count={closedRows.length} open={expanded} controls={archivedId} onToggle={() => actions.setPref('closedExpanded', !expanded)} />
+        <ArchivedFold
+          count={closedRows.length}
+          open={expanded}
+          controls={archivedId}
+          onToggle={() => actions.setPref('closedExpanded', !expanded)}
+          lane
+          unread={unreadTotal(closedRows)}
+        />
         {expanded ? (
           <ArchivedRows id={archivedId}>
             <Rows rows={closedRows} now={now} tz={tz} />
@@ -767,7 +774,8 @@ export function SearchView({ q }: SearchViewProps) {
             {hits.map((hit) => {
               const { row } = hit;
               const d = searchDisplay(hit);
-              // Name and LP number hits are highlighted in place; any other field shows the matched text.
+              // Name hits are highlighted in place, LP number hits on the second line (the row has no # column);
+              // any other field shows the matched text there.
               const line = hit.field === 'name' || hit.field === 'caseNumber' ? '' : d.line;
               return (
                 <SearchLogRow

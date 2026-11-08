@@ -2671,11 +2671,12 @@ $f4drop$;
 -- arguments change a switch (and every device of theirs follows); a New requests set this way is the staff
 -- member's own choice (new_requests_set) and stays. p_default_new_requests is a device's old "Alerts" bell:
 -- until that choice is made, a device whose bell was on turns New requests on (OR), whichever device came
--- first; without it, New requests starts off. Returns {newRequests, myUpdates}.
+-- first; without it, New requests starts on by the team default (every team since 2026-11-08). Returns {newRequests, myUpdates}.
 -- (F6, Brian 2026-11-07 02:15: Main Med gets distracted; the lock-screen push is the chosen alert.) Staff of the
 -- Medical team (the canonical staff string's team is 'medical') start with New requests ON, and so does a Medical
--- staff member's row that never had the switch set in the Alerts sheet (new_requests_set false); everyone else
--- keeps the rule above. A switch set in the sheet always stays as set. new_requests_team_default marks a switch
+-- staff member's row that never had the switch set in the Alerts sheet (new_requests_set false). (2026-11-08, Brian:
+-- "new requests should be on for everyone by default n configurable") That default is now every team's: anyone
+-- whose switch was never set in the sheet has New requests ON. A switch set in the sheet always stays as set. new_requests_team_default marks a switch
 -- that is on by that default alone ("show nothing extra": the push, no Activity row). It stays marked until the
 -- switch is set in the sheet, because each device then echoes the switch back as its bell (ActivityHost); a row
 -- a device's old bell had turned on before is never marked.
@@ -2694,14 +2695,15 @@ declare
   v_team text := pg_catalog.left(pg_catalog.btrim(coalesce(p_team, '')), 120);
   v_row public.lp_push_prefs;
   v_bell boolean := coalesce(p_default_new_requests, false);
-  v_medical boolean;
+  v_team_default boolean;
   v_default boolean;
 begin
   perform public.lp_require_staff(p_staff);
   v_staff := public.lp_canon_staff(p_staff);
-  -- (F6) The device's old bell, or the Medical team's default (on).
-  v_medical := coalesce((pg_catalog.regexp_match(v_staff, '^(.*) · (.*)$'))[2] = 'medical', false);
-  v_default := v_bell or v_medical;
+  -- (F6) The device's old bell, or the team default (on). (2026-11-08, Brian: "new requests should be on for everyone by
+  -- default n configurable") The default is every team's now, not only Medical's: tonight nobody signed in as Medical.
+  v_team_default := true;
+  v_default := v_bell or v_team_default;
 
   insert into public.lp_push_prefs as pr (staff, team, new_requests, my_updates, new_requests_set, new_requests_team_default)
   values (
@@ -2709,7 +2711,7 @@ begin
     coalesce(p_new_requests, v_default),
     coalesce(p_my_updates, true),
     p_new_requests is not null,
-    p_new_requests is null and v_medical and not v_bell)
+    p_new_requests is null and v_team_default and not v_bell)
   on conflict (staff) do update set
     team = excluded.team,
     new_requests = case
@@ -2722,7 +2724,7 @@ begin
       when p_new_requests is not null or pr.new_requests_set then false
       when pr.new_requests_team_default then true
       when pr.new_requests then false
-      else v_medical and not v_bell
+      else v_team_default and not v_bell
     end,
     my_updates = coalesce(p_my_updates, pr.my_updates),
     updated_at = case when p_new_requests is null and p_my_updates is null then pr.updated_at else now() end
@@ -3341,6 +3343,20 @@ with medical as (
 update public.lp_push_subscriptions s
    set new_requests = true
  where s.staff in (select m.staff from medical m) and not s.new_requests;
+
+-- (2026-11-08, Brian: "new requests should be on for everyone by default n configurable") Everyone whose "New requests"
+-- switch was never set in the Alerts sheet gets it ON now, on every device of theirs (lp_push_prefs_sync keeps it so
+-- from here on), marked as the team default (the push only, no Activity row). Anyone who set it keeps it as set.
+with defaulted as (
+  update public.lp_push_prefs pr
+     set new_requests = true, new_requests_team_default = true, updated_at = now()
+   where not pr.new_requests_set
+     and not pr.new_requests
+  returning pr.staff
+)
+update public.lp_push_subscriptions s
+   set new_requests = true
+ where s.staff in (select d.staff from defaulted d) and not s.new_requests;
 
 -- The job: every 5 minutes, exactly one 'lp-close-inactive' (any earlier one of that name is unscheduled first).
 -- pg_cron is enabled here when the server can run it (Supabase: it is preloaded; this is the Dashboard's Database →

@@ -1,0 +1,524 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Message lane</title>
+<!-- 2026-11-07 ~23:45. FINAL: the message lane (angle A) with the judge's fixes from B and C. Brian: "HOW TO INDICATE THERES A
+     MESSAGE ON A REQUEST... IN ALL REQUESTS VIEW I DONT SEE THAT" · "NOT CLUNKY" · "the request number [doesn't] need to be on
+     that list" · "CLEAR THAT IT SIGNIFIES MESSAGES NOT JUST A BLUE DOT". Base: msg-indicator-a.html. Grafts: B (short labels,
+     the real filled icon in the nav / Friend coming header), C (the involved gate).
+
+     THE LANE: # goes; a fixed 31 px leading lane takes its place (.log first track minmax(47px,auto) = 16 px row padding + 31,
+       gap 5: names start at x = 52 on every row). 31 = the "99+" bubble, so no count ever nudges the names. No column header.
+     THE MARK (one shape, two strengths, lucide MessageSquare's silhouette):
+       none ............. empty (no ghost bubble)
+       read ............. outline MessageSquare 18 px, stroke 1.75, gray-11 (gray-10 on closed rows, not faded: 3:1+ both themes)
+       unread for me .... filled bubble (CSS: 17 px body, 4.5 px corners, square bottom-left + 5 x 4.5 tail), white 12/700
+                          tabular count inside, badge blue (blue-11 light / blue-8 dark, the AA-checked .badge tokens). 99+ from 100.
+       "Unread for me" = unread > 0 AND involved AND the latest message is not mine (judge fix 1, from C). Otherwise, with
+         messageCount > 0, the read outline. Without the gate every threaded row is blue for a dispatcher who has never
+         opened those threads (the RPC counts all of them while the read cursor is null).
+       A number in the lane always means "unread for me"; read rows carry no number. Only unread signal in the row.
+     NEEDS INFO stays amber in Status; the lane stays blue / grey.
+     STATUS LABELS under 430 px (judge fix 2, from B): Waiting for check → Waiting, Friend en route → En route,
+       Friend arrived → Arrived, Recheck due → Recheck. Sentences keep the full label.
+     TAP: the row is one button (openRowAt). The mark's span carries data-thread-badge; its ::before is the hit area: the row's
+       left 52 px (gutter + lane + gap) x the full row height, anchored to the row so a two-line search row is covered and
+       nothing hangs outside. Only rendered when a mark exists. Lands at Messages via openThread; anywhere else opens the top.
+     SCREEN READERS: logRowLabel + " 1 unread message." / " 4 messages." / nothing. Fold: "Archived 6 requests. 3 unread messages."
+     CLOSED: read mark gray-10; unread bubble stays full blue. Folded Archived row: the closed rows' (gated) unread total in the lane.
+     SEARCH: same row; the LP number shows highlighted on the match line.
+     DESK: the lane leads the table, before #; the count pill after the name goes. Docked at 1024–1279: # drops, the pane's top
+       bar carries the LP number. Nav Pending + Pending's Friend coming header: <MessageSquare size={14} fill="currentColor"
+       strokeWidth={0}> in the badge blue (was the 7 px dot); same logic as today's dot.
+     Synthetic data only. Real @radix-ui/themes 3.3.0. Frames: 1 All 390 dark · 2 light · 3 360 long names · 4 search ·
+       5 landed at Messages · 6 desk 1440 + docked 1240 · 7 the mark's states at 3x. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@radix-ui/themes@3.3.0/styles.css">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+body{margin:0;background:#0c0c0d}
+.radix-themes{--default-font-family:InterVariable,Inter,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;font-feature-settings:"cv11";-webkit-font-smoothing:antialiased}
+.radix-themes[data-is-root-theme]{min-height:0!important;height:100%;position:relative}
+.board{display:flex;flex-wrap:wrap;justify-content:center;align-items:flex-start;gap:28px 20px;padding:24px;max-width:1500px;margin:0 auto}
+.board figure{margin:0;width:min-content}
+.shot{display:inline-flex;flex-direction:column;gap:16px;vertical-align:top}
+.frame{width:390px;height:844px;border-radius:30px;overflow:hidden;border:1px solid #2b2b30;position:relative}
+.frame.n360{width:360px;height:780px;border-radius:28px}
+.frame.desk{width:1440px;height:500px;border-radius:12px}
+.frame.desk.d1240{width:1240px;height:560px}
+.frame.states{width:auto;height:auto;border-radius:16px;background:#18181b}
+figcaption{margin-top:10px;text-align:center;font:500 15px/1.3 system-ui;color:#e4e4e7}
+figcaption span{display:block;font-weight:400;font-size:13px;color:#8e8e96;margin-top:2px}
+.app{height:100%;display:flex;flex-direction:column;background:var(--color-background);position:relative;overflow:hidden;container-type:inline-size}
+.sp{flex:1}.tab{font-variant-numeric:tabular-nums}
+.scroller{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;position:relative}
+.scroller::-webkit-scrollbar{display:none}
+.vh{position:absolute;top:0;left:0;width:1px;height:1px;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+
+/* ---- title row + live line (AppHeader + live row) ---- */
+.bar{flex:none;background:var(--color-background);position:relative;z-index:5}
+.lt{display:flex;align-items:center;gap:6px;height:64px;padding:12px 12px 0 16px;box-sizing:border-box}
+.lt .tx{font-size:28px;font-weight:700;letter-spacing:-.022em;color:var(--gray-12);white-space:nowrap}.lt .tc{font-size:28px;color:var(--gray-9)}
+.lt .chv{color:var(--gray-11);display:flex;margin-top:3px}
+.ib{width:36px;height:36px;display:grid;place-items:center;color:var(--gray-11)}
+.av{width:32px;height:32px;border-radius:50%;background:var(--gray-12);color:var(--gray-1);display:grid;place-items:center;font-size:12px;font-weight:600;flex:none}
+.live{display:flex;align-items:center;gap:7px;height:40px;padding:0 12px 4px 16px;box-sizing:border-box;font-size:13px;color:var(--gray-11);white-space:nowrap;position:relative}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green-9);flex:none}
+.rf{all:unset;box-sizing:border-box;position:relative;width:32px;height:32px;margin-left:-4px;display:grid;place-items:center;color:var(--gray-11);border-radius:8px;flex:none}
+.rf::after{content:"";position:absolute;inset:-6px}
+.live .brk{display:none}
+.sort{all:unset;box-sizing:border-box;margin-left:auto;position:relative;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 11px 0 9px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--gray-a6);font-size:13.5px;font-weight:500;color:var(--gray-11);white-space:nowrap;flex:none}
+.sort::before{content:"";position:absolute;inset:-6px -2px}
+@container (max-width:360px){
+  .live{flex-wrap:wrap;height:auto;row-gap:0;padding:4px 12px 10px 16px}
+  .live .brk{display:block;flex-basis:100%;height:0}
+  .live .sort{margin:6px 0 0}
+}
+
+/* ---- the log (list.module.css .log / .lrow / .lr): # → the message lane ---- */
+/* Track 1 = the row's 16 px padding + the 31 px lane (the "99+" bubble's width), never less, never more. */
+.log{display:grid;grid-template-columns:minmax(47px,auto) minmax(min(80px,25%),1fr) auto auto auto;column-gap:5px}
+.lrow{grid-column:1/-1;display:grid;grid-template-columns:subgrid;align-items:center;box-sizing:border-box;padding:0 16px}
+.c1,.c2,.c3,.c4,.c5,.c45{grid-row:1;min-width:0}
+.c1,.c4,.c5,.c45{min-width:auto}
+.c1{grid-column:1}.c2{grid-column:2}.c3{grid-column:3}.c4{grid-column:4}.c5{grid-column:5}
+.c45{grid-column:4/6;justify-self:end;display:flex;gap:6px}
+.colh{position:sticky;top:0;z-index:3;height:24px;background:var(--color-background);font-size:11px;line-height:1;font-weight:500;letter-spacing:.01em;color:var(--gray-11);white-space:nowrap}
+.colh>.c2{overflow:hidden;text-overflow:ellipsis}
+.lr{position:relative;width:100%;min-height:48px;margin:0;border:0;background:none;color:var(--gray-12);font:inherit;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.lr::after{content:"";grid-column:2/-1;grid-row:1;align-self:end;margin-right:-16px;border-bottom:1px solid var(--gray-a3)}
+.lr2{padding-top:7px;padding-bottom:8px;row-gap:1px}
+.lr2::after{grid-row:2;margin-bottom:-8px}
+.nm{font-size:15px;line-height:20px;color:var(--gray-12);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stc{min-width:20px;display:flex;align-items:center;gap:6px;font-size:12px;line-height:16px;color:var(--gray-11);white-space:nowrap}
+.stc.blue{color:var(--blue-11)}.stc.green{color:var(--green-11)}.stc.amber{color:var(--amber-11)}.stc.violet{color:var(--violet-11)}.stc.teal{color:var(--teal-11)}
+.stl{max-width:10.5em;overflow:hidden;text-overflow:ellipsis}
+.lg{flex:none;display:flex}
+.tm{justify-self:end;font-size:13px;color:var(--gray-11);font-variant-numeric:tabular-nums;white-space:nowrap}
+.c5.tm{min-width:28px;text-align:right}
+.match{grid-column:2/-1;grid-row:2;min-width:0;font-size:13px;line-height:18px;color:var(--gray-11);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+mark{background:var(--amber-a5);color:inherit;border-radius:3px;padding:0 1px}
+.closed .nm{color:var(--gray-11)}.closed .lg{opacity:.55}
+
+/* ---- THE MARK ---- */
+.mc{display:flex;align-items:center;justify-self:start;color:var(--gray-11)}
+.mc>svg{margin-left:-1.5px}                       /* MessageSquare's body starts 1.5 px into its box */
+.closed .mc{color:var(--gray-10)}                 /* fix 4: exempt from the row's fade; gray-10 holds 3:1 in both themes */
+/* fix 7: the hit area, CSS only, only when a mark exists: the row's left 52 px, full row height (anchored to the row). */
+.lr .mc[data-thread-badge]::before{content:"";position:absolute;top:0;bottom:0;left:0;width:52px}
+.ub{position:relative;display:inline-grid;place-items:center;min-width:20px;height:17px;box-sizing:border-box;padding:0 4.5px;
+  border-radius:4.5px 4.5px 4.5px 0;background:var(--blue-11);color:#fff;font-size:12px;font-weight:700;line-height:1;
+  font-variant-numeric:tabular-nums;letter-spacing:-.01em;white-space:nowrap}
+.ub[data-w="3"]{padding:0 3px;letter-spacing:-.04em}
+.dark .ub{background:var(--blue-8)}
+.ub::after{content:"";position:absolute;left:0;top:100%;width:5px;height:4.5px;background:inherit;clip-path:polygon(0 0,100% 0,0 100%)}
+/* fix 5: nav + Friend coming header: the real icon, filled, in the badge blue */
+.nb{flex:none;display:flex;color:var(--blue-11)}
+.dark .nb{color:var(--blue-8)}
+
+/* ---- Archived fold: a subgrid row, its unread sum in the lane ---- */
+.fold{all:unset;box-sizing:border-box;grid-column:1/-1;display:grid;grid-template-columns:subgrid;align-items:center;height:52px;margin-top:6px;padding:0 16px;cursor:pointer}
+.fl{grid-column:2/-1;grid-row:1;display:flex;align-items:center;gap:8px;min-width:0}
+.fl .lb{font-size:15px;font-weight:500;color:var(--gray-11)}
+.cap{display:inline-grid;place-items:center;min-width:22px;height:20px;box-sizing:border-box;padding:0 7px;border-radius:999px;background:var(--gray-a3);color:var(--gray-11);font-size:12px;font-weight:500;font-variant-numeric:tabular-nums}
+.fl .chx{display:flex;color:var(--gray-11)}
+.fab{position:absolute;right:16px;bottom:26px;height:50px;padding:0 20px 0 16px;border-radius:999px;display:flex;align-items:center;gap:8px;background:var(--gray-12);color:var(--gray-1);font-size:15px;font-weight:600;box-shadow:0 8px 24px -6px rgba(0,0,0,.5);z-index:6;white-space:nowrap}
+
+/* ---- search ---- */
+.search{display:flex;align-items:center;gap:10px;padding:14px 12px 10px}
+.sfield{flex:1;min-width:0;display:flex;align-items:center;gap:8px;height:38px;padding:0 4px 0 10px;border-radius:var(--radius-3);background:var(--gray-a3);color:var(--gray-12);box-shadow:inset 0 0 0 1.5px var(--gray-a8);box-sizing:border-box}
+.sfield>svg{color:var(--gray-10)}
+.sq{flex:1;font-size:16px;color:var(--gray-12)}
+.caret{display:inline-block;width:1.5px;height:19px;background:var(--blue-9);vertical-align:-4px;margin-left:1px}
+.sclear{width:30px;height:30px;display:grid;place-items:center;color:var(--gray-10)}
+.cancel{font-size:15px;font-weight:500;color:var(--gray-12);padding:0 4px;white-space:nowrap}
+.cnt{padding:2px 16px 8px;font-size:12px;color:var(--gray-11)}
+
+/* ---- request page (ProfileView; top bar as on main: close · LP number · more) ---- */
+.pbar{flex:none;display:grid;grid-template-columns:44px 1fr 44px;align-items:center;height:60px;padding:0 12px;box-sizing:border-box;background:var(--color-background);border-bottom:1px solid var(--gray-a3);position:relative;z-index:4}
+.rb{width:34px;height:34px;border-radius:50%;background:var(--gray-a3);display:grid;place-items:center;color:var(--gray-12)}
+.rb.r{justify-self:end}
+.pid{justify-self:center;font-size:15px;font-weight:500;color:var(--gray-11);font-variant-numeric:tabular-nums}
+.pbody{padding:16px 14px 20px;display:flex;flex-direction:column}
+.hero{display:flex;gap:14px;align-items:center}
+.portrait{width:64px;height:82px;border-radius:8px;background:var(--gray-a4);color:var(--gray-11);display:grid;place-items:end center;overflow:hidden;flex:none}
+.hero .n{font-size:20px;font-weight:600;letter-spacing:-.012em;color:var(--gray-12)}
+.hero .m{font-size:16px;color:var(--gray-11);margin-top:4px}
+.hero .m2{font-size:13px;color:var(--gray-11);margin-top:6px}
+.sblk{margin-top:14px;display:flex;align-items:center;gap:12px;padding:16px 14px;border-radius:12px;background:var(--amber-a3)}
+.sblk.g{background:var(--green-a3)}
+.sblk .t1{font-size:16px;font-weight:500;color:var(--amber-11)}.sblk.g .t1{color:var(--green-11)}.sblk .t2{font-size:12.5px;color:var(--gray-11);margin-top:3px}
+.tprev{margin-top:10px;display:flex;align-items:center;gap:8px;min-width:0}
+.chipA{flex:none;display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 9px;border-radius:7px;background:var(--amber-a4);color:var(--amber-11);font-size:13px;font-weight:600;white-space:nowrap}
+.pbox{flex:1;min-width:0;display:flex;align-items:center;gap:8px;min-height:44px;padding:0 10px 0 12px;box-sizing:border-box;border-radius:10px;background:var(--gray-a3);font-size:14px;color:var(--gray-12)}
+.pbox .tx{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pbox .who{color:var(--gray-11)}
+.udot{width:8px;height:8px;border-radius:50%;background:var(--blue-9);flex:none}
+.slbl{display:flex;align-items:center;margin:22px 4px 8px;font-size:14px;font-weight:500;color:var(--gray-11)}
+.slbl .ed{margin-left:auto;display:flex;align-items:center;gap:5px;font-size:13px;color:var(--gray-11)}
+.grp{border-radius:10px;box-shadow:inset 0 0 0 1px var(--gray-a5);overflow:hidden}
+.kv{display:grid;grid-template-columns:84px 1fr auto;align-items:center;gap:10px;min-height:44px;padding:0 14px;font-size:15px}
+.kv+.kv{border-top:1px solid var(--gray-a4)}
+.kv .k{color:var(--gray-11);font-size:14px}.kv .v{color:var(--gray-12);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.call{display:flex;align-items:center;gap:6px;height:28px;padding:0 9px;border-radius:6px;background:var(--gray-a3);font-size:13px;color:var(--gray-12)}
+.addph{width:76px;height:76px;border-radius:8px;box-shadow:inset 0 0 0 1.5px var(--gray-a6);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:12px;color:var(--gray-11)}
+.mhead{padding:22px 4px 6px;font-size:14px;font-weight:600;color:var(--gray-12)}
+.chat{display:flex;flex-direction:column;gap:2px;padding:2px 0 8px}
+.from{margin:10px 0 3px 12px;font-size:12px;line-height:16px;color:var(--gray-11)}.from b{font-weight:500;color:var(--gray-12)}
+.mrow{display:flex}.mrow.me{justify-content:flex-end}
+.bubble{max-width:76%;min-height:36px;padding:8px 13px;border-radius:19px;font-size:16px;line-height:1.3;box-sizing:border-box}
+.them{background:var(--gray-4);color:var(--gray-12)}
+.mine{background:var(--blue-11);color:#fff}.dark .mine{background:var(--blue-8)}
+.receipt{align-self:flex-end;margin:3px 6px 0 0;font-size:12px;line-height:16px;color:var(--gray-11)}.receipt b{font-weight:500;color:var(--gray-12)}
+.pills{display:flex;gap:6px;overflow:hidden;padding:0 2px}
+.pill{flex:none;display:inline-flex;align-items:center;height:36px;margin:4px 0;padding:0 14px;border-radius:18px;background:var(--gray-a3);color:var(--gray-12);font-size:14px;white-space:nowrap}
+.field{position:relative;margin-top:6px}
+.input{height:44px;border-radius:22px;box-shadow:inset 0 0 0 1px var(--gray-a7);display:flex;align-items:center;padding:0 50px 0 16px;font-size:16px;color:var(--gray-a9)}
+.send{position:absolute;right:4px;top:4px;width:36px;height:36px;border-radius:50%;background:var(--gray-a3);color:var(--gray-a8);display:grid;place-items:center}
+.tl{list-style:none;margin:0;padding:0 4px 260px}.tl li{display:flex;gap:10px}
+.tdot{width:9px;height:9px;border-radius:50%;background:var(--gray-8);margin-top:5px;flex:none}
+.tt{display:flex;flex-direction:column;gap:2px;font-size:14px;color:var(--gray-12)}.ts{font-size:12px;color:var(--gray-11)}
+.abar{flex:none;display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px 14px 30px;border-top:1px solid var(--gray-a4);background:var(--color-background)}
+.btn{height:44px;border-radius:9px;display:flex;align-items:center;justify-content:center;gap:8px;font-size:16px;font-weight:500;white-space:nowrap}
+.btn.soft{background:var(--gray-a3);color:var(--gray-12)}.btn.green{background:var(--green-9);color:#fff;font-weight:600}
+
+/* ---- desk (table.module.css; wide tracks as on main, the lane in front) ---- */
+.dwin{height:100%;display:grid;grid-template-columns:232px minmax(0,1fr);background:var(--color-background)}
+.dwin.docked{grid-template-columns:232px minmax(0,1fr) 420px}
+.side{background:var(--gray-2);border-right:1px solid var(--gray-a4);padding:14px 10px;display:flex;flex-direction:column;gap:2px}
+.brand{display:flex;align-items:center;gap:8px;padding:4px 8px 14px;font-size:13.5px;font-weight:600;color:var(--gray-12);white-space:nowrap}
+.bmark{width:22px;height:22px;border-radius:6px;background:var(--gray-12);color:var(--gray-1);display:grid;place-items:center;font-size:12px;font-weight:700}
+.ni{display:flex;align-items:center;gap:10px;height:32px;padding:0 8px;border-radius:7px;font-size:14px;color:var(--gray-11);white-space:nowrap}
+.ni .nb{margin-left:-3px}
+.ni.on{background:var(--gray-a4);color:var(--gray-12);font-weight:500}.ni .c{margin-left:auto;font-size:12.5px;color:var(--gray-11)}
+.sep{height:1px;background:var(--gray-a4);margin:8px 8px}
+.dmain{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
+.dtop{display:flex;align-items:center;gap:10px;height:56px;padding:0 20px 0 24px;border-bottom:1px solid var(--gray-a4);flex:none;box-sizing:border-box}
+.dtop .h{font-size:17px;font-weight:600;color:var(--gray-12);letter-spacing:-.01em;white-space:nowrap}.dtop .hc{font-size:17px;color:var(--gray-11)}
+.dsearch{display:flex;align-items:center;gap:8px;width:240px;height:32px;padding:0 8px 0 10px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--gray-a5);color:var(--gray-11);font-size:13.5px;box-sizing:border-box}
+.docked .dsearch{width:150px}
+.kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:4px;font-size:11px;font-weight:500;color:var(--gray-11);box-shadow:inset 0 0 0 1px var(--gray-a5);box-sizing:border-box}
+.newb{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 12px;border-radius:8px;background:var(--gray-12);color:var(--gray-1);font-size:13.5px;font-weight:600;white-space:nowrap}
+.newb .kbd{color:var(--gray-1);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--gray-1) 35%,transparent)}
+.dt{--cols:31px 64px minmax(0,1fr) 240px 128px 104px 76px 150px;display:grid;grid-template-columns:var(--cols);column-gap:12px;padding:0 20px 0 24px;align-items:center;box-sizing:border-box}
+.docked .dt{--cols:31px minmax(96px,1fr) minmax(176px,232px) 96px 56px;column-gap:10px;padding:0 16px 0 20px}
+.dt>*{min-width:0}
+.dt.h{height:38px;border-bottom:1px solid var(--gray-a4);font-size:12.5px;font-weight:500;color:var(--gray-11);white-space:nowrap}
+.dt.r{all:unset;box-sizing:border-box;display:grid;grid-template-columns:var(--cols);column-gap:12px;padding:0 20px 0 24px;align-items:center;width:100%;position:relative;height:44px;border-bottom:1px solid var(--gray-a3);font-size:14px;color:var(--gray-12);cursor:pointer}
+.docked .dt.r{column-gap:10px;padding:0 16px 0 20px}
+.dt.r .mc[data-thread-badge]::before{content:"";position:absolute;top:0;bottom:0;left:0;width:61px}
+.docked .dt.r .mc[data-thread-badge]::before{width:56px}
+.dt.r.sel{background:var(--gray-a3);box-shadow:inset 2px 0 0 var(--gray-12)}
+.dt .num{font-size:13px;font-weight:500;color:var(--gray-11);font-variant-numeric:tabular-nums}
+.dt .who{display:flex;align-items:baseline;gap:8px;min-width:0;white-space:nowrap}
+.dt .who .n2{overflow:hidden;text-overflow:ellipsis}.dt .who small{flex:none;font-size:12.5px;color:var(--gray-11)}
+.dt .st{display:flex;align-items:center;gap:7px;font-size:13px;white-space:nowrap;color:var(--gray-11);overflow:hidden}
+.dt .st.blue{color:var(--blue-11)}.dt .st.green{color:var(--green-11)}.dt .st.amber{color:var(--amber-11)}.dt .st.violet{color:var(--violet-11)}.dt .st.teal{color:var(--teal-11)}
+.dt .x{font-variant-numeric:tabular-nums}.dt .x.red{color:var(--red-11)}.dt .x.amber{color:var(--amber-11)}.dt .x.gray{color:var(--gray-11)}
+.dt .mut{font-size:13px;color:var(--gray-11);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dt .ra{text-align:right;justify-self:end}
+.dt .tm2{font-size:13px;color:var(--gray-11);font-variant-numeric:tabular-nums;white-space:nowrap}
+.dt.r.closed .who .n2{color:var(--gray-11)}.dt.r.closed .lg{opacity:.55}.dt.r.closed .mc{color:var(--gray-10)}
+.dfold{all:unset;box-sizing:border-box;display:grid;grid-template-columns:31px 1fr;column-gap:12px;align-items:center;width:100%;height:44px;padding:0 20px 0 24px;border-bottom:1px solid var(--gray-a3);cursor:pointer}
+.docked .dfold{column-gap:10px;padding:0 16px 0 20px}
+.dfold .fl .lb{font-size:14px}
+.dpane{border-left:1px solid var(--gray-a4);display:flex;flex-direction:column;min-width:0;overflow:hidden;background:var(--color-background)}
+.dpane .pbar{height:56px;border-bottom:0}
+.dpane .pbody{padding:6px 18px 20px}
+
+/* ---- 7 · states close-up (a spec sheet: rows cropped to lane · name · status, at 3x) ---- */
+.sgrid{zoom:1.5;display:grid;grid-template-columns:auto 280px 280px;column-gap:12px;padding:14px 18px 18px}
+.slabels{display:flex;flex-direction:column;font:500 11px/1.2 system-ui;color:#a1a1aa;text-align:right}
+.slabels>div,.spanel>.sx,.crop>.lrow,.crop>.fold{height:48px;min-height:48px;box-sizing:border-box}
+.slabels>div{display:flex;align-items:center;justify-content:flex-end;white-space:nowrap}
+.slabels>.sh,.spanel>.sh{height:24px;min-height:24px}
+.spanel{border-radius:10px;overflow:hidden;background:var(--color-background);display:flex;flex-direction:column}
+.spanel>.sh{display:flex;align-items:center;padding:0 16px;font:600 10px/1 system-ui;letter-spacing:.06em;text-transform:uppercase;color:var(--gray-11)}
+.crop{grid-template-columns:minmax(47px,auto) minmax(0,1fr) auto}
+.crop>.fold{margin:0}
+.spanel>.sx{display:flex;align-items:center;padding:0 8px;border-top:1px solid var(--gray-a3)}
+.sx.nav{background:var(--gray-2)}
+.sx .ni{flex:1}
+.qh{flex:1;display:flex;align-items:center;gap:8px;height:44px;padding:0 6px 0 8px}
+.qh .ql{font-size:15px;line-height:20px;font-weight:600;color:var(--gray-12);white-space:nowrap}
+.qh .qc{font-size:15px;line-height:20px;color:var(--gray-11);font-variant-numeric:tabular-nums}
+.qh .qv{margin-left:auto;display:flex;color:var(--gray-11)}
+</style>
+<script type="importmap">{"imports":{
+"react":"https://esm.sh/react@18.3.1","react-dom":"https://esm.sh/react-dom@18.3.1","react-dom/client":"https://esm.sh/react-dom@18.3.1/client",
+"@radix-ui/themes":"https://esm.sh/@radix-ui/themes@3.3.0?deps=react@18.3.1,react-dom@18.3.1","htm":"https://esm.sh/htm@3.1.1"}}</script>
+</head><body><div id="b"></div>
+<script type="module">
+import React from 'react';
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
+import htm from 'htm';
+import { Theme } from '@radix-ui/themes';
+const h = htm.bind(React.createElement);
+const svg = (p, s = 16, w = 1.75) => h`<svg width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth=${w} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style=${{ flex: 'none' }} dangerouslySetInnerHTML=${{ __html: p }} />`;
+const P = {
+  // lucide message-square: the app's message glyph (CardActivity MessageButton / MessageIconButton)
+  msg: '<path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>', x: '<path d="M18 6 6 18M6 6l12 12"/>', search: '<circle cx="11" cy="11" r="7.5"/><path d="m20.5 20.5-4.2-4.2"/>',
+  chev: '<path d="m6 9 6 6 6-6"/>', chevR: '<path d="m9 18 6-6-6-6"/>', plus: '<path d="M5 12h14M12 5v14"/>',
+  walk: '<circle cx="13" cy="4" r="2"/><path d="m7 21 2-6 3 3v3"/><path d="m9 12 2-4 3 2 3 1"/><path d="M11 8 8 9 6 12"/>',
+  hour: '<path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/>',
+  hist: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
+  refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+  sort: '<path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/>',
+  dots: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  up: '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+  pencil: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
+  phone: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/>',
+  cam: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
+  bust: '<circle cx="12" cy="10" r="5"/><path d="M2 26a10 9 0 0 1 20 0"/>',
+  list: '<path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/>',
+  inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/>', chart: '<path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
+};
+// fix 5: <MessageSquare size={14} fill="currentColor" strokeWidth={0}>
+const NavBubble = () => h`<span className="nb" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="0" dangerouslySetInnerHTML=${{ __html: P.msg }} /></span>`;
+// ---- status glyphs (StatusGlyph + StageGlyph, main 6f75a34) ----
+const pie = (f) => { const a = f * 2 * Math.PI, x = 7 + 3.25 * Math.sin(a), y = 7 - 3.25 * Math.cos(a); return `M7 7L7 3.75A3.25 3.25 0 ${f > 0.5 ? 1 : 0} 1 ${x.toFixed(2)} ${y.toFixed(2)}Z`; };
+const box = (s, kids) => h`<svg width=${s} height=${s} viewBox="0 0 14 14" style=${{ flex: 'none' }} aria-hidden="true">${kids}</svg>`;
+const gW = (s = 14) => box(s, h`<circle cx="7" cy="7" r="5.75" fill="none" stroke="var(--blue-9)" strokeWidth="1.5"/>`);
+const gQ = (s = 14) => box(s, h`<circle cx="7" cy="7" r="5.75" fill="none" stroke="var(--amber-11)" strokeWidth="1.5"/><path d="M5.6 5.6a1.45 1.45 0 0 1 2.82.47c0 .97-1.42 1.3-1.42 1.3" fill="none" stroke="var(--amber-11)" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/><circle cx="7" cy="9.55" r="0.75" fill="var(--amber-11)"/>`);
+const gIn = (s = 14) => box(s, h`<circle cx="7" cy="7" r="5.75" fill="none" stroke="var(--green-9)" strokeWidth="1.5"/><path d=${pie(0.75)} fill="var(--green-9)"/>`);
+const gDone = (s = 14) => box(s, h`<circle cx="7" cy="7" r="6.25" fill="var(--gray-8)"/><path d="M4.4 7.2l1.8 1.8 3.5-3.7" fill="none" stroke="var(--color-background)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>`);
+const gNF = (s = 14) => box(s, h`<circle cx="7" cy="7" r="6.25" fill="var(--gray-8)"/><path d="M5 5l4 4M9 5l-4 4" stroke="var(--color-background)" strokeWidth="1.6" strokeLinecap="round"/>`);
+const gIc = (p, c, w = 2) => (s = 14) => h`<span style=${{ color: `var(--${c}-11)`, display: 'flex' }}>${svg(p, s + 1, w)}</span>`;
+// n: the narrow label (under 430 px). fix 2: En route / Arrived / Recheck join Waiting.
+const S = {
+  waiting: { g: gW, t: 'Waiting for check', n: 'Waiting', c: 'blue' }, need: { g: gQ, t: 'Needs info', c: 'amber' },
+  pending: { g: gIc(P.hour, 'violet'), t: 'Pending', c: 'violet' }, recheck: { g: gIc(P.hist, 'violet', 2.25), t: 'Recheck due', n: 'Recheck', c: 'violet' },
+  located: { g: gIn, t: 'Located', c: 'green' }, enroute: { g: gIc(P.walk, 'teal'), t: 'Friend en route', n: 'En route', c: 'teal' },
+  arrived: { g: gIc(P.check, 'green', 2.4), t: 'Friend arrived', n: 'Arrived', c: 'green' },
+  notlocated: { g: gNF, t: 'Not located', c: 'gray', closed: true }, reunited: { g: gDone, t: 'Reunited', c: 'gray', closed: true },
+  cancelled: { g: gDone, t: 'Cancelled', c: 'gray', closed: true },
+};
+const Shell = ({ dark = true, children }) => h`<${Theme} appearance=${dark ? 'dark' : 'light'} accentColor="gray" grayColor="gray" radius="medium"><div className="app">${children}</div><//>`;
+
+// ---- the mark ----
+// r.msgs = messageCount · r.unread = others' messages after my cursor · r.inv = involved · r.mine = lastMessage.mine
+// fix 1 (the gate): blue only when unread > 0 && involved && !lastMessage?.mine.
+const unreadForMe = (r) => (r.unread > 0 && r.inv && !r.mine ? r.unread : 0);
+const fmt = (n) => (n > 99 ? '99+' : String(n));
+const Bubble = ({ n }) => { const t = fmt(n); return h`<span className="ub" data-w=${t.length > 2 ? '3' : undefined}>${t}</span>`; };
+const Mark = ({ r, cls = 'c1' }) => {
+  const u = unreadForMe(r);
+  if (u) return h`<span className=${cls + ' mc'} data-unread="" data-thread-badge="" aria-hidden="true"><${Bubble} n=${u}/></span>`;
+  if (r.msgs) return h`<span className=${cls + ' mc'} data-thread-badge="" aria-hidden="true">${svg(P.msg, 18, 1.75)}</span>`;
+  return h`<span className=${cls + ' mc'} aria-hidden="true"></span>`;
+};
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+// fix 8: logRowLabel + " 2 unread messages." / " 3 messages." / nothing
+const msgSaid = (r) => { const u = unreadForMe(r); return u ? ` ${plural(u, 'unread message')}.` : r.msgs ? ` ${plural(r.msgs, 'message')}.` : ''; };
+const updSaid = (u = '—') => (u === '—' ? 'not updated yet' : u === 'now' ? 'updated just now' : `updated ${u.endsWith('m') ? plural(parseInt(u, 10), 'minute') : plural(parseInt(u, 10), 'hour')} ago`);
+const say = (r) => `LP-${r.n}, ${r.nm}, ${S[r.k].t}, created ${r.cr || '11:00 PM'}, ${updSaid(r.up)}.${msgSaid(r)}`;
+const foldSaid = (n, sum, open) => `Archived ${plural(n, 'request')}${!open && sum ? `. ${plural(sum, 'unread message')}.` : ''}`;
+
+// ---- phone pieces ----
+const Bar = ({ n }) => h`<div className="bar">
+  <div className="lt"><span className="tx">All requests</span><span className="tc tab">${n}</span><span className="chv">${svg(P.chev, 18, 2.25)}</span><span className="sp"></span><span className="ib" aria-label="Search">${svg(P.search, 20)}</span><span className="av">DK</span></div>
+  <div className="live"><span className="dot"></span><span>Updated just now</span><button type="button" className="rf" aria-label="Refresh now">${svg(P.refresh, 15, 2)}</button><span className="brk"></span>
+    <button type="button" className="sort" aria-pressed="false" aria-label="Newest first. Sort by status, waiting for check first">${svg(P.sort, 14, 2)}Newest</button></div>
+</div>`;
+const ColH = () => h`<div className="lrow colh" aria-hidden="true"><span className="c1"></span><span className="c2">Friend</span><span className="c3">Status</span><span className="c45"><span>Created</span><span>Updated</span></span></div>`;
+const hl = (text, q) => { const i = text.indexOf(q); if (!q || i < 0) return text; return h`${text.slice(0, i)}<mark>${q}</mark>${text.slice(i + q.length)}`; };
+const Row = ({ r, q, crop }) => {
+  const m = S[r.k];
+  const line = q ? `LP-${r.n}` : '';
+  return h`<button type="button" className=${'lrow lr' + (m.closed ? ' closed' : '') + (line ? ' lr2' : '')} data-closed=${m.closed ? '' : undefined}>
+    <span className="vh">${say(r)}${line ? ` ${line}` : ''}</span>
+    <${Mark} r=${r}/>
+    <span className="c2 nm" aria-hidden="true">${r.nm}</span>
+    <span className=${'c3 stc ' + m.c} aria-hidden="true"><span className="lg">${m.g(14)}</span><span className="stl">${m.n || m.t}</span></span>
+    ${crop ? null : h`<span className="c4 tm" aria-hidden="true">${r.cr}</span><span className="c5 tm" aria-hidden="true">${r.up}</span>`}
+    ${line ? h`<span className="match" aria-hidden="true">${hl(line, q)}</span>` : null}
+  </button>`;
+};
+const Fold = ({ n, open, sum }) => h`<button type="button" className="fold" aria-expanded=${String(!!open)} aria-label=${foldSaid(n, sum, open)}>
+  <span className="c1 mc" aria-hidden="true">${!open && sum ? h`<${Bubble} n=${sum}/>` : null}</span>
+  <span className="fl" aria-hidden="true"><span className="lb">Archived</span><span className="cap">${n}</span><span className="sp"></span><span className="chx">${svg(open ? P.chev : P.chevR, 16, 2)}</span></span>
+</button>`;
+const Fab = () => h`<span className="fab">${svg(P.plus, 18, 2.25)}New request</span>`;
+const Log = ({ open, closed, foldOpen, foldN }) => {
+  const sum = closed.reduce((a, r) => a + unreadForMe(r), 0);
+  return h`<div className="log" data-testid="request-list"><${ColH}/>
+    ${open.map((r) => h`<${Row} key=${r.n} r=${r}/>`)}
+    <${Fold} n=${foldN || closed.length} open=${foldOpen} sum=${sum}/>
+    ${foldOpen ? closed.map((r) => h`<${Row} key=${r.n} r=${r}/>`) : null}
+  </div>`;
+};
+
+// ---- data: Friday night, now 11:04 PM. Signed in as Dana K. (Dispatch, front of house). Synthetic. ----
+const OPEN = [
+  { n: 1021, nm: 'D.F.', k: 'waiting', cr: '11:02 PM', up: '—' },                                                  // no messages
+  { n: 1020, nm: 'Kayla Martinez', k: 'need', cr: '10:58 PM', up: '1m', msgs: 3, unread: 1, inv: true },          // Needs info + 1 unread
+  { n: 1019, nm: 'Christopher Montgomery', k: 'waiting', cr: '10:51 PM', up: '3m', msgs: 2, inv: true, mine: true }, // mine is latest
+  { n: 1018, nm: 'B.W.', k: 'waiting', cr: '10:47 PM', up: '2m', msgs: 2, unread: 2, inv: true },                 // 2 unread
+  { n: 1016, nm: 'Jordan Diaz', k: 'enroute', cr: '10:31 PM', up: 'now', msgs: 15, unread: 12, inv: true },       // 12 unread
+  { n: 1015, nm: 'S.L.', k: 'located', cr: '10:20 PM', up: '21m', msgs: 4, unread: 4 },                            // never opened, not involved: the gate keeps it grey
+  { n: 1014, nm: 'M.P.', k: 'pending', cr: '10:12 PM', up: '9m' },                                                  // Pending hold, none
+  { n: 1013, nm: 'T.R.', k: 'arrived', cr: '9:58 PM', up: '4m', msgs: 5, inv: true },                              // read
+];
+const CLOSED = [
+  { n: 1017, nm: 'A.N.', k: 'notlocated', cr: '10:36 PM', up: '6m', msgs: 2, unread: 1, inv: true },  // closed, new message: blue
+  { n: 1012, nm: 'L.W.', k: 'reunited', cr: '9:41 PM', up: '25m', msgs: 6, inv: true },               // closed, old thread: gray-10
+  { n: 1011, nm: 'N.G.', k: 'notlocated', cr: '9:30 PM', up: '40m' },
+  { n: 1009, nm: 'C.H.', k: 'cancelled', cr: '9:12 PM', up: '1h', msgs: 1 },
+];
+const All = ({ dark = true }) => h`<${Shell} dark=${dark}><${Bar} n=${OPEN.length + CLOSED.length}/><div className="scroller"><${Log} open=${OPEN} closed=${CLOSED} foldOpen/></div><${Fab}/><//>`;
+
+// 360, long names: names give way first; En route / Arrived / Recheck keep the status whole. Archived folded with its sum.
+const LONG = [
+  { n: 1024, nm: 'Christopher Montgomery', k: 'waiting', cr: '11:02 PM', up: '—', msgs: 1, unread: 1, inv: true },
+  { n: 1022, nm: 'Kayla Martinez', k: 'need', cr: '10:58 PM', up: '1m', msgs: 3, unread: 2, inv: true },
+  { n: 1021, nm: 'D.F.', k: 'need', cr: '10:51 PM', up: '1m', msgs: 2, inv: true },                           // Needs info, read
+  { n: 1019, nm: 'Maximilian Okonkwo-Reyes', k: 'located', cr: '10:31 PM', up: '2m', msgs: 4, unread: 4 },   // not involved: grey
+  { n: 1018, nm: 'Sofia Valentina Castellanos', k: 'pending', cr: '10:20 PM', up: '9m', msgs: 2, inv: true, mine: true },
+  { n: 1017, nm: 'E.N.', k: 'recheck', cr: '10:12 PM', up: '21m' },
+  { n: 1016, nm: 'Jordan Diaz', k: 'arrived', cr: '9:58 PM', up: '4m', msgs: 5, inv: true },
+  { n: 1015, nm: 'Benjamin Hartley', k: 'waiting', cr: '9:51 PM', up: '6m' },
+  { n: 998, nm: 'Alexandra Washington-Pierce', k: 'enroute', cr: 'Fri 11:58 PM', up: 'now', msgs: 14, unread: 12, inv: true }, // earlier day
+];
+const CLOSED3 = [{ unread: 1, inv: true }, { unread: 2, inv: true }, { unread: 5 }]; // 5 not involved: not counted → 3
+const Narrow = () => h`<${Shell}><${Bar} n=${15}/><div className="scroller"><${Log} open=${LONG} closed=${CLOSED3} foldOpen=${false} foldN=${6}/></div><${Fab}/><//>`;
+
+// Search "101": with # gone, the LP number shows (highlighted) on the match line.
+const HITS = [...OPEN.slice(2, 8), CLOSED[0], CLOSED[1], CLOSED[2], { n: 1010, nm: 'J.K.', k: 'reunited', cr: '9:20 PM', up: '1h' }]
+  .filter((r) => String(r.n).includes('101')).sort((a, b) => b.n - a.n);
+const Search = () => h`<${Shell} dark=${false}>
+  <div className="bar"><form role="search" className="search" onSubmit=${(e) => e.preventDefault()}>
+    <div className="sfield">${svg(P.search, 16)}<span className="sq">101<span className="caret"></span></span><span className="sclear" aria-label="Clear search">${svg(P.x, 15)}</span></div>
+    <span className="cancel">Cancel</span></form>
+    <div className="cnt" aria-live="polite">${HITS.length} results</div></div>
+  <div className="scroller"><div className="log"><${ColH}/>${HITS.map((r) => h`<${Row} key=${r.n} r=${r} q="101"/>`)}</div></div>
+<//>`;
+
+// ---- 5 · request page, landed at Messages (a tap in Kayla's lane). Top bar as on main; no New line. ----
+const KV = ({ k, v, extra }) => h`<div className="kv"><span className="k">${k}</span><span className="v">${v}</span>${extra || h`<span></span>`}</div>`;
+const PBar = ({ n }) => h`<div className="pbar"><span className="rb" aria-label="Close">${svg(P.x, 18, 2)}</span><span className="pid">LP-${n}</span><span className="rb r" aria-label="More">${svg(P.dots, 18, 2)}</span></div>`;
+const Request = () => h`<${Shell}>
+  <${PBar} n=${1020}/>
+  <div className="scroller" data-at="messages"><div className="pbody">
+    <div className="hero"><div className="portrait">${svg(P.bust, 56)}</div><div><div className="n">Kayla Martinez</div><div className="m">19 · Female</div><div className="m2">FA 3 – Kinetic · Dana K.</div></div></div>
+    <div className="sblk">${gQ(18)}<div><div className="t1">Needs info</div><div className="t2">Rae C. asked · 11:03 PM</div></div></div>
+    <div className="tprev"><span className="chipA">${gQ(13)}Needs info</span><div className="pbox"><span className="udot"></span><span className="tx"><span className="who">Rae C.:</span> Any tattoos or marks?</span><span style=${{ color: 'var(--gray-11)', display: 'flex' }}>${svg(P.chev, 16, 2)}</span></div></div>
+    <div className="slbl">Missing person<span className="ed">${svg(P.pencil, 14)}Edit</span></div>
+    <div className="grp"><${KV} k="Wearing" v="Neon green bikini top, white boots"/><${KV} k="Last seen" v="Kinetic Field, left rail"/><${KV} k="Hair" v="Long, blue braids"/></div>
+    <div className="slbl">Friend or family<span className="ed">${svg(P.pencil, 14)}Edit</span></div>
+    <div className="grp"><${KV} k="Name" v="Maya R. · Friend"/><${KV} k="Phone" v="407-555-0142" extra=${h`<span className="call">${svg(P.phone, 14)}Call</span>`}/></div>
+    <div className="slbl">Photos</div>
+    <div className="addph">${svg(P.cam, 20)}Add</div>
+    <section aria-labelledby="mh"><div className="mhead" id="mh" data-jump="">Messages</div>
+      <div className="chat">
+        <div className="from"><b>Rae C.</b> · Medical</div>
+        <div className="mrow"><div className="bubble them">Checking the tents now</div></div>
+        <div className="mrow me" style=${{ marginTop: 10 }}><div className="bubble mine">Friend is still here at FA 3</div></div>
+        <div className="receipt"><b>Read</b> 11:00 PM</div>
+        <div className="from"><b>Rae C.</b> · Medical</div>
+        <div className="mrow"><div className="bubble them">Any tattoos or marks?</div></div>
+      </div>
+      <div className="pills" role="group" aria-label="Quick messages"><span className="pill">Friend is still here</span><span className="pill">Friend left the area</span></div>
+      <div className="field"><div className="input">Message</div><span className="send" aria-label="Send">${svg(P.up, 18, 2.25)}</span></div>
+    </section>
+    <div className="slbl">Audit trail</div>
+    <ul className="tl"><li><span className="tdot"></span><div className="tt"><span>Request logged</span><span className="ts">FA 3 – Kinetic · Dana K. · 10:58 PM</span></div></li></ul>
+  </div></div>
+  <div className="abar"><span className="btn soft">${svg(P.hour, 17)}Pending</span><span className="btn green">${svg(P.check, 17, 2.25)}Located</span></div>
+<//>`;
+
+// ---- 6 · desk: the lane leads the table, before #; docked at 1024–1279 the # goes ----
+const DESK = [
+  { n: 1021, nm: 'D.F.', ag: '28 M', k: 'waiting', x: '2m', xc: 'gray', post: 'Command', by: 'Sam R. · Dispatch', cr: '11:02 PM', up: '—' },
+  { n: 1020, nm: 'Kayla Martinez', ag: '19 F', k: 'need', x: '6m', xc: 'gray', post: 'FA 3 – Kinetic', by: 'Dana K. · Dispatch', cr: '10:58 PM', up: '1m', msgs: 3, unread: 1, inv: true },
+  { n: 1019, nm: 'Christopher Montgomery', ag: '24 M', k: 'waiting', x: '13m', xc: 'amber', post: 'FA 4 – Oasis', by: 'Dana K. · Dispatch', cr: '10:51 PM', up: '3m', msgs: 2, inv: true, mine: true },
+  { n: 1018, nm: 'B.W.', ag: '23 F', k: 'waiting', x: '17m', xc: 'amber', post: 'FA 4 – Oasis', by: 'Dana K. · Dispatch', cr: '10:47 PM', up: '2m', msgs: 2, unread: 2, inv: true },
+  { n: 1016, nm: 'Jordan Diaz', ag: '22 M', k: 'enroute', x: '~4 min', post: 'FA 4 – Oasis', by: 'Dana K. · Dispatch', cr: '10:31 PM', up: 'now', msgs: 15, unread: 12, inv: true },
+  { n: 1015, nm: 'S.L.', ag: '20 F', k: 'located', x: 'Bed 3', post: 'FA 3 – Kinetic', by: 'Lee W. · Base', cr: '10:20 PM', up: '21m', msgs: 4, unread: 4, sel: true },
+  { n: 1014, nm: 'M.P.', ag: '26 M', k: 'pending', x: '52m', xc: 'red', post: 'Command', by: 'Sam R. · Dispatch', cr: '10:12 PM', up: '9m' },
+  { n: 1013, nm: 'T.R.', ag: '24 M', k: 'arrived', x: '10:59 PM', post: 'Base', by: 'Lee W. · Base', cr: '9:58 PM', up: '4m', msgs: 5, inv: true },
+];
+const DRow = ({ r, docked }) => { const m = S[r.k]; return h`<button type="button" className=${'dt r' + (r.sel ? ' sel' : '') + (m.closed ? ' closed' : '')} aria-current=${r.sel ? 'true' : undefined}>
+  <span className="vh">${say(r)}</span>
+  <${Mark} r=${r} cls=""/>
+  ${docked ? null : h`<span className="num" aria-hidden="true">${r.n}</span>`}
+  <span className="who" aria-hidden="true"><span className="n2">${r.nm}</span><small>${r.ag}</small></span>
+  <span className=${'st ' + m.c} aria-hidden="true"><span className="lg">${m.g(14)}</span>${m.t}${r.x ? h`<span className=${'x ' + (r.xc || '')}>· ${r.x}</span>` : null}</span>
+  ${docked ? null : h`<span className="mut" aria-hidden="true">${r.post}</span>`}
+  <span className="tm2 ra" aria-hidden="true">${r.cr}</span>
+  <span className="tm2 ra" aria-hidden="true">${r.up}</span>
+  ${docked ? null : h`<span className="mut" aria-hidden="true">${r.by}</span>`}
+</button>`; };
+const Nav = () => h`<aside className="side"><div className="brand"><span className="bmark">?</span>Is my friend in medical?</div>
+  <div className="ni on">${svg(P.list)}All requests<span className="c tab">12</span></div>
+  <div className="ni" aria-label="Pending, 8 requests, unread messages">${svg(P.inbox)}Pending<${NavBubble}/><span className="c tab">8</span></div>
+  <div className="ni">${svg(P.user)}My requests<span className="c tab">6</span></div>
+  <div className="sep"></div><div className="ni">${svg(P.chart)}Dashboard</div></aside>`;
+const DFold = () => h`<button type="button" className="dfold" aria-expanded="false" aria-label=${foldSaid(4, 1, false)}>
+  <span className="mc" aria-hidden="true"><${Bubble} n=${1}/></span>
+  <span className="fl" aria-hidden="true"><span className="lb">Archived</span><span className="cap">4</span><span className="sp"></span><span className="chx">${svg(P.chevR, 16, 2)}</span></span></button>`;
+const DTop = () => h`<div className="dtop"><span className="h">All requests</span><span className="hc tab">12</span><span className="sp"></span>
+  <div className="dsearch">${svg(P.search, 15)}Search<span className="sp"></span><span className="kbd">/</span></div>
+  <div className="newb">${svg(P.plus, 15, 2.25)}New request<span className="kbd">N</span></div></div>`;
+const DeskWide = () => h`<${Theme} appearance="dark" accentColor="gray" grayColor="gray" radius="medium"><div className="dwin"><${Nav}/>
+  <main className="dmain"><${DTop}/>
+    <div className="dt h" aria-hidden="true"><span></span><span>#</span><span>Friend</span><span>Status</span><span>Post</span><span className="ra">Created ${svg(P.chev, 12, 2.25)}</span><span className="ra">Updated</span><span>Logged by</span></div>
+    ${DESK.map((r) => h`<${DRow} key=${r.n} r=${r}/>`)}<${DFold}/>
+  </main></div><//>`;
+const DeskDocked = () => h`<${Theme} appearance="light" accentColor="gray" grayColor="gray" radius="medium"><div className="dwin docked"><${Nav}/>
+  <main className="dmain"><${DTop}/>
+    <div className="dt h" aria-hidden="true"><span></span><span>Friend</span><span>Status</span><span className="ra">Created ${svg(P.chev, 12, 2.25)}</span><span className="ra">Updated</span></div>
+    ${DESK.map((r) => h`<${DRow} key=${r.n} r=${r} docked/>`)}<${DFold}/>
+  </main>
+  <aside className="dpane" aria-label="LP-1015"><${PBar} n=${1015}/><div className="pbody">
+    <div className="hero"><div className="portrait">${svg(P.bust, 56)}</div><div><div className="n">S.L.</div><div className="m">20 · Female</div><div className="m2">FA 3 – Kinetic · Lee W.</div></div></div>
+    <div className="sblk g">${gIn(18)}<div><div className="t1">Located</div><div className="t2">Bed 3 · 10:43 PM</div></div></div>
+    <div className="tprev"><div className="pbox"><span className="tx"><span className="who">Rae C.:</span> Friend can come to FA 3</span><span style=${{ color: 'var(--gray-11)', display: 'flex' }}>${svg(P.chev, 16, 2)}</span></div></div>
+    <div className="slbl">Missing person<span className="ed">${svg(P.pencil, 14)}Edit</span></div>
+    <div className="grp"><${KV} k="Wearing" v="Black mesh top, red shorts"/><${KV} k="Last seen" v="Circuit Grounds"/></div>
+  </div></aside></div><//>`;
+
+// ---- 7 · the mark's states, close-up ----
+const ST = [
+  ['No messages', { n: 1, nm: 'D.F.', k: 'waiting' }],
+  ['Read', { n: 2, nm: 'T.R.', k: 'arrived', msgs: 5, inv: true }],
+  ['1 unread · Needs info', { n: 3, nm: 'Kayla Martinez', k: 'need', msgs: 3, unread: 1, inv: true }],
+  ['2 unread', { n: 4, nm: 'B.W.', k: 'waiting', msgs: 2, unread: 2, inv: true }],
+  ['12 unread', { n: 5, nm: 'Jordan Diaz', k: 'enroute', msgs: 15, unread: 12, inv: true }],
+  ['100+ unread', { n: 6, nm: 'Sofia Castellanos', k: 'pending', msgs: 140, unread: 128, inv: true }],
+  ['Mine is latest', { n: 7, nm: 'Christopher M.', k: 'waiting', msgs: 2, unread: 1, inv: true, mine: true }],
+  ['Unread, not involved', { n: 8, nm: 'S.L.', k: 'located', msgs: 4, unread: 4 }],
+  ['Closed · read', { n: 9, nm: 'L.W.', k: 'reunited', msgs: 6, inv: true }],
+  ['Closed · unread', { n: 10, nm: 'A.N.', k: 'notlocated', msgs: 2, unread: 1, inv: true }],
+];
+const XLABELS = ['Archived, folded', 'Desk nav', 'Pending header'];
+const Panel = ({ dark }) => h`<${Theme} appearance=${dark ? 'dark' : 'light'} accentColor="gray" grayColor="gray" radius="medium" hasBackground=${false}>
+  <div className="spanel"><div className="sh">${dark ? 'Dark' : 'Light'}</div>
+    <div className="log crop">${ST.map(([, r]) => h`<${Row} key=${r.n} r=${r} crop/>`)}<${Fold} n=${6} sum=${3}/></div>
+    <div className="sx nav"><div className="ni">${svg(P.inbox)}Pending<${NavBubble}/><span className="c tab">8</span></div></div>
+    <div className="sx"><div className="qh" aria-label="Friend coming 3 requests, unread messages">${gIn(16)}<span className="ql">Friend coming</span><span className="qc">3</span><${NavBubble}/><span className="qv">${svg(P.chev, 18, 2)}</span></div></div>
+  </div><//>`;
+const States = () => h`<div className="sgrid">
+  <div className="slabels" aria-hidden="true"><div className="sh"></div>${[...ST.map(([l]) => l), ...XLABELS].map((l) => h`<div key=${l}>${l}</div>`)}</div>
+  <${Panel} dark/><${Panel}/>
+</div>`;
+
+const Fig = ({ cap, sub, cls = '', children }) => h`<figure><div className="shot"><div className=${'frame ' + cls}>${children}</div></div><figcaption>${cap}<span>${sub}</span></figcaption></figure>`;
+const Board = () => h`<div className="board">
+  <${Fig} cap="1 · All requests, 390 dark" sub="Lane where # was · blue bubble + count = unread for me · outline = conversation"><${All}/><//>
+  <${Fig} cap="2 · All requests, 390 light" sub="Kayla: amber Needs info + blue 1 · S.L. never opened, not involved: outline"><${All} dark=${false}/><//>
+  <${Fig} cls="n360" cap="3 · 360, long names" sub="En route / Arrived / Recheck keep status whole · Archived folded: 3 unread"><${Narrow}/><//>
+  <${Fig} cap="4 · Search ‘101’, light" sub="Same lane · LP number highlighted on the match line"><${Search}/><//>
+  <${Fig} cap="5 · Tap in Kayla’s lane" sub="Opens at Messages · top bar as on main"><${Request}/><//>
+  <figure><div className="shot"><div className="frame desk"><${DeskWide}/></div><div className="frame desk d1240"><${DeskDocked}/></div></div>
+    <figcaption>6 · Desk parity: 1440 dark, 1240 docked light<span>Lane before # · no pill after the name · docked: # drops, the pane carries LP-1015 · nav bubble is the real icon</span></figcaption></figure>
+  <figure><div className="shot"><div className="frame states"><${States}/></div></div>
+    <figcaption>7 · The mark’s states at 3x<span>Cropped rows: lane · name · status · the nav and Pending header use the filled lucide icon</span></figcaption></figure>
+</div>`;
+flushSync(() => createRoot(document.getElementById('b')).render(h`<${Board}/>`));
+// Frame 5 lands as the jump does (MessagesSection, R2): the Messages heading just under the top bar.
+window.__layout = () => document.querySelectorAll('.scroller').forEach((c) => {
+  const to = c.dataset.at === 'messages' ? c.querySelector('[data-jump]') : null;
+  c.scrollTop = to ? to.getBoundingClientRect().top - c.getBoundingClientRect().top + c.scrollTop - 4 : 0;
+});
+window.__layout();
+document.fonts.ready.then(() => { window.__layout(); document.body.dataset.ready = '1'; });
+</script></body></html>

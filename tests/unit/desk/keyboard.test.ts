@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   decideShortcut,
   describeTarget,
+  inMessageLane,
   mainRowId,
   readRowIds,
   type KeyInput,
@@ -155,5 +156,17 @@ describe('mainRowId', () => {
     expect(mainRowId(target('') as unknown as EventTarget)).toBeNull();
     expect(mainRowId(null)).toBeNull();
     expect(mainRowId({} as EventTarget)).toBeNull();
+  });
+});
+
+describe('inMessageLane', () => {
+  it("(message lane) a click inside a row's lane mark opens at the thread, docked too; anywhere else does not", () => {
+    const seen: string[] = [];
+    const inLane = { closest: (sel: string) => (seen.push(sel), sel === '[data-thread-badge]' ? {} : null) };
+    expect(inMessageLane(inLane as unknown as EventTarget)).toBe(true);
+    expect(seen).toEqual(['[data-thread-badge]']);
+    expect(inMessageLane({ closest: () => null } as unknown as EventTarget)).toBe(false);
+    expect(inMessageLane(null)).toBe(false);
+    expect(inMessageLane({} as EventTarget)).toBe(false);
   });
 });

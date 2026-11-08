@@ -834,7 +834,7 @@ test.describe('fixture', () => {
             ),
           ),
         );
-        // Whole from 1080 px (1024–1279) and from 1304 px (1280+); short just above each breakpoint. (Pending v9.1)
+        // Whole from about 1065 px (1024–1279) and about 1285 px (1280+, message lane); short just above each breakpoint. (Pending v9.1)
         // Every stage of Waiting for check shows its wait, never a recheck time, so only "· 2 checks" has a short form.
         const whole = width === 1180 || width === 1440;
         expect(cells).toEqual({

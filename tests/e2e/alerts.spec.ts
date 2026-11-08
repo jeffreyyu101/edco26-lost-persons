@@ -284,32 +284,45 @@ test.describe('no double alerts (F4 + system notifications)', () => {
 });
 
 test.describe('the Alerts sheet', () => {
-  test('the switches are server-side: New requests follows to a second device', async ({ browser }) => {
-    const a = await context(browser, PHONE, 'iphone', { permission: 'default', noPush: true });
-    const b = await context(browser, PHONE, 'iphone', { permission: 'default', noPush: true });
-    try {
-      await a.request.post('/api/push/prefs', { headers: { origin: BASE }, data: { newRequests: false, myUpdates: true } });
-      const one = await a.newPage();
-      await openApp(one);
-      await one.getByTestId('account-trigger').click();
-      await one.getByRole('dialog', { name: 'Account' }).getByTestId('alerts-menu').click();
-      const sheet = one.getByRole('dialog', { name: 'Alerts' });
+  test('the switches are server-side: New requests starts on, and switched off it follows to a second device', async ({ browser, browserName }) => {
+    // A staff member never seen before (the switch never set in the sheet): New requests is on by the team default
+    // for every team (2026-11-08, Brian: "new requests should be on for everyone by default n configurable").
+    const fresh = { staffName: `TEST-F4 Alerts Sheet ${browserName.slice(0, 2)}${Date.now().toString(36)}`, team: 'GC/HX - Dispatch' };
+    const a = await context(browser, fresh, 'iphone', { permission: 'default', noPush: true });
+    const b = await context(browser, fresh, 'iphone', { permission: 'default', noPush: true });
+    const openSheet = async (page: Page) => {
+      await openApp(page);
+      await page.getByTestId('account-trigger').click();
+      await page.getByRole('dialog', { name: 'Account' }).getByTestId('alerts-menu').click();
+      const sheet = page.getByRole('dialog', { name: 'Alerts' });
       await expect(sheet.getByRole('heading', { name: 'Alerts' })).toBeVisible();
+      return sheet;
+    };
+    try {
+      // The second device first: the default is on there too, and its phone bell copies it.
+      const before = await b.newPage();
+      const shown = await openSheet(before);
+      await expect(shown.getByRole('switch', { name: /New requests/ })).toHaveAttribute('aria-checked', 'true');
+      await expect(shown.getByRole('switch', { name: /Updates on my requests/ })).toHaveAttribute('aria-checked', 'true');
+      await expect.poll(() => before.evaluate(() => localStorage.getItem('lp-bell'))).toBe('1');
+      await before.close();
+
+      const one = await a.newPage();
+      const sheet = await openSheet(one);
+      await expect(sheet.getByRole('switch', { name: /New requests/ })).toHaveAttribute('aria-checked', 'true');
       await sheet.getByRole('switch', { name: /Updates on my requests/ }).click();
       await sheet.getByRole('switch', { name: /New requests/ }).click();
-      await expect(sheet.getByRole('switch', { name: /New requests/ })).toHaveAttribute('aria-checked', 'true');
+      await expect(sheet.getByRole('switch', { name: /New requests/ })).toHaveAttribute('aria-checked', 'false');
       await expect(sheet.getByRole('switch', { name: /Updates on my requests/ })).toHaveAttribute('aria-checked', 'false');
 
       const two = await b.newPage();
-      await openApp(two);
-      await two.getByTestId('account-trigger').click();
-      await two.getByRole('dialog', { name: 'Account' }).getByTestId('alerts-menu').click();
-      const other = two.getByRole('dialog', { name: 'Alerts' });
-      await expect(other.getByRole('switch', { name: /New requests/ })).toHaveAttribute('aria-checked', 'true');
+      const other = await openSheet(two);
+      await expect(other.getByRole('switch', { name: /New requests/ })).toHaveAttribute('aria-checked', 'false');
       await expect(other.getByRole('switch', { name: /Updates on my requests/ })).toHaveAttribute('aria-checked', 'false');
       // The phone bell follows the server switch.
-      await expect.poll(() => two.evaluate(() => localStorage.getItem('lp-bell'))).toBe('1');
+      await expect.poll(() => two.evaluate(() => localStorage.getItem('lp-bell'))).toBeNull();
     } finally {
+      // Leave this identity off (set in the sheet), so later runs on the stack never push to its devices.
       await a.request.post('/api/push/prefs', { headers: { origin: BASE }, data: { newRequests: false, myUpdates: true } });
       await a.close();
       await b.close();
