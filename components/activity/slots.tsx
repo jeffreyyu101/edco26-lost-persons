@@ -13,5 +13,4 @@ export const ActivityBellSlot = dynamic(() => load().then((m) => m.ActivityBell)
 export const AlertsBannerSlot = dynamic(() => load().then((m) => m.AlertsBanner), { ssr: false });
 export const ActivityHostSlot = dynamic(() => load().then((m) => m.ActivityHost), { ssr: false });
 export const AccountAlertsRowSlot = dynamic(() => load().then((m) => m.AccountAlertsRow), { ssr: false });
-export const DeskActivitySlot = dynamic(() => load().then((m) => m.DeskActivityItem), { ssr: false });
 export const DeskAlertsRowSlot = dynamic(() => load().then((m) => m.DeskAlertsRow), { ssr: false });

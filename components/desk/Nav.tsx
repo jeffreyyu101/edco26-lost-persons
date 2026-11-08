@@ -15,7 +15,7 @@
 import { Activity, ChartColumn, ChevronsUpDown, Inbox, List, UserRound, type LucideIcon } from 'lucide-react';
 import { useEffect, useSyncExternalStore } from 'react';
 import { AccountMenu } from '@/components/account/AccountMenu';
-import { DeskActivitySlot, DeskAlertsRowSlot } from '@/components/activity/slots';
+import { DeskAlertsRowSlot } from '@/components/activity/slots';
 import { PendingDot } from '@/components/messages/CardActivity';
 import { useActions, usePrefs, useCounts, useIsLoading, useSession } from '@/lib/client/store-contract';
 import { teamShort } from '@/lib/domain';
@@ -120,7 +120,6 @@ export function DeskNav({ main, pane = false }: DeskNavProps) {
           <div className={d.group}>
             <div className={d.menu}>
               {VIEW_KEYS.map(item)}
-              <DeskActivitySlot />
             </div>
           </div>
           <span className={d.sep} aria-hidden />

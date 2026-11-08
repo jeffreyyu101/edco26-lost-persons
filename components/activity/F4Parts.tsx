@@ -4,19 +4,15 @@
 // does not list the push and Activity code for every view (spec A25 budget; F4 A53–A59).
 import { VisuallyHidden } from '@radix-ui/themes';
 import { BellDot, BellOff, BellPlus, BellRing } from 'lucide-react';
-import { useEffect } from 'react';
 import accountStyles from '@/components/account/account.module.css';
 import { usePushStarted } from '@/components/alerts/AlertsBanner';
 import { alertsValue } from '@/components/alerts/AlertsSheet';
 import deskStyles from '@/components/desk/desk.module.css';
 import { Tip } from '@/components/desk/parts';
 import { NOTIFY_COPY } from '@/components/ui/NotifyStatus';
-import { badgeText } from '@/lib/activity';
-import { activityClient, useActivity } from '@/lib/client/activity-client';
 import { openAlertsSheet } from '@/lib/client/alerts-ui';
 import { useAlerts } from '@/lib/client/push-client';
 import { askNotifyPermission, useNotifyState, type NotifyState } from '@/lib/client/system-notify';
-import { BellIcon } from './icons';
 
 export { AlertsBanner } from '@/components/alerts/AlertsBanner';
 export { ActivityBell } from './ActivityBell';
@@ -107,35 +103,6 @@ export function DeskAlertsRow() {
         </>
       ) : null}
       <Tip>Alerts</Tip>
-    </button>
-  );
-}
-
-/** The desk sidebar's Activity item, with the bell's count; it opens the top bar's Activity popover. */
-export function DeskActivityItem() {
-  useEffect(() => activityClient().start(), []);
-  const activity = useActivity();
-  const text = badgeText(activity.unread);
-  return (
-    <button
-      type="button"
-      className={d.item}
-      aria-haspopup="dialog"
-      aria-expanded={activity.open}
-      onClick={() => activityClient().setOpen(true)}
-      data-testid="desk-activity"
-    >
-      <BellIcon size={16} strokeWidth={1.75} />
-      {/* Named by what it shows, "Activity 3", then " unread" for screen readers (WCAG 2.5.3). */}
-      <span className={d.label}>Activity</span>
-      {text ? (
-        <>
-          {' '}
-          <span className={d.badge}>{text}</span>
-          <VisuallyHidden> unread</VisuallyHidden>
-        </>
-      ) : null}
-      <Tip>Activity</Tip>
     </button>
   );
 }
