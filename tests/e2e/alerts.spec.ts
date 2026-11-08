@@ -362,7 +362,7 @@ test.describe('overflow: the banner and the Alerts sheet at every width', () => 
               await page.getByTestId('account-trigger').click();
               await page.getByRole('dialog', { name: 'Account' }).getByTestId('alerts-menu').click();
             } else {
-              await page.locator('[data-testid="desk-alerts"], [data-testid="desk-rail"] button[aria-label^="Alerts"]').filter({ visible: true }).first().click();
+              await page.getByTestId('desk-alerts').click();
             }
             const sheet = page.getByTestId('alerts-sheet');
             await expectNoOverflow(page, sheet, 'Alerts sheet');

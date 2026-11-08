@@ -535,11 +535,11 @@ test.describe('iPad landscape 1180 × 820', () => {
 test.describe('iPad portrait 820 × 1180', () => {
   test.use({ viewport: { width: 820, height: 1180 }, isMobile: false, hasTouch: true, deviceScaleFactor: 1 });
 
-  test('two columns beside the rail', async ({ page }) => {
+  test('two columns beside the collapsed sidebar', async ({ page }) => {
     const waiting = await createRequest(page);
     const coming = await inMedical(page, await createRequest(page));
     await page.goto('/?view=pending');
-    await expect(page.getByTestId('desk-rail')).toBeVisible();
+    await expect(page.getByTestId('desk-sidebar')).toHaveAttribute('data-state', 'collapsed');
     await expect(checkCard(page, waiting.id)).toBeVisible({ timeout: 15_000 });
     await expect(comingCard(page, coming.id)).toBeVisible();
     await expect(page.getByTestId('pending-tabs')).toHaveCount(0);

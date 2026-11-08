@@ -398,11 +398,11 @@ test.describe('fixture', () => {
     });
   });
 
-  test('tablet 820: the board beside the rail, two columns', async ({ browser }) => {
+  test('tablet 820: the board beside the collapsed sidebar, two columns', async ({ browser }) => {
     await withPage(browser, DANA, viewportFor(820), async (page) => {
       await serve(page, { rows: [...ALL_FIX] });
       await page.goto('/?view=pending');
-      await expect(page.getByTestId('desk-rail')).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId('desk-sidebar')).toHaveAttribute('data-state', 'collapsed', { timeout: 20_000 });
       const left = (await page.getByTestId('pending-column-check').boundingBox())!;
       const right = (await page.getByTestId('pending-column-coming').boundingBox())!;
       expect(right.x).toBeGreaterThan(left.x + left.width);

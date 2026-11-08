@@ -431,13 +431,13 @@ test.describe('iPad landscape 1180 × 820 (touch)', () => {
     const [one] = await createRequests(page, 1, tag);
     await page.goto('/');
     await expect(row(page, one!.id)).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId('desk-rail')).toBeVisible();
+    await expect(page.getByTestId('desk-sidebar')).toHaveAttribute('data-state', 'collapsed');
     // The columns follow the table's own width, not the window's: wider than at 1280 with nothing open.
     expect(await shownColumns(page)).toEqual(ALL_COLUMNS);
     await columnsLineUp(page, one!.id);
     for (const col of ['number', 'status', 'post', 'created', 'updated']) expect(await notCut(page, one!.id, col), col).toBe(true);
 
-    // Docked at 420 px: the main column is 700 px; the tighter grid keeps the status label whole (the
+    // Docked at 420 px: the main column is 688 px in the inset card; the tighter grid keeps the status label whole (the
     // longest, "Not located", too: F2).
     await row(page, one!.id).click();
     await expect(page.getByTestId('desk-pane')).toBeVisible();
@@ -461,7 +461,7 @@ test.describe('iPad landscape 1180 × 820 (touch)', () => {
 test.describe('1024 × 768 with a request open', () => {
   test.use({ viewport: { width: 1024, height: 768 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
 
-  test('the narrowest main column (544 px) keeps every column but the name whole', async ({ page }) => {
+  test('the narrowest main column (532 px, in the inset card) keeps every column but the name whole', async ({ page }) => {
     const tag = nextTag();
     const [one] = await createRequests(page, 1, tag);
     await page.goto(`/?r=${one!.id}`);
@@ -487,7 +487,7 @@ test.describe('1024 × 768 with a request open', () => {
 test.describe('iPad portrait 820 × 1180 (touch)', () => {
   test.use({ viewport: { width: 820, height: 1180 }, isMobile: false, hasTouch: true, deviceScaleFactor: 1 });
 
-  test('the table under the icon rail with Post (desktop-new-tablet-3.png); a request is a sheet over it, its row selected', async ({ page }) => {
+  test('the table beside the collapsed sidebar with Post (desktop-new-tablet-3.png); a request is a sheet over it, its row selected', async ({ page }) => {
     const tag = nextTag();
     const [one] = await createRequests(page, 1, tag);
     await page.goto('/');
