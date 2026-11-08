@@ -522,6 +522,18 @@ async function navigation(event) {
     return res;
   });
   if (!key) return network;
+  // (network fix 2, 2026-11-08) The app page `/` with a stored copy: that copy at once (no data in it, the same
+  // response the offline and lie-fi path serves), the network refreshing it for the next open. An open no longer
+  // waits for the page's own round trip (up to NAV_TIMEOUT_MS on a stalled link) before any script runs. A deploy
+  // reaches the phone one open later, or through "Update ready". /signin stays network-first: its redirect for a
+  // signed-in phone matters.
+  if (key === '/') {
+    const stored = await (await caches.open(CACHE)).match(key);
+    if (stored) {
+      event.waitUntil(network.catch(() => undefined));
+      return stored;
+    }
+  }
   const timeout = new Promise((resolve) => setTimeout(() => resolve(null), NAV_TIMEOUT_MS));
   const first = await Promise.race([network.catch(() => null), timeout]);
   if (first) return first;
