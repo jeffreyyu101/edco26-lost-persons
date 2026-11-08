@@ -234,6 +234,20 @@ describe('a click no page opened yet (lp-take-open: the iPhone Home Screen app l
     expect((await stored())?.url).toBe(THREAD);
   });
 
+  it('an entry it cannot read back counts as not taken: the window is still navigated (as before)', async () => {
+    const meta = await caches.open(META);
+    meta.match = async () => {
+      throw new Error('storage evicted');
+    };
+    const refuses = win('tab-1', '/', { answers: false });
+    tabs.push(refuses);
+    await w.notificationClick({ url: `/?r=${ID}` });
+    expect(refuses.navigated).toEqual([`${ORIGIN}/?r=${ID}`]);
+    tabs.splice(0, tabs.length);
+    await w.notificationClick({ url: THREAD });
+    expect(w.opened).toContain(`${ORIGIN}${THREAD}`);
+  });
+
   it('lp-take-open answers it once, then null', async () => {
     expect(await take()).toEqual({ open: null });
     await w.notificationClick({ url: THREAD });
