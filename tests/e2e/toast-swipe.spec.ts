@@ -10,8 +10,9 @@ import { newSignedInContext, signedInAs } from './helpers/session';
 //   up / sideways  the toast follows the finger (and fades); past the threshold it goes, the other toast stays
 //   short / down   a short drag springs back and the toast stays; a drag down does nothing; a quick flick goes
 //   taps           a tap on View still opens the request; a swipe that began on View never does
-//   the page       a finger on a toast never scrolls the page (touchmoves cancelled; real touch: Chromium); a finger
-//                  anywhere else still scrolls it
+//   the page       a finger on a toast never scrolls the page (touch-action: none; its touchmoves cancelled once
+//                  it follows the finger, never inside the slop, which on iOS can cost a tap its click; real touch:
+//                  Chromium); a finger anywhere else still scrolls it
 //   mouse          a mouse drag never moves it (click and ✕ close it); reduced motion: the same, at once
 // The toasts are the sticky "<LP> · <name> located" alerts (View): synthetic requests (TEST-TS-…) logged by this
 // phone and answered In medical by another staff member, closed afterwards. Synthetic touch is pointer events plus
@@ -91,8 +92,9 @@ interface SwipeOptions {
   steps?: number;
   /** Held still this long before letting go (ms): no flick, the distance alone decides. */
   hold?: number;
-  /** Then a click on the element, as a browser may still send after a touch. */
-  click?: boolean;
+  /** Then a click on the element, as a browser may still send after a touch: at once, or this many ms later (on touch
+   *  it comes in a later task). */
+  click?: boolean | number;
 }
 
 interface SwipeResult {
@@ -149,7 +151,8 @@ async function swipe(el: Locator, dx: number, dy: number, { ms = 240, steps = 10
       const result = { cancelled, x: m.m41, y: m.m42, opacity: Number(getComputedStyle(toast).opacity) };
       node.dispatchEvent(pointer('pointerup', x0 + o.dx, y0 + o.dy));
       node.dispatchEvent(touch('touchend', x0 + o.dx, y0 + o.dy));
-      if (o.click) node.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, composed: true }));
+      if (typeof o.click === 'number') await sleep(o.click);
+      if (o.click !== false) node.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, composed: true }));
       return result;
     },
     { dx, dy, ms, steps, hold, click },
@@ -178,12 +181,19 @@ const transform = (el: Locator) =>
     return { x: m.m41, y: m.m42 };
   });
 const opened = (page: Page) => new URL(page.url()).searchParams.get('r');
+/** Every touchmove from the one where the toast began to follow the finger on was cancelled, none before it. */
+const cancelledOnceClaimed = (c: boolean[]) => {
+  const from = c.indexOf(true);
+  return from >= 0 && c.slice(0, from).every((x) => !x) && c.slice(from).every(Boolean);
+};
 
 test('swipe up: it follows the finger and fades, and past the threshold it goes; the other toast stays', async ({ page, browser }) => {
   const { toasts } = await openWithToasts(page, browser, 2);
   const [first, second] = toasts as [Locator, Locator];
   const up = await swipe(second, 0, -70, { hold: 150 });
-  expect(up.cancelled.every(Boolean), 'the page never scrolls under it').toBe(true);
+  // The first move (7 px) is inside the slop: left alone, so a tap that wobbles keeps its click on iOS.
+  expect(cancelledOnceClaimed(up.cancelled), 'cancelled once it follows the finger, never inside the slop').toBe(true);
+  expect(up.cancelled[0], 'the 7 px first move').toBe(false);
   expect(up.y).toBeLessThan(-40);
   expect(up.x).toBe(0);
   expect(up.opacity).toBeLessThan(1);
@@ -201,7 +211,7 @@ test('swipe sideways, right or left: it follows the finger and goes', async ({ p
   const { toasts } = await openWithToasts(page, browser, 2);
   const [first, second] = toasts as [Locator, Locator];
   const right = await swipe(first, 220, 6, { hold: 150 });
-  expect(right.cancelled.every(Boolean)).toBe(true);
+  expect(cancelledOnceClaimed(right.cancelled)).toBe(true);
   expect(right.x).toBeGreaterThan(180);
   expect(right.y).toBe(0);
   expect(right.opacity).toBeLessThan(1);
@@ -230,7 +240,9 @@ test('a short drag springs back and the toast stays; a drag down does nothing; a
 
   const down = await swipe(toast, 0, 120, { hold: 100 });
   expect(down).toMatchObject({ x: 0, y: 0, opacity: 1 });
-  expect(down.cancelled.every(Boolean), 'not the page’s either').toBe(true);
+  // Not claimed, so not cancelled: touch-action: none keeps the page still (real touch: the Chromium test below).
+  expect(down.cancelled.some(Boolean)).toBe(false);
+  expect(await toast.evaluate((el) => getComputedStyle(el).touchAction)).toBe('none');
   await expect(toast).toBeVisible();
 
   // A tap closes it, as before.
@@ -244,8 +256,12 @@ test('a tap on View still opens the request; a swipe that began on View never do
   const [first, second] = toasts as [Locator, Locator];
   const view = (t: Locator) => t.getByRole('button', { name: 'View' });
 
-  // Short, from View, and the click a browser could send after it: swallowed; the toast springs back.
+  // Short, from View, and the click a browser could send after it, at once or (touch) a moment later: swallowed; the
+  // toast springs back.
   await swipe(view(first), 0, -16, { hold: 150, click: true });
+  await expect(first).toBeVisible();
+  expect(opened(page)).toBeNull();
+  await swipe(view(first), 0, -16, { hold: 150, click: 250 });
   await expect(first).toBeVisible();
   expect(opened(page)).toBeNull();
   // Up and away from View: gone, nothing opened.
@@ -259,7 +275,7 @@ test('a tap on View still opens the request; a swipe that began on View never do
   await expect(second).toHaveCount(0);
 });
 
-test('a finger anywhere but a toast is the page’s: its touchmoves are never cancelled; on a toast they always are', async ({ page, browser }) => {
+test('a finger anywhere but a toast is the page’s: its touchmoves are never cancelled; on a toast, once it follows the finger', async ({ page, browser }) => {
   const { toasts } = await openWithToasts(page, browser, 1);
   const toast = toasts[0]!;
   const box = (await toast.boundingBox())!;
@@ -276,9 +292,13 @@ test('a finger anywhere but a toast is the page’s: its touchmoves are never ca
   );
   expect(outside, 'a touchmove away from the toast is left to the browser').toEqual({ inToast: false, passed: true });
   expect(await toast.evaluate((el) => getComputedStyle(el).touchAction)).toBe('none');
-  // On the toast, a drag down (which moves nothing) is not the page's either.
+  // On the toast, a drag down moves nothing and claims nothing (touch-action: none keeps the page still).
   const down = await swipe(toast, 0, 120, { hold: 60 });
-  expect(down.cancelled.every(Boolean)).toBe(true);
+  expect(down.cancelled.some(Boolean)).toBe(false);
+  await expect(toast).toBeVisible();
+  // A short drag up: the move inside the slop is left alone, the rest cancelled.
+  const short = await swipe(toast, 0, -24, { steps: 6, hold: 150 });
+  expect(cancelledOnceClaimed(short.cancelled)).toBe(true);
   await expect(toast).toBeVisible();
 });
 
@@ -308,6 +328,23 @@ test('real touch (Chromium): the page scrolls under a finger outside the toast, 
   await expect(toast).toHaveCount(0);
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
   expect(opened(page)).toBeNull();
+});
+
+test('real touch (Chromium): a tap on View that wobbles a little still opens it; a short swipe from View never does', async ({ page, browser, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Real touch input through DevTools is Chromium only.');
+  const { toasts, requests } = await openWithToasts(page, browser, 2);
+  const [first, second] = toasts as [Locator, Locator];
+  const view = (t: Locator) => t.getByRole('button', { name: 'View' });
+  // 11 px up from View: the toast follows, springs back, and the browser's later tap-click on View is swallowed.
+  const a = (await view(first).boundingBox())!;
+  await realTouch(page, a.x + a.width / 2, a.y + a.height / 2, 0, -11, { ms: 120, steps: 4, hold: 40 });
+  await page.waitForTimeout(400);
+  expect(opened(page), 'a swipe from View opened nothing').toBeNull();
+  await expect(first).toBeVisible();
+  // A tap that moves 3 px (inside the slop): View runs.
+  const b = (await view(second).boundingBox())!;
+  await realTouch(page, b.x + b.width / 2, b.y + b.height / 2, 3, 2, { ms: 60, steps: 2 });
+  await expect.poll(() => opened(page)).toBe(requests[1]!.id);
 });
 
 test('a mouse drag is not a swipe: it never moves the toast (a mouse press and release on it is a click; ✕ closes)', async ({ page, browser }) => {

@@ -4,7 +4,7 @@
 // wiring is end to end (tests/e2e/toast-swipe.spec.ts).
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DISMISS_FRACTION, DRAG_SLOP_PX, FLICK_PX_PER_MS, shouldDismiss, swallowClick, toastIntent, toastOffset, toastOpacity } from '@/lib/client/toast-swipe';
+import { DISMISS_FRACTION, DRAG_SLOP_PX, FLICK_PX_PER_MS, SWALLOW_MS, clickToClose, shouldDismiss, swallowClick, toastIntent, toastOffset, toastOpacity } from '@/lib/client/toast-swipe';
 
 describe('the thresholds', () => {
   it('a sheet’s slop and flick; 40 % of the toast’s height (up) or width (sideways)', () => {
@@ -118,17 +118,43 @@ describe('swallowClick', () => {
     expect(click(target)).toEqual({ prevented: true, stopped: true });
   });
 
-  it('only until this task ends: the next tap clicks as usual', () => {
+  it('a touch click comes in a later task: still swallowed a moment later, then only once', () => {
     vi.useFakeTimers();
     const target = new EventTarget();
-    const add = vi.spyOn(target, 'addEventListener');
-    const remove = vi.spyOn(target, 'removeEventListener');
     swallowClick(target);
+    vi.advanceTimersByTime(SWALLOW_MS - 100);
+    expect(click(target)).toEqual({ prevented: true, stopped: true });
+    // That was the swipe's click: the next one is a tap's.
+    expect(click(target)).toEqual({ prevented: false, stopped: false });
+  });
+
+  it('until the next pointerdown (the next tap clicks as usual) or SWALLOW_MS, whichever comes first', () => {
+    vi.useFakeTimers();
+    const target = new EventTarget();
+    swallowClick(target);
+    target.dispatchEvent(new Event('pointerdown'));
+    expect(click(target)).toEqual({ prevented: false, stopped: false });
+
+    const later = new EventTarget();
+    const add = vi.spyOn(later, 'addEventListener');
+    const remove = vi.spyOn(later, 'removeEventListener');
+    swallowClick(later);
     expect(add).toHaveBeenCalledWith('click', expect.any(Function), { capture: true });
     expect(remove).not.toHaveBeenCalled();
-    vi.runAllTimers();
+    vi.advanceTimersByTime(SWALLOW_MS);
     expect(remove).toHaveBeenCalledWith('click', add.mock.calls[0]![1], { capture: true });
-    expect(click(target)).toEqual({ prevented: false, stopped: false });
+    expect(click(later)).toEqual({ prevented: false, stopped: false });
+  });
+
+  it("the dismiss's own close (clickToClose) is never swallowed", () => {
+    vi.useFakeTimers();
+    const target = new EventTarget();
+    swallowClick(target);
+    let result: { prevented: boolean; stopped: boolean } | null = null;
+    clickToClose({ click: () => (result = click(target)) });
+    expect(result).toEqual({ prevented: false, stopped: false });
+    // The browser's click for the swipe is still swallowed after it.
+    expect(click(target)).toEqual({ prevented: true, stopped: true });
   });
 });
 

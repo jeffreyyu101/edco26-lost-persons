@@ -62,18 +62,44 @@ export function toastOpacity(offset: number, size: number): number {
   return size > 0 ? 1 - DRAG_FADE * Math.min(1, Math.abs(offset) / size) : 1;
 }
 
+/** How long after a swipe's release its click may still come (touch: a later task, iOS and Chromium alike). */
+export const SWALLOW_MS = 600;
+
+/** Set while this module closes a toast with its own tap-to-close (clickToClose): that click is never swallowed. */
+let ownClick = false;
+
+/** Closes a toast with its own tap-to-close, past any swallowClick still waiting. */
+export function clickToClose(toast: Pick<HTMLElement, 'click'>): void {
+  ownClick = true;
+  try {
+    toast.click();
+  } finally {
+    ownClick = false;
+  }
+}
+
 /**
  * Swallows the click the browser may still send for the pointer just let go (a swipe is not a tap: one that began
- * on View or ✕ runs neither). Captured on `target` (the window), until the end of this task.
+ * on View or ✕ runs neither, and one whose toast is gone never lands on what was under it). On touch that click
+ * comes in a later task, so it is captured on `target` (the window) until the next pointerdown (the next tap is
+ * a tap again) or SWALLOW_MS, whichever comes first.
  */
-export function swallowClick(target: EventTarget = window): void {
+export function swallowClick(target: EventTarget = window, ms: number = SWALLOW_MS): void {
+  // ({capture} rather than `true`: Node's EventTarget, under the unit tests, removes only that form.)
+  const done = () => {
+    clearTimeout(timer);
+    target.removeEventListener('click', swallow, { capture: true });
+    target.removeEventListener('pointerdown', done, { capture: true });
+  };
   const swallow = (event: Event) => {
+    if (ownClick) return;
     event.preventDefault();
     event.stopPropagation();
+    done();
   };
-  // ({capture} rather than `true`: Node's EventTarget, under the unit tests, removes only that form.)
   target.addEventListener('click', swallow, { capture: true });
-  setTimeout(() => target.removeEventListener('click', swallow, { capture: true }), 0);
+  target.addEventListener('pointerdown', done, { capture: true });
+  const timer = setTimeout(done, ms);
 }
 
 interface Gesture {
@@ -137,7 +163,7 @@ export function attachToastSwipe(toaster: HTMLElement): () => void {
   /** Slides it on out the way it went (not with reduced motion), then closes it with its own tap-to-close. */
   const dismiss = (toast: HTMLElement, axis: ToastAxis, offset: number) => {
     leaving.add(toast);
-    const close = () => toast.click();
+    const close = () => clickToClose(toast);
     if (reducedMotion()) return close();
     // Sideways: a screen's width on; up: until its bottom edge is past the top of the screen.
     const to = axis === 'x' ? offset + Math.sign(offset) * innerWidth : offset - toast.getBoundingClientRect().bottom - 8;
@@ -213,13 +239,15 @@ export function attachToastSwipe(toaster: HTMLElement): () => void {
     }
     if (e.type === 'pointerup' && shouldDismiss(offset, sizeOn(toast, axis), releaseVelocity(samples))) dismiss(toast, axis, offset);
     else settle(toast);
-    // (After a dismiss: with reduced motion, its own close is a click too.)
+    // (A dismiss's own close is a click too: clickToClose lets it through.)
     swallowClick();
   };
 
   const touchMove = (e: TouchEvent) => {
-    // Only a toast takes touches in the toaster (pointer-events: none around them).
-    if (e.cancelable) e.preventDefault();
+    // Only once the toast follows the finger (pointermove comes first, so the claim is in): a touchmove cancelled
+    // inside the slop can cost a tap its click on iOS. The page never scrolls under a toast anyway (touch-action:
+    // none on .toast; only a toast takes touches in the toaster, pointer-events: none around them).
+    if (g?.axis && e.cancelable) e.preventDefault();
   };
 
   toaster.addEventListener('pointerdown', down);
