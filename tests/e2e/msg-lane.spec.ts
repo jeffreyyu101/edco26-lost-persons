@@ -9,9 +9,14 @@ import { newSignedInContext, signedInAs } from './helpers/session';
 //   phone (iPhone 14, 390 px)  the # column is gone; a fixed lane leads every row: the blue bubble with the unread
 //                              count, the grey outline once read, nothing without messages; the names never move; a
 //                              tap in the lane (a 52 px wide, full-height area) opens the request at its Messages, a
-//                              tap on the name at its top; the row's sentence ends with the lane's words
+//                              tap on the name at its top, in All and in search; the row's sentence ends with the
+//                              lane's words
 //   desk (1440 × 900)          the same lane leads the table before #; no count pill after the name; a click in the
-//                              lane lands at the thread; docked, # goes; the nav's Pending carries the filled bubble
+//                              lane lands at the thread; docked under 1320 px, # goes; the nav's Pending carries the
+//                              filled bubble (blue-9 in dark mode)
+//   landing                    every jump lands as mockup frame 5, by every route and in both engines: the Messages
+//                              heading under the top bar (or the page's end), the composer whole above the action bar
+//                              or inside the pane (expectLanded), a 5-message thread included
 // Synthetic rows only (TEST-ML-…), closed again afterwards.
 
 const BASE = testBaseUrl();
@@ -111,10 +116,66 @@ const profile = (page: Page) => page.getByTestId('profile');
 const title = (page: Page) => profile(page).locator('h1');
 const threadHead = (page: Page) => page.getByTestId('messages').getByRole('heading', { name: 'Messages', exact: true });
 
-/** The request open at its Messages: the heading on screen, the request's name scrolled past. */
+/**
+ * Where a jump left the request, against the scroller it lives in (the page, or the desk pane's body): `head` is the
+ * Messages section's distance from its landing (0: right under the phone's top bar, 4 px into the pane; its
+ * scroll-margin-top), `atEnd` that nothing is left to scroll, `fieldTop` / `fieldRoom` the composer's field from that
+ * landing line and from the visible bottom (the phone's action bar while it is stuck to the foot of the screen, else
+ * the pane's edge), `sectionRoom` the same for the section's end.
+ */
+function landing(page: Page) {
+  return page.evaluate(() => {
+    const section = document.querySelector<HTMLElement>('[data-testid="messages"]')!;
+    const field = section.querySelector<HTMLElement>('[data-testid="composer-input"]')!;
+    let box: HTMLElement | null = section.parentElement;
+    for (; box && box !== document.body; box = box.parentElement) {
+      const overflow = getComputedStyle(box).overflowY;
+      if (overflow === 'auto' || overflow === 'scroll') break;
+    }
+    const inBox = !!box && box !== document.body;
+    const frame = inBox ? box!.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+    const scrollTop = inBox ? box!.scrollTop : window.scrollY;
+    const max = inBox ? box!.scrollHeight - box!.clientHeight : document.documentElement.scrollHeight - window.innerHeight;
+    const margin = parseFloat(getComputedStyle(section).scrollMarginTop) || 0;
+    const bar = (inBox ? box! : document).querySelector<HTMLElement>('[data-testid="profile-actions"]');
+    const visibleBottom = Math.min(frame.bottom, bar && getComputedStyle(bar).position === 'sticky' ? bar.getBoundingClientRect().top : frame.bottom);
+    const s = section.getBoundingClientRect();
+    const f = field.getBoundingClientRect();
+    return {
+      head: Math.round(s.top - frame.top - margin),
+      atEnd: scrollTop >= max - 2,
+      fieldTop: Math.round(f.top - frame.top - margin),
+      fieldRoom: Math.round(visibleBottom - f.bottom),
+      sectionRoom: Math.round(visibleBottom - s.bottom),
+    };
+  });
+}
+
+/**
+ * Landed as mockup frame 5 (msg-indicator-5.png), the same in every engine and by every route: the composer's field
+ * whole, between the top bar and the action bar (or inside the pane); the Messages heading not short of its landing
+ * unless the page ends first, and not past it unless the screen is too short for the whole section (then just far
+ * enough for the composer to clear the action bar). Held: still there a moment later.
+ */
+async function expectLanded(page: Page): Promise<void> {
+  const check = async () => {
+    const at = await landing(page);
+    const said = JSON.stringify(at);
+    expect(at.fieldTop, `composer under the top bar: ${said}`).toBeGreaterThanOrEqual(0);
+    expect(at.fieldRoom, `composer above the action bar / inside the pane: ${said}`).toBeGreaterThanOrEqual(0);
+    if (!at.atEnd) expect(at.head, `stopped short of Messages: ${said}`).toBeLessThanOrEqual(2);
+    if (at.head < -2) expect(at.sectionRoom, `scrolled past Messages: ${said}`).toBeLessThanOrEqual(12);
+  };
+  await expect(check).toPass(SYNC);
+  await page.waitForTimeout(700);
+  await check();
+}
+
+/** The request open at its Messages: the heading on screen, the request's name scrolled past, landed (expectLanded). */
 async function expectAtThread(page: Page): Promise<void> {
   await expect(threadHead(page)).toBeInViewport(SYNC);
   await expect(title(page)).not.toBeInViewport();
+  await expectLanded(page);
   // Regression (the lane's unread mark once reused the chat's .bubble class, which turned every message into a
   // 17 px blue tab): the thread's bubbles keep their own shape.
   const bubble = page.getByTestId('messages').locator('[data-testid="bubble-them"], [data-testid="bubble-mine"]').first();
@@ -251,12 +312,85 @@ test.describe('phone 390 × 844', () => {
     await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(unread.id);
     await expectAtTop(page);
   });
+
+  test('search: the same row and the same tap; the lane covers a two-line result; a tap on the name opens the top', async ({ page, browser }) => {
+    test.slow();
+    const { unread } = await seed(page, browser);
+    const result = page.locator(`[data-request-id="${unread.id}"]`);
+    // By name (one line), then by number (the LP number on a second line): the lane's area is the row's full height.
+    for (const q of [unread.name, String(unread.caseNumber)]) {
+      await page.goto(`/?q=${encodeURIComponent(q)}`);
+      await expect.poll(() => markOf(result), SYNC).toBe('unread 2');
+      for (const [x, y] of [[2, 2], [2, -2], [50, 2], [50, -2], [24, 24]] as const) expect(await landsInLane(result, x, y), `${q} ${x},${y}`).toBe(true);
+      expect(await landsInLane(result, 56, 12), q).toBe(false);
+    }
+    await expect(result.locator('[data-col="match"]')).toHaveText(`LP-${String(unread.caseNumber).padStart(4, '0')}`);
+    expect((await result.boundingBox())!.height).toBeGreaterThan(48);
+
+    // A tap in the lane on the second line: at Messages.
+    await result.click({ position: { x: 6, y: (await result.boundingBox())!.height - 6 } });
+    await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(unread.id);
+    await expectAtThread(page);
+
+    // The name search's row, tapped in the lane's padding as in All: at Messages; on the name: at the top. (Opening
+    // the thread read it: the grey outline, whose lane lands at Messages too.)
+    await page.goto(`/?q=${encodeURIComponent(unread.name)}`);
+    await expect.poll(() => markOf(result), SYNC).toBe('read');
+    await result.click({ position: { x: 6, y: 24 } });
+    await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(unread.id);
+    await expectAtThread(page);
+    await page.goBack();
+    await expect(result).toBeVisible(SYNC);
+    await result.locator('[data-col="name"]').click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(unread.id);
+    await expectAtTop(page);
+  });
+
+  test('a long thread lands the same by every route: the lane, Pending\'s Message button, a notification link', async ({ page, browser }) => {
+    test.slow();
+    const long = await createLongThread(page, browser);
+    const row = page.locator(`[data-testid="request-list"] [data-request-id="${long.id}"]`);
+
+    await page.goto('/');
+    await expect.poll(() => lane(row).getAttribute('data-mark'), SYNC).toBe('unread');
+    await row.click({ position: { x: 6, y: 24 } });
+    await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(long.id);
+    await expectAtThread(page);
+    expect(await page.getByTestId('messages').locator('[data-testid="bubble-them"], [data-testid="bubble-mine"]').count()).toBe(5);
+
+    await page.goto('/?view=pending');
+    const card = page.locator(`[data-testid="check-card"]:has([data-request-id="${long.id}"])`);
+    await expect(card).toBeVisible(SYNC);
+    await card.getByTestId('message-button').click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(long.id);
+    await expectAtThread(page);
+
+    // Cold: a message's notification opens "/?r=<id>&to=thread" in a fresh page.
+    await page.goto(`/?r=${long.id}&to=thread`);
+    await expectAtThread(page);
+  });
 });
+
+/**
+ * A request whose thread is longer than its box: 5 messages, 3 from medical and 2 of mine, as mockup frame 5's
+ * longer cousin (the probe that found the jump landing short used this shape).
+ */
+async function createLongThread(page: Page, browser: Browser): Promise<RequestSummary> {
+  const long = await createRequest(page.request);
+  await withMedical(browser, async (med) => {
+    await say(med, long.id, 'Checking the tents now');
+    await say(page.request, long.id, 'Friend is still here at FA 3');
+    await say(med, long.id, 'Any tattoos or marks?');
+    await say(page.request, long.id, 'Small star tattoo on her left wrist, blue braids');
+    await say(med, long.id, 'Thanks. One more check of the back row and I will update you here');
+  });
+  return long;
+}
 
 test.describe('desk 1440 × 900', () => {
   test.use({ viewport: { width: 1440, height: 900 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
 
-  test('the lane leads the table before #; no pill after the name; a click in it lands at the thread; docked, # goes', async ({ page, browser }) => {
+  test('the lane leads the table before #; no pill after the name; a click in it lands at the thread; docked under 1320, # goes', async ({ page, browser }) => {
     test.slow();
     const { unread, read, none } = await seed(page, browser);
     await page.goto('/');
@@ -296,14 +430,14 @@ test.describe('desk 1440 × 900', () => {
     const [r, , b] = (await navMark.evaluate((el) => getComputedStyle(el).color)).match(/\d+/g)!.map(Number);
     expect(b! - r!, 'blue, not the nav grey').toBeGreaterThan(80);
 
-    // A click on the name: the request docks beside the table at its top. Docked, # goes (the pane's top bar
-    // carries the LP number); the lane stays.
+    // A click on the name: the request docks beside the table at its top. Docked at 1440, # stays (the spec drops it
+    // at 1024–1279 only; the lane's docked rule drops it under 1320); the lane stays.
     await row(read).locator('[data-col="friend"]').click();
     await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(read.id);
     await expect(page.getByTestId('desk-pane')).toBeVisible();
     await expectAtTop(page);
-    await expect(main.getByTestId('desk-table-columns').locator('[data-col="number"]')).toBeHidden();
-    await expect(row(unread).locator('[data-col="number"]')).toBeHidden();
+    await expect(main.getByTestId('desk-table-columns').locator('[data-col="number"]')).toHaveText('#');
+    await expect(row(unread).locator('[data-col="number"]')).toHaveText(String(unread.caseNumber));
     await expect(lane(row(unread))).toBeVisible();
     const docked = await lane(row(unread)).evaluate((el) => parseFloat(getComputedStyle(el, '::before').width));
     expect(docked).toBeCloseTo(61, 0);
@@ -327,19 +461,26 @@ test.describe('desk 1440 × 900', () => {
     await expectAtThread(page);
     await expect(page.getByTestId('messages').getByTestId('composer-input')).toBeFocused(SYNC);
 
-    // A search by the number: undocked, # highlights it (nothing under the name); docked, # is gone and the LP
-    // number shows highlighted under the name instead.
+    // A search by the number: undocked, # highlights it (nothing under the name), and the row's sentence ends with
+    // the lane's words after one full stop (read by now); docked at 1440 the same; docked at 1240, # is gone and the
+    // LP number shows highlighted under the name instead.
     await page.goto(`/?q=${unread.caseNumber}`);
     const num = String(unread.caseNumber);
     await expect(row(unread).locator('[data-col="number"] mark')).toHaveText(num, SYNC);
     await expect(row(unread).locator('[data-col="friend"] mark')).toBeHidden();
+    await expect(row(unread)).toHaveAccessibleName(/[^.]\. 2 messages\.$/);
     await row(unread).locator('[data-col="friend"]').click();
     await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(unread.id);
     await expect(page.getByTestId('desk-pane')).toBeVisible();
+    await expect(row(unread).locator('[data-col="number"] mark')).toHaveText(num);
+    await expect(row(unread).locator('[data-col="friend"] mark')).toBeHidden();
+    await page.setViewportSize({ width: 1240, height: 900 });
+    await expect(main.getByTestId('desk-table-columns').locator('[data-col="number"]')).toBeHidden();
     await expect(row(unread).locator('[data-col="number"]')).toBeHidden();
     await expect(row(unread).locator('[data-col="friend"] mark')).toBeVisible();
     await expect(row(unread).locator('[data-col="friend"] mark')).toHaveText(num);
     await expect(row(unread).locator('[data-col="friend"]')).toContainText(`LP-${num.padStart(4, '0')}`);
+    await page.setViewportSize({ width: 1440, height: 900 });
 
     // The nav's Pending as the current page, in light mode: still the badge blue, not the current item's grey.
     await page.goto('/?view=pending');
@@ -348,5 +489,35 @@ test.describe('desk 1440 × 900', () => {
     await expect(navMark).toBeVisible(SYNC);
     const [pr, , pb] = (await navMark.evaluate((el) => getComputedStyle(el).color)).match(/\d+/g)!.map(Number);
     expect(pb! - pr!, 'blue on the current Pending, not its grey').toBeGreaterThan(80);
+
+    // In dark mode the mark is blue-9, not the bubble's blue-8: blue-8 is 2.6:1 on the current item's grey (a graphic
+    // needs 3:1); blue-9 is 4.0:1. The lane's bubble keeps blue-8 (white numerals inside).
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.reload();
+    await expect(page.locator('html')).toHaveClass(/\bdark\b/);
+    await expect(navMark).toBeVisible(SYNC);
+    const token = (name: string) =>
+      page.evaluate((t) => {
+        const probe = document.body.appendChild(document.createElement('span'));
+        probe.style.color = `var(${t})`;
+        const color = getComputedStyle(probe).color;
+        probe.remove();
+        return color;
+      }, name);
+    expect(await navMark.evaluate((el) => getComputedStyle(el).color)).toBe(await token('--blue-9'));
+  });
+
+  test('a long thread: a click in the lane lands with the heading at the pane\'s top and the composer whole', async ({ page, browser }) => {
+    test.slow();
+    const long = await createLongThread(page, browser);
+    await page.goto('/');
+    const row = page.locator(`[data-desk-main] [data-request-id="${long.id}"]`);
+    await expect.poll(() => lane(row).getAttribute('data-mark'), SYNC).toBe('unread');
+    await lane(row).click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(long.id);
+    await expectAtThread(page);
+    await expect(page.getByTestId('messages').getByTestId('composer-input')).toBeFocused(SYNC);
+    // Only the pane scrolled: the page (and the list beside the pane) kept its place.
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
   });
 });

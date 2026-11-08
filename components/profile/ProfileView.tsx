@@ -364,6 +364,8 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
       <div
         className={panel ? s.acts : s.foot}
         data-layout={footer.length === 1 ? 'one' : panel ? 'two' : isInMedical(row.status) ? 'one-two' : 'two'}
+        // (R2) The phone's bar covers the foot of the screen: a jump to the thread keeps the composer above it.
+        data-sticky-foot={panel ? undefined : ''}
         data-testid="profile-actions"
       >
         {offline ? (

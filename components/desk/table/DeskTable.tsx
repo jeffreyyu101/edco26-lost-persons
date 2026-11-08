@@ -19,7 +19,7 @@
 // (Message lane, design/screens/msg-indicator.html, Brian 2026-11-07) The phone log's message lane leads every row,
 // before #: the blue bubble with the unread count, the grey outline once read, nothing without messages. It
 // replaces the count pill after the name. A click in the lane lands at the thread (openRowAt). With a request
-// docked beside the table the # column goes: the pane's top bar carries the LP number.
+// docked beside the table under 1320 px the # column goes: the pane's top bar carries the LP number.
 import { Skeleton } from '@radix-ui/themes';
 import { ArrowDown, ArrowUpDown, ChevronDown, ChevronRight, CircleAlert } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
@@ -369,7 +369,8 @@ export const SearchRow = memo(function SearchRow({ hit, times, selected, stage, 
   const closed = isClosed(row.status);
   const look = stage ?? stageLook(row, now);
   const friend = friendCell(row);
-  // A number hit: docked, # goes, so the LP number shows highlighted under the name (as on the phone's SearchLogRow).
+  // A number hit: docked under 1320 px, # goes, so the LP number shows highlighted under the name (as on the phone's
+  // SearchLogRow).
   const numHit = !line && caseRanges.length > 0;
   return (
     <button

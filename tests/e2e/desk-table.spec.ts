@@ -11,8 +11,8 @@ import { syncRows } from './helpers/sync';
 // The desk request table (components/desk/table; design/screens/desktop-log.html): from 768 px, All
 // requests, My requests and Search are a table in the shell's main column. Columns (message lane) · # · Friend · Status ·
 // Created · Updated, plus Post whenever no request is docked beside the table and Logged by too on a table
-// 1040 px or wider (the table's own width decides, not the window's), and no # while a request is docked (the
-// pane's top bar carries the LP number; design/screens/msg-indicator.html); open rows first and the
+// 1040 px or wider (the table's own width decides, not the window's), and no # while a request is docked under
+// 1320 px (the pane's top bar carries the LP number; design/screens/msg-indicator.html); open rows first and the
 // Archived fold as on F1's phone log; unsent rows on top; the dashboard's filters and their chips; search
 // highlighting; the selected row; the skeleton, offline, error and empty states. Under 768 px the phone list
 // is unchanged. Synthetic rows only (TEST-table-e2e-…), closed afterwards.
@@ -24,8 +24,10 @@ const STAFF_SHORT = 'TEST-table D. · Dispatch';
 const TAG = `TEST-table-e2e-${Date.now().toString(36)}`;
 const ALL_COLUMNS = ['#', 'Friend', 'Status', 'Post', 'Created', 'Updated', 'Logged by'];
 const SIX_COLUMNS = ['#', 'Friend', 'Status', 'Post', 'Created', 'Updated'];
-/** A request docked beside the table: the message lane (unlabeled), Friend, Status, Created, Updated; no # (the pane's top bar carries the LP number). */
+/** A request docked beside the table under 1320 px: the message lane (unlabeled), Friend, Status, Created, Updated; no # (the pane's top bar carries the LP number). */
 const FIVE_COLUMNS = ['Friend', 'Status', 'Created', 'Updated'];
+/** Docked from 1320 px: # is back. */
+const DOCKED_WIDE = ['#', 'Friend', 'Status', 'Created', 'Updated'];
 const NOT_IN_MEDICAL = 'Checked – Not Found';
 const TZ = (loadTestEnv() as Record<string, string | undefined>)['EVENT_TIMEZONE'] || 'America/New_York';
 
@@ -197,11 +199,12 @@ test.describe('desktop 1440 × 900', () => {
     await fold(page).click();
     await expect(row(page, closed.id)).toHaveCount(0);
 
-    // A request open: it docks, the table drops Post and Logged by, and its row is the selected one.
+    // A request open: it docks, the table drops Post and Logged by (# stays at 1440), and its row is the selected one.
     await row(page, b!.id).click();
     await expect.poll(() => paramOf(page, 'r')).toBe(b!.id);
     await expect(page.getByTestId('desk-pane')).toBeVisible();
-    await expect.poll(() => shownColumns(page)).toEqual(FIVE_COLUMNS);
+    await expect.poll(() => shownColumns(page)).toEqual(DOCKED_WIDE);
+    for (const col of ['number', 'status', 'created', 'updated']) expect(await notCut(page, b!.id, col), col).toBe(true);
     await expect(row(page, b!.id)).toHaveAttribute('aria-current', 'true');
     await expect(row(page, b!.id)).toHaveAttribute('data-selected', '');
     await columnsLineUp(page, b!.id);
@@ -522,7 +525,7 @@ test.describe('the narrowest desk, 768 × 1024 (touch)', () => {
 test.describe('an earlier day\'s time in the narrow layouts', () => {
   test.use({ viewport: { width: 768, height: 1024 }, isMobile: false, hasTouch: true, deviceScaleFactor: 2 });
 
-  test('"Mon 12:58 AM" (the widest) stays whole at 768 and 820, and docked at 1024 and 1279; so do the other columns', async ({ page }) => {
+  test('"Mon 12:58 AM" (the widest) stays whole at 768 and 820, and docked at 1024, 1279 and 1320 (# back); so do the other columns', async ({ page }) => {
     const tag = nextTag();
     const [one] = await createRequests(page, 1, tag);
     const earlier = widestEarlierDay(TZ);
@@ -534,6 +537,9 @@ test.describe('an earlier day\'s time in the narrow layouts', () => {
       { width: 820, height: 1180, url: '/', columns: SIX_COLUMNS },
       { width: 1024, height: 768, url: `/?r=${one!.id}`, columns: FIVE_COLUMNS },
       { width: 1279, height: 800, url: `/?r=${one!.id}`, columns: FIVE_COLUMNS },
+      // The narrowest docked window with # (the message lane's docked rule, table.module.css): nothing cut.
+      { width: 1319, height: 800, url: `/?r=${one!.id}`, columns: FIVE_COLUMNS },
+      { width: 1320, height: 800, url: `/?r=${one!.id}`, columns: DOCKED_WIDE },
     ];
     for (const step of steps) {
       await page.setViewportSize({ width: step.width, height: step.height });

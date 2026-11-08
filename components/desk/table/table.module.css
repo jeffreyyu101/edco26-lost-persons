@@ -8,16 +8,19 @@
    (from 1024 px) always leaves five, as the mockup's .withPanel:
      nothing docked, under 1040 px    ◻  #  Friend  Status  Post  Created  Updated            (iPad portrait, 1024)
      nothing docked, 1040 px and up   ◻  #  Friend  Status  Post  Created  Updated  Logged by (1180 and wider)
-     a request docked                 ◻  Friend  Status  Created  Updated                    (tighter at 1024–1279)
+     a request docked, 1024–1319 px   ◻  Friend  Status  Created  Updated                    (tighter at 1024–1279)
+     a request docked, 1320 px and up ◻  #  Friend  Status  Created  Updated
    ◻ is the message lane (design/screens/msg-indicator.html, Brian 2026-11-07): 31 px, no header, the phone log's
-   mark. Docked, the # column goes (the pane's top bar carries the LP number); at 1280–1299 it would not fit
-   beside the lane in the 596 px main column anyway.
+   mark. Docked under 1320 px the # column goes (the pane's top bar carries the LP number): the spec drops it at
+   1024–1279, and at 1280–1319 the five columns with # (615 px at least: 31 + 48 + 96 + 184 + 96 + 56, 5 × 12 gaps,
+   44 padding) do not fit the 596–615 px main column with room for a 17 px classic scrollbar. From 1320 # is back
+   (the main column is 636 px or more; 756 at 1440, where the Friend column keeps about 189 px).
    At 768–1023 a request is a sheet over the table, not docked: the table keeps its columns behind it.
    (F5) With a request docked the Status column is minmax(184px, 232px) (176 px at least at 1024–1279, where
    F2's 96 px Created column leaves 8 px less): it takes its full width before the Friend column (kept at 96 px
-   or more) gets anything, so it is whole from about 1065 px (1024–1279) and from about 1285 px (1280+; the
-   message lane in place of # gives it 13 and 17 px more); only on the narrower windows does what follows the
-   label take its short form (.stxWide / .stxNarrow).
+   or more) gets anything, so it is whole from about 1065 px (1024–1279), from about 1285 px (1280–1319; the
+   message lane in place of # gives it 13 and 17 px more) and from about 1347 px (1320 and up, # back); only on the
+   narrower windows does what follows the label take its short form (.stxWide / .stxNarrow).
    The frame marks an open request with [data-pane] (components/desk/DeskFrame.tsx). */
 
 .root {
@@ -69,12 +72,18 @@
     --tbl-cols: 31px minmax(96px, 1fr) minmax(184px, 232px) 96px 56px;
     --tbl-gap: 12px;
   }
-  [data-pane] .cNum,
   [data-pane] .cPost,
   [data-pane] .cBy {
     display: none;
   }
-  /* A search that matched the number: with # gone, the LP number shows highlighted under the name. */
+}
+
+/* Docked under 1320 px: no # column. A search that matched the number shows the LP number, highlighted, under the
+   name instead. */
+@media (min-width: 1024px) and (max-width: 1319.98px) {
+  [data-pane] .cNum {
+    display: none;
+  }
   [data-pane] .numLine {
     display: block;
   }
@@ -82,6 +91,13 @@
     min-height: 56px;
     padding-top: 7px;
     padding-bottom: 7px;
+  }
+}
+
+/* Docked from 1320 px: # is back, 48 px, as before the lane. */
+@media (min-width: 1320px) {
+  [data-pane] .table {
+    --tbl-cols: 31px 48px minmax(96px, 1fr) minmax(184px, 232px) 96px 56px;
   }
 }
 
