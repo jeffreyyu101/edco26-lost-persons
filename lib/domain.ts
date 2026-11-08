@@ -652,7 +652,16 @@ export function joinName(firstName: string | null | undefined, lastName: string 
 }
 
 /**
- * Initials for alerts and toasts (v2.1 A4): the first letters of the first and last word, uppercased,
+ * The request's name as alerts, toasts, Activity rows and notifications show it (Brian 2026-11-07: "the
+ * notification should just show the full value of what's in the name", replacing v2.1 A4's initials): the
+ * whole name as entered, whitespace collapsed. Empty → "".
+ */
+export function alertName(name: string | null | undefined): string {
+  return (name ?? '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Initials (v2.1 A4, no longer used by alerts: alertName): the first letters of the first and last word, uppercased,
  * with periods. Periods count as word breaks, so "T.R." stays "T.R.". A single word keeps its first two
  * letters, uppercased ("Dana" → "DA"). Empty → "".
  */

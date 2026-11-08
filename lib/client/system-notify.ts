@@ -20,9 +20,9 @@
 //     replaces the earlier one, and
 //     the store closes one whose alert is out of date (alerts.ts alertStillCurrent). 3+ at once are one
 //     notification ("3 new requests"), like the toast.
-//   * Content: the initials and the status, or "New request"; the post. Never a request id (LP-####, F4:
+//   * Content: the request's full name and the status, or "New request"; the post. Never a request id (LP-####, F4:
 //     like the Web Push), a phone number or any other contact detail: it lands on the lock screen and in
-//     the notification centre. (F5) A request going on hold reads as contract B and recheck-6.png: "K.T." /
+//     the notification centre. (F5) A request going on hold reads as contract B and recheck-6.png: "Kai Tran" /
 //     "Not found yet · recheck 4:40 PM" (the alert's own words, alerts.ts holdAlert).
 //   * Click: public/sw.js focuses an app window and posts {type: 'lp-open', url}; this page opens that view
 //     in place (no reload, so an open form or sheet is not lost) and answers {ok}. A message's opens the
@@ -33,7 +33,7 @@
 // browserEnv), and the avatar menu and the sheets import it from their own view chunks.
 import { useSyncExternalStore } from 'react';
 import type { RequestSummary } from '../api-types';
-import { initials, isHeld, statusMeta } from '../domain';
+import { alertName, isHeld, statusMeta } from '../domain';
 import { LOCATED_SUBTITLE, alertKey } from './alerts';
 import { hrefFor, navigate, parseView, viewToParams } from './nav';
 import type { AlertEvent } from './store-contract';
@@ -150,9 +150,9 @@ export interface SystemNotice {
   requireInteraction: boolean;
 }
 
-/** "S.L. · FA 3": initials and the post, never contact details. */
+/** "Sam Lee · FA 3": the name and the post, never contact details. */
 function who(row: RequestSummary): string {
-  return [initials(row.name), row.postShort].filter(Boolean).join(' · ');
+  return [alertName(row.name), row.postShort].filter(Boolean).join(' · ');
 }
 
 /**
@@ -166,10 +166,10 @@ export function systemNotice(
 ): SystemNotice {
   if (alert.kind === 'combined' || !alert.requestId) {
     const allNew = sources.length > 0 && sources.every((a) => a.kind === 'new_request');
-    // The requests' initials, never their LP numbers (F4: no request ids in notifications).
+    // The requests' names, never their LP numbers (F4: no request ids in notifications).
     const names = sources.flatMap((a) => {
       const row = a.requestId ? rowOf(a.requestId) : undefined;
-      return row ? [initials(row.name) || NO_NAME] : [];
+      return row ? [alertName(row.name) || NO_NAME] : [];
     });
     const listed = names.length > MAX_LISTED ? [...names.slice(0, MAX_LISTED), `+${names.length - MAX_LISTED}`] : names;
     return {
@@ -188,12 +188,12 @@ export function systemNotice(
   const requireInteraction = alert.kind === 'in_medical';
   const tag = requestTag(id);
   if (!row) return { title: alert.kind === 'new_request' ? 'New request' : alert.title, body: '', tag, url, key: null, requireInteraction };
-  // (F5) A request on hold: the hold alert's own words, initials and "Not found yet · recheck 4:40 PM" (no LP).
+  // (F5) A request on hold: the hold alert's own words, the name and "Not found yet · recheck 4:40 PM" (no LP).
   if (alert.kind === 'status_changed' && isHeld(row)) {
     return { title: alert.title, body: alert.subtitle ?? '', tag, url, key: alertKey(row), requireInteraction };
   }
-  // F4: no LP number (the Web Push for the same request reads the same way: initials, then the news).
-  const name = initials(row.name) || NO_NAME;
+  // F4: no LP number (the Web Push for the same request reads the same way: the name, then the news).
+  const name = alertName(row.name) || NO_NAME;
   const title = alert.kind === 'new_request' ? 'New request' : `${name} · ${statusMeta(row.status).shortLabel}`;
   const where = alert.kind === 'new_request' ? who(row) : row.postShort;
   const body = alert.kind === 'in_medical' ? [where, LOCATED_SUBTITLE].filter(Boolean).join('\n') : where;

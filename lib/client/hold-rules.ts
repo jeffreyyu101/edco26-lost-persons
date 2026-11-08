@@ -18,7 +18,7 @@ export interface HoldDomain {
   STATUS_META: typeof Domain.STATUS_META;
   NOT_FOUND_YET_LABEL: typeof Domain.NOT_FOUND_YET_LABEL;
   RECHECK_MINUTES: typeof Domain.RECHECK_MINUTES;
-  initials: typeof Domain.initials;
+  alertName: typeof Domain.alertName;
   isHeld: typeof Domain.isHeld;
   notFoundHolds: typeof Domain.notFoundHolds;
   formatCaseNumber: typeof Format.formatCaseNumber;
@@ -81,7 +81,7 @@ export function holdRules(d: HoldDomain) {
       };
     }
     if (row.status !== STATUS.notInMedical) return null;
-    const who = d.initials(row.name) || d.formatCaseNumber(row.caseNumber);
+    const who = d.alertName(row.name) || d.formatCaseNumber(row.caseNumber);
     const closed = d.STATUS_META[STATUS.notInMedical].label.toLowerCase();
     return { message: `${who} closed · ${closed}`, said: `${who} closed, ${closed}.` };
   }
