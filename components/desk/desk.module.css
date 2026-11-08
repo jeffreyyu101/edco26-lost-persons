@@ -279,6 +279,54 @@
   filter: brightness(0) invert(1);
 }
 
+/* Easter egg: hovering the lockup with a mouse runs a rainbow left to right through the white EDC Orlando
+   logo. The layer sits exactly on the logo and is masked by the logo's own alpha, so only the white part
+   changes; Ground Control and the card stay as they are. Mouse / trackpad only (never touch screens); a still
+   rainbow under reduced motion. */
+.lockEdcWrap {
+  position: relative;
+  display: block;
+  flex: none;
+  line-height: 0;
+}
+.lockRainbow {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, #ff3cac, #ff8a3d, #ffe14d, #4dffa6, #2bd9fe, #6a7bff, #c86bff, #ff3cac);
+  background-size: 200% 100%;
+  -webkit-mask: url('/logos/edc-orlando.png') center / contain no-repeat;
+  mask: url('/logos/edc-orlando.png') center / contain no-repeat;
+  transition: opacity 0.25s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .lockup:hover .lockRainbow {
+    opacity: 1;
+    animation: edcRainbow 2.4s linear infinite;
+  }
+  .lockup:hover .lockEdcWrap {
+    filter: drop-shadow(0 0 6px rgb(255 120 220 / 0.35));
+  }
+}
+/* background-position 200% → 0 moves the 2×-wide gradient to the right: the colours run left to right. */
+@keyframes edcRainbow {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lockRainbow {
+    transition: none;
+  }
+  .lockup:hover .lockRainbow {
+    animation: none;
+  }
+}
+
 .lockDiv {
   flex: none;
   width: 1px;

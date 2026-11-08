@@ -127,6 +127,9 @@ describe('DeskNav', () => {
     const lockup = html.slice(html.indexOf('data-testid="desk-live"'));
     expect(lockup.indexOf('src="/logos/edc-orlando.png"')).toBeGreaterThan(0);
     expect(lockup.indexOf('src="/logos/ground-control.png"')).toBeGreaterThan(lockup.indexOf('edc-orlando.png'));
+    // The hover rainbow sits on the EDC Orlando logo only, hidden from screen readers.
+    expect(lockup).toMatch(/src="\/logos\/edc-orlando.png"[^>]*\/?><span[^>]*aria-hidden="true"[^>]*data-testid="desk-live-rainbow"/);
+    expect(lockup.indexOf('desk-live-rainbow')).toBeLessThan(lockup.indexOf('ground-control.png'));
     expect(html.indexOf('data-testid="desk-live"')).toBeLessThan(html.indexOf('href="/"'));
     expect(sidebar).not.toContain('Is my friend in medical?');
     expect(sidebar).toContain(`All requests ${counts.all}`);
