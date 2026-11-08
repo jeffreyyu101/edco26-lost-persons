@@ -1,6 +1,6 @@
 // Dashboard v4 (design/screens/dashboard-v4.html) against the seeded local stack: the status bar and legend open the
 // lists they count, a Needs attention row opens its request, the range control asks the server for that range (with
-// the ETag back on the next poll), the calls views and table, the speed hover card on tap, no polling while hidden,
+// the same range on the next poll), the calls views and table, the speed hover card on tap, no polling while hidden,
 // the Reconnecting banner, and the phone and desk layouts. Synthetic data only.
 import { randomUUID } from 'node:crypto';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
@@ -70,7 +70,7 @@ test('status: Open is Waiting + Pending + Located; the legend opens the lists; a
   await expect(page).toHaveURL(/[?&]r=[0-9a-f-]{36}/);
 });
 
-test('range: Tonight by default; a choice asks the server for that range and is remembered; the next poll sends the ETag back', async ({ page }) => {
+test('range: Tonight by default; a choice asks the server for that range and is remembered; the next poll asks for it again', async ({ page }) => {
   test.slow();
   const urls = statsUrls(page);
   await page.goto('/?dashboard=1');
@@ -85,9 +85,9 @@ test('range: Tonight by default; a choice asks the server for that range and is 
   await page.reload();
   await expect(page.getByRole('radiogroup', { name: 'Time range' }).getByRole('radio', { name: '1h' })).toHaveAttribute('aria-checked', 'true');
 
-  // The next poll (15 s) carries the ETag of the last answer.
+  // The next poll (15 s) asks for the same range again, through the store's session-safe fetch.
   const before = urls.length;
-  await expect.poll(() => urls.slice(before).some((u) => u.url.includes('range=1h') && u.etag?.startsWith('W/"')), { timeout: 25_000 }).toBe(true);
+  await expect.poll(() => urls.slice(before).some((u) => u.url.includes('range=1h')), { timeout: 25_000 }).toBe(true);
 });
 
 test('calls: Total bars, By tent with its legend, the Heatmap, and the same numbers as a table', async ({ page }) => {

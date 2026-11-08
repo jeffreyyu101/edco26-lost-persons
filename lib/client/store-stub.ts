@@ -294,7 +294,7 @@ export function createStubStore(options: StubOptions): AppStore {
       if (!row) throw Object.assign(new Error('not_found'), { reason: 'not_found' });
       return stubDetail(row);
     },
-    async fetchStats(): Promise<Stats> {
+    async fetchStats(_range?: unknown): Promise<Stats> {
       const all = [...state.confirmed.values()];
       const open = all.filter((r) => r.status === STATUS.waiting || isInMedical(r.status));
       const oldest = all.filter((r) => r.status === STATUS.waiting).sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
