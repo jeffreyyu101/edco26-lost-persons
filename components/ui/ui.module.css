@@ -48,6 +48,35 @@
   overflow-wrap: anywhere;
 }
 
+/* The ✕: 32 px drawn, 44 px to tap (.lp-hit). A global class, so the first load carries no class-name mapping for it. */
+.toast :global(.lp-toast-x) {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  margin-left: -4px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--gray-11);
+  cursor: pointer;
+}
+
+.toast :global(.lp-toast-x) svg {
+  width: 16px;
+  height: 16px;
+}
+
+.toast :global(.lp-toast-x):hover {
+  background: var(--gray-a3);
+}
+
+.toast :global(.lp-toast-x):focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 1px;
+}
+
 @keyframes lp-toast-in {
   from {
     opacity: 0;
