@@ -68,6 +68,13 @@ const checkCard = (page: Page, id: string) => page.locator(`[data-testid="check-
 const comingCard = (page: Page, id: string) => page.locator(`[data-testid="friend-coming-card"]:has([data-request-id="${id}"])`);
 const lp = (r: RequestSummary) => `LP-${String(r.caseNumber).padStart(4, '0')}`;
 const fold = (page: Page) => page.getByTestId('closed-fold');
+/** The fold's visible words ("Archived 6"): its parts hidden from screen readers, without the message lane. */
+const foldShown = (el: Element) =>
+  [...el.children]
+    .filter((c) => c.getAttribute('aria-hidden') === 'true' && !c.hasAttribute('data-lane'))
+    .map((c) => c.textContent?.trim() ?? '')
+    .filter(Boolean)
+    .join(' ');
 
 /** Back to All through the large-title view menu (there is no separate ×). */
 async function showAll(page: Page) {
@@ -116,9 +123,11 @@ test('All: the large title is the view menu; a new request is the top row and op
   await expect(page.getByRole('heading', { level: 1, name: /^All requests \d+, change view$/ })).toBeVisible();
   await expect(row(page, r.id)).toBeVisible({ timeout: 10_000 });
   await expect(page.locator('[data-testid="request-list"] [data-request-id]').first()).toHaveAttribute('data-request-id', r.id);
-  // One quiet column header: # · Friend · Status · Created · Updated.
-  await expect(page.getByTestId('log-columns')).toHaveText(/^#\s*Friend\s*Status\s*Created\s*Updated$/);
-  await expect(cell(page, r.id, 'number')).toHaveText(String(r.caseNumber));
+  // One quiet column header: (the message lane, unlabeled) · Friend · Status · Created · Updated. No # column: the
+  // LP number is in the row's sentence (design/screens/msg-indicator.html).
+  await expect(page.getByTestId('log-columns')).toHaveText(/^Friend\s*Status\s*Created\s*Updated$/);
+  await expect(cell(page, r.id, 'number')).toHaveCount(0);
+  await expect(row(page, r.id).locator('[data-lane]')).toBeEmpty();
   await expect(cell(page, r.id, 'name')).toHaveText(r.name);
   // iPhone 14 is 390 px wide: under 430 px "Waiting for check" reads "Waiting" (the blue ring says the rest,
   // the row's sentence says it in full), so the name keeps its room.
@@ -599,8 +608,10 @@ test('All (option B): closed requests fold into "Archived N"; the fold opens in 
   // Folded: the Not located request is not listed; the fold sits after every open request.
   await expect(fold(page)).toBeVisible();
   await expect(fold(page)).toHaveAttribute('aria-expanded', 'false');
-  await expect(fold(page)).toHaveAccessibleName(/^Archived \d+ requests?$/);
-  await expect(fold(page)).toHaveText(/^Archived\s*\d+$/);
+  // (Message lane) Folded, it also says the unread messages on the rows it hides (other runs leave some on this stack).
+  await expect(fold(page)).toHaveAccessibleName(/^Archived \d+ requests?(\. \d+ unread messages?\.)?$/);
+  // What it shows (named by its content: the visible parts are hidden from screen readers): "Archived N".
+  expect(await fold(page).evaluate(foldShown)).toMatch(/^Archived \d+$/);
   await expect(row(page, notIn.id)).toHaveCount(0);
   const order = await page.evaluate(
     ([openId]) => {
@@ -620,7 +631,7 @@ test('All (option B): closed requests fold into "Archived N"; the fold opens in 
   await expect
     .poll(() =>
       page.evaluate(() => {
-        const label = document.querySelector('[data-testid="closed-fold"]')?.getAttribute('aria-label') ?? '';
+        const label = document.querySelector('[data-testid="closed-fold"]')?.textContent ?? '';
         const shown = document.querySelectorAll('[data-testid="closed-rows"] [data-request-id]').length;
         return Number(/\d+/.exec(label)?.[0] ?? -1) === shown && shown > 0;
       }),

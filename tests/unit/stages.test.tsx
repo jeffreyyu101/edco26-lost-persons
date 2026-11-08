@@ -28,6 +28,7 @@ import { createStubStore } from '@/lib/client/store-stub';
 import { STUB_SESSION, stubRows } from '@/lib/client/stub-data';
 import { RECHECK_MINUTES, STATUS, STATUS_META, actionLabel, alertName, isHeld, isRecheckDue, primaryActions } from '@/lib/domain';
 import { holdDetail } from '@/lib/hold-detail';
+import { narrowStageLabel } from '@/components/list/rows';
 import { STAGE_META, displayStage, notFoundAnswer, etaText, holdAnsweredAt, isMedicalTeam, shortStaffName, stageLook, stagePhrase, type StageKey, type StageSource } from '@/lib/stages';
 import { formatClockAmPm } from '@/lib/format';
 import { mapAudit, mapRow } from '@/lib/server/mappers';
@@ -112,7 +113,7 @@ describe('displayStage', () => {
     const key = expectedKey(status, needsInfo, hold, enroute);
     expect(stage.key).toBe(key);
     if (key !== 'legacy') {
-      expect({ label: stage.label, tone: stage.tone, glyph: stage.glyph, bucket: stage.bucket }).toEqual(STAGE_META[key]);
+      expect({ label: stage.label, narrow: stage.narrow, tone: stage.tone, glyph: stage.glyph, bucket: stage.bucket }).toEqual(STAGE_META[key]);
     } else {
       expect(stage).toMatchObject({ label: 'Found – Transported', tone: 'gray', bucket: 'closed' });
     }
@@ -231,6 +232,25 @@ describe('labels', () => {
     expect(STAGE_META.recheckDue.glyph).toBe('history');
     expect(STAGE_META.enroute.label).toBe('Friend en route');
     expect(STAGE_META.arrived.label).toBe('Friend arrived');
+  });
+
+  it('(message lane) the narrow labels under 430 px: Waiting, En route, Arrived, Recheck, Inactive; the rest are short already', () => {
+    expect(Object.fromEntries(Object.entries(STAGE_META).filter(([, m]) => m.narrow).map(([k, m]) => [k, m.narrow]))).toEqual({
+      waiting: 'Waiting',
+      recheckDue: 'Recheck',
+      enroute: 'En route',
+      arrived: 'Arrived',
+      inactive: 'Inactive',
+    });
+    // The log row reads them through narrowStageLabel (legacy statuses keep their label).
+    for (const [key, narrow] of [['enroute', 'En route'], ['arrived', 'Arrived'], ['recheckDue', 'Recheck'], ['waiting', 'Waiting'], ['inactive', 'Inactive']] as const) {
+      expect(narrowStageLabel(key)).toBe(narrow);
+    }
+    for (const key of ['needsInfo', 'notFoundYet', 'inMedical', 'notInMedical', 'reunited', 'discharged', 'cancelled', 'legacy'] as const) {
+      expect(narrowStageLabel(key)).toBeNull();
+    }
+    // Every narrow label is shorter than its label.
+    for (const m of Object.values(STAGE_META)) if (m.narrow) expect(m.narrow.length).toBeLessThan(m.label.length);
   });
 
   it('colour = meaning: blue waiting, amber needs info, violet pending, green in medical / arrived, teal en route, grey closed', () => {
@@ -614,15 +634,16 @@ describe('renders', () => {
     expect(html).not.toContain('data-testid="later-group"');
   });
 
-  it('the request (medical): violet block, who answered, "Recheck 4:40 PM", and the answers inside the block', () => {
+  it('the request (medical): violet block, "Pending · not located yet", "Medical rechecks 4:40 PM", and the answers inside the block', () => {
     const store = heldStore({ team: 'Medical', staff: 'Rae Chen · Medical', staffName: 'Rae Chen' });
     const held = [...store.getState().confirmed.values()].find((r) => isHeld(r) && Date.parse(r.recheckAt!) > RECHECK_NOW)!;
     const html = render(store, <ProfileView id={held.id} />);
     const i = html.indexOf('data-testid="status-block"');
     const block = html.slice(html.lastIndexOf('<div', i), html.indexOf('data-testid="person-details"') > 0 ? html.indexOf('data-testid="person-details"') : i + 4000);
     expect(block).toContain('data-tone="violet"');
-    expect(block).toContain('>Pending<');
-    expect(block).toContain(`Recheck ${formatClockAmPm(held.recheckAt!, TZ)}`);
+    // (2026-11-08, Pending clarity) The block says what the hold means; lists keep "Pending".
+    expect(block).toContain('>Pending · not located yet<');
+    expect(block).toMatch(new RegExp(`data-testid="recheck-text"[^>]*>Medical rechecks(<!-- -->)? <b>${formatClockAmPm(held.recheckAt!, TZ)}</b>`));
     // (Pending v9.1 GLYPHS) Recheck is lucide history, as on the chip and the heading; refresh-cw is the live line's.
     const recheck = block.slice(block.indexOf('data-testid="recheck-row"'), block.indexOf('data-testid="recheck-row"') + 1200);
     expect(recheck).toContain('lucide-history');
@@ -666,7 +687,9 @@ describe('renders', () => {
     const time = formatClockAmPm(held.recheckAt!, TZ);
     const profile = render(store, <ProfileView id={held.id} />);
     expect(profile).toContain('data-stage="needsInfo"');
-    expect(profile).toMatch(new RegExp(`data-testid="recheck-row"[\\s\\S]*?Recheck ${time}`));
+    // (2026-11-08) The same hold row as Pending's: "Medical rechecks 4:40 PM", the minutes left and the bar.
+    expect(profile).toMatch(new RegExp(`data-testid="recheck-row"[\\s\\S]*?Medical rechecks(<!-- -->)? <b>${time}</b>`));
+    expect(profile).toContain('data-testid="recheck-bar"');
     const mine = render(store, <MineView />);
     const i = mine.indexOf(`data-request-id="${held.id}"`);
     const next = mine.indexOf('data-testid="mine-card"', i + 1);

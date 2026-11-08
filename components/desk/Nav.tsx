@@ -89,7 +89,8 @@ function Sidebar({ main }: DeskNavProps) {
               <Icon size={16} strokeWidth={1.75} aria-hidden />
               <span className={d.nl}>{NAV_LABEL[k]}</span>{' '}
               {loading ? null : <span className={d.nc}>{counts[k]}</span>}
-              {/* F3: a dot while a Pending request has unread messages (after the count: "Pending 4", then the dot). */}
+              {/* F3, message lane: the filled bubble while a Pending request has unread messages. Drawn right after the
+                  label (CSS order), read after the count: "Pending 4 Unread messages". */}
               {k === 'pending' ? <PendingDot /> : null}
             </ViewLink>
           );

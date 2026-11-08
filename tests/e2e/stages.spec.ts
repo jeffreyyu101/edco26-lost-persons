@@ -5,6 +5,7 @@ import { expect, test, type APIRequestContext, type Browser, type BrowserContext
 import type { AuditEvent, RequestDetail, RequestSummary } from '../../lib/api-types';
 import { STATUS, STATUS_META, actionLabel } from '../../lib/domain';
 import { formatClockAmPm } from '../../lib/format';
+import { shortStaffName } from '../../lib/stages';
 import { ROOT, testBaseUrl } from '../../scripts/test-env.mjs';
 import { axeViolations, smallTargets } from './helpers/a11y';
 import { newSignedInContext, signedInAs, type TestStaff } from './helpers/session';
@@ -175,7 +176,10 @@ test('medical: Pending → the chip, in place (Undo takes it away) → Recheck d
   }
 });
 
-test('the request (medical): Pending in violet, who answered, Recheck, and the answers inside the block', async ({ page }) => {
+/** A literal for a RegExp. */
+const escapeRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+test('the request (medical): Pending · not located yet in violet, the first check, Medical rechecks, and the answers inside the block', async ({ page }) => {
   const r = await createRequest(page.request);
   const held = await setStatus(page.request, r, STATUS.notInMedical);
   await page.goto(`/?r=${r.id}`);
@@ -183,9 +187,13 @@ test('the request (medical): Pending in violet, who answered, Recheck, and the a
   await expect(block).toHaveAttribute('data-tone', 'violet', {
     timeout: 20_000,
   });
-  await expect(block.getByTestId('status-label')).toHaveText('Pending');
-  await expect(block).toContainText(MEDIC.staffName);
-  await expect(block.getByTestId('recheck-row')).toHaveText(`Recheck ${formatClockAmPm(held.recheckAt as string, TZ)}`);
+  // (2026-11-08, Pending clarity) The block says what the hold means and who gave the first check.
+  const time = formatClockAmPm(held.recheckAt as string, TZ);
+  await expect(block.getByTestId('status-label')).toHaveText('Pending · not located yet');
+  await expect(block.getByTestId('status-sub')).toHaveText(new RegExp(`^First check · ${escapeRe(shortStaffName(MEDIC.staffName))} · \\d{1,2}:\\d\\d$`), { timeout: 20_000 });
+  await expect(block.getByTestId('recheck-text')).toHaveText(`Medical rechecks ${time}`);
+  await expect(block.getByTestId('recheck-when')).toHaveText(/^in (19|20) min$/);
+  await expect(block.getByTestId('recheck-bar')).toBeVisible();
   const answers = block.getByTestId('block-answers');
   // (Pending v9.1) Held: the left answer is the final "Not located".
   await expect(answers.getByTestId('not-found-answer')).toHaveText('Not located');
@@ -203,6 +211,51 @@ test('the request (medical): Pending in violet, who answered, Recheck, and the a
   await answers.getByRole('button', { name: IN_MEDICAL, exact: true }).click();
   await expect(block).toHaveAttribute('data-tone', 'green');
   await expect(block.getByTestId('recheck-row')).toHaveCount(0);
+});
+
+test('the request (2026-11-08, Pending clarity): the minutes left count down with the clock and the bar fills; once due, how long ago, no bar', async ({ page }) => {
+  test.slow();
+  const r = await createRequest(page.request);
+  const held = await setStatus(page.request, r, STATUS.notInMedical);
+  const recheckAt = Date.parse(held.recheckAt as string);
+  const time = formatClockAmPm(held.recheckAt as string, TZ);
+  const block = page.getByTestId('status-block');
+  const row = block.getByTestId('recheck-row');
+  const progress = async () => Number(await block.getByTestId('recheck-bar').getAttribute('data-progress'));
+
+  // 13.5 minutes left (6.5 of the 20 gone): "in 14 min"; screen readers hear the sentence.
+  await page.clock.setFixedTime(recheckAt - 13.5 * 60_000);
+  await page.goto(`/?r=${r.id}`);
+  await expect(block.getByTestId('status-label')).toHaveText('Pending · not located yet', { timeout: 20_000 });
+  await expect(block.getByTestId('recheck-text')).toHaveText(`Medical rechecks ${time}`);
+  await expect(block.getByTestId('recheck-when')).toHaveText('in 14 min');
+  await expect(row).toContainText(`Medical rechecks at ${time}, in 14 minutes.`);
+  expect(await progress()).toBeCloseTo(0.325, 2);
+  // The visible words are not read twice: the label and the row speak in sentences.
+  await expect(block.getByTestId('status-label')).toHaveAttribute('aria-hidden', 'true');
+  await expect(block).toContainText('Pending, not located yet.');
+  // The clock moves on (the app's 15 s tick): 4.5 minutes left, the bar further along.
+  await page.clock.setFixedTime(recheckAt - 4.5 * 60_000);
+  await expect(block.getByTestId('recheck-when')).toHaveText('in 5 min', { timeout: 20_000 });
+  expect(await progress()).toBeCloseTo(0.775, 2);
+
+  // 3.5 minutes past: Recheck due, how long ago, no bar.
+  await page.clock.setFixedTime(recheckAt + 3.5 * 60_000);
+  await expect(block.getByTestId('status-label')).toHaveText('Recheck due · not located yet', { timeout: 20_000 });
+  await expect(row).toHaveAttribute('data-due', '');
+  await expect(block.getByTestId('recheck-text')).toHaveText(`Medical recheck was due ${time}`);
+  await expect(block.getByTestId('recheck-when')).toHaveText('3 min ago');
+  await expect(row).toContainText(`Medical recheck was due at ${time}, 3 minutes ago.`);
+  await expect(block.getByTestId('recheck-bar')).toHaveCount(0);
+  await expect(block).toContainText('Recheck due, not located yet.');
+  // The block keeps the hold's colour.
+  await expect(block).toHaveAttribute('data-tone', 'violet');
+
+  // Lists keep the short words: My requests' card says Recheck due, never "not located yet".
+  await page.goto('/?view=pending');
+  const card = page.locator(`[data-pending-card="${r.id}"]`);
+  await expect(card.getByTestId('hold-chip')).toHaveText(/Recheck due/, { timeout: 20_000 });
+  await expect(card).not.toContainText('not located yet');
 });
 
 test.describe('desk', () => {
@@ -781,7 +834,7 @@ test.describe('fixture', () => {
             ),
           ),
         );
-        // Whole from 1080 px (1024–1279) and from 1304 px (1280+); short just above each breakpoint. (Pending v9.1)
+        // Whole from about 1065 px (1024–1279) and about 1285 px (1280+, message lane); short just above each breakpoint. (Pending v9.1)
         // Every stage of Waiting for check shows its wait, never a recheck time, so only "· 2 checks" has a short form.
         const whole = width === 1180 || width === 1440;
         expect(cells).toEqual({

@@ -23,8 +23,9 @@ const ROW_WIDTHS: ReadonlyArray<readonly [string, string]> = [
 ];
 
 /**
- * All requests (log option B): one-line rows in the log's columns, number · name · status glyph and label ·
- * created · updated (varying widths).
+ * All requests (log option B): one-line rows in the log's columns, the message lane (empty) · name · status glyph and
+ * label · created · updated (varying widths). The same shape as the list's own AllSkeleton
+ * (components/list/ListSkeletons.tsx), so nothing moves when one replaces the other.
  */
 export function RowSkeletons({ count = 8 }: { count?: number }) {
   return (
@@ -33,7 +34,7 @@ export function RowSkeletons({ count = 8 }: { count?: number }) {
         const [name, status] = ROW_WIDTHS[i % ROW_WIDTHS.length] as readonly [string, string];
         return (
           <div key={i} className={styles.skLogRow}>
-            <S w="32px" h={11} />
+            <span />
             <div className={styles.skLine}>
               <S w={name} h={13} />
             </div>

@@ -3,13 +3,14 @@
 // #clarify 3 and 5, #edit 1–3). Self-contained slots: each reads the store itself, so the cards they sit in
 // only place them.
 //   My requests (every status): the en route row (In medical), the last-message preview (when there are
-//   messages), then En route / Arrived (front of house, In medical) and Message with its unread count.
+//   messages), then Message with its unread count and En route / Reunited (front of house, In medical).
 //   Pending → To check: the preview above the answers, and a 44 px Message button left of them.
 //   Pending → Friend coming: the en route row, then Message | Reunited.
-//   Desk tables: a count after the name (a click on it lands at the thread). Pending's Friend coming tab and
-//   the nav's Pending: a dot.
+//   Log rows and desk tables (message lane, design/screens/msg-indicator.html, 2026-11-07): one mark leading the
+//   row, the blue bubble with the unread count or the grey outline (a tap there lands at the thread). Pending's
+//   Friend coming header and the nav's Pending: the filled bubble.
 //   The request page (R1, 2026-11-07): the preview as a button under the status block (ThreadPreview).
-// The Message buttons, the desk badge and the request page's preview open the thread (lib/client/thread-jump).
+// The Message buttons, a row's message lane and the request page's preview open the thread (lib/client/thread-jump).
 import { Button, IconButton, VisuallyHidden } from '@radix-ui/themes';
 import { Check, ChevronDown, MessageSquare } from 'lucide-react';
 import { WalkIcon } from './WalkIcon';
@@ -17,10 +18,13 @@ import type { ReactNode } from 'react';
 import type { RequestSummary } from '@/lib/api-types';
 import { useMessaging } from '@/lib/client/messages-hooks';
 import { navigate } from '@/lib/client/nav';
-import { usePending, useSession } from '@/lib/client/store-contract';
+import { useEventTimezone, useNow, usePending, useSession } from '@/lib/client/store-contract';
 import { openThread, requestThreadJump } from '@/lib/client/thread-jump';
-import { alertName, isInMedical } from '@/lib/domain';
+import { STATUS, alertName, isInMedical } from '@/lib/domain';
+import { formatCreatedTime } from '@/lib/format';
+import { useStatusTap } from '@/components/list/hooks';
 import { previewText, sideOfTeam, unreadOf } from '@/lib/messaging';
+import { markCount, messageMark } from '@/components/list/message-mark';
 import type { DisplayStage } from '@/lib/stages';
 import { StageChip } from '@/components/list/StageChips';
 import { EnrouteFailed, EnrouteRow, useEnrouteControl } from './Enroute';
@@ -114,16 +118,20 @@ const closed = (text: string) => (/[.?!…]$/.test(text) ? text : `${text}.`);
 
 /**
  * (Request page order R1, Brian 2026-11-07) The request page's latest-message line, under the status block: the
- * cards' preview (the amber Needs info chip when it applies, "Rae C.: Any tattoos or marks?" on one line, the unread
- * dot) as one 44 px button that brings the thread into view, and on a computer focuses the composer. The page
- * decides when it shows (lib/messaging threadPreviewShown).
+ * cards' preview ("Rae C.: Any tattoos or marks?", the unread dot) as one 44 px button that brings the thread into
+ * view, and on a computer focuses the composer. The page decides when it shows (lib/messaging threadPreviewShown).
+ * (2026-11-08, T1 + T2) Up to two lines (three under 360 px) with the message's time at the right ("12:24 PM"), and
+ * the page passes no Needs info chip (its status block says it). `needsInfo` still puts the chip first if passed.
  */
 export function ThreadPreview({ row, needsInfo, unread }: { row: RequestSummary; needsInfo: DisplayStage | null; unread: boolean }) {
+  const now = useNow();
+  const timeZone = useEventTimezone();
   const last = row.lastMessage && (row.messageCount ?? 0) > 0 ? row.lastMessage : null;
   const p = last ? previewText(last) : null;
+  const at = last && row.lastMessageAt && Number.isFinite(Date.parse(row.lastMessageAt)) ? formatCreatedTime(row.lastMessageAt, now, timeZone) : null;
   const said = [
     needsInfo ? `${needsInfo.label}.` : '',
-    last && p ? closed(`Last message${unread ? ', unread' : ''}, from ${last.mine ? 'you' : p.who}: ${p.text}`) : '',
+    last && p ? closed(`Last message${unread ? ', unread' : ''}, from ${last.mine ? 'you' : p.who}${at ? ` at ${at}` : ''}: ${p.text}`) : '',
     'Go to messages.',
   ];
   return (
@@ -140,6 +148,11 @@ export function ThreadPreview({ row, needsInfo, unread }: { row: RequestSummary;
             <span className={s.previewWho}>{p.who}:</span> {p.text}
           </span>
         ) : null}
+        {at ? (
+          <span className={s.tpTime} data-testid="preview-time">
+            {at}
+          </span>
+        ) : null}
         <ChevronDown size={16} strokeWidth={2} className={s.tpGo} />
       </span>
       <VisuallyHidden>{said.filter(Boolean).join(' ')}</VisuallyHidden>
@@ -152,22 +165,34 @@ function Slot({ children, mine }: { children: ReactNode; mine?: boolean }) {
 }
 
 /**
- * My requests: en route row (In medical), preview, then [En route | Arrived] (front of house, In medical,
- * until the friend arrived) and [Message].
+ * My requests: en route row (In medical), preview, then [Message] and [En route | Reunited] (front of house, In
+ * medical). (2026-11-08, Arrived dropped: design/DECISIONS.md "Request page tonight") Once I am en route, or the
+ * friend arrived on an old row, the card offers the request's Reunited instead: the same tap as Pending's Friend
+ * coming card (useStatusTap → setStatus reunite, with its Undo; "Needs a connection" offline), on the same side as
+ * there: Message left, the action right, so a tap meant for Message never closes the request.
  */
 export function MineActivity({ row }: { row: RequestSummary }) {
   const api = useMessaging();
   const session = useSession();
   const enroute = useEnrouteControl(row);
+  const { offline, tap } = useStatusTap();
   if (!api) return null;
   const foh = sideOfTeam(session.team) === 'foh';
   const inMedical = isInMedical(row.status);
   const arrived = enroute.enroute?.state === 'arrived';
-  const action = foh && inMedical && !arrived ? (
-    enroute.mine ? (
-      <Button size="3" variant="outline" color="gray" highContrast className={`${s.btn} ${s.btnQuiet}`} onClick={enroute.arrive} data-testid="arrived-button" aria-label={`Arrived with the friend of ${who(row)}`}>
-        <Check size={16} strokeWidth={2} aria-hidden />
-        Arrived
+  const action = foh && inMedical ? (
+    enroute.mine || arrived ? (
+      <Button
+        size="3"
+        highContrast
+        className={s.btn}
+        {...(offline ? { 'aria-disabled': true, 'data-disabled': '' } : {})}
+        onClick={() => void tap(row.id, STATUS.reunited, 'reunite')}
+        data-testid="reunited-button"
+        aria-label={`Reunited: ${who(row)}`}
+      >
+        <Check size={16} strokeWidth={2.25} aria-hidden />
+        Reunited
       </Button>
     ) : (
       <Button size="3" variant="outline" color="gray" highContrast className={`${s.btn} ${s.btnQuiet}`} onClick={enroute.openNew} data-testid="enroute-button" aria-label={`En route: bringing the friend of ${who(row)}`}>
@@ -184,8 +209,8 @@ export function MineActivity({ row }: { row: RequestSummary }) {
       <EnrouteFailed control={enroute} />
       <PreviewRow row={row} />
       <div className={s.cardBtns} data-count={action ? 2 : 1}>
-        {action}
         <MessageButton row={row} />
+        {action}
       </div>
       {enroute.sheet}
     </Slot>
@@ -224,45 +249,68 @@ export function useHasMessages(): boolean {
   return !!useMessaging();
 }
 
-/** " 2 unread messages." for a row's screen-reader sentence ('' when none). */
-export function unreadSentence(row: RequestSummary): string {
-  const n = unreadOf(row);
-  return n === 0 ? '' : ` ${n} unread ${n === 1 ? 'message' : 'messages'}.`;
-}
-
-/** A desk row's unread badge marks itself: a click on it opens the request at its Messages (openRowAt). */
+/** A row's message lane marks itself: a click on it opens the request at its Messages (openRowAt). */
 const THREAD_BADGE = 'data-thread-badge';
 
-/**
- * A count after a name in a desk table row (unread messages from others). The row is the one control (a button
- * holds no other); a click on the badge (its tap area grown to 44 px) lands at the thread (R2).
- */
-export function UnreadBadge({ row }: { row: RequestSummary }) {
-  const n = unreadOf(row);
-  if (n === 0) return null;
+/** The unread bubble: lucide MessageSquare's silhouette drawn in CSS, the count in white inside ("99+" from 100). */
+export function UnreadBubble({ count }: { count: number }) {
+  const text = markCount(count);
   return (
-    <span className={s.rowBadge} data-testid="row-unread" {...{ [THREAD_BADGE]: '' }} aria-hidden>
-      {n}
+    <span className={s.markBubble} data-wide={text.length > 2 ? '' : undefined}>
+      {text}
     </span>
   );
 }
 
-/** A desk row's click: at the Messages when it landed on the unread badge, else at the top. */
+/**
+ * (Message lane) The mark leading a log row or a desk table row: the blue bubble with the unread count (others'
+ * messages after my read cursor, for everyone: Brian's override, no involved gate), else the grey outline while
+ * the request has messages, else an empty lane. Hidden from screen readers: the row's sentence says it
+ * (list-helpers.messagesSentence). With a mark, a click in the lane lands at the thread (openRowAt); the lane's
+ * 44 px hit area is the context's CSS (`className`: the row's lane cell, its ::before).
+ */
+export function MessageMark({ row, className }: { row: Pick<RequestSummary, 'unread' | 'messageCount'>; className?: string }) {
+  const mark = messageMark(row);
+  const cls = className ? `${s.lane} ${className}` : s.lane;
+  if (!mark) return <span className={cls} data-lane="" aria-hidden />;
+  return (
+    <span className={cls} data-lane="" data-mark={mark.kind} data-testid="message-mark" {...{ [THREAD_BADGE]: '' }} aria-hidden>
+      {mark.kind === 'unread' ? <UnreadBubble count={mark.count} /> : <MessageSquare size={18} strokeWidth={1.75} className={s.laneIcon} />}
+    </span>
+  );
+}
+
+/** A row's click: at the Messages when it landed in the message lane, else at the top. */
 export function openRowAt(id: string, target: EventTarget | null): void {
   const el = target as { closest?: (selector: string) => unknown } | null;
   if (typeof el?.closest === 'function' && el.closest(`[${THREAD_BADGE}]`)) openThread(id);
   else navigate({ r: id });
 }
 
-/** A dot after a label while any of these rows has unread messages. */
-export function UnreadDot({ rows, label }: { rows: readonly RequestSummary[]; label: string }) {
-  if (!rows.some((r) => unreadOf(r) > 0)) return null;
-  return <span className={s.navDot} role="img" aria-label={label} data-testid="unread-dot" />;
+/** The filled message bubble after a label (14 px, the badge blue): "unread messages here". */
+function UnreadMark({ label, className }: { label: string; className?: string }) {
+  return (
+    <MessageSquare
+      size={14}
+      fill="currentColor"
+      strokeWidth={0}
+      className={className ? `${s.unreadMark} ${className}` : s.unreadMark}
+      role="img"
+      aria-label={label}
+      data-testid="unread-mark"
+    />
+  );
 }
 
-/** The nav's Pending item: a dot while any Pending request has unread messages (`rail`: on the icon). */
+/** After a label while any of these rows has unread messages: the filled bubble (Pending's Friend coming header). */
+export function UnreadDot({ rows, label }: { rows: readonly RequestSummary[]; label: string }) {
+  if (!rows.some((r) => unreadOf(r) > 0)) return null;
+  return <UnreadMark label={label} />;
+}
+
+/** The nav's Pending item: the filled bubble while any Pending request has unread messages (`rail`: on the icon). */
 export function PendingDot({ rail = false }: { rail?: boolean }) {
   const { friendComing, waiting } = usePending();
   if (![...friendComing, ...waiting].some((r) => unreadOf(r) > 0)) return null;
-  return <span className={rail ? `${s.navDot} ${s.railDot}` : s.navDot} role="img" aria-label="Unread messages" data-testid="unread-dot" />;
+  return <UnreadMark label="Unread messages" className={rail ? s.railMark : s.navMark} />;
 }

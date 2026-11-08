@@ -510,10 +510,13 @@ test.describe('fixture', () => {
       expect(await rowIds(list)).toEqual(ids(['P.V.', 'S.O.', 'M.R.', 'B.W.', 'K.T.', 'J.D.', 'E.N.', 'M.P.', 'A.L.', 'R.P.']));
       await expect(page.getByTestId('closed-fold')).toHaveAccessibleName('Archived 3 requests');
       await expect(page.getByTestId('closed-fold')).toHaveAttribute('aria-expanded', 'false');
-      // The status cell is the stage label: held → Pending, due → Recheck due (violet).
+      // The status cell is the stage label: held → Pending, due → Recheck due (violet), "Recheck" under 430 px
+      // (message lane: the narrow label keeps it whole beside the lane).
       const cell = (n: string) => list.locator(`[data-request-id="${idOf(n)}"] [data-col="status"]`);
       await expect(cell('P.V.')).toHaveText(NOT_FOUND_YET_LABEL);
-      await expect(cell('M.R.')).toHaveText(RECHECK_DUE_LABEL);
+      await expect(cell('M.R.')).toHaveText('Recheck', { useInnerText: true });
+      await expect(cell('M.R.').locator('[data-narrow]')).toHaveText('Recheck');
+      await expect(cell('M.R.')).toContainText(RECHECK_DUE_LABEL);
       await expect(cell('M.R.')).toHaveAttribute('data-tone', 'violet');
       // Archived opens newest closed first.
       await page.getByTestId('closed-fold').click();
@@ -978,7 +981,8 @@ test.describe('real flow', () => {
     const answer = page.getByTestId('block-answers').getByTestId('not-found-answer');
     await expect(answer).toHaveText(NOT_FOUND_YET_LABEL, { timeout: 20_000 });
     await answer.click();
-    await expect(page.getByTestId('status-label')).toHaveText(NOT_FOUND_YET_LABEL);
+    // (2026-11-08, Pending clarity) The request's block says what the hold means; the answer keeps the short label.
+    await expect(page.getByTestId('status-label')).toHaveText(`${NOT_FOUND_YET_LABEL} · not located yet`);
     await expect(answer).toHaveText(NOT_FOUND_FINAL_LABEL);
     await expect(answer).toHaveAccessibleName(`Not located. Closes this request as ${CLOSED_WORDS}`);
   });

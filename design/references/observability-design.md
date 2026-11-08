@@ -66,7 +66,7 @@ through one more RPC.
 | Service worker | `public/sw.js`: a push and click log in META, and an `lp-tel-take` message |
 | Health page | `app/health/page.tsx`, `components/health/{HealthView,ProblemTable,PathTable,NetTable,PushPanel,CoverageTable,ErrorList,TrailDrawer}.tsx`, `components/health/health.module.css`; desk link in `components/desk/Nav.tsx` |
 | Tests | `tests/unit/telemetry/*.test.ts`, `tests/unit/sw/telemetry-sw.test.ts`, `tests/unit/health/*.test.tsx`, `tests/integration/telemetry.test.ts`, `tests/e2e/telemetry.spec.ts`, `tests/e2e/health.spec.ts` |
-| Docs | `HANDOFF.md` "Telemetry in production", `docs/BUILD_SPEC.md` amendment (A109–A116) |
+| Docs | `HANDOFF.md` "Telemetry in production", `docs/BUILD_SPEC.md` amendment (A110–A117; renumbered from A109–A116 when it met `main`'s A109, Request page tonight) |
 
 ---
 

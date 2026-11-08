@@ -5,7 +5,7 @@
 import { Theme } from '@radix-ui/themes';
 import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DeskAllTable, DeskMineTable, DeskSearchTable } from '@/components/desk/table/DeskTableViews';
 import { DeskFrame } from '@/components/desk/DeskFrame';
 import type { OutboxItem } from '@/lib/api-types';
@@ -13,6 +13,22 @@ import { StoreContext, type AppStore, type StoreState } from '@/lib/client/store
 import { createStubStore } from '@/lib/client/store-stub';
 import { STUB_SESSION, stubId } from '@/lib/client/stub-data';
 import { STATUS, postFilterKey } from '@/lib/domain';
+import type * as ViewPrefs from '@/lib/client/view-prefs';
+
+// A server render reads every remembered view choice as its default (view-prefs' server snapshot). My requests in
+// status order (its folded "Closed N" group) is picked here instead, only by the tests that set the flag.
+const prefs = vi.hoisted(() => ({ mineByStatus: false }));
+vi.mock('@/lib/client/view-prefs', async (importOriginal) => {
+  const actual = await importOriginal<typeof ViewPrefs>();
+  return {
+    ...actual,
+    useSortOrder: (view: ViewPrefs.SortView) =>
+      view === 'mine' && prefs.mineByStatus ? (['status', () => {}] as const) : actual.useSortOrder(view),
+  };
+});
+afterEach(() => {
+  prefs.mineByStatus = false;
+});
 
 // useNow() reads the real clock during a server render (sampled when its module loaded), so the stub is
 // built around the real now, half a minute back: "9m ago" in the stub then reads 9m, not 8m.
@@ -120,7 +136,9 @@ describe('All requests table', () => {
     expect(fold).toBeGreaterThan(open.at(-1)!);
     const foldTag = html.slice(html.lastIndexOf('<button', fold), html.indexOf('>', fold) + 1);
     expect(foldTag).toContain('aria-expanded="false"');
-    expect(foldTag).toMatch(/aria-label="Archived \d+ requests"/);
+    // (Message lane) Named by its content (one screen-reader sentence), not an aria-label.
+    expect(foldTag).not.toContain('aria-label=');
+    expect(html.slice(fold, html.indexOf('</button>', fold))).toMatch(/class="[^"]*vh[^"]*">Archived \d+ requests<\/span>/);
     expect(foldTag).not.toContain('aria-controls');
     // Folded: no closed row is on the page.
     for (const n of [1009, 1008, 1006, 1003, 1002, 1001, 1000]) expect(at(html, n)).toBe(-1);
@@ -147,6 +165,68 @@ describe('All requests table', () => {
     // Tooltips: the whole attribution, and the exact time of the last change.
     expect(row).toContain('title="Dana Kim, Dispatch"');
     expect(row).toMatch(/data-col="updated"[^>]*title="Nov \d+, \d{1,2}:\d\d (AM|PM)"|title="Nov \d+, \d{1,2}:\d\d (AM|PM)"[^>]*data-col="updated"/);
+  });
+
+  it('(message lane) the lane leads every row before #: blue bubble, grey outline or nothing; no count pill after the name', () => {
+    const activity: Record<number, { messageCount: number; unread: number }> = {
+      1013: { messageCount: 3, unread: 2 },
+      1012: { messageCount: 4, unread: 0 },
+      1010: { messageCount: 150, unread: 100 },
+      1009: { messageCount: 2, unread: 1 },
+      1008: { messageCount: 1, unread: 2 },
+    };
+    const store = (expanded: boolean) =>
+      storeWith((s) => {
+        const confirmed = new Map(s.confirmed);
+        for (const [n, a] of Object.entries(activity)) {
+          const r = confirmed.get(stubId(Number(n)))!;
+          confirmed.set(r.id, { ...r, ...a });
+        }
+        return { ...s, confirmed, prefs: { ...s.prefs, closedExpanded: expanded } };
+      });
+    const html = render(store(true), <DeskAllTable status={null} post={null} />);
+    const lane = (n: number) => {
+      const row = rowHtml(html, n);
+      const m = /<span class="[^"]*" data-lane=""([^>]*)>([^]*?)<span [^>]*data-col="number"/.exec(row);
+      expect(m, `LP-${n} lane before #`).not.toBeNull();
+      const attrs = m![1] ?? '';
+      const inner = m![2] ?? '';
+      expect(attrs).toContain('aria-hidden="true"');
+      if (attrs.includes('data-mark="unread"')) return `unread:${text(inner)}`;
+      if (attrs.includes('data-mark="read"')) return inner.includes('lucide-message-square') ? 'read' : '?';
+      return attrs.includes('data-thread-badge') ? '?' : text(inner) || '';
+    };
+    expect(lane(1013)).toBe('unread:2');
+    expect(lane(1012)).toBe('read');
+    expect(lane(1011)).toBe('');
+    expect(lane(1010)).toBe('unread:99+');
+    expect(lane(1009)).toBe('unread:1');
+    // Unread wins over a stale total.
+    expect(lane(1008)).toBe('unread:2');
+    expect(html).not.toContain('row-unread');
+    // The column header leads with an empty, unlabeled lane.
+    const cols = html.slice(html.indexOf('data-testid="desk-table-columns"'), html.indexOf('</div>', html.indexOf('data-testid="desk-table-columns"')));
+    expect(cols).toMatch(/role="row"><span class="[^"]*lane[^"]*" aria-hidden="true"><\/span><span[^>]*data-col="number">#</);
+    // The sentence: the row's, then the lane's.
+    const said = (n: number) => /class="[^"]*vh[^"]*">([^<]*)</.exec(rowHtml(html, n))?.[1] ?? '';
+    expect(said(1013)).toMatch(/^LP-1013, .+, logged by Lee Park, GCHX Base\. 2 unread messages\.$/);
+    expect(said(1012)).toMatch(/^LP-1012, .+, logged by Dana Kim, Dispatch\. 4 messages\.$/);
+    expect(said(1010)).toMatch(/\. 100 unread messages\.$/);
+    expect(said(1011)).toMatch(/^LP-1011, .+, logged by Lee Park, GCHX Base$/);
+    // Folded: the Archived row carries the closed rows' unread total (1009: 1, 1008: 2) in its lane and its name.
+    const folded = render(store(false), <DeskAllTable status={null} post={null} />);
+    const f = folded.indexOf('data-testid="closed-fold"');
+    const fold = folded.slice(folded.lastIndexOf('<button', f), folded.indexOf('</button>', f));
+    expect(fold).toMatch(/class="[^"]*vh[^"]*">Archived \d+ requests\. 3 unread messages\.<\/span>/);
+    expect(fold).toMatch(/data-lane="" aria-hidden="true"><span class="[^"]*markBubble[^"]*">3<\/span><\/span>/);
+    // Open, the rows show their own marks: the fold's lane is empty and its name is the plain count (each unread
+    // message counted once, as on the phone).
+    const o = html.indexOf('data-testid="closed-fold"');
+    const open = html.slice(html.lastIndexOf('<button', o), html.indexOf('</button>', o));
+    expect(open).toContain('aria-expanded="true"');
+    expect(open).toMatch(/class="[^"]*vh[^"]*">Archived \d+ requests<\/span>/);
+    expect(open).toMatch(/data-lane="" aria-hidden="true"><\/span>/);
+    expect(open).not.toContain('markBubble');
   });
 
   it('opens the Archived fold in place from prefs, closed rows greyed, newest first', () => {
@@ -247,6 +327,27 @@ describe('My requests table', () => {
 
     expect(text(render(storeWith((s) => ({ ...s, confirmed: new Map(), outbox: [] })), <DeskMineTable />))).toContain('No requests yet');
   });
+
+  it('(message lane) sorted by status, the folded "Closed N" group carries its rows\' unread total in its lane and name', () => {
+    prefs.mineByStatus = true;
+    const store = storeWith((s) => {
+      const confirmed = new Map(s.confirmed);
+      const r = confirmed.get(stubId(1009))!;
+      confirmed.set(r.id, { ...r, messageCount: 2, unread: 1 });
+      return { ...s, confirmed };
+    });
+    const html = render(store, <DeskMineTable />);
+    const area = html.indexOf('data-testid="mine-closed"');
+    expect(area).toBeGreaterThan(0);
+    const f = html.indexOf('data-testid="closed-fold"', area);
+    expect(f).toBeGreaterThan(area);
+    const fold = html.slice(html.lastIndexOf('<button', f), html.indexOf('</button>', f));
+    expect(fold).toContain('aria-expanded="false"');
+    // Folded: the closed rows are not on the page, so the fold says what they hide.
+    expect(at(html, 1009)).toBe(-1);
+    expect(fold).toMatch(/class="[^"]*vh[^"]*">Closed \d+ requests?\. 1 unread message\.<\/span>/);
+    expect(fold).toMatch(/data-lane="" aria-hidden="true"><span class="[^"]*markBubble[^"]*">1<\/span><\/span>/);
+  });
 });
 
 describe('Search table', () => {
@@ -265,10 +366,30 @@ describe('Search table', () => {
     const byNumber = render(storeWith(), <DeskSearchTable q="1012" />);
     expect(cell(byNumber, 1012, 'number')).toBe('1012');
     expect(rowHtml(byNumber, 1012)).toMatch(/<mark[^>]*>1012<\/mark>/);
+    // Docked, # is hidden: the LP number, highlighted, under the name (shown by CSS under [data-pane] only).
+    expect(rowHtml(byNumber, 1012)).toMatch(/data-col="friend"[\s\S]*LP-<\/span><mark[^>]*>1012<\/mark>/);
+    expect(rowHtml(html, 998).split('data-col="friend"')[1]).not.toContain('LP-');
 
     expect(text(render(storeWith(), <DeskSearchTable q="zzzz-nothing" />))).toContain('No matches');
     const blank = render(storeWith(), <DeskSearchTable q="" />);
     expect(blank).not.toContain('data-request-id');
     expect(blank).not.toContain('No matches');
+  });
+
+  it("(message lane) a result with messages: the row's sentence ends with the lane's words, after one full stop", () => {
+    const store = storeWith((s) => {
+      const confirmed = new Map(s.confirmed);
+      const r = confirmed.get(stubId(1012))!;
+      confirmed.set(r.id, { ...r, messageCount: 2, unread: 1 });
+      return { ...s, confirmed };
+    });
+    const said = (html: string) => /class="[^"]*vh[^"]*">([^<]*)</.exec(rowHtml(html, 1012))?.[1] ?? '';
+    // A number match (no matched text: the table's sentence already ends in its full stop), a matched-text line
+    // ("…pink hat"), a name match.
+    for (const q of ['1012', 'pink', 'kayla']) {
+      const sentence = said(render(store, <DeskSearchTable q={q} />));
+      expect(sentence, q).toMatch(/^LP-1012, .+[^.]\. 1 unread message\.$/);
+      expect(sentence, q).not.toContain('..');
+    }
   });
 });

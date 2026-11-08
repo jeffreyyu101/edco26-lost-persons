@@ -51,6 +51,13 @@ export { RECHECK_MINUTES, isHeld, isRecheckDue } from './domain';
 /** The due stage's label (STAGE_META.recheckDue): a hold whose RECHECK_MINUTES have passed. */
 export const RECHECK_DUE_LABEL = 'Recheck due';
 
+/**
+ * (2026-11-08, Pending clarity) What the request's own status block adds after a hold's label: "Pending · not located
+ * yet", "Recheck due · not located yet" (DisplayStage.fullLabel). Lists, cards, toasts and notifications keep the short
+ * label ("Pending", "Recheck due").
+ */
+export const NOT_LOCATED_YET = 'not located yet';
+
 /** The final Not found answer's label on a held request: F2's answer label (domain ANSWER_LABEL). */
 export const NOT_FOUND_FINAL_LABEL = ANSWER_LABEL.notFound;
 
@@ -101,6 +108,12 @@ export type StageGlyphKind = GlyphKind | 'needsInfo' | 'hourglass' | 'history' |
 
 export interface StageMeta {
   label: string;
+  /**
+   * (Message lane, 2026-11-07) The label the phone log shows under 430 px, where the full one would be cut beside
+   * the message lane and an earlier day's time: "Waiting", "En route", "Arrived", "Recheck" (components/list/rows.tsx
+   * narrowStageLabel). Absent: the label is short already. Sentences always say the full label.
+   */
+  narrow?: string;
   tone: StageTone;
   glyph: StageGlyphKind;
   bucket: StatusBucket;
@@ -108,7 +121,7 @@ export interface StageMeta {
 
 const fromStatus = (status: Status): StageMeta => {
   const m = STATUS_META[status];
-  return { label: m.shortLabel, tone: m.tone, glyph: m.glyph, bucket: m.bucket };
+  return { label: m.shortLabel, ...(m.narrowLabel ? { narrow: m.narrowLabel } : {}), tone: m.tone, glyph: m.glyph, bucket: m.bucket };
 };
 
 /** The ONE stage map: label, colour and glyph per stage. Status stages take their label from STATUS_META. */
@@ -116,10 +129,10 @@ export const STAGE_META: Readonly<Record<Exclude<StageKey, 'legacy'>, StageMeta>
   waiting: fromStatus(STATUS.waiting),
   needsInfo: { label: 'Needs info', tone: 'amber', glyph: 'needsInfo', bucket: 'open' },
   notFoundYet: { label: NOT_FOUND_YET_LABEL, tone: 'violet', glyph: 'hourglass', bucket: 'open' },
-  recheckDue: { label: RECHECK_DUE_LABEL, tone: 'violet', glyph: 'history', bucket: 'open' },
+  recheckDue: { label: RECHECK_DUE_LABEL, narrow: 'Recheck', tone: 'violet', glyph: 'history', bucket: 'open' },
   inMedical: fromStatus(STATUS.inMedical),
-  enroute: { label: 'Friend en route', tone: 'teal', glyph: 'walk', bucket: 'open' },
-  arrived: { label: 'Friend arrived', tone: 'green', glyph: 'arrived', bucket: 'open' },
+  enroute: { label: 'Friend en route', narrow: 'En route', tone: 'teal', glyph: 'walk', bucket: 'open' },
+  arrived: { label: 'Friend arrived', narrow: 'Arrived', tone: 'green', glyph: 'arrived', bucket: 'open' },
   notInMedical: fromStatus(STATUS.notInMedical),
   reunited: fromStatus(STATUS.reunited),
   discharged: fromStatus(STATUS.discharged),
@@ -156,7 +169,10 @@ export interface StageSource {
 
 export interface DisplayStage extends StageMeta {
   key: StageKey;
-  /** The detail block's label: the status's full label for status stages ("In medical · friend coming"). */
+  /**
+   * The detail block's label: the status's full label for status stages ("In medical · friend coming"); a hold's
+   * says what it means ("Pending · not located yet", "Recheck due · not located yet", 2026-11-08).
+   */
   fullLabel: string;
   /** One quiet line under the label: "9m", "Recheck 4:40 PM", "Bed 3", "~4 min", "Rae C. asked · 4:20 PM", "2 checks". */
   sub?: string;
@@ -229,6 +245,69 @@ function holdOf(recheckAt: string, timeZone: string, now: number) {
   return { recheckAt, recheck: `Recheck ${formatClockAmPm(recheckAt, timeZone)}`, due: epoch(recheckAt) <= now };
 }
 
+/** The request's status block row for a hold (recheckCountdown). */
+export interface RecheckCountdown {
+  due: boolean;
+  /** "Medical rechecks"; once due "Medical recheck was due" (the Medical team: A104 keeps the team's name). */
+  lead: string;
+  /** "1:12 AM", the recheck time. */
+  time: string;
+  /** At the row's right: "in 14 min"; once due "3 min ago", "now", "1 h 5 min ago". */
+  when: string;
+  /** The row as a screen reader says it: "Medical rechecks at 1:12 AM, in 14 minutes." */
+  said: string;
+  /** How much of the RECHECK_MINUTES hold has gone by, 0 to 1 (the bar under the row; 1 once due). */
+  progress: number;
+}
+
+const MINUTE_MS = 60_000;
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+/** "14 min" / "1 h 5 min" on screen and "14 minutes" / "1 hour 5 minutes" in words, for whole minutes. */
+function spanOf(minutes: number): { shown: string; said: string } {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return { shown: `${m} min`, said: plural(m, 'minute') };
+  return {
+    shown: m ? `${h} h ${m} min` : `${h} h`,
+    said: m ? `${plural(h, 'hour')} ${plural(m, 'minute')}` : plural(h, 'hour'),
+  };
+}
+
+/**
+ * (2026-11-08, Pending clarity) The hold's row on the request's own status block, from its recheck time and the
+ * clock (useNow()): "Medical rechecks 1:12 AM" with "in 14 min" at its right and a bar filling over the 20 minutes;
+ * once due, "Medical recheck was due 1:12 AM" with "3 min ago". The minutes round up while waiting (never "in 0
+ * min") and down once due. Null for an unreadable time.
+ */
+export function recheckCountdown(recheckAt: string, now: number, timeZone: string = DEFAULT_EVENT_TIMEZONE): RecheckCountdown | null {
+  const at = epoch(recheckAt);
+  if (!Number.isFinite(at)) return null;
+  const time = formatClockAmPm(recheckAt, timeZone);
+  const hold = RECHECK_MINUTES * MINUTE_MS;
+  if (at > now) {
+    const left = spanOf(Math.max(1, Math.ceil((at - now) / MINUTE_MS)));
+    return {
+      due: false,
+      lead: 'Medical rechecks',
+      time,
+      when: `in ${left.shown}`,
+      said: `Medical rechecks at ${time}, in ${left.said}.`,
+      progress: Math.min(1, Math.max(0, 1 - (at - now) / hold)),
+    };
+  }
+  const minutes = Math.floor((now - at) / MINUTE_MS);
+  const ago = minutes > 0 ? spanOf(minutes) : null;
+  return {
+    due: true,
+    lead: 'Medical recheck was due',
+    time,
+    when: ago ? `${ago.shown} ago` : 'now',
+    said: `Medical recheck was due at ${time}, ${ago ? `${ago.said} ago` : 'just now'}.`,
+    progress: 1,
+  };
+}
+
 /**
  * The stage a request shows (list status cells, the desk status cell, the detail status block, the My
  * requests chip). Pure: pass `now` from useNow().
@@ -293,11 +372,14 @@ function stageOf(row: StageSource, opts: StageOptions): DisplayStage {
       return of('needsInfo', { ...(sub ? { sub } : {}), said, ...wait, ...held });
     }
     if (hold) {
-      return of(hold.due ? 'recheckDue' : 'notFoundYet', {
+      const key = hold.due ? 'recheckDue' : 'notFoundYet';
+      return of(key, {
+        // (2026-11-08) The request's own status block says what the hold means: "Pending · not located yet".
+        fullLabel: `${STAGE_META[key].label} · ${NOT_LOCATED_YET}`,
         // The request's own status block (not a card) keeps when the recheck is due.
         sub: hold.recheck,
         ...wait,
-        said: hold.due ? STAGE_META.recheckDue.label : STAGE_META.notFoundYet.label,
+        said: STAGE_META[key].label,
         ...held,
       });
     }

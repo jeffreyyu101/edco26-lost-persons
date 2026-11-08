@@ -45,16 +45,19 @@
   color: var(--gray-12);
 }
 
-/* The thread scrolls inside its own box and opens at the newest message. */
-.scroller {
+/* (2026-11-08) On a phone the thread is part of the page, not a box of its own: a swipe anywhere on it scrolls the
+   page (MessagesSection follows the page's scroll). The desk pane's thread scrolls inside its own box, opens at the
+   newest message and keeps its scroll to itself. */
+.thread {
   position: relative;
   display: flex;
   flex-direction: column;
+}
+.panel .thread {
   max-height: min(60vh, 520px);
   max-height: min(60dvh, 520px);
   overflow-y: auto;
   overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
 }
 
 .chat {
@@ -80,6 +83,11 @@
 .from b {
   font-weight: 500;
   color: var(--gray-12);
+}
+/* (2026-11-08, T5) The time over my own run, at its right. */
+.fromMe {
+  align-self: flex-end;
+  margin: 10px 12px 3px 0;
 }
 
 .gap {
@@ -241,7 +249,8 @@
   padding: 6px 0 10px;
 }
 
-/* "New messages": over the bottom of the thread when new ones arrive while it is scrolled up. */
+/* "New messages": over the bottom of the thread when new ones arrive while the reader is higher up; on a phone just
+   above the request's action bar (its `bottom` is set inline), only while the thread is on screen. */
 .newPill {
   position: sticky;
   bottom: 8px;
@@ -284,22 +293,14 @@
   padding: 4px 0 6px;
 }
 
-/* Quick lines: one row that scrolls sideways; never cut off, never wrapped. */
+/* Quick lines: they wrap onto more rows, never cut off and never a sideways scroller (2026-11-08, T3: lines past the
+   phone's edge went unseen), on the phone as in the desk pane. */
 .pills {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
-  overflow-x: auto;
   padding: 0 2px;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-}
-.pills::-webkit-scrollbar {
-  display: none;
-}
-.panel .pills {
-  flex-wrap: wrap;
-  overflow: visible;
 }
 
 .pill {
@@ -668,6 +669,28 @@ button.enr:focus-visible {
   min-height: 44px;
   padding: 12px 10px 12px 12px;
 }
+/* (2026-11-08, T2) The whole message on up to two lines (three under 360 px), then its time and the ⌄ at the right. */
+.tpBox .previewText {
+  flex: 1 1 auto;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 359px) {
+  .tpBox .previewText {
+    -webkit-line-clamp: 3;
+  }
+}
+.tpTime {
+  flex: none;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .threadPreview:hover .tpBox {
   background: var(--gray-a4);
 }
@@ -717,52 +740,97 @@ button.enr:focus-visible {
   background: var(--blue-8);
 }
 
-/* A count after a name in a table row. */
-.rowBadge {
+/* ---- The message lane (design/screens/msg-indicator.html, Brian 2026-11-07) ---------------------------------
+   One mark leading a log row and a desk table row, lucide MessageSquare's silhouette at two strengths: the blue
+   bubble with the unread count, or the grey outline once read; an empty lane without messages. The lane is 31 px
+   (the "99+" bubble), so no count ever moves the names. Where the lane sits and its 44 px hit area are the row's
+   (list.module.css .lane, table.module.css .lane). */
+.lane {
+  display: flex;
+  align-items: center;
+  justify-self: start;
+  color: var(--gray-11);
+}
+
+/* MessageSquare's body starts 1.5 px into its box: the outline's left edge meets the bubble's. Shifted, not pulled
+   in with a margin, so the lane keeps the icon's whole width. */
+.laneIcon {
   flex: none;
+  position: relative;
+  left: -1.5px;
+}
+
+/* The unread mark (the message lane): its own class, never the chat's message-bubble class. A 17 px body with 4.5 px corners, square at the bottom left, and a 5 × 4.5 tail under that
+   corner; the badge blue (.badge: blue-11 light, blue-8 dark, white 12 / 700 on both, AA-checked). */
+.markBubble {
+  position: relative;
   display: inline-grid;
   place-items: center;
   min-width: 20px;
-  height: 20px;
-  margin-left: 8px;
-  padding: 0 6px;
-  border-radius: 999px;
+  height: 17px;
+  box-sizing: border-box;
+  padding: 0 4.5px;
+  border-radius: 4.5px 4.5px 4.5px 0;
   background: var(--blue-11);
   color: #fff;
   font-size: 12px;
   font-weight: 700;
-  font-variant-numeric: tabular-nums;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
 }
-:global(.dark) .rowBadge {
+
+:global(.dark) .markBubble {
   background: var(--blue-8);
 }
-/* (R2) A click on the badge opens the request at its Messages: a 44 px tall area around it, inside the row. */
-.rowBadge {
-  position: relative;
+
+/* "99+": tighter, so it stays inside the 31 px lane. */
+.markBubble[data-wide] {
+  padding: 0 3px;
+  letter-spacing: -0.04em;
 }
-.rowBadge::after {
+
+.markBubble::after {
   content: '';
   position: absolute;
-  inset: -12px -10px;
+  left: 0;
+  top: 100%;
+  width: 5px;
+  height: 4.5px;
+  background: inherit;
+  clip-path: polygon(0 0, 100% 0, 0 100%);
 }
 
-/* An unread dot after a tab or nav label. */
-.navDot {
+/* The filled bubble after a label (the nav's Pending, Pending's Friend coming header): "unread messages here", in
+   the badge blue. Tripled class (0,3,0): the nav's `.ni svg` and the current item's `.ni[aria-current='page'] svg`
+   (0,2,1) grey must not win. In dark mode it is blue-9, not the bubble's blue-8: blue-8 is chosen for the white
+   numerals inside a bubble, and this mark has none. On the current nav item (gray-a4 over gray-2) blue-8 is only
+   2.6:1, under the 3:1 a graphic needs (WCAG 1.4.11); blue-9 is 4.0:1 there, 5.4:1 on the plain nav. Light mode
+   keeps blue-11 (3.7:1 on the current item). */
+.unreadMark.unreadMark.unreadMark {
   flex: none;
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  margin-left: 6px;
-  border-radius: 50%;
-  background: var(--blue-9);
+  color: var(--blue-11);
 }
 
-.railDot {
+:global(.dark) .unreadMark.unreadMark.unreadMark {
+  color: var(--blue-9);
+}
+
+/* The sidebar: right after the label (the count keeps the right edge; the name still reads "Pending 4, Unread
+   messages"). */
+.navMark {
+  order: 1;
+  margin-left: -3px;
+}
+
+/* The icon rail: 12 px, on the icon's top left corner (the count badge has the right one). */
+.railMark {
   position: absolute;
-  top: 7px;
-  left: 7px;
-  margin: 0;
+  top: 6px;
+  left: 6px;
+  width: 12px;
+  height: 12px;
 }
 
 .iconBtn.iconBtn {

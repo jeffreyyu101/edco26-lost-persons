@@ -384,13 +384,14 @@
 
 /* One grid for the whole list: every row (and the column header) is a subgrid of it, so the columns line up
    and size to their widest value. The name takes what is left, and never less than 80 px (or a quarter of
-   a phone narrower than 320 px): the number and both times keep their content width, and the status gives
-   way instead, first with a shorter label under 400 px, then with an ellipsis once the name is at its floor
-   (at 375 px that takes the closed rows open, a "Not in medical" and an earlier day's time together).
+   a phone narrower than 320 px): the lane and both times keep their width, and the status gives way instead,
+   first with a shorter label under 430 px, then with an ellipsis once the name is at its floor.
+   (Message lane, design/screens/msg-indicator.html) The first track is the message lane: the row's 16 px padding
+   plus 31 px (the "99+" bubble), never less, so no mark ever moves the names: they start 52 px in on every row.
    Gap as polish-v7.html. */
 .log {
   display: grid;
-  grid-template-columns: auto minmax(min(80px, 25%), 1fr) auto auto auto;
+  grid-template-columns: minmax(47px, auto) minmax(min(80px, 25%), 1fr) auto auto auto;
   column-gap: 5px;
 }
 
@@ -415,7 +416,7 @@
   min-width: 0;
 }
 
-/* The number and the times are never squeezed: their content is their minimum. */
+/* The lane and the times are never squeezed: their content is their minimum. */
 .c1,
 .c4,
 .c5,
@@ -452,7 +453,7 @@
   gap: 6px;
 }
 
-/* "#  Friend  Status  Created  Updated": small, quiet, sticky right under the header. */
+/* "Friend  Status  Created  Updated" (nothing over the lane): small, quiet, sticky right under the header. */
 .colh {
   position: sticky;
   top: var(--lp-sticky-h, 0px);
@@ -521,12 +522,17 @@ button.lr:focus-visible {
   outline-offset: -2px;
 }
 
-.num {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--gray-11);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+/* The message lane's cell (components/messages/CardActivity.tsx MessageMark draws the mark). With a mark, its
+   ::before is the tap area that lands at the thread: the row's left 52 px (gutter, lane and gap) over the row's
+   full height, anchored to the row (a two-line search result is covered, nothing hangs outside it), so at least
+   52 × 48 px. Without a mark there is none: the whole row opens the top. */
+.lane[data-thread-badge]::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 52px;
 }
 
 .nm {
@@ -660,9 +666,15 @@ button.lr:focus-visible {
 }
 
 /* Closed rows are greyed without losing text contrast (spec §7): the name and status drop to gray-11 and
-   the glyph fades. Opacity on the whole row would take the text under 4.5:1. */
+   the glyph fades. Opacity on the whole row would take the text under 4.5:1. The lane's read mark drops to
+   gray-10, never faded (3:1 or more in both themes); an unread bubble stays full blue (a new message on a closed
+   request is still news). */
 .closed .nm {
   color: var(--gray-11);
+}
+
+.closed .lane {
+  color: var(--gray-10);
 }
 
 .closed .lg {
@@ -684,6 +696,7 @@ button.lr:focus-visible {
 /* "Closed  6  ›": a plain row, not a card (polish-v7.html .fold, pending-v9.html .arch). Full width in the log grid
    and in a plain block (My requests' Closed by status), so the chevron and the hairlines reach the right edge. */
 .fold {
+  position: relative;
   grid-column: 1 / -1;
   box-sizing: border-box;
   width: 100%;
@@ -709,6 +722,16 @@ button.lr:focus-visible {
 .fold:focus-visible {
   outline: 2px solid var(--focus-8);
   outline-offset: -2px;
+}
+
+/* The log's fold leads with the message lane, so "Archived" lines up with the names (16 + 31 + 5 = 52 px): the
+   folded rows' unread total sits there. */
+.foldLane {
+  flex: none;
+  display: flex;
+  align-items: center;
+  width: 31px;
+  margin-right: -3px;
 }
 
 .foldLabel {
@@ -1738,7 +1761,8 @@ button.qheadBtn:focus-visible {
 
 /* ---- Skeletons (skeletons.html) ---------------------------------------------------------------- */
 
-/* The log's rows: number, name, status glyph and label, created, updated; 48 px, hairline from the name. */
+/* The log's rows: the empty message lane, name, status glyph and label, created, updated; 48 px, hairline from the
+   name (52 px in, as the rows). */
 .skLog {
   padding-top: 24px;
 }
@@ -1746,8 +1770,8 @@ button.qheadBtn:focus-visible {
 .skLogRow {
   position: relative;
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) 112px 56px 26px;
-  column-gap: 7px;
+  grid-template-columns: 31px minmax(0, 1fr) 112px 56px 26px;
+  column-gap: 5px;
   align-items: center;
   height: 48px;
   padding: 0 16px;
@@ -1761,7 +1785,7 @@ button.qheadBtn:focus-visible {
 .skLogRow::after {
   content: '';
   position: absolute;
-  left: 55px;
+  left: 52px;
   right: 0;
   bottom: 0;
   border-bottom: 1px solid var(--gray-a3);

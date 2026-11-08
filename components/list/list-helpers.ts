@@ -5,6 +5,8 @@ import type { SearchHit } from '@/lib/client/selectors';
 import { STATUS, ageGender, isInMedical, isRecheckDue, postShort, sameStaff, statusMeta, type StatusTone } from '@/lib/domain';
 import { stagePhrase, type StageSource } from '@/lib/stages';
 import { formatCaseNumber } from '@/lib/format';
+import { unreadOf } from '@/lib/messaging-activity';
+import { messageMark } from './message-mark';
 
 /** Shown where a request has no name (a photo or description alone is a valid request). */
 export const NO_NAME = 'No name';
@@ -244,7 +246,7 @@ export function outboxRowLabel(d: OutboxDisplay, time: string): string {
 
 // ---------------------------------------------------------------------------------------------------
 // The All requests log (option B, 2026-11-06): one line per request in a shared grid
-//   #  ·  Friend  ·  Status  ·  Created  ·  Updated
+//   #  ·  Friend  ·  Status  ·  Created  ·  Updated   (message lane, 2026-11-07: the lane in place of #; see below)
 // ---------------------------------------------------------------------------------------------------
 
 /**
@@ -278,16 +280,29 @@ export function statusPhrase(status: string): string {
 
 /**
  * A log row's accessible name, as one sentence:
- * "LP-1013, T.R., Waiting for check, created 11:02 PM, updated 2 minutes ago".
+ * "LP-1013, T.R., Waiting for check, created 11:02 PM, updated 2 minutes ago", then (message lane) what the lane
+ * shows: ". 2 unread messages." / ". 4 messages." / nothing (messagesSentence).
  * `updated` is format.updatedPhrase(): "updated 2 minutes ago" or "not updated yet".
  */
 export function logRowLabel(
-  row: Pick<RequestSummary, 'caseNumber' | 'name' | 'status' | 'createdAt' | 'recheckAt'> & StageSource,
+  row: Pick<RequestSummary, 'caseNumber' | 'name' | 'status' | 'createdAt' | 'recheckAt' | 'unread' | 'messageCount'> & StageSource,
   created: string,
   updated: string,
   timeZone?: string,
   /** (Pending v9.1) The views' clock: a hold whose recheck time has passed says "Recheck due". */
   now = 0,
+): string {
+  const said = messagesSentence(row);
+  return `${logSentence(row, created, updated, timeZone, now)}${said ? `.${said}` : ''}`;
+}
+
+/** The row's own words, number to updated, without a full stop (logRowLabel / searchLogLabel go on from it). */
+function logSentence(
+  row: Pick<RequestSummary, 'caseNumber' | 'name' | 'status' | 'createdAt'> & StageSource,
+  created: string,
+  updated: string,
+  timeZone: string | undefined,
+  now: number,
 ): string {
   // (F5) The stage, not just the status: "Not found yet", "Recheck due", "Friend en route".
   return `${formatCaseNumber(row.caseNumber)}, ${displayName(row.name)}, ${stagePhrase(row, timeZone, now)}, created ${created}, ${updated}`;
@@ -303,25 +318,34 @@ export function stageClock(row: Pick<RequestSummary, 'status' | 'recheckAt'>, no
   return isRecheckDue(row, now) ? Date.parse(row.recheckAt as string) : 0;
 }
 
-/** A search result in the log grid: the row's sentence, then the matched text when it is not the name. */
+/**
+ * A search result in the log grid: the row's sentence, then the matched text when it is not the name or the number,
+ * then what the message lane shows (" 2 unread messages." / " 4 messages."). The matched text gets a full stop when
+ * a sentence follows it.
+ */
 export function searchLogLabel(
-  row: Pick<RequestSummary, 'caseNumber' | 'name' | 'status' | 'createdAt'> & StageSource,
+  row: Pick<RequestSummary, 'caseNumber' | 'name' | 'status' | 'createdAt' | 'unread' | 'messageCount'> & StageSource,
   created: string,
   updated: string,
   line: string,
   timeZone?: string,
   now = 0,
 ): string {
-  return `${logRowLabel(row, created, updated, timeZone, now)}.${line ? ` ${line}` : ''}`;
+  const said = messagesSentence(row);
+  const matched = line ? ` ${said ? fullStop(line) : line}` : '';
+  return `${logSentence(row, created, updated, timeZone, now)}.${matched}${said}`;
 }
 
-/** The number column of the log: the LP number without its prefix or padding, "1013", "998". */
+/** "Any tattoos?" stays as it is; "…pink braids" gets its full stop (a sentence follows it). */
+const fullStop = (text: string) => (/[.?!…]$/.test(text) ? text : `${text}.`);
+
+/** The desk table's number column: the LP number without its prefix or padding, "1013", "998". */
 export function logNumber(caseNumber: number): string {
   return String(caseNumber);
 }
 
 /**
- * Highlight ranges for the bare number in the log's number column, from a search hit's ranges in
+ * Highlight ranges for the bare number in the desk table's number column, from a search hit's ranges in
  * formatCaseNumber() ("LP-0998" → "998").
  */
 export function logNumberRanges(caseNumber: number, caseRanges: Ranges): Ranges {
@@ -332,7 +356,39 @@ export function logNumberRanges(caseNumber: number, caseRanges: Ranges): Ranges 
     .filter(([s, e]) => e > s);
 }
 
-/** The "Archived N" fold's accessible name ("Archived 6 requests"); aria-expanded carries open / folded. */
-export function archivedFoldLabel(count: number, label = 'Archived'): string {
-  return `${label} ${count} ${count === 1 ? 'request' : 'requests'}`;
+/** "1 unread message", "3 unread messages". */
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+/**
+ * The "Archived N" fold's accessible name ("Archived 6 requests"); aria-expanded carries open / folded. While folded,
+ * the unread messages on the rows it hides follow (message lane): "Archived 6 requests. 3 unread messages.".
+ */
+export function archivedFoldLabel(count: number, label = 'Archived', unread = 0): string {
+  const rows = `${label} ${count} ${count === 1 ? 'request' : 'requests'}`;
+  return unread > 0 ? `${rows}. ${plural(unread, 'unread message')}.` : rows;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The message lane (design/screens/msg-indicator.html, Brian 2026-11-07): one mark leading every log row and
+// desk table row. With Brian's override ("i want the blue bubble to be for everyone it indicates its unread to
+// you"), there is no involved gate: the server's unread count already leaves out my own messages.
+//   unread > 0 ............ the filled blue bubble with the unread count ("99+" from 100)
+//   messages, all read .... the grey outline bubble, no number
+//   no messages ........... nothing
+// ---------------------------------------------------------------------------------------------------
+
+// The mark itself (MARK_MAX, markCount, messageMark) lives in ./message-mark: the request page's CardActivity draws
+// it too, and importing it from here would bring every list helper into the request page's code.
+export { MARK_MAX, markCount, messageMark, type MessageMark } from './message-mark';
+
+/** The lane in words, for the row's sentence: " 2 unread messages." / " 4 messages." / '' (no messages). */
+export function messagesSentence(row: Partial<Pick<RequestSummary, 'unread' | 'messageCount'>>): string {
+  const mark = messageMark(row);
+  if (!mark) return '';
+  return ` ${plural(mark.count, mark.kind === 'unread' ? 'unread message' : 'message')}.`;
+}
+
+/** The unread messages on rows a fold hides (its lane's bubble and its name while folded). */
+export function unreadTotal(rows: ReadonlyArray<Partial<Pick<RequestSummary, 'unread'>>>): number {
+  return rows.reduce((sum, r) => sum + unreadOf(r), 0);
 }

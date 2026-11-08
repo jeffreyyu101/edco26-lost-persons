@@ -84,7 +84,8 @@ export function messageLength(body: string): number {
 // Quick lines (status × side)
 // ---------------------------------------------------------------------------------------------------
 
-export type QuickLineKind = 'message' | 'enroute' | 'arrived';
+/** (2026-11-08) No 'arrived': Arrived is no longer offered (design/DECISIONS.md "Request page tonight"). */
+export type QuickLineKind = 'message' | 'enroute';
 
 export interface QuickLine {
   /** The text a tap puts in the composer (for 'message'), and the pill's label. */
@@ -123,12 +124,13 @@ export const FOH_WAITING_LINES: readonly QuickLine[] = [msg('Friend is still her
 
 /**
  * The quick lines for a request, a side, whether I am en route on it now, and whether the friend has
- * arrived. Every quick line is just a message (a tap fills the composer; Send posts it) except En route
- * (opens the en route sheet) and Arrived.
+ * arrived (an old row). Every quick line is just a message (a tap fills the composer; Send posts it) except
+ * En route (opens the en route sheet).
  *   Waiting (incl. the Pending hold): medical asks; front of house says whether the friend is still here.
- *   In medical: medical's handover lines; front of house "En route" (before) or "Arrived" (while en route),
- *   neither once the friend arrived (as on the cards), then "Friend left the area" ("Can't find them" was
- *   removed 2026-11-07, the ops lead + Brian; old messages with it stay as written).
+ *   In medical: medical's handover lines; front of house "En route" until I am en route (my row in the status
+ *   block changes or cancels it) and never once the friend arrived, then "Friend left the area" ("Can't find
+ *   them" was removed 2026-11-07, the ops lead + Brian; old messages with it stay as written). (2026-11-08) No
+ *   "Arrived" line: after Located the path is (optional) En route → Reunited, Reunited in the request's bar.
  *   Closed: none (free text only).
  */
 export function quickLines(stage: QuickStage, side: Side, enrouteMine: boolean, arrived = false): readonly QuickLine[] {
@@ -136,8 +138,7 @@ export function quickLines(stage: QuickStage, side: Side, enrouteMine: boolean, 
   if (stage === 'waiting') return FOH_WAITING_LINES;
   if (stage === 'in_medical') {
     const rest = [msg('Friend left the area')];
-    if (arrived) return rest;
-    return [enrouteMine ? { text: 'Arrived', kind: 'arrived' } : { text: 'En route', kind: 'enroute' }, ...rest];
+    return enrouteMine || arrived ? rest : [{ text: 'En route', kind: 'enroute' }, ...rest];
   }
   return [];
 }
