@@ -293,7 +293,6 @@ test.describe('phone', () => {
     const refTop = async () => (await ref.boundingBox())!.y;
 
     await card.getByRole('button', { name: 'Located', exact: true }).click();
-
     await page.getByTestId('located-no').click(); // (Companion) "Someone already with them?" No
     const sheet = page.getByRole('dialog', { name: `${nameOf(r)} located` });
     const field = sheet.getByRole('textbox', { name: 'Location' });

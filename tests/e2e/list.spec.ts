@@ -879,7 +879,6 @@ test('Pending: In medical → Friend coming, Undo, then Reunited closes it (grey
   await expect(checkCard(page, r.id)).toBeVisible();
 
   await checkCard(page, r.id).getByRole('button', { name: 'Located', exact: true }).click();
-
   await page.getByTestId('located-no').click(); // (Companion) "Someone already with them?" No
   await sheet.getByRole('button', { name: 'Skip' }).click();
   await expect(comingCard(page, r.id)).toBeVisible();
