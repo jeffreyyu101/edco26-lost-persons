@@ -88,7 +88,7 @@ describe('Arrived is offered nowhere (2026-11-08)', () => {
     return render(s, <MineCard row={row} now={NOW} freshTone={null} timeZone={TZ} />);
   };
 
-  it('My requests, front of house: En route first; once I am en route the card offers the request\'s Reunited, never Arrived', () => {
+  it('My requests, front of house: En route first; once I am en route the card offers the request\'s Reunited (right of Message), never Arrived', () => {
     const before = card(store(IN_MEDICAL, withEnroute(null)));
     expect(before).toContain('data-testid="enroute-button"');
     expect(before).not.toContain('reunited-button');
@@ -98,6 +98,10 @@ describe('Arrived is offered nowhere (2026-11-08)', () => {
     expect(enroute).not.toContain('enroute-button');
     expect(enroute).toMatch(/<button[^>]*data-testid="reunited-button"[^>]*aria-label="Reunited: [^"]+"[^>]*>[^]*?Reunited<\/button>/);
     expect(enroute).toContain('data-testid="message-button"');
+    // Pending's Friend coming card's order, [Message | Reunited]: a tap meant for Message never closes the request.
+    expect(enroute.indexOf('data-testid="message-button"')).toBeLessThan(enroute.indexOf('data-testid="reunited-button"'));
+    expect(before.indexOf('data-testid="message-button"')).toBeGreaterThan(-1);
+    expect(before.indexOf('data-testid="message-button"')).toBeLessThan(before.indexOf('data-testid="enroute-button"'));
 
     // Someone else en route: I can go too.
     const others = card(store(IN_MEDICAL, withEnroute(OTHERS_ENROUTE)));

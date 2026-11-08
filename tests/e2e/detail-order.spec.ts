@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { expect, test, type APIRequestContext, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { devices, expect, test, type APIRequestContext, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import type { RequestDetail, RequestSummary, ThreadPage } from '../../lib/api-types';
 import { testBaseUrl } from '../../scripts/test-env.mjs';
 import { axeViolations, type AxeFinding } from './helpers/a11y';
@@ -17,7 +17,8 @@ import { newSignedInContext, signedInAs } from './helpers/session';
 //       (a count only from the phone's cache, read meanwhile on another device, keeps no line, not even for a moment)
 //   overflow at 375, 390, 820, 1180 and 1440 px in light and dark; axe on the request with the line.
 //   (2026-11-08, request page tonight) the line has no Needs info chip of its own (T1), wraps to two lines with the
-//   message's time at its right (T2); the thread is no scroll trap on the phone, the desk pane keeps its own (T4).
+//   message's time at its right (T2); the thread is no scroll trap on the phone, the desk pane keeps its own (T4);
+//   a phone's jump to a long thread keeps the message field above the sticky action bar.
 // Synthetic rows only (TEST-RO-…), closed again afterwards.
 
 const BASE = testBaseUrl();
@@ -407,6 +408,51 @@ test.describe('phone', () => {
     // An old "/?r=<id>" (an earlier build's notification, a shared link): the top.
     await page.goto(`/?r=${r.id}`);
     await expectAtTop(page);
+  });
+
+  test("a jump to a long thread keeps medical's message field above the action bar (390 × 844 and 390 × 664)", async ({ page, browser }) => {
+    test.slow();
+    // In medical (medical's three quick lines wrap to two rows, T3), and 8 messages that alternate (8 run labels, T5):
+    // the thread is at its height cap.
+    const r = await createRequest(page.request);
+    await withMedical(browser, async (med) => {
+      await inMedical(med, r.id);
+      for (let i = 1; i <= 8; i += 1) await say(i % 2 ? med : page.request, r.id, `Synthetic handover note ${i}`);
+    });
+    const fieldAboveBar = async (p: Page, label: string, plainLandingHides: boolean) => {
+      await p.waitForTimeout(800);
+      const field = (await composer(p).boundingBox())!;
+      const bar = (await p.getByTestId('profile-actions').boundingBox())!;
+      expect(field.y + field.height, `${label}: the field ends above the action bar`).toBeLessThanOrEqual(bar.y);
+      await expect(composer(p)).toBeInViewport({ ratio: 1 });
+      await expect(messages(p).getByTestId('bubble-them').last()).toBeInViewport();
+      await expect(composer(p)).not.toBeFocused();
+      if (plainLandingHides) {
+        // The case this guards: with the heading just under the top bar, the field would sit under the action bar.
+        const section = (await messages(p).boundingBox())!;
+        expect(field.y + field.height - section.y + 56, `${label}: the section is taller than the room`).toBeGreaterThan(bar.y);
+      }
+    };
+    for (const height of [844, 664]) {
+      const latest = `Synthetic handover note ${height}`;
+      await say(page.request, r.id, latest);
+      const ctx = await newSignedInContext(browser, MED, { baseURL: BASE, ...devices['iPhone 14'], viewport: { width: 390, height }, serviceWorkers: 'block' });
+      const p = await ctx.newPage();
+      try {
+        // In place: the line (unread), with the thread already shown.
+        await p.goto(`/?r=${r.id}`);
+        await expect(messages(p).getByTestId('bubble-them').last()).toHaveText(latest, SYNC);
+        await expect(line(p)).toBeVisible(SYNC);
+        await line(p).click();
+        await fieldAboveBar(p, `${height} line`, height === 664);
+        // A notification on a new page: the thread loads under the jump, and it lands again once it shows.
+        await p.goto(`/?r=${r.id}&to=thread`);
+        await expect(messages(p).getByTestId('bubble-them').last()).toHaveText(latest, SYNC);
+        await fieldAboveBar(p, `${height} notification`, height === 664);
+      } finally {
+        await ctx.close();
+      }
+    }
   });
 
   test('axe and the 44 px line, light and dark', async ({ page, browser }) => {

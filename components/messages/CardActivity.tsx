@@ -3,7 +3,7 @@
 // #clarify 3 and 5, #edit 1–3). Self-contained slots: each reads the store itself, so the cards they sit in
 // only place them.
 //   My requests (every status): the en route row (In medical), the last-message preview (when there are
-//   messages), then En route / Reunited (front of house, In medical) and Message with its unread count.
+//   messages), then Message with its unread count and En route / Reunited (front of house, In medical).
 //   Pending → To check: the preview above the answers, and a 44 px Message button left of them.
 //   Pending → Friend coming: the en route row, then Message | Reunited.
 //   Desk tables: a count after the name (a click on it lands at the thread). Pending's Friend coming tab and
@@ -163,10 +163,11 @@ function Slot({ children, mine }: { children: ReactNode; mine?: boolean }) {
 }
 
 /**
- * My requests: en route row (In medical), preview, then [En route | Reunited] (front of house, In medical) and
- * [Message]. (2026-11-08, Arrived dropped: design/DECISIONS.md "Request page tonight") Once I am en route, or the
+ * My requests: en route row (In medical), preview, then [Message] and [En route | Reunited] (front of house, In
+ * medical). (2026-11-08, Arrived dropped: design/DECISIONS.md "Request page tonight") Once I am en route, or the
  * friend arrived on an old row, the card offers the request's Reunited instead: the same tap as Pending's Friend
- * coming card (useStatusTap → setStatus reunite, with its Undo; "Needs a connection" offline).
+ * coming card (useStatusTap → setStatus reunite, with its Undo; "Needs a connection" offline), on the same side as
+ * there: Message left, the action right, so a tap meant for Message never closes the request.
  */
 export function MineActivity({ row }: { row: RequestSummary }) {
   const api = useMessaging();
@@ -206,8 +207,8 @@ export function MineActivity({ row }: { row: RequestSummary }) {
       <EnrouteFailed control={enroute} />
       <PreviewRow row={row} />
       <div className={s.cardBtns} data-count={action ? 2 : 1}>
-        {action}
         <MessageButton row={row} />
+        {action}
       </div>
       {enroute.sheet}
     </Slot>

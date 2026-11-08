@@ -44,6 +44,10 @@ const FINE_POINTER = '(hover: hover) and (pointer: fine)';
 /** (R2) A jump focuses the composer here only: the desk layout with a mouse or trackpad. */
 const COMPUTER = `${DESK_QUERY} and ${FINE_POINTER}`;
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+/** (2026-11-08) A phone's jump that landed before the thread showed lands again when it shows, within this long. */
+const JUMP_SETTLE_MS = 3_000;
+/** (2026-11-08) Room a phone's jump keeps between the message field and the request's sticky action bar. */
+const KEEP_GAP_PX = 8;
 
 export function MessagesSection({ row, panel = false }: MessagesSectionProps) {
   const api = useMessaging();
@@ -76,6 +80,8 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
   const atBottom = useRef(true);
   const lastKey = useRef<string | null>(null);
   const firstShown = useRef(false);
+  /** Until when a phone's jump that landed while the thread was loading lands again once it shows (0: no). */
+  const settle = useRef(0);
   const [newPill, setNewPill] = useState(false);
 
   const scrollToEnd = useCallback((smooth: boolean) => {
@@ -99,6 +105,9 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
     if (!firstShown.current) {
       firstShown.current = true;
       scrollToEnd(false);
+      // (2026-11-08) The thread came in under a phone's jump: land again, so it can't push the field under the bar.
+      if (section.current && Date.now() <= settle.current) scrollToSection(section.current, motion(), input.current);
+      settle.current = 0;
       return;
     }
     // Only a new message at the end counts (an older page loaded above changes nothing here).
@@ -142,7 +151,9 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
   }, [api, row.id, lastAt, count]);
 
   // --- (R2) a jump to the thread (lib/client/thread-jump): into view, at its newest; the composer focused on a
-  // computer only (a phone keeps its keyboard down: the heading takes the focus) --------------------------
+  // computer only (a phone keeps its keyboard down: the heading takes the focus). (2026-11-08) On a phone the message
+  // field also lands above the sticky action bar, the heading going under the top bar if the whole section can't fit;
+  // a jump that lands while the thread is still loading lands again when it shows. ------------------------------
   useEffect(() => {
     const id = row.id;
     let frame = 0;
@@ -152,7 +163,8 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
       frame = requestAnimationFrame(() => {
         frame = 0;
         if (!takeThreadJump(id)) return;
-        if (section.current) scrollToSection(section.current, window.matchMedia(REDUCED_MOTION).matches ? 'auto' : 'smooth');
+        settle.current = panel || firstShown.current ? 0 : Date.now() + JUMP_SETTLE_MS;
+        if (section.current) scrollToSection(section.current, motion(), panel ? null : input.current);
         scrollToEnd(false);
         setNewPill(false);
         if (window.matchMedia(COMPUTER).matches) input.current?.focus({ preventScroll: true });
@@ -166,7 +178,7 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
       off();
       cancelAnimationFrame(frame);
     };
-  }, [row.id, scrollToEnd]);
+  }, [row.id, panel, scrollToEnd]);
 
   const side = sideOfTeam(session.team);
   const lines = quickLines(quickStage(row), side, enroute.mine, enroute.enroute?.state === 'arrived');
@@ -325,11 +337,15 @@ export function bubbleSaid(bubble: Pick<Bubble, 'by' | 'team' | 'mine' | 'body' 
   return `${who}${time ? `, ${time}` : ''}: ${bubble.body}.${state}`;
 }
 
+const motion = (): ScrollBehavior => (window.matchMedia(REDUCED_MOTION).matches ? 'auto' : 'smooth');
+
 /**
  * (R2) Scrolls the request's own scroller (the desk pane's body, else the page) so the section's top sits under its
  * scroll-margin. Not scrollIntoView: that moves every scroller around it, the desk's list included.
+ * (2026-11-08) On the page (a phone), `keep` (the message field) ends at least KEEP_GAP_PX above the request's sticky
+ * action bar: when the section is taller than the room between the bars, the page scrolls further down by the rest.
  */
-function scrollToSection(el: HTMLElement, behavior: ScrollBehavior): void {
+function scrollToSection(el: HTMLElement, behavior: ScrollBehavior, keep: HTMLElement | null = null): void {
   const margin = parseFloat(getComputedStyle(el).scrollMarginTop) || 0;
   for (let box = el.parentElement; box && box !== document.body && box !== document.documentElement; box = box.parentElement) {
     const overflow = getComputedStyle(box).overflowY;
@@ -337,7 +353,14 @@ function scrollToSection(el: HTMLElement, behavior: ScrollBehavior): void {
     box.scrollTo({ top: box.scrollTop + el.getBoundingClientRect().top - box.getBoundingClientRect().top - margin, behavior });
     return;
   }
-  window.scrollTo({ top: window.scrollY + el.getBoundingClientRect().top - margin, behavior });
+  const top = el.getBoundingClientRect().top - margin;
+  let by = top;
+  if (keep) {
+    const bar = el.closest('[data-testid="profile"]')?.querySelector<HTMLElement>('[data-testid="profile-actions"]');
+    const room = window.innerHeight - (bar?.offsetHeight ?? 0) - KEEP_GAP_PX;
+    by = Math.max(top, keep.getBoundingClientRect().bottom - room);
+  }
+  window.scrollTo({ top: window.scrollY + by, behavior });
 }
 
 // ---------------------------------------------------------------------------------------------------
