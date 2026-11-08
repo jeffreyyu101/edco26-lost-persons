@@ -187,15 +187,17 @@ export function systemNotice(
   const url = alert.kind === 'message' ? threadPath(id) : hrefFor({ r: id });
   const requireInteraction = alert.kind === 'in_medical';
   const tag = requestTag(id);
-  if (!row) return { title: alert.kind === 'new_request' ? 'New request' : alert.title, body: '', tag, url, key: null, requireInteraction };
+  // The row is gone: no name to show, and the alert's own title may carry the LP number (F4: none in notifications).
+  if (!row) return { title: alert.kind === 'new_request' ? 'New request' : 'Request update', body: '', tag, url, key: null, requireInteraction };
   // (F5) A request on hold: the hold alert's own words, the name and "Not found yet · recheck 4:40 PM" (no LP).
   if (alert.kind === 'status_changed' && isHeld(row)) {
     return { title: alert.title, body: alert.subtitle ?? '', tag, url, key: alertKey(row), requireInteraction };
   }
-  // F4: no LP number (the Web Push for the same request reads the same way: the name, then the news).
+  // F4: no LP number. As the Web Push for the same request: the name is the title and the news leads the body, so a
+  // long name never pushes the status out of a one-line banner.
   const name = alertName(row.name) || NO_NAME;
-  const title = alert.kind === 'new_request' ? 'New request' : `${name} · ${statusMeta(row.status).shortLabel}`;
-  const where = alert.kind === 'new_request' ? who(row) : row.postShort;
+  const title = alert.kind === 'new_request' ? 'New request' : name;
+  const where = alert.kind === 'new_request' ? who(row) : [statusMeta(row.status).shortLabel, row.postShort].filter(Boolean).join(' · ');
   const body = alert.kind === 'in_medical' ? [where, LOCATED_SUBTITLE].filter(Boolean).join('\n') : where;
   return { title, body, tag, url, key: alertKey(row), requireInteraction };
 }

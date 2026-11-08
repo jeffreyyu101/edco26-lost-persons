@@ -7,7 +7,7 @@
 // once more where the text leaves the server. The push title is the request's full name (alertName, Brian
 // 2026-11-07), except a new request: "New request". Status words always come from STATUS_META, so a
 // later rename of a label flows through.
-import { NOT_FOUND_YET_LABEL, STATUS, STATUS_META, ageGender, alertName, joinName } from './domain';
+import { NOT_FOUND_YET_LABEL, STATUS, STATUS_META, ageGender, alertName, initials, joinName } from './domain';
 import { agoPhrase, formatClockAmPm, eventDate, minutesSince } from './format';
 import { threadPath } from './thread-link';
 
@@ -426,19 +426,25 @@ export function groupByDay<T extends { at: string }>(rows: readonly T[], now: nu
 }
 
 /**
- * A new request's detail after its initials: "T.R. · 24 M · FA 4" → "24 M · FA 4" (contract B starts it with the
- * initials because the push's title is "New request"). Other kinds: the detail as it is.
+ * A new request's detail after its name: "Tara Reyes · 24 M · FA 4" → "24 M · FA 4" (contract B starts it with the
+ * name because the push's title is "New request"). A row stored before names replaced initials (2026-11-07)
+ * starts with the initials instead ("T.R. · 24 M · FA 4"): those go too. Other kinds: the detail as it is.
  */
 function detailAfterTitle(row: Pick<ActivityRow, 'kind' | 'title' | 'detail'>): string {
   if (row.kind !== 'new_request') return row.detail;
-  if (row.detail === row.title) return '';
-  const prefix = `${row.title} · `;
-  return row.detail.startsWith(prefix) ? row.detail.slice(prefix.length) : row.detail;
+  const names = row.title === NO_NAME ? [row.title] : [row.title, initials(row.title)];
+  for (const name of names) {
+    if (!name) continue;
+    if (row.detail === name) return '';
+    const prefix = `${name} · `;
+    if (row.detail.startsWith(prefix)) return row.detail.slice(prefix.length);
+  }
+  return row.detail;
 }
 
 /**
  * Line 2 as the row shows it: the detail (contract B), except a new request, whose line 1 already is its
- * initials: "New request · 24 M · FA 4" (f34-v2-2), not "T.R. · 24 M · FA 4" again. The stored detail and the
+ * name: "New request · 24 M · FA 4" (f34-v2-2), not "Tara Reyes · 24 M · FA 4" again. The stored detail and the
  * push body are unchanged.
  */
 export function activityLine2(row: Pick<ActivityRow, 'kind' | 'title' | 'detail'>): string {
@@ -471,7 +477,7 @@ function spokenTitle(title: string): string {
   return title === NO_NAME ? 'A request with no name' : `Request ${title}`;
 }
 
-/** The row's full sentence: "Request J D, answer: Located, Chair 9. 5 minutes ago. Unread." */
+/** The row's full sentence: "Request Jane Doe, answer: Located, Chair 9. 5 minutes ago. Unread." */
 export function activityAriaLabel(row: Pick<ActivityRow, 'kind' | 'title' | 'detail' | 'at' | 'read'>, now: number): string {
   const detail = detailAfterTitle(row).replace(/ · /g, ', ').replace(/ → /g, ' to ');
   const ago = agoPhrase(minutesSince(row.at, now));

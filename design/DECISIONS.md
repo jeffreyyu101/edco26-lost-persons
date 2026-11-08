@@ -538,3 +538,9 @@ Approved 2026-11-07 morning. Identifying the person comes first and the conversa
 
 - **"<initials> located" reads "Friend can head over"** under it (was "Bring the friend to Main Med"), in the in-app alert and the page's own system notification: no alert names where the person is.
 - **Medical's In medical quick lines: Bring 1 person only · Not ready yet — wait · Ready for them.** "Being worked up — wait" became "Not ready yet — wait" (it described care); "Hold — not ready yet", now the same words, is gone. Old messages stay as written.
+
+## Full names in alerts and notifications (Brian 2026-11-07 ~19:50)
+
+- **Every alert names the request by its full name as entered**, not its initials (v2.1 A4 reversed): the Web Push title and a new request's body, the page's own system notification, the in-app toasts, the Activity rows, the Not located Undo bar. Brian: "the notification should just show the full value of whats in the name ... not trying to abbreviate initials or anything". `lib/domain.ts alertName`.
+- **Still never in a notification:** an LP number, a phone number (a name is scrubbed like a detail), contact details. Staff in message lines stay short ("Rae C.").
+- **The page's own notification reads like the push:** the name is the title, the status leads the body, so a long name never hides it. The Undo bar wraps to two lines.
