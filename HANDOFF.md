@@ -25,6 +25,15 @@ screenshots.
 - **Jeffrey's old routes are gone** (`/api/login`, `/api/logout`, `/api/patients/**`). Every working feature
   was kept or moved (spec §12).
 
+### 2026-11-08 (in-house telemetry and the Health page, `feat/observability`)
+
+- **The app records how it is used, never what is in it** (Brian: "lets try to log everything so we can make
+  actionabile improvements"): taps, swipes that move nothing, rage taps, dead taps, sheets opened and closed, slow
+  requests, errors, sync and push health, and timed flows (open, resume, answer, message, new request, alert), as
+  numbers and attribute names only, by team. A desktop-only **`/health`** page shows the problem spots with their
+  breadcrumb trails, the critical paths, request failure rates, push delivery and alert coverage. It stops by itself at
+  **2026-11-10 06:00 ET**; the kill switch is on `/health` and in SQL. See "Telemetry in production" below.
+
 ### 2026-11-06 morning (v2.5, Brian + Jeffrey)
 
 - **Not in medical (now "Not found in medical") is closed** and grey everywhere. Only Waiting for check (blue) and In medical · friend
@@ -244,6 +253,55 @@ screenshots.
 | Real delivery to a phone's lock screen | Not verified here (needs a real device and the production keys): morning checklist below. |
 
 ## The production migration
+
+### Telemetry in production
+
+The telemetry tables are section 10 of `20261106000000_rework.sql`; production gets that section **alone**, as its own
+transaction (it never re-runs the whole file mid-event). `node scripts/telemetry-sql.mjs` writes it to
+`/tmp/observability/migration.sql` (ending in `commit;`) and `/tmp/observability/dry-run.sql` (ending in `rollback;`).
+It needs only `public.lp_push_subscriptions` (F4), takes no lock on any existing table (every table is new), and the
+live build never touches it. **Order: migration first, then deploy** (the build works without it too: the ingest route
+answers 204 and every phone turns itself off).
+
+1. **Before:** `select to_regclass('public.lp_push_subscriptions') is not null;` returns `true`.
+2. **Dry run.** Paste `dry-run.sql` and run it. It must finish without an error; the NOTICE says
+   `lp-tel-retention: scheduled daily 09:17 UTC (job …)`. Nothing is kept.
+3. **Commit.** Paste `migration.sql` and run it.
+4. **Check:** `select enabled, off_at from public.lp_tel_settings;` gives `t | 2026-11-10 11:00:00+00`;
+   `select count(*) from pg_class where relname like 'lp\_tel\_%' and relkind = 'r' and relrowsecurity;` gives `5`;
+   `select count(*) from pg_policies where tablename like 'lp\_tel\_%';` gives `0`;
+   `select jobname, schedule, active from cron.job where jobname = 'lp-tel-retention';` gives `17 9 * * * | t`.
+5. **Deploy** (merge to `main`; no new environment variable). Phones start collecting once they run the new build
+   (after "Update ready · Reload" or their next launch); nobody needs to be asked.
+6. **Verify** within 5 minutes of the first reloads:
+   `select name, count(*) from public.lp_tel_events where received_at > now() - interval '10 minutes' group by 1 order by 2 desc;`
+   shows `app_start`, `view`, `net`, `sync`, `device_state`; open `/health` on a laptop (any signed-in session) and
+   the devices number is above 0.
+7. **Watch the budget** now and then: `select pg_size_pretty(pg_total_relation_size('public.lp_tel_events'));` (expect
+   well under 200 MB); `select device, events from public.lp_tel_quota where hour = date_trunc('hour', now()) order by events desc limit 5;`
+   (no device near 3,000).
+
+**Turn it off** (any of these): the switch on `/health` (with a confirm), or
+`update public.lp_tel_settings set enabled = false, updated_at = now();` (server instances answer 204 within 30 s; each
+phone stops at its next send, restores everything it attached, and probes once every 30 minutes). Move the auto-off:
+`update public.lp_tel_settings set off_at = timestamptz '2026-11-09 06:00-05', updated_at = now();`. Back on:
+`update public.lp_tel_settings set enabled = true, updated_at = now();`. Pause retention:
+`select cron.unschedule('lp-tel-retention');`.
+
+**Teardown** (after the analysis; retention empties it by about 2026-12-10 anyway; safe before a build without the
+collector, which then turns itself off):
+
+```sql
+begin;
+select cron.unschedule(jobid) from cron.job where jobname = 'lp-tel-retention';
+drop function if exists public.lp_tel_health(text, timestamptz, integer), public.lp_tel_retention(),
+  public.lp_tel_set(boolean, timestamptz), public.lp_tel_server_events(jsonb), public.lp_tel_config(),
+  public.lp_tel_ingest(text, text, text, text, bigint, jsonb, jsonb, integer);
+drop table if exists public.lp_tel_events, public.lp_tel_devices, public.lp_tel_quota, public.lp_tel_batches,
+  public.lp_tel_settings;
+notify pgrst, 'reload schema';
+commit;
+```
 
 ### F6 in production
 

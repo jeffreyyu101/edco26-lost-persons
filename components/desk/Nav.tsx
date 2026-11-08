@@ -5,8 +5,11 @@
 // at the bottom the Alerts row (it opens the Alerts sheet, F4) and the signed-in person with the phone's
 // account menu (with "Show header" on All requests while its brand row is hidden, as on the phone). F4 adds
 // Activity under the views, with the bell's unread count; it opens the top bar's Activity popover. Rail icons
-// show their label as a tooltip on hover and keyboard focus.
-import { ChartColumn, ChevronDown, Inbox, List, UserRound, type LucideIcon } from 'lucide-react';
+// show their label as a tooltip on hover and keyboard focus. (Telemetry, 2026-11-08) Health, the in-house telemetry's
+// page (/health, its own route), sits under Dashboard only on a device that has opened /health once
+// (localStorage lp-health): floor staff never see it.
+import { Activity, ChartColumn, ChevronDown, Inbox, List, UserRound, type LucideIcon } from 'lucide-react';
+import { useSyncExternalStore } from 'react';
 import { AccountMenu } from '@/components/account/AccountMenu';
 import { ActivityNavItemSlot, DeskAlertsRowSlot, DeskRailActivitySlot, DeskRailAlertsSlot } from '@/components/activity/slots';
 import { PendingDot } from '@/components/messages/CardActivity';
@@ -25,6 +28,19 @@ const ICONS: Readonly<Record<NavKey, LucideIcon>> = {
 };
 
 const VIEW_KEYS = ['all', 'pending', 'mine'] as const;
+
+const noSubscribe = () => () => undefined;
+function healthSeen(): boolean {
+  try {
+    return window.localStorage.getItem('lp-health') === '1';
+  } catch {
+    return false;
+  }
+}
+/** The Health link shows on a device that has opened /health once (false on the server and in hydration). */
+function useHealthLink(): boolean {
+  return useSyncExternalStore(noSubscribe, healthSeen, () => false);
+}
 
 export interface DeskNavProps {
   /** The view in the main column. */
@@ -55,6 +71,7 @@ export function DeskNav({ main }: DeskNavProps) {
 }
 
 function Sidebar({ main }: DeskNavProps) {
+  const health = useHealthLink();
   const active = navKeyOf(main);
   const counts = useCounts();
   const loading = useIsLoading();
@@ -83,6 +100,13 @@ function Sidebar({ main }: DeskNavProps) {
           <ChartColumn size={16} strokeWidth={1.75} aria-hidden />
           <span className={d.nl}>{NAV_LABEL.dashboard}</span>
         </ViewLink>
+        {health ? (
+          // A plain link: /health is its own route.
+          <a href="/health" className={d.ni} data-testid="desk-health">
+            <Activity size={16} strokeWidth={1.75} aria-hidden />
+            <span className={d.nl}>Health</span>
+          </a>
+        ) : null}
       </nav>
       <span className={d.sp} />
       <DeskAlertsRowSlot />
@@ -110,6 +134,7 @@ function Person({ onShowHeader }: { onShowHeader: (() => void) | undefined }) {
 }
 
 function Rail({ main }: DeskNavProps) {
+  const health = useHealthLink();
   const active = navKeyOf(main);
   const counts = useCounts();
   const loading = useIsLoading();
@@ -139,6 +164,12 @@ function Rail({ main }: DeskNavProps) {
         <DeskRailActivitySlot />
         <span className={d.railSep} aria-hidden />
         {item('dashboard')}
+        {health ? (
+          <a href="/health" className={`${d.ri} lp-hit`} aria-label="Health" data-testid="desk-rail-health">
+            <Activity size={19} strokeWidth={1.75} aria-hidden />
+            <Tip>Health</Tip>
+          </a>
+        ) : null}
       </nav>
       <span className={d.sp} />
       <DeskRailAlertsSlot />

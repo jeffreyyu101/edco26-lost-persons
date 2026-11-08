@@ -55,6 +55,13 @@
  * 'test') always shows: it is tapped inside the app. A click opens the request (the handler above). pushsubscriptionchange re-subscribes with the same key and tells the server, which
  * drops the old endpoint. The worker answers {type: 'lp-caps'} with {push: true} too: a page subscribes
  * only once the active worker can show pushes.
+ *
+ * Telemetry (2026-11-08, design/references/observability-design.md §4.7): after a push is shown (or not), and at the
+ * very end of a click (after focus, lp-open, navigate or openWindow, so it never costs the click its user activation),
+ * the worker appends one entry to a small log in META (`/__lp/tel`, at most 100 entries, none older than 24 h): the
+ * push's kind, when it arrived, its sentAt, whether a window took it and whether a notification showed; or the click's
+ * kind, age and how it opened. No title, body, URL or id. A page's collector takes the log with {type: 'lp-tel-take'}
+ * (it is cleared then). A failed log write is swallowed: it can never stop a notification or a click.
  */
 'use strict';
 
@@ -424,6 +431,16 @@ self.addEventListener('message', (event) => {
     if (port) port.postMessage({ notificationClick: true, push: true });
     return;
   }
+  if (data.type === TEL_TAKE_MESSAGE) {
+    // Telemetry: the push and click log, once ({entries}); an older worker never answers this.
+    const port = event.ports && event.ports[0];
+    event.waitUntil(
+      takeTelLog().then((entries) => {
+        if (port) port.postMessage({ entries });
+      }),
+    );
+    return;
+  }
   if (data.type === TAKE_OPEN_MESSAGE) {
     // A page that started or came back: the click it should open, once ({open: {url, at}}), or {open: null}.
     const port = event.ports && event.ports[0];
@@ -689,7 +706,53 @@ function pendingTaken(open) {
   }).catch(() => false);
 }
 
-async function handleClick(url) {
+// ---- Telemetry log (lp-tel-take) -----------------------------------------------------------------------
+
+const TEL_LOG_KEY = '/__lp/tel';
+const TEL_TAKE_MESSAGE = 'lp-tel-take';
+const TEL_LOG_MAX = 100;
+const TEL_LOG_MS = 24 * 60 * 60 * 1000;
+
+async function readTelLog(meta) {
+  try {
+    const res = await meta.match(TEL_LOG_KEY);
+    const list = res ? await res.json() : [];
+    return Array.isArray(list) ? list : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+/** Appends one entry (numbers, booleans and enums only). Never rejects. */
+function telLog(entry) {
+  return pendingStep(async () => {
+    const meta = await caches.open(META);
+    const now = Date.now();
+    const list = (await readTelLog(meta)).filter((x) => x && typeof x.at === 'number' && now - x.at <= TEL_LOG_MS);
+    list.push(entry);
+    const kept = list.slice(-TEL_LOG_MAX);
+    await meta.put(TEL_LOG_KEY, new Response(JSON.stringify(kept), { headers: { 'Content-Type': 'application/json' } }));
+  }).catch(() => undefined);
+}
+
+/** The log, handed over once and cleared. */
+function takeTelLog() {
+  return pendingStep(async () => {
+    const meta = await caches.open(META);
+    if (!(await meta.match(TEL_LOG_KEY))) return [];
+    const list = await readTelLog(meta);
+    await meta.delete(TEL_LOG_KEY);
+    const now = Date.now();
+    return list.filter((x) => x && typeof x.at === 'number' && now - x.at <= TEL_LOG_MS);
+  }).catch(() => []);
+}
+
+/** A push or page notification's kind for the log ('' when it has none). */
+function telKind(kind) {
+  return typeof kind === 'string' && /^[a-z_]{1,24}$/.test(kind) ? kind : null;
+}
+
+async function handleClick(url, info) {
   const open = { url, at: Date.now() };
   // Kept first, so a page that misses the hand-off below still finds it; never long enough to cost the
   // click its user activation (focus, openWindow).
@@ -705,13 +768,21 @@ async function handleClick(url) {
   clearTimeout(timer);
   // Not kept (yet): no page can have taken it, so the window is still navigated or opened.
   const taken = () => (kept ? pendingTaken(open) : Promise.resolve(false));
-  if (await openFromNotification(url, taken).catch(() => false)) await clearPendingOpen(open).catch(() => undefined);
+  const opened = await openFromNotification(url, taken).catch(() => false);
+  if (opened) await clearPendingOpen(open).catch(() => undefined);
   await saved;
+  // Telemetry, last: the click has done everything it does. How it opened: a page answered lp-open, a page took the
+  // kept click (lp-take-open), or the worker navigated / opened a window.
+  const via = opened ? 'lp-open' : kept && (await taken().catch(() => false)) ? 'take-open' : 'nav';
+  const ts = info && typeof info.timestamp === 'number' ? info.timestamp : null;
+  await telLog({ e: 'click', k: telKind(info && info.kind), ps: !!(info && info.push === true), at: Date.now(), age: ts === null ? null : Math.max(0, Date.now() - ts), via });
 }
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  event.waitUntil(handleClick(notificationTarget(event.notification.data)).catch(() => undefined));
+  const data = event.notification.data || null;
+  const info = { kind: data && data.kind, push: !!(data && data.push === true), timestamp: event.notification.timestamp };
+  event.waitUntil(handleClick(notificationTarget(data), info).catch(() => undefined));
 });
 
 // ---- Web Push (F4) ------------------------------------------------------------------------------------
@@ -748,6 +819,8 @@ function pushData(event) {
     renotify: !!(raw && raw.renotify === true),
     requireInteraction: !!(raw && raw.requireInteraction === true),
     badge: raw && typeof raw.badge === 'number' && raw.badge >= 0 ? Math.floor(raw.badge) : null,
+    // Telemetry: the server clock when the push was built (push transit times on the Health page).
+    sentAt: raw && typeof raw.sentAt === 'number' && Number.isFinite(raw.sentAt) ? raw.sentAt : null,
   };
 }
 
@@ -822,12 +895,18 @@ function askFront(client, message) {
   });
 }
 
+/** Telemetry: one log entry per push, written after it was shown (or not). Never rejects. */
+function logPush(data, front, shown, silent) {
+  return telLog({ e: 'rx', k: telKind(data.kind) || 'other', at: Date.now(), sent: data.sentAt, fr: front, sh: shown, si: silent });
+}
+
 async function handlePush(event) {
   const data = pushData(event);
   await setBadge(data.badge);
   // "Send a test alert" is tapped inside the app: it shows in front too (that is what it tests).
   if (data.kind === 'test') {
     await showPush(data, false);
+    await logPush(data, false, true, false);
     return;
   }
   const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
@@ -849,9 +928,13 @@ async function handlePush(event) {
   const front = answers.some(Boolean);
   if (!front) {
     await showPush(data, false);
+    await logPush(data, false, true, false);
     return;
   }
-  if (!isWebKit()) return;
+  if (!isWebKit()) {
+    await logPush(data, true, false, false);
+    return;
+  }
   // WebKit counts a push that shows nothing against the subscription: show it silently and take it away.
   await showPush(data, true);
   try {
@@ -860,6 +943,7 @@ async function handlePush(event) {
   } catch (e) {
     // it stays in the notification centre; still one alert
   }
+  await logPush(data, true, true, true);
 }
 
 self.addEventListener('push', (event) => {

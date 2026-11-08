@@ -34,6 +34,10 @@
 --      every 5 minutes (enabled and scheduled only where pg_cron can run; a NOTICE says which). Additive.
 --      Pause the job with: select cron.unschedule('lp-close-inactive');
 --      Deploy the F6 build BEFORE pasting this (HANDOFF.md "F6 in production"): it works on a database without it.
+--  10. Telemetry (2026-11-08): lp_tel_settings, lp_tel_events, lp_tel_devices, lp_tel_quota, lp_tel_batches (RLS on, no
+--      policies), the lp_tel_* functions and the daily pg_cron job 'lp-tel-retention' (30 days). Additive; collection stops
+--      by itself at lp_tel_settings.off_at (2026-11-10 06:00 ET). In production it is pasted ALONE, as its own
+--      transaction (HANDOFF.md "Telemetry in production"), never by re-running this whole file mid-event.
 -- =====================================================================================================
 
 begin;
@@ -3395,6 +3399,570 @@ begin
   raise notice 'lp-close-inactive: scheduled every 5 minutes (job %). Pause: select cron.unschedule(''lp-close-inactive'');', v_job;
 end
 $cron$;
+
+-- -----------------------------------------------------------------------------------------------------
+-- 10. Telemetry (Brian 2026-11-08 ~00:50: "lets try to log everything so we can make actionabile improvements";
+--     design/references/observability-design.md §2, design/DECISIONS.md "In-house telemetry"). Additive: five new
+--     lp_tel_* tables (RLS on, no policies, service_role only, like every lp_ table), their lp_tel_* functions and the
+--     daily pg_cron job 'lp-tel-retention' (deletes after 30 days). Nothing existing changes; the live build never
+--     calls any of it. It reads public.lp_push_subscriptions (section 8) for the Health page's coverage only.
+--     Collection stops on its own at lp_tel_settings.off_at (2026-11-10 06:00 ET); the kill switch:
+--       update public.lp_tel_settings set enabled = false, updated_at = now();
+--     Paste alone: `node scripts/telemetry-sql.mjs` writes this section wrapped in its own begin / preflight / commit
+--     (migration.sql, and dry-run.sql ending in rollback;).
+-- -----------------------------------------------------------------------------------------------------
+
+-- 10a. Settings: one row. The kill switch, the auto-off and the caps.
+create table if not exists public.lp_tel_settings (
+  id boolean primary key default true check (id),
+  enabled boolean not null default true,
+  -- Monday 06:00 ET (EST: daylight saving time ended on Nov 1).
+  off_at timestamptz not null default timestamptz '2026-11-10 06:00:00-05',
+  device_hour_cap integer not null default 3000 check (device_hour_cap between 0 and 100000),
+  device_hour_bytes integer not null default 2097152 check (device_hour_bytes between 0 and 67108864),
+  flush_seconds integer not null default 60 check (flush_seconds between 30 and 3600),
+  -- Share of sessions that record the tap / swipe / key / field aggregates (everything else is always kept).
+  sample numeric(3, 2) not null default 1.00 check (sample between 0 and 1),
+  updated_at timestamptz not null default now()
+);
+insert into public.lp_tel_settings (id) values (true) on conflict (id) do nothing;
+
+-- 10b. Events: one row per event (aggregates are already one row per key per flush). Every column is checked: a
+-- token can't hold a space, a capital or an @, so no name, phone number or message text fits by construction.
+create table if not exists public.lp_tel_events (
+  id bigint generated always as identity primary key,
+  at timestamptz not null,
+  received_at timestamptz not null default now(),
+  device text not null check (device ~ '^[a-z0-9]{8,24}$' or device = 'server'),
+  session text not null check (session ~ '^[a-z0-9]{6,24}$' or session = 'server'),
+  team text not null check (team in ('medical', 'dispatch', 'base', 'transpo', 'other')),
+  name text not null check (name ~ '^[a-z][a-z0-9_]{1,23}$'),
+  view text check (view ~ '^[a-z]{1,16}$'),
+  area text check (area ~ '^[a-z0-9/][a-z0-9_.:#/-]{0,63}$'),
+  ctl text check (ctl ~ '^[a-z0-9/][a-z0-9_.:#/-]{0,63}$'),
+  ms integer check (ms between 0 and 86400000),
+  n integer check (n between 0 and 100000),
+  ok boolean,
+  props jsonb check (props is null or (pg_catalog.jsonb_typeof(props) = 'object' and pg_catalog.octet_length(props::text) <= 4096)),
+  trail jsonb check (trail is null or (pg_catalog.jsonb_typeof(trail) = 'array' and pg_catalog.octet_length(trail::text) <= 4096))
+);
+create index if not exists lp_tel_events_at_idx on public.lp_tel_events (at);
+create index if not exists lp_tel_events_name_at_idx on public.lp_tel_events (name, at);
+create index if not exists lp_tel_events_device_at_idx on public.lp_tel_events (device, at);
+
+-- 10c. Devices: the latest context per device (platform, Home Screen app, build) for the Health page.
+create table if not exists public.lp_tel_devices (
+  device text primary key,
+  team text not null,
+  plat text,
+  osv integer,
+  eng text,
+  sa boolean,
+  lay text,
+  dpr integer,
+  touch boolean,
+  build text,
+  eff text,
+  mem integer,
+  first_seen timestamptz not null default now(),
+  last_seen timestamptz not null default now(),
+  last_session text
+);
+create index if not exists lp_tel_devices_last_seen_idx on public.lp_tel_devices (last_seen);
+
+-- 10d. The per device per hour quota, and batch dedupe (a beacon that landed and its later resend).
+create table if not exists public.lp_tel_quota (
+  device text not null,
+  hour timestamptz not null,
+  events integer not null default 0,
+  bytes integer not null default 0,
+  primary key (device, hour)
+);
+create table if not exists public.lp_tel_batches (
+  id text primary key check (id ~ '^[a-z0-9]{8,24}$'),
+  device text not null,
+  received_at timestamptz not null default now()
+);
+create index if not exists lp_tel_batches_received_at_idx on public.lp_tel_batches (received_at);
+
+alter table public.lp_tel_settings enable row level security;
+alter table public.lp_tel_events enable row level security;
+alter table public.lp_tel_devices enable row level security;
+alter table public.lp_tel_quota enable row level security;
+alter table public.lp_tel_batches enable row level security;
+-- No policies: browsers can never read them. Service role only.
+revoke all on table public.lp_tel_settings, public.lp_tel_events, public.lp_tel_devices, public.lp_tel_quota,
+  public.lp_tel_batches from public, anon, authenticated;
+revoke all on sequence public.lp_tel_events_id_seq from public, anon, authenticated;
+grant select, update on table public.lp_tel_settings to service_role;
+grant select, insert, delete on table public.lp_tel_events to service_role;
+grant select, insert, update, delete on table public.lp_tel_devices, public.lp_tel_quota, public.lp_tel_batches to service_role;
+grant usage, select on sequence public.lp_tel_events_id_seq to service_role;
+
+-- 10e. Functions (service_role only). Dropped first, so a second paste is clean.
+drop function if exists public.lp_tel_config();
+drop function if exists public.lp_tel_ingest(text, text, text, text, bigint, jsonb, jsonb, integer);
+drop function if exists public.lp_tel_server_events(jsonb);
+drop function if exists public.lp_tel_set(boolean, timestamptz);
+drop function if exists public.lp_tel_retention();
+drop function if exists public.lp_tel_health(text, timestamptz, integer);
+
+-- lp_tel_config: what the ingest route caches for 30 s. {on, until (epoch ms), cap, capBytes, flushSeconds, sample}.
+-- on = enabled and before off_at. No settings row: off.
+create function public.lp_tel_config()
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_set public.lp_tel_settings;
+begin
+  select * into v_set from public.lp_tel_settings where id;
+  if not found then
+    return pg_catalog.jsonb_build_object('on', false, 'enabled', false);
+  end if;
+  return pg_catalog.jsonb_build_object(
+    'on', v_set.enabled and pg_catalog.clock_timestamp() < v_set.off_at,
+    'enabled', v_set.enabled,
+    'until', pg_catalog.floor(extract(epoch from v_set.off_at) * 1000)::bigint,
+    'cap', v_set.device_hour_cap,
+    'capBytes', v_set.device_hour_bytes,
+    'flushSeconds', v_set.flush_seconds,
+    'sample', v_set.sample);
+end
+$fn$;
+
+-- lp_tel_ingest: one batch from one phone, in one statement's worth of work. Off (kill switch, past off_at, no
+-- settings row) → {on: false} and nothing is written. A batch id seen before → {dup: true}. The quota row counts
+-- every event offered this hour; past the event or byte cap the rest is dropped ({capped: true}). The event time is
+-- the phone's plus the route's skew correction, clamped to [now − 2 days, now].
+create function public.lp_tel_ingest(p_batch text, p_device text, p_session text, p_team text, p_skew_ms bigint,
+                                     p_ctx jsonb, p_events jsonb, p_bytes integer)
+returns jsonb
+language plpgsql
+volatile
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_set public.lp_tel_settings;
+  v_now timestamptz := pg_catalog.clock_timestamp();
+  v_count integer;
+  v_prev_events integer;
+  v_prev_bytes integer;
+  v_allowed integer;
+  v_inserted integer := 0;
+begin
+  select * into v_set from public.lp_tel_settings where id;
+  if not found or not v_set.enabled or v_now >= v_set.off_at then
+    return pg_catalog.jsonb_build_object('on', false);
+  end if;
+  if p_events is null or pg_catalog.jsonb_typeof(p_events) <> 'array' then
+    raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:ev';
+  end if;
+  v_count := pg_catalog.jsonb_array_length(p_events);
+  if v_count > 300 then
+    raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:ev';
+  end if;
+
+  insert into public.lp_tel_batches (id, device) values (p_batch, p_device) on conflict do nothing;
+  if not found then
+    return pg_catalog.jsonb_build_object('on', true, 'accepted', 0, 'dropped', 0, 'dup', true);
+  end if;
+
+  insert into public.lp_tel_quota as q (device, hour, events, bytes)
+  values (p_device, pg_catalog.date_trunc('hour', v_now), v_count, greatest(coalesce(p_bytes, 0), 0))
+  on conflict (device, hour) do update set events = q.events + excluded.events, bytes = q.bytes + excluded.bytes
+  returning q.events - v_count, q.bytes - greatest(coalesce(p_bytes, 0), 0) into v_prev_events, v_prev_bytes;
+
+  v_allowed := case when v_prev_bytes + greatest(coalesce(p_bytes, 0), 0) > v_set.device_hour_bytes then 0
+                    else greatest(0, least(v_count, v_set.device_hour_cap - v_prev_events)) end;
+
+  if v_allowed > 0 then
+    insert into public.lp_tel_events (at, device, session, team, name, view, area, ctl, ms, n, ok, props, trail)
+    select least(v_now, greatest(v_now - interval '2 days',
+                 pg_catalog.to_timestamp(((x.e ->> 'at')::bigint + coalesce(p_skew_ms, 0)) / 1000.0))),
+           p_device, p_session, p_team, x.e ->> 'n', x.e ->> 'v', x.e ->> 'a', x.e ->> 'c',
+           (x.e ->> 'ms')::integer, (x.e ->> 'k')::integer, (x.e ->> 'ok')::boolean, x.e -> 'p', x.e -> 'tr'
+      from pg_catalog.jsonb_array_elements(p_events) with ordinality as x(e, i)
+     where x.i <= v_allowed;
+    get diagnostics v_inserted = row_count;
+  end if;
+
+  insert into public.lp_tel_devices as d (device, team, plat, osv, eng, sa, lay, dpr, touch, build, eff, mem, last_session)
+  values (p_device, p_team, p_ctx ->> 'plat', (p_ctx ->> 'osv')::integer, p_ctx ->> 'eng', (p_ctx ->> 'sa')::boolean,
+          p_ctx ->> 'lay', (p_ctx ->> 'dpr')::integer, (p_ctx ->> 'touch')::boolean, p_ctx ->> 'build', p_ctx ->> 'eff',
+          (p_ctx ->> 'mem')::integer, p_session)
+  on conflict (device) do update set team = excluded.team, plat = excluded.plat, osv = excluded.osv, eng = excluded.eng,
+     sa = excluded.sa, lay = excluded.lay, dpr = excluded.dpr, touch = excluded.touch, build = excluded.build,
+     eff = excluded.eff, mem = excluded.mem, last_seen = v_now, last_session = excluded.last_session;
+
+  return pg_catalog.jsonb_build_object('on', true, 'accepted', v_inserted, 'dropped', v_count - v_inserted,
+                                       'capped', v_inserted < v_count);
+end
+$fn$;
+
+-- lp_tel_server_events: rows the server writes itself (device = session = 'server'): push_send after a push, and
+-- tel_switch when the kill switch is flipped from /health. p_rows = [{n, team, ms, k, ok, p}], ≤ 20. Gated by the
+-- same settings check (a flip that turns collection on is recorded once it is on). Returns how many were written.
+create function public.lp_tel_server_events(p_rows jsonb)
+returns integer
+language plpgsql
+volatile
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_set public.lp_tel_settings;
+  v_now timestamptz := pg_catalog.clock_timestamp();
+  v_count integer := 0;
+begin
+  select * into v_set from public.lp_tel_settings where id;
+  if not found or not v_set.enabled or v_now >= v_set.off_at then
+    return 0;
+  end if;
+  if p_rows is null or pg_catalog.jsonb_typeof(p_rows) <> 'array' or pg_catalog.jsonb_array_length(p_rows) = 0 then
+    return 0;
+  end if;
+  if pg_catalog.jsonb_array_length(p_rows) > 20 then
+    raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:rows';
+  end if;
+  insert into public.lp_tel_events (at, device, session, team, name, ms, n, ok, props)
+  select v_now, 'server', 'server', x.e ->> 'team', x.e ->> 'n', (x.e ->> 'ms')::integer, (x.e ->> 'k')::integer,
+         (x.e ->> 'ok')::boolean, x.e -> 'p'
+    from pg_catalog.jsonb_array_elements(p_rows) as x(e)
+   where x.e ->> 'n' in ('push_send', 'tel_switch');
+  get diagnostics v_count = row_count;
+  return v_count;
+end
+$fn$;
+
+-- lp_tel_set: the kill switch (from /health, or by hand). p_off_at moves the auto-off when given. Returns
+-- lp_tel_config().
+create function public.lp_tel_set(p_enabled boolean, p_off_at timestamptz default null)
+returns jsonb
+language plpgsql
+volatile
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+begin
+  if p_enabled is null then
+    raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:enabled';
+  end if;
+  update public.lp_tel_settings
+     set enabled = p_enabled, off_at = coalesce(p_off_at, off_at), updated_at = pg_catalog.now()
+   where id;
+  return public.lp_tel_config();
+end
+$fn$;
+
+-- lp_tel_retention: run daily by pg_cron. Events and devices after 30 days, quota rows and batch ids after 2 days.
+-- SECURITY DEFINER so the job (run as the role that scheduled it) needs no table grants; service_role only.
+create function public.lp_tel_retention()
+returns integer
+language plpgsql
+volatile
+security definer
+set search_path = public, pg_temp
+set statement_timeout = '120s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_count integer;
+begin
+  delete from public.lp_tel_events where at < pg_catalog.now() - interval '30 days';
+  get diagnostics v_count = row_count;
+  delete from public.lp_tel_quota where hour < pg_catalog.now() - interval '2 days';
+  delete from public.lp_tel_batches where received_at < pg_catalog.now() - interval '2 days';
+  delete from public.lp_tel_devices where last_seen < pg_catalog.now() - interval '30 days';
+  return v_count;
+end
+$fn$;
+
+-- lp_tel_health: one section of the Health page (/health), events since p_since. Sections: kpis, problems, examples,
+-- flows, net, push, coverage, errors. The route asks for them in parallel; one that fails or times out shows "—".
+create function public.lp_tel_health(p_section text, p_since timestamptz, p_limit integer default 50)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '6s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_frus constant text[] := array['stuck_scroll', 'rage_tap', 'dead_tap', 'loop', 'slow', 'pinch', 'error', 'stuck_send'];
+  v_since timestamptz := coalesce(p_since, pg_catalog.now() - interval '1 hour');
+  v_prev timestamptz := v_since - (pg_catalog.now() - v_since);
+  v_limit integer := least(greatest(coalesce(p_limit, 50), 1), 200);
+  v_out jsonb;
+begin
+  if p_section = 'kpis' then
+    with cur as (
+      select pg_catalog.count(distinct e.device) filter (where e.device <> 'server') as devices,
+             pg_catalog.count(distinct e.session) filter (where e.device <> 'server') as sessions,
+             pg_catalog.count(*) as events,
+             pg_catalog.count(*) filter (where e.name = any (v_frus)) as frustrations,
+             pg_catalog.count(distinct e.device) filter (where e.name = any (v_frus)) as hit_devices,
+             pg_catalog.count(*) filter (where e.name = 'error') as errors,
+             pg_catalog.sum(case when e.name = 'sync' and pg_catalog.jsonb_typeof(e.props -> 'ok') = 'number' then (e.props ->> 'ok')::numeric else 0 end) as sync_ok,
+             pg_catalog.sum(case when e.name = 'sync' and pg_catalog.jsonb_typeof(e.props -> 'fail') = 'number' then (e.props ->> 'fail')::numeric else 0 end) as sync_fail,
+             pg_catalog.count(*) filter (where e.name = 'push_rx') as push_rx,
+             pg_catalog.count(*) filter (where e.name = 'notif_click' and e.props ->> 'src' = 'push') as push_opened,
+             pg_catalog.percentile_cont(0.95) within group (order by e.ms) filter (where e.name = 'flow_open' and coalesce(e.props ->> 'out', 'ok') = 'ok') as open_p95
+        from public.lp_tel_events e
+       where e.at >= v_since
+    ), prev as (
+      select pg_catalog.count(distinct e.device) filter (where e.device <> 'server') as devices,
+             pg_catalog.count(*) filter (where e.name = any (v_frus)) as frustrations,
+             pg_catalog.count(distinct e.device) filter (where e.name = any (v_frus)) as hit_devices,
+             pg_catalog.count(*) filter (where e.name = 'error') as errors
+        from public.lp_tel_events e
+       where e.at >= v_prev and e.at < v_since
+    )
+    select pg_catalog.jsonb_build_object(
+             'devices', c.devices, 'sessions', c.sessions, 'events', c.events, 'frustrations', c.frustrations,
+             'hitDevices', c.hit_devices, 'errors', c.errors, 'syncOk', c.sync_ok, 'syncFail', c.sync_fail,
+             'pushRx', c.push_rx, 'pushOpened', c.push_opened, 'openP95', c.open_p95,
+             'prev', pg_catalog.jsonb_build_object('devices', p.devices, 'frustrations', p.frustrations,
+                                                   'hitDevices', p.hit_devices, 'errors', p.errors))
+      into v_out
+      from cur c, prev p;
+
+  elsif p_section = 'problems' or p_section = 'examples' then
+    with top as (
+      select e.name, e.view, e.area, e.ctl, pg_catalog.count(*) as n, pg_catalog.count(distinct e.device) as devices,
+             pg_catalog.array_agg(distinct e.team) as teams, pg_catalog.max(e.at) as last_at,
+             (pg_catalog.array_agg(e.id order by e.at desc))[1:3] as examples
+        from public.lp_tel_events e
+       where e.at >= v_since and e.name = any (v_frus)
+       group by e.name, e.view, e.area, e.ctl
+       order by devices desc, n desc
+       limit case when p_section = 'examples' then least(v_limit, 10) else v_limit end
+    )
+    select case when p_section = 'problems' then
+             coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+                 'name', t.name, 'view', t.view, 'area', t.area, 'ctl', t.ctl, 'n', t.n, 'devices', t.devices,
+                 'teams', pg_catalog.to_jsonb(t.teams), 'lastAt', t.last_at, 'examples', pg_catalog.to_jsonb(t.examples))
+                 order by t.devices desc, t.n desc) from top t), '[]'::jsonb)
+           else
+             coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+                 'id', e.id, 'name', e.name, 'at', e.at, 'team', e.team, 'view', e.view, 'area', e.area, 'ctl', e.ctl,
+                 'ms', e.ms, 'k', e.n, 'props', e.props, 'trail', e.trail) order by e.at desc)
+                from public.lp_tel_events e
+               where e.id in (select pg_catalog.unnest(t.examples) from top t)), '[]'::jsonb)
+           end
+      into v_out;
+
+  elsif p_section = 'flows' then
+    select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('name', f.name, 'out', f.out, 'n', f.n, 'p50', f.p50, 'p95', f.p95)
+                                         order by f.name, f.n desc), '[]'::jsonb)
+      into v_out
+      from (
+        select e.name, coalesce(e.props ->> 'out', 'ok') as out, pg_catalog.count(*) as n,
+               pg_catalog.percentile_cont(0.5) within group (order by e.ms) as p50,
+               pg_catalog.percentile_cont(0.95) within group (order by e.ms) as p95
+          from public.lp_tel_events e
+         where e.at >= v_since and e.name like 'flow\_%' and e.ms is not null
+         group by 1, 2
+      ) f;
+
+  elsif p_section = 'net' then
+    with r as (
+      select e.area as pattern, e.props ->> 'm' as m, e.props ->> 'st' as st,
+             case when e.props ->> 'on' = 'false' then 'link_down' else coalesce(e.props ->> 'conn', 'unk') end as state,
+             coalesce(e.n, 0) as n
+        from public.lp_tel_events e
+       where e.at >= v_since and e.name = 'net'
+    ), durs as (
+      select e.area as pattern, e.props ->> 'm' as m, d.v::numeric as ms
+        from public.lp_tel_events e
+       cross join lateral pg_catalog.jsonb_array_elements_text(
+               case when pg_catalog.jsonb_typeof(e.props -> 'd') = 'array' then e.props -> 'd' else '[]'::jsonb end) as d(v)
+       where e.at >= v_since and e.name = 'net' and e.props ->> 'st' = '2xx'
+    ), pct as (
+      select pattern, m, pg_catalog.percentile_cont(0.5) within group (order by ms) as p50,
+             pg_catalog.percentile_cont(0.95) within group (order by ms) as p95
+        from durs group by 1, 2
+    ), st as (
+      select pattern, m, state, pg_catalog.sum(n) as n, pg_catalog.sum(n) filter (where r.st in ('5xx', 'net', 'timeout')) as failed
+        from r group by 1, 2, 3
+    ), agg as (
+      select pattern, m, pg_catalog.sum(n) as n,
+             coalesce(pg_catalog.sum(n) filter (where r.st in ('5xx', 'net', 'timeout')), 0) as failed,
+             coalesce(pg_catalog.sum(n) filter (where r.st = 'timeout'), 0) as timeouts,
+             coalesce(pg_catalog.sum(n) filter (where r.st in ('4xx', '401', '409', '429')), 0) as c4xx
+        from r group by 1, 2 order by 3 desc limit v_limit
+    ), sync as (
+      select pg_catalog.sum(case when pg_catalog.jsonb_typeof(e.props -> 'ok') = 'number' then (e.props ->> 'ok')::numeric else 0 end) as ok,
+             pg_catalog.sum(case when pg_catalog.jsonb_typeof(e.props -> 'fail') = 'number' then (e.props ->> 'fail')::numeric else 0 end) as fail,
+             pg_catalog.sum(case when pg_catalog.jsonb_typeof(e.props -> 'full') = 'number' then (e.props ->> 'full')::numeric else 0 end) as full_n,
+             pg_catalog.percentile_cont(0.95) within group (order by (case when pg_catalog.jsonb_typeof(e.props -> 'age') = 'number' then (e.props ->> 'age')::numeric end)) as age_p95
+        from public.lp_tel_events e
+       where e.at >= v_since and e.name = 'sync'
+    )
+    select pg_catalog.jsonb_build_object(
+             'rows', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+                 'pattern', a.pattern, 'm', a.m, 'n', a.n, 'failed', a.failed, 'timeouts', a.timeouts, 'c4xx', a.c4xx,
+                 'p50', p.p50, 'p95', p.p95,
+                 'states', (select pg_catalog.jsonb_object_agg(s.state, pg_catalog.jsonb_build_object('n', s.n, 'failed', coalesce(s.failed, 0)))
+                              from st s where s.pattern is not distinct from a.pattern and s.m is not distinct from a.m))
+                 order by a.n desc)
+               from agg a left join pct p on p.pattern is not distinct from a.pattern and p.m is not distinct from a.m), '[]'::jsonb),
+             'sync', (select pg_catalog.jsonb_build_object('ok', s.ok, 'fail', s.fail, 'full', s.full_n, 'ageP95', s.age_p95) from sync s))
+      into v_out;
+
+  elsif p_section = 'push' then
+    with sent as (
+      select e.props ->> 'kind' as kind,
+             pg_catalog.sum(case when pg_catalog.jsonb_typeof(e.props -> 'ok') = 'number' then (e.props ->> 'ok')::numeric else 0 end) as ok,
+             pg_catalog.sum(case when pg_catalog.jsonb_typeof(e.props -> 'gone') = 'number' then (e.props ->> 'gone')::numeric else 0 end) as gone,
+             pg_catalog.sum(case when pg_catalog.jsonb_typeof(e.props -> 'failed') = 'number' then (e.props ->> 'failed')::numeric else 0 end) as failed
+        from public.lp_tel_events e
+       where e.at >= v_since and e.name = 'push_send'
+       group by 1
+    ), rx as (
+      select e.props ->> 'kind' as kind, pg_catalog.count(*) as rx,
+             pg_catalog.count(*) filter (where e.props ->> 'shown' = 'true') as shown,
+             pg_catalog.percentile_cont(0.5) within group (order by e.ms) as t50,
+             pg_catalog.percentile_cont(0.95) within group (order by e.ms) as t95
+        from public.lp_tel_events e
+       where e.at >= v_since and e.name = 'push_rx'
+       group by 1
+    ), opened as (
+      select e.props ->> 'kind' as kind, pg_catalog.count(*) as opened
+        from public.lp_tel_events e
+       where e.at >= v_since and e.name = 'notif_click' and e.props ->> 'src' = 'push'
+       group by 1
+    ), kinds as (
+      select kind from sent union select kind from rx union select kind from opened
+    )
+    select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+             'kind', k.kind, 'ok', coalesce(s.ok, 0), 'gone', coalesce(s.gone, 0), 'failed', coalesce(s.failed, 0),
+             'rx', coalesce(r.rx, 0), 'shown', coalesce(r.shown, 0), 'opened', coalesce(o.opened, 0),
+             't50', r.t50, 't95', r.t95) order by k.kind), '[]'::jsonb)
+      into v_out
+      from kinds k
+      left join sent s on s.kind is not distinct from k.kind
+      left join rx r on r.kind is not distinct from k.kind
+      left join opened o on o.kind is not distinct from k.kind;
+
+  elsif p_section = 'coverage' then
+    with latest as (
+      select distinct on (e.device) e.device, e.team, e.props
+        from public.lp_tel_events e
+       where e.name = 'device_state' and e.at >= v_since
+       order by e.device, e.at desc
+    ), devices as (
+      select l.team, pg_catalog.count(*) as devices,
+             pg_catalog.count(*) filter (where l.props ->> 'sa' = 'true') as standalone,
+             pg_catalog.count(*) filter (where l.props ->> 'perm' = 'granted') as granted,
+             pg_catalog.count(*) filter (where l.props ->> 'push' = 'sub') as pushsub,
+             pg_catalog.count(*) filter (where l.props ->> 'newreq' = 'true') as newreq
+        from latest l group by 1
+    ), subs as (
+      select case (pg_catalog.regexp_match(s.staff, '^(.*) · (.*)$'))[2]
+               when 'medical' then 'medical'
+               when 'gc/hx - dispatch' then 'dispatch'
+               when 'gc/hx - base' then 'base'
+               when 'gc/hx - special operations/med transpo' then 'transpo'
+               else 'other' end as team,
+             pg_catalog.count(*) as n, pg_catalog.count(*) filter (where s.new_requests) as newreq
+        from public.lp_push_subscriptions s group by 1
+    ), alerts as (
+      select e.team, pg_catalog.count(*) as n,
+             pg_catalog.count(*) filter (where e.ms <= 30000 and e.props ->> 'route' in ('toast', 'push')) as within30,
+             pg_catalog.percentile_cont(0.5) within group (order by e.ms) as p50
+        from public.lp_tel_events e
+       where e.name = 'flow_alert' and e.at >= v_since
+       group by 1
+    ), teams as (
+      select team from devices union select team from subs union select team from alerts
+    )
+    select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+             'team', t.team, 'devices', coalesce(d.devices, 0), 'standalone', coalesce(d.standalone, 0),
+             'granted', coalesce(d.granted, 0), 'pushsub', coalesce(d.pushsub, 0), 'newreq', coalesce(d.newreq, 0),
+             'subs', coalesce(s.n, 0), 'subsNewreq', coalesce(s.newreq, 0),
+             'alerts', coalesce(a.n, 0), 'within30', coalesce(a.within30, 0), 'p50', a.p50) order by t.team), '[]'::jsonb)
+      into v_out
+      from teams t
+      left join devices d on d.team = t.team
+      left join subs s on s.team = t.team
+      left join alerts a on a.team = t.team;
+
+  elsif p_section = 'errors' then
+    select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+             'fp', x.fp, 'type', x.type, 'src', x.src, 'line', x.line, 'col', x.col, 'n', x.n, 'devices', x.devices,
+             'teams', pg_catalog.to_jsonb(x.teams), 'views', pg_catalog.to_jsonb(x.views), 'lastAt', x.last_at)
+             order by x.last_at desc), '[]'::jsonb)
+      into v_out
+      from (
+        select e.props ->> 'fp' as fp, e.ctl as type, e.area as src, e.props ->> 'line' as line, e.props ->> 'col' as col,
+               pg_catalog.sum(greatest(coalesce(e.n, 1), 1)) as n, pg_catalog.count(distinct e.device) as devices,
+               pg_catalog.array_agg(distinct e.team) as teams, pg_catalog.array_agg(distinct e.view) as views,
+               pg_catalog.max(e.at) as last_at
+          from public.lp_tel_events e
+         where e.at >= v_since and e.name = 'error'
+         group by 1, 2, 3, 4, 5
+         order by last_at desc
+         limit v_limit
+      ) x;
+  else
+    raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:section';
+  end if;
+  return v_out;
+end
+$fn$;
+
+revoke all on function public.lp_tel_config() from public, anon, authenticated;
+revoke all on function public.lp_tel_ingest(text, text, text, text, bigint, jsonb, jsonb, integer) from public, anon, authenticated;
+revoke all on function public.lp_tel_server_events(jsonb) from public, anon, authenticated;
+revoke all on function public.lp_tel_set(boolean, timestamptz) from public, anon, authenticated;
+revoke all on function public.lp_tel_retention() from public, anon, authenticated;
+revoke all on function public.lp_tel_health(text, timestamptz, integer) from public, anon, authenticated;
+grant execute on function public.lp_tel_config() to service_role;
+grant execute on function public.lp_tel_ingest(text, text, text, text, bigint, jsonb, jsonb, integer) to service_role;
+grant execute on function public.lp_tel_server_events(jsonb) to service_role;
+grant execute on function public.lp_tel_set(boolean, timestamptz) to service_role;
+grant execute on function public.lp_tel_retention() to service_role;
+grant execute on function public.lp_tel_health(text, timestamptz, integer) to service_role;
+
+-- 10f. The job: daily at 09:17 UTC (04:17 ET), exactly one 'lp-tel-retention' (an earlier one of that name is
+-- unscheduled first). Where pg_cron can't run, the file still succeeds and the NOTICE says so.
+do $tel_cron$
+declare
+  v_job bigint;
+begin
+  if not exists (select 1 from pg_catalog.pg_extension where extname = 'pg_cron')
+     and exists (select 1 from pg_catalog.pg_available_extensions where name = 'pg_cron') then
+    begin
+      create extension if not exists pg_cron;
+      raise notice 'pg_cron: enabled.';
+    exception when others then
+      raise notice 'pg_cron: cannot be enabled here (%).', sqlerrm;
+    end;
+  end if;
+  if not exists (select 1 from pg_catalog.pg_extension where extname = 'pg_cron') then
+    raise notice 'lp-tel-retention: NOT scheduled (pg_cron is not available). Run select public.lp_tel_retention(); by hand.';
+    return;
+  end if;
+  perform cron.unschedule(j.jobid) from cron.job j where j.jobname = 'lp-tel-retention';
+  v_job := cron.schedule('lp-tel-retention', '17 9 * * *', 'select public.lp_tel_retention()');
+  raise notice 'lp-tel-retention: scheduled daily 09:17 UTC (job %). Pause: select cron.unschedule(''lp-tel-retention'');', v_job;
+end
+$tel_cron$;
+-- (end of section 10)
 
 notify pgrst, 'reload schema';
 

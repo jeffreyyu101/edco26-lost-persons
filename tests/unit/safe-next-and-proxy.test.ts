@@ -106,6 +106,17 @@ describe('proxy auth redirects', () => {
     expect(new URL(signin.headers.get('location') ?? '').pathname).toBe('/');
   });
 
+  it('(telemetry) /health without a cookie goes to sign-in and comes back; with one it renders', async () => {
+    process.env.SESSION_SECRET = SECRET;
+    const response = await proxy(request('/health'));
+    expect(response.status).toBe(307);
+    const location = new URL(response.headers.get('location') ?? '');
+    expect(`${location.pathname}${location.search}`).toBe('/signin?next=%2Fhealth');
+    expect(safeNextPath('/health')).toBe('/health');
+    const signed = await signSessionToken({ staffName: 'Dana Kim', team: 'GC/HX - Dispatch' }, SECRET);
+    expect((await proxy(request('/health', signed!.token))).headers.get('x-middleware-next')).toBe('1');
+  });
+
   it('rejects a cookie signed with a different secret', async () => {
     process.env.SESSION_SECRET = SECRET;
     const signed = await signSessionToken({ staffName: 'Dana Kim', team: 'Medical' }, `${SECRET}-other`);
