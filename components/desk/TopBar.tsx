@@ -65,8 +65,14 @@ export function DeskTop({ main, pane = false }: DeskTopProps) {
         )}
       </h1>
       {main.name === 'dashboard' ? (
-        // Dashboard v4: who's on and the range control, portalled in by the dashboard (no search, New or bell here).
-        <div ref={setDashboardSlot} className={d.dashSlot} data-testid="desk-dashboard-slot" />
+        // Dashboard v4: who's on and the range control, portalled in by the dashboard (no search or New here), then the
+        // Activity bell, as on every view (the sidebar has no Activity item, Brian 2026-11-08).
+        <>
+          <div ref={setDashboardSlot} className={d.dashSlot} data-testid="desk-dashboard-slot" />
+          <span className={d.bellBox}>
+            <ActivityBellSlot place="desk" />
+          </span>
+        </>
       ) : (
         <>
           <ListLive />
@@ -90,8 +96,7 @@ export function DeskTop({ main, pane = false }: DeskTopProps) {
             <span className={d.newShort}>New</span>
             <Kbd className={d.newKbd}>N</Kbd>
           </button>
-          {/* F4: the Activity bell, its popover anchored here (the sidebar's Activity item opens the same one). Its box
-              keeps the bell's 28 px while the chunk loads. */}
+          {/* F4: the Activity bell, its popover anchored here. Its box keeps the bell's 28 px while the chunk loads. */}
           <span className={d.bellBox}>
             <ActivityBellSlot place="desk" />
           </span>

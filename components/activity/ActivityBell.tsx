@@ -5,7 +5,7 @@
 //     dimmed page above it (a tap there closes it), ✕ in its header, and a swipe down from its grabber or
 //     header (or its list scrolled to the top) closes it; focus goes back to the bell.
 //   * Desk (place "desk", in the top bar): a Popover anchored to the bell, 380 wide, at most 480 tall. The
-//     sidebar's Activity item (F4Parts DeskActivityItem) opens the same popover.
+//     sidebar has no Activity item (Brian 2026-11-08): the bell is the one way in, on every desk view.
 //     Opened from any of them, focus moves into the popover (it is portalled to the end of the page, so Tab
 //     would never reach it otherwise): Tab goes on to Mark all read and the rows; Escape gives focus back to
 //     whatever opened it.

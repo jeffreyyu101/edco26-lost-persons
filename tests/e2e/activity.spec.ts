@@ -200,11 +200,10 @@ test.describe('desk', () => {
       await answer(liaison, r);
       const top = page.getByTestId('desk-topbar').getByTestId('activity-bell');
       await expect(top).toHaveAccessibleName('Activity, 1 unread', { timeout: 20_000 });
-      const side = page.getByTestId('desk-activity');
-      await expect(side).toHaveAccessibleName('Activity 1 unread');
-      await expect(side).toContainText('1');
+      // The sidebar has no Activity item (Brian 2026-11-08): the bell is the one way in.
+      await expect(page.getByTestId('desk-sidebar').getByTestId('desk-activity')).toHaveCount(0);
 
-      await side.click();
+      await top.click();
       const pop = page.getByTestId('activity-popover');
       await expect(pop).toBeVisible();
       // Layout size (the open animation scales it for a moment).
@@ -263,19 +262,6 @@ test.describe('desk keyboard', () => {
       await expect(pop).toHaveCount(0);
       expect(await page.evaluate(() => document.activeElement?.getAttribute('data-testid'))).toBe('activity-bell');
 
-      // From the sidebar item: focus goes in too, and comes back to the item.
-      const side = page.getByTestId('desk-activity');
-      await side.focus();
-      await page.keyboard.press('Enter');
-      await expect(pop).toBeVisible();
-      await expect.poll(inPopover).toBe(true);
-      await expect(pop.getByTestId('activity-row').first()).toBeVisible();
-      await page.keyboard.press('Tab');
-      await page.keyboard.press('Tab');
-      expect(await page.evaluate(() => document.activeElement?.getAttribute('data-testid'))).toBe('activity-row');
-      await page.keyboard.press('Enter');
-      await expect(pop).toHaveCount(0);
-      await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(r.id);
     } finally {
       await closeAll(liaison, created);
       await liaison.close();
