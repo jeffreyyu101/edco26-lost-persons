@@ -233,7 +233,7 @@ const THREAD_BADGE = 'data-thread-badge';
 export function UnreadBubble({ count }: { count: number }) {
   const text = markCount(count);
   return (
-    <span className={s.bubble} data-wide={text.length > 2 ? '' : undefined}>
+    <span className={s.markBubble} data-wide={text.length > 2 ? '' : undefined}>
       {text}
     </span>
   );

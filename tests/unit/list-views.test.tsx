@@ -801,7 +801,7 @@ describe('list views render', () => {
     const folded = render(storeWith((s) => ({ ...withActivity(s), prefs: { ...s.prefs, closedExpanded: false } })), <AllView status={null} post={null} />);
     const fold = folded.slice(folded.lastIndexOf('<button', folded.indexOf('data-testid="closed-fold"')), folded.indexOf('</button>', folded.indexOf('data-testid="closed-fold"')));
     expect(fold).toMatch(/class="[^"]*vh[^"]*">Archived \d+ requests\. 1 unread message\.<\/span>/);
-    expect(fold).toMatch(/data-lane="" aria-hidden="true"><span class="[^"]*bubble[^"]*">1<\/span><\/span>/);
+    expect(fold).toMatch(/data-lane="" aria-hidden="true"><span class="[^"]*markBubble[^"]*">1<\/span><\/span>/);
     // Open, the rows show their own marks: the fold's lane is empty and its name is the plain count.
     const open = html.slice(html.lastIndexOf('<button', html.indexOf('data-testid="closed-fold"')), html.indexOf('</button>', html.indexOf('data-testid="closed-fold"')));
     expect(open).toMatch(/class="[^"]*vh[^"]*">Archived \d+ requests<\/span>/);

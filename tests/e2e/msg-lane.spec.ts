@@ -115,6 +115,18 @@ const threadHead = (page: Page) => page.getByTestId('messages').getByRole('headi
 async function expectAtThread(page: Page): Promise<void> {
   await expect(threadHead(page)).toBeInViewport(SYNC);
   await expect(title(page)).not.toBeInViewport();
+  // Regression (the lane's unread mark once reused the chat's .bubble class, which turned every message into a
+  // 17 px blue tab): the thread's bubbles keep their own shape.
+  const bubble = page.getByTestId('messages').locator('[data-testid="bubble-them"], [data-testid="bubble-mine"]').first();
+  if ((await bubble.count()) > 0) {
+    const look = await bubble.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { radius: cs.borderTopLeftRadius, minHeight: cs.minHeight, height: el.getBoundingClientRect().height };
+    });
+    expect(look.radius).toBe('19px');
+    expect(look.minHeight).toBe('36px');
+    expect(look.height).toBeGreaterThanOrEqual(36);
+  }
 }
 
 /** The request open at its top: its name on screen, nothing scrolled. */

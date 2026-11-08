@@ -202,7 +202,7 @@ describe('All requests table', () => {
     const f = folded.indexOf('data-testid="closed-fold"');
     const fold = folded.slice(folded.lastIndexOf('<button', f), folded.indexOf('</button>', f));
     expect(fold).toMatch(/class="[^"]*vh[^"]*">Archived \d+ requests\. 3 unread messages\.<\/span>/);
-    expect(fold).toMatch(/data-lane="" aria-hidden="true"><span class="[^"]*bubble[^"]*">3<\/span><\/span>/);
+    expect(fold).toMatch(/data-lane="" aria-hidden="true"><span class="[^"]*markBubble[^"]*">3<\/span><\/span>/);
   });
 
   it('opens the Archived fold in place from prefs, closed rows greyed, newest first', () => {
