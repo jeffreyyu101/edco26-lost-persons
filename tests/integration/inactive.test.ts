@@ -410,7 +410,7 @@ rollback;`).split('\n') as [string, string, string];
     expect(s1.open.inMedical).toBe(s0.open.inMedical - 1);
     expect(s1.total).toBe(s0.total);
     // Open + every closed status = total.
-    expect(s1.open.waiting + s1.open.inMedical + s1.notInMedical + s1.reunited + s1.discharged + s1.cancelled + (s1.inactive ?? 0)).toBe(s1.total);
+    expect(s1.open.waiting + s1.open.inMedical + s1.notInMedical + s1.reunited + s1.discharged + s1.cancelled + (s1.inactive ?? 0) + (s1.friendInformed ?? 0)).toBe(s1.total);
 
     // Through the route, once it really closed.
     closeInactive([r.id]);
