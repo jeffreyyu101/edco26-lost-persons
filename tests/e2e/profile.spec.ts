@@ -493,6 +493,125 @@ test('photos open the full-screen viewer, and Add uploads another', async ({ pag
   await expect(page.getByRole('button', { name: 'Photo 2 of 2, Not today' })).toBeVisible({ timeout: 15_000 });
 });
 
+/** A camera-sized synthetic JPEG (a gradient and a disc), drawn by the browser. */
+async function cameraJpeg(page: Page, width: number, height: number): Promise<Buffer> {
+  const b64 = await page.evaluate(
+    async ({ width, height }) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+      const bg = ctx.createLinearGradient(0, 0, width, height);
+      bg.addColorStop(0, '#e05a7a');
+      bg.addColorStop(1, '#3a6ad0');
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, width, height);
+      ctx.fillStyle = '#f2c9a0';
+      ctx.beginPath();
+      ctx.arc(width / 2, height / 2, Math.min(width, height) * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+      const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob'))), 'image/jpeg', 0.8));
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      canvas.width = 0;
+      return btoa(bin);
+    },
+    { width, height },
+  );
+  return Buffer.from(b64, 'base64');
+}
+
+/**
+ * The viewer covers the window, and the open photo (decoded, full size) is drawn whole inside the area between
+ * the top bar and the dots: its box inside that area and the window, the photo contained in it, centred, and
+ * filling at least 60% of the area's height or width.
+ */
+async function expectPhotoFits(page: Page, name: string): Promise<void> {
+  const viewer = page.getByTestId('photo-viewer');
+  const img = viewer.getByRole('img', { name });
+  await expect(img).toBeVisible();
+  await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0), { timeout: 15_000 }).toBe(true);
+  // Arrow keys scroll smoothly: wait for the photo's slide to come to rest.
+  await expect.poll(() => img.evaluate((el) => Math.round(el.parentElement?.getBoundingClientRect().x ?? -1))).toBe(0);
+  await settle(page);
+
+  const m = await img.evaluate((el: HTMLImageElement) => {
+    const rect = (e: Element) => {
+      const b = e.getBoundingClientRect();
+      return { x: b.x, y: b.y, w: b.width, h: b.height };
+    };
+    const area = el.parentElement?.parentElement as HTMLElement;
+    const dialog = el.closest('[data-testid="photo-viewer"]') as HTMLElement;
+    return { win: { w: window.innerWidth, h: window.innerHeight }, dialog: rect(dialog), area: rect(area), box: rect(el), natural: { w: el.naturalWidth, h: el.naturalHeight } };
+  });
+  const { win, dialog, area, box, natural } = m;
+  const at = JSON.stringify(m);
+  expect(natural.w, at).toBeGreaterThan(1000);
+
+  expect(Math.abs(dialog.x) + Math.abs(dialog.y), at).toBeLessThanOrEqual(1);
+  expect(Math.abs(dialog.w - win.w) + Math.abs(dialog.h - win.h), at).toBeLessThanOrEqual(1);
+
+  expect(box.w, at).toBeLessThanOrEqual(win.w);
+  expect(box.h, at).toBeLessThanOrEqual(win.h);
+  expect(box.x, at).toBeGreaterThanOrEqual(area.x - 1);
+  expect(box.y, at).toBeGreaterThanOrEqual(area.y - 1);
+  expect(box.x + box.w, at).toBeLessThanOrEqual(Math.min(area.x + area.w, win.w) + 1);
+  expect(box.y + box.h, at).toBeLessThanOrEqual(Math.min(area.y + area.h, win.h) + 1);
+
+  // object-fit: contain draws the photo at this size, centred in the box.
+  const scale = Math.min(box.w / natural.w, box.h / natural.h);
+  const drawn = { w: natural.w * scale, h: natural.h * scale };
+  expect(Math.max(drawn.w / area.w, drawn.h / area.h), at).toBeGreaterThanOrEqual(0.6);
+  expect(Math.abs(box.x + box.w / 2 - (area.x + area.w / 2)), at).toBeLessThanOrEqual(2);
+  expect(Math.abs(box.y + box.h / 2 - (area.y + area.h / 2)), at).toBeLessThanOrEqual(2);
+}
+
+// 2026-11-07: on the desk a real photo opened far larger than the window and mostly cut off (the slide's grid
+// row took the photo's height at full width). Camera-sized photos, portrait then landscape, on the phone, in
+// the docked laptop layout and in a desktop window.
+test('the viewer fits a camera-sized photo inside the window on the phone and the desk', async ({ browser, page, baseURL }) => {
+  test.setTimeout(120_000);
+  const origin = baseURL as string;
+  const row = await createRequest(page, origin);
+  for (const [width, height, timing] of [[3024, 4032, 'today'], [4032, 3024, 'older']] as const) {
+    const upload = await page.request.post(`/api/requests/${row.id}/photos`, {
+      headers: { Origin: origin },
+      multipart: {
+        photoId: randomUUID(),
+        timing,
+        photo: { name: 'photo.jpg', mimeType: 'image/jpeg', buffer: await cameraJpeg(page, width, height) },
+        thumb: { name: 'thumb.jpg', mimeType: 'image/jpeg', buffer: JPEG },
+      },
+    });
+    expect(upload.ok(), `photo upload → ${upload.status()}`).toBe(true);
+  }
+
+  const check = async (p: Page) => {
+    await p.goto(`/?r=${row.id}`);
+    await p.getByRole('button', { name: 'Photo 1 of 2, Today' }).click();
+    const viewer = p.getByTestId('photo-viewer');
+    await expect(viewer.getByRole('heading', { name: '1 of 2' })).toBeVisible();
+    await expectPhotoFits(p, 'Photo 1 of 2, Today');
+    await p.keyboard.press('ArrowRight');
+    await expect(viewer.getByRole('heading', { name: '2 of 2' })).toBeVisible();
+    await expectPhotoFits(p, 'Photo 2 of 2, Not today');
+    await p.keyboard.press('Escape');
+    await expect(viewer).toBeHidden();
+  };
+
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }]) {
+    const context = await newSignedInContext(browser, FRONT, { baseURL: origin, viewport, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
+    try {
+      await check(await context.newPage());
+    } finally {
+      await context.close();
+    }
+  }
+  // The project's phone.
+  await check(page);
+});
+
 // F2 review (a): Retake on a later photo of a multi-photo pick must not lose the photos already kept. Before
 // the fix the kept one was prepared and shown at once, the input went disabled, and the retaken photo then
 // replaced it in the Add sheet.

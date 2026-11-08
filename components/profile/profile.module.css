@@ -629,7 +629,13 @@ button.portrait {
   overflow: hidden;
   position: relative;
 }
+/* Out of the slide's grid: as a grid item its height: 100% has nothing to resolve against while the row is
+   sized, so the row took the photo's height at full width (a 3:4 photo on a 1440 px wide window: 1920 px)
+   and the photo overflowed the slide, cropped, wherever the slide is wider than the photo's shape. Pinned
+   to the slide instead, it is the slide's size and contain scales the photo into it. */
 .slide img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
