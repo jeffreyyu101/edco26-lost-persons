@@ -18,6 +18,7 @@ import type {
   RequestSummary,
   Stats,
   StatsRange,
+  SwapAction,
 } from '../api-types';
 import type { PhotoTiming, SettableStatus, StatusKind } from '../domain';
 import type { MessagingApi } from './messages-core';
@@ -272,6 +273,13 @@ export interface StoreActions {
    * latest value wins). An Undo still on screen for the request stays usable: a location is not a status.
    */
   setMedicalLocation(id: string, location: string | null, opts?: MutationOptions): Promise<MutationResult>;
+  /**
+   * (Companion) POST /api/requests/:id/swap: request a friend swap (Accompanied), approve it at the request's own
+   * post ('fa') or Main Med ('mm') (→ In medical, swapPlace set), or decline it (back to Accompanied). Optimistic,
+   * serialised per request, resent once on a 409 when the status did not move. A request gets the Undo bar
+   * (Undo = decline); approve / decline say so in a toast.
+   */
+  swap(id: string, action: SwapAction, opts?: MutationOptions): Promise<MutationResult>;
   /** Creator only, while Waiting. */
   cancel(id: string, opts?: MutationOptions): Promise<MutationResult>;
   /** Photos for an existing request (needs a connection in v1). */
