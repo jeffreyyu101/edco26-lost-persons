@@ -483,6 +483,9 @@ test.describe('desk 1440 × 900', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
 
     // The nav's Pending as the current page, in light mode: still the badge blue, not the current item's grey.
+    // The lane click above read `unread`, so medical writes once more: the mark needs a Pending request that is unread
+    // now (it passed before only when an earlier run had left one behind in the database).
+    await withMedical(browser, (med) => say(med, unread.id, 'TEST-ML one more'));
     await page.goto('/?view=pending');
     await expect(page.locator('html')).toHaveClass(/\blight\b/);
     await expect(page.getByTestId('desk-sidebar').locator('[aria-current="page"]')).toContainText('Pending');
