@@ -7,12 +7,12 @@
 //     closes once the row is in another status (alertStillCurrent), so a sticky "is in medical" never
 //     outlives a changed or undone answer. (F5) Going on hold or off it counts as a change too: the "Not
 //     found yet" alert closes when its Undo takes the hold away.
-//   * (F5) The hold's alert names the request by its initials only, never its LP number (contract B: it may
-//     reach the lock screen): "K.T." / "Not found yet · recheck 4:40 PM".
+//   * (F5) The hold's alert names the request by its full name only, never its LP number (contract B: it may
+//     reach the lock screen): "Kai Tran" / "Not found yet · recheck 4:40 PM".
 //   * (F6) A backlog auto-close (row.quietClose: the first run after the migration, or after the job was paused)
 //     never alerts, as the server never tells it: no toast, no system notification, no burst on the deploy.
 import type { RequestSummary } from '../api-types';
-import { STATUS, ageGender, initials, isHeld, isInMedical, sameStaff, statusMeta } from '../domain';
+import { STATUS, ageGender, alertName, isHeld, isInMedical, sameStaff, statusMeta } from '../domain';
 import { holdDetail } from '../hold-detail';
 import { formatCaseNumber } from '../format';
 import type { AlertEvent, ToastItem } from './store-contract';
@@ -36,15 +36,15 @@ export interface AlertContext {
 
 export const alertKey = (row: Pick<RequestSummary, 'id' | 'rowVersion'>) => `${row.id}:${row.rowVersion}`;
 
-/** "LP-1004 · S.L." (just "LP-1004" when there is no name). */
+/** "LP-1004 · Sam Lee" (just "LP-1004" when there is no name). */
 function subject(row: RequestSummary): string {
-  const who = initials(row.name);
+  const who = alertName(row.name);
   const lp = formatCaseNumber(row.caseNumber);
   return who ? `${lp} · ${who}` : lp;
 }
 
 /**
- * (HIPAA, Brian 2026-11-07 14:18) The line under "<initials> located" in the in-app alert and the page's own system
+ * (HIPAA, Brian 2026-11-07 14:18) The line under "<name> located" in the in-app alert and the page's own system
  * notification. It never names Main Med (or any medical place): "Bring the friend to Main Med" said where the
  * named person is.
  */
@@ -64,19 +64,19 @@ export function statusAlert(row: RequestSummary, timeZone?: string): AlertEvent 
   return { kind: 'status_changed', requestId: row.id, title: `${s} — ${statusMeta(row.status).shortLabel.toLowerCase()}`, count: 1 };
 }
 
-/** (F5) The title of a request with no name to take initials from (as F4's Activity rows). */
+/** (F5) The title of a request with no name (as F4's Activity rows). */
 export const HOLD_ALERT_UNNAMED = 'Request';
 
 /**
- * (F5) "K.T." / "Not found yet · recheck 4:40 PM": the first Not found put the request on hold (recheck-6.png).
- * Initials and nouns only (contract B), no LP number: the system notification shows the same words.
+ * (F5) "Kai Tran" / "Not found yet · recheck 4:40 PM": the first Not found put the request on hold (recheck-6.png).
+ * The name and nouns only (contract B), no LP number: the system notification shows the same words.
  */
 export function holdAlert(row: RequestSummary, timeZone?: string): AlertEvent {
-  return { kind: 'status_changed', requestId: row.id, title: initials(row.name) || HOLD_ALERT_UNNAMED, subtitle: holdDetail(row.recheckAt, timeZone), count: 1 };
+  return { kind: 'status_changed', requestId: row.id, title: alertName(row.name) || HOLD_ALERT_UNNAMED, subtitle: holdDetail(row.recheckAt, timeZone), count: 1 };
 }
 
 export function newRequestAlert(row: RequestSummary): AlertEvent {
-  const who = [initials(row.name), ageGender(row.age, row.gender)].filter(Boolean).join(' ');
+  const who = [alertName(row.name), ageGender(row.age, row.gender)].filter(Boolean).join(' ');
   const subtitle = [who, row.postShort].filter(Boolean).join(' · ');
   return { kind: 'new_request', requestId: row.id, title: `New request · ${formatCaseNumber(row.caseNumber)}`, ...(subtitle ? { subtitle } : {}), count: 1 };
 }

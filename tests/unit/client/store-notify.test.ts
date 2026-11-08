@@ -2,7 +2,8 @@
 // system notification and no toast or chime; in front it is the toast + chime as before; never both. The
 // (id, rowVersion) dedupe and the 3+ combine rule hold for notifications too, and a notification whose
 // alert is out of date is closed like its toast. Fake notifier; synthetic rows only.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { lazyNotifier } from '@/lib/client/store-core';
 import type { AlertEvent } from '@/lib/client/store-contract';
 import { createNotifySystem, systemNotice, type AlertNotifier, type AlertRoute, type SystemNotice } from '@/lib/client/system-notify';
 import { STATUS } from '@/lib/domain';
@@ -75,7 +76,7 @@ describe('(F5) my request going on the "Pending" hold', () => {
     server.change(mine.id, hold);
     await advance(6_000);
     expect(n.shown).toEqual([
-      { title: 'S.L.', body: 'Pending · recheck 11:40 PM', tag: `lp-${mine.id}`, url: `/?r=${mine.id}`, key: `${mine.id}:2`, requireInteraction: false },
+      { title: 'Sofia Lopez', body: 'Pending · recheck 11:40 PM', tag: `lp-${mine.id}`, url: `/?r=${mine.id}`, key: `${mine.id}:2`, requireInteraction: false },
     ]);
     expect(s().toasts).toEqual([]);
     // The 10 s Undo lands after the alert: the request is plain Waiting for check again, status unchanged.
@@ -85,15 +86,15 @@ describe('(F5) my request going on the "Pending" hold', () => {
     expect(n.shown).toHaveLength(1);
   });
 
-  it('in front: the toast "S.L." / "Pending · recheck 11:40 PM" goes when the hold is undone; an Undo that puts it back says "Pending" again', async () => {
+  it('in front: the toast "Sofia Lopez" / "Pending · recheck 11:40 PM" goes when the hold is undone; an Undo that puts it back says "Pending" again', async () => {
     const mine = makeRow(4, { firstName: 'Sofia', lastName: 'Lopez', createdBy: STAFF.dana.staff });
     const server = new FakeServer([mine]);
     const { s, heard } = bootWith(server, 'toast');
     await ready();
     server.change(mine.id, hold);
     await advance(6_000);
-    expect(s().toasts.map((t) => [t.title, t.subtitle])).toEqual([['S.L.', 'Pending · recheck 11:40 PM']]);
-    expect(heard.map((e) => e.title)).toEqual(['S.L.']);
+    expect(s().toasts.map((t) => [t.title, t.subtitle])).toEqual([['Sofia Lopez', 'Pending · recheck 11:40 PM']]);
+    expect(heard.map((e) => e.title)).toEqual(['Sofia Lopez']);
     server.change(mine.id, undo);
     await advance(6_000);
     expect(s().toasts).toEqual([]);
@@ -102,10 +103,10 @@ describe('(F5) my request going on the "Pending" hold', () => {
     await advance(6_000);
     server.change(mine.id, { status: STATUS.notInMedical, recheckAt: null, notFoundChecks: 2 });
     await advance(6_000);
-    expect(alertTitles(s)).toEqual(['LP-1004 · S.L. — not located']);
+    expect(alertTitles(s)).toEqual(['LP-1004 · Sofia Lopez — not located']);
     server.change(mine.id, { status: STATUS.waiting, ...hold });
     await advance(6_000);
-    expect(s().toasts.map((t) => [t.title, t.subtitle])).toEqual([['S.L.', 'Pending · recheck 11:40 PM']]);
+    expect(s().toasts.map((t) => [t.title, t.subtitle])).toEqual([['Sofia Lopez', 'Pending · recheck 11:40 PM']]);
   });
 });
 
@@ -120,8 +121,8 @@ describe('alerts in the background are system notifications', () => {
     await advance(6_000);
     expect(n.shown).toEqual([
       {
-        title: 'S.L. · Located',
-        body: 'FA 3\nFriend can head over',
+        title: 'Sofia Lopez',
+        body: 'Located · FA 3\nFriend can head over',
         tag: `lp-${mine.id}`,
         url: `/?r=${mine.id}`,
         key: `${mine.id}:2`,
@@ -141,13 +142,13 @@ describe('alerts in the background are system notifications', () => {
     a.setPref('bell', true);
     server.put(makeRow(21, { caseNumber: 1014 }));
     await advance(6_000);
-    expect(n.shown.map((x) => [x.title, x.body])).toEqual([['New request', 'T.R. · FA 4']]);
+    expect(n.shown.map((x) => [x.title, x.body])).toEqual([['New request', 'T. R21 · FA 4']]);
     server.put(makeRow(22));
     server.put(makeRow(23));
     server.put(makeRow(24));
     await advance(6_000);
-    // Initials, never LP numbers (F4).
-    expect(n.shown.at(-1)).toMatchObject({ title: '3 new requests', body: 'T.R., T.R., T.R.', tag: 'lp-alerts', url: '/' });
+    // Names, never LP numbers (F4).
+    expect(n.shown.at(-1)).toMatchObject({ title: '3 new requests', body: 'T. R22, T. R23, T. R24', tag: 'lp-alerts', url: '/' });
     expect(n.shown).toHaveLength(2);
     expect(s().toasts).toEqual([]);
   });
@@ -164,8 +165,8 @@ describe('alerts in the background are system notifications', () => {
     n.route = 'toast';
     server.change(mine.id, { status: STATUS.notInMedical });
     await advance(6_000);
-    expect(alertTitles(s)).toEqual(['LP-1004 · S.L. — not located']);
-    expect(heard.map((e) => e.title)).toEqual(['LP-1004 · S.L. — not located']);
+    expect(alertTitles(s)).toEqual(['LP-1004 · Sofia Lopez — not located']);
+    expect(heard.map((e) => e.title)).toEqual(['LP-1004 · Sofia Lopez — not located']);
     expect(n.shown).toHaveLength(1);
     expect(n.closed).toEqual([{ tag: mine.id, key: `${mine.id}:2` }]);
   });
@@ -178,7 +179,7 @@ describe('alerts in the background are system notifications', () => {
     n.works = false;
     server.change(mine.id, { status: STATUS.inMedical });
     await advance(6_000);
-    expect(alertTitles(s)).toEqual(['LP-1004 · S.L. located']);
+    expect(alertTitles(s)).toEqual(['LP-1004 · Sofia Lopez located']);
     expect(heard).toHaveLength(1);
   });
 
@@ -204,9 +205,10 @@ describe('alerts in the background are system notifications', () => {
     server.change(mine.id, { status: STATUS.waiting }); // the liaison's Undo, seen on the next poll
     await advance(6_000);
     expect(n.shown.map((x) => [x.title, x.tag, x.key])).toEqual([
-      ['T.R. · Located', `lp-${mine.id}`, `${mine.id}:2`],
-      ['T.R. · Waiting for check', `lp-${mine.id}`, `${mine.id}:3`],
+      ['T. R4', `lp-${mine.id}`, `${mine.id}:2`],
+      ['T. R4', `lp-${mine.id}`, `${mine.id}:3`],
     ]);
+    expect(n.shown.map((x) => x.body.split('\n')[0]?.split(' · ')[0])).toEqual(['Located', 'Waiting for check']);
     // The out-of-date "Located" may be closed by its own key; the new one never is.
     expect(n.closed.every((c) => c.tag === mine.id && c.key === `${mine.id}:2`)).toBe(true);
   });
@@ -333,5 +335,46 @@ describe('alerts across tabs of one browser (the store’s side)', () => {
     expect(B.s().toasts).toEqual([]);
     expect(heardB).toEqual([]);
     expect(alertTitles(A.s)).toEqual(['New request · LP-1051']);
+  });
+});
+
+describe('lazyNotifier (system-notify loads after start)', () => {
+  it('a failed import is tried again a few times; once in, it is started with the active state', async () => {
+    let tries = 0;
+    const started: boolean[] = [];
+    const real: AlertNotifier = {
+      plan: () => ({ route: 'system', skip: new Set<string>() }),
+      show: async () => true,
+      close: () => undefined,
+      closeAll: () => undefined,
+      setActive: (on) => started.push(on),
+    };
+    const load = async () => {
+      tries += 1;
+      if (tries < 3) throw new Error('chunk failed');
+      return { startNotify: () => real };
+    };
+    const n = lazyNotifier(load, [100, 200, 400]);
+    n.setActive(true);
+    await advance(0);
+    expect(tries).toBe(1);
+    // A toast until it is in.
+    expect(n.plan(['k']).route).toBe('toast');
+    await advance(100);
+    expect(tries).toBe(2);
+    await advance(200);
+    expect(tries).toBe(3);
+    expect(started).toEqual([true]);
+    expect(n.plan(['k']).route).toBe('system');
+
+    // It gives up after the last retry.
+    let failures = 0;
+    lazyNotifier(async () => {
+      failures += 1;
+      throw new Error('chunk failed');
+    }, [100, 200]);
+    await advance(10_000);
+    expect(failures).toBe(3);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

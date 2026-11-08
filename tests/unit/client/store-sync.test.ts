@@ -311,6 +311,33 @@ describe('session', () => {
     expect(keys.some((k) => k.endsWith(':rows'))).toBe(true);
   });
 
+  it('(R2) a request opened at its Messages (a notification tap) comes back there after sign-in: next= keeps to=thread', async () => {
+    const id = '7e570000-0000-4000-8000-000000000002';
+    const { requestThreadJump, takeThreadJump } = await import('@/lib/client/thread-jump');
+    const server = new FakeServer([makeRow(2)]);
+    server.session = null;
+    // The page opened /?r=<id> in place and the jump to its thread waits in memory (or has just landed).
+    requestThreadJump(id);
+    expect(takeThreadJump(id)).toBe(true);
+    const { fe, s } = boot(server, { path: `/?r=${id}` });
+    await ready();
+    await advance(1_000);
+    expect(s().session.status).toBe('expired');
+    expect(fe.redirects).toEqual([`/signin?next=${encodeURIComponent(`/?r=${id}&to=thread`)}`]);
+  });
+
+  it('(R2) another request, or one opened at its top, comes back as it was', async () => {
+    const { requestThreadJump, takeThreadJump } = await import('@/lib/client/thread-jump');
+    requestThreadJump('7e570000-0000-4000-8000-000000000003');
+    const server = new FakeServer([makeRow(4)]);
+    server.session = null;
+    const { fe } = boot(server, { path: '/?r=7e570000-0000-4000-8000-000000000004' });
+    await ready();
+    await advance(1_000);
+    expect(fe.redirects).toEqual([`/signin?next=${encodeURIComponent('/?r=7e570000-0000-4000-8000-000000000004')}`]);
+    expect(takeThreadJump('7e570000-0000-4000-8000-000000000003')).toBe(true);
+  });
+
   it('does not loop between / and /signin when the API keeps refusing a cookie the proxy accepts', async () => {
     const server = new FakeServer([makeRow(1)]);
     server.session = null;

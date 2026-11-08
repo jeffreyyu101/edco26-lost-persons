@@ -191,7 +191,7 @@ describe('the jump (R2)', () => {
     vi.useRealTimers();
   });
 
-  it('waits for its request, is taken once, tells the open thread, and lapses after 20 s', () => {
+  it('waits for its request, is taken once, tells the open thread, and lapses after 60 s (a slow cold start)', () => {
     const told = vi.fn();
     const off = subscribeThreadJump(told);
     requestThreadJump(ID);
@@ -203,7 +203,9 @@ describe('the jump (R2)', () => {
     off();
     vi.useFakeTimers();
     requestThreadJump(ID);
-    vi.advanceTimersByTime(20_001);
+    vi.advanceTimersByTime(59_000);
+    expect(threadJumpWaiting(ID)).toBe(true);
+    vi.advanceTimersByTime(1_001);
     expect(takeThreadJump(ID)).toBe(false);
   });
 

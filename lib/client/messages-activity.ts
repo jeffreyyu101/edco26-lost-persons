@@ -2,7 +2,7 @@
 // answer that has none, and raise the in-app alert for a new message. Small on purpose: the store's first-load
 // code imports this, while the messages engine (messages-core.ts) loads after start (messages-lazy.ts, A25).
 import type { RequestSummary } from '../api-types';
-import { initials, isInMedical } from '../domain';
+import { alertName, isInMedical } from '../domain';
 import { hasActivity, unreadOf, type RequestActivity } from '../messaging-activity';
 import type { AlertEvent } from './store-contract';
 
@@ -78,7 +78,7 @@ export function diffMessageAlerts(
     if (seen.has(key)) continue;
     seen.add(key);
     if (open(row.id)) continue;
-    const who = initials(row.name);
+    const who = alertName(row.name);
     const subtitle = `${row.lastMessage.by || 'Staff'}: ${row.lastMessage.text}`;
     out.push({ key, at: row.lastMessageAt, alert: { kind: 'message', requestId: row.id, title: who || 'New message', subtitle, count: 1 } });
   }

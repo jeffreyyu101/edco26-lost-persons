@@ -1,6 +1,6 @@
 // notifyStaff (contract A) in-process against the local database, with web-push mocked (F4, spec §18 A57):
 // ONE Activity row per (staff, request) holding the latest event, the actor and duplicates dropped, a push per
-// device with the initials as the title and no ids or contact details, 410 deletes the subscription, and a
+// device with the request's full name as the title and no ids or contact details, 410 deletes the subscription, and a
 // push service that never answers never holds the caller beyond 1.5 s. Also involvedStaff (contract C): the
 // logger and the answerer, whether or not lp_involved_staff (the Messages release) is there.
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -101,7 +101,7 @@ describe('notifyStaff', () => {
     ]);
   });
 
-  it('pushes once per device: initials as the title, the detail as the body, no ids or contact details', async () => {
+  it('pushes once per device: the full name as the title, the detail as the body, no ids or contact details', async () => {
     const dana = newStaff();
     const phone = await device(dana, 'a');
     const laptop = await device(dana, 'b');
@@ -116,12 +116,11 @@ describe('notifyStaff', () => {
     expect(s.map((x) => x.endpoint).sort()).toEqual([phone, laptop].sort());
     for (const x of s) {
       // (R2, 2026-11-07) A message opens the request at its thread.
-      expect(x.payload).toMatchObject({ title: 'J.D.', tag: `lp-${r.id}`, url: `/?r=${r.id}&to=thread`, kind: 'message', renotify: true, badge: 1 });
+      expect(x.payload).toMatchObject({ title: 'Jordan TEST-S Diaz', tag: `lp-${r.id}`, url: `/?r=${r.id}&to=thread`, kind: 'message', renotify: true, badge: 1 });
       expect(x.payload.body).toBe('Rae C.: call me on ••• about');
       const text = JSON.stringify(x.payload);
       expect(text).not.toMatch(/LP-?\d/);
       expect(text).not.toContain('555');
-      expect(text).not.toContain('Jordan');
       expect(Buffer.byteLength(text)).toBeLessThan(4_000);
       expect(x.options).toMatchObject({ TTL: 3_600, urgency: 'high' });
       expect((x.options.vapidDetails as { subject?: string }).subject).toBe(process.env.VAPID_SUBJECT);

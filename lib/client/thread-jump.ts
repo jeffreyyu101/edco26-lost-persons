@@ -9,19 +9,45 @@
 // focuses the composer on a computer only. The request may already be open (its section is told), or open a
 // moment later (its section takes it when it mounts). No React here: the store, on the first load, uses
 // openThread for a message's toast.
-import { wantsThread } from '../thread-link';
-import { navigate } from './nav';
+import { THREAD_PARAM, THREAD_VALUE, wantsThread } from '../thread-link';
+import { navigate, setSignInNext } from './nav';
 
-/** How long a jump waits for its request's Messages to show (the view chunk, the row on a cold start). */
-const JUMP_MS = 20_000;
+/**
+ * How long a jump waits for its request's Messages to show (the view chunk, the row on a cold start over a
+ * slow festival network), and how long a sign-in after a 401 still comes back to a thread it opened.
+ */
+const JUMP_MS = 60_000;
 
 let pending: { id: string; until: number } | null = null;
+/** The request whose Messages a jump last brought into view, and until when a sign-in comes back to them. */
+let landed: { id: string; until: number } | null = null;
 const listeners = new Set<() => void>();
 
 /** Ask the request's Messages to come into view (now if it is open, else when it opens). */
 export function requestThreadJump(requestId: string): void {
   pending = { id: requestId, until: Date.now() + JUMP_MS };
+  // A 401 before or just after it lands: the sign-in comes back to the thread, not the request's top.
+  setSignInNext(withThread);
   for (const listener of [...listeners]) listener();
+}
+
+/**
+ * `location` ("/?r=<id>") with `to=thread` while a jump to that request's Messages waits or has just landed:
+ * the address after sign-in (store-core sessionExpired, through nav.ts signInNext).
+ */
+export function withThread(location: string): string {
+  let url: URL;
+  try {
+    url = new URL(location, 'https://lp.invalid');
+  } catch {
+    return location;
+  }
+  const id = url.searchParams.get('r');
+  if (!id || url.searchParams.get('edit') !== null || wantsThread(url.searchParams)) return location;
+  const recent = landed !== null && landed.id === id && Date.now() <= landed.until;
+  if (!threadJumpWaiting(id) && !recent) return location;
+  url.searchParams.set(THREAD_PARAM, THREAD_VALUE);
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 /** A jump to this request's thread is waiting. */
@@ -33,6 +59,7 @@ export function threadJumpWaiting(requestId: string): boolean {
 export function takeThreadJump(requestId: string): boolean {
   if (!threadJumpWaiting(requestId)) return false;
   pending = null;
+  landed = { id: requestId, until: Date.now() + JUMP_MS };
   return true;
 }
 

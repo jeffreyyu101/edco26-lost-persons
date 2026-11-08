@@ -10,6 +10,7 @@ import {
   TEAM_ALIASES,
   TRANSITIONS,
   ageGender,
+  alertName,
   appendChip,
   avatarInitials,
   canCancel,
@@ -265,6 +266,27 @@ describe('names', () => {
     expect(splitName('J.D.')).toEqual({ firstName: 'J.D.', lastName: null });
     expect(splitName('   ')).toEqual({ firstName: null, lastName: null });
     expect(splitName(null)).toEqual({ firstName: null, lastName: null });
+  });
+
+  it('alertName: the whole name as entered, whitespace collapsed (alerts and notifications, Brian 2026-11-07)', () => {
+    expect(alertName('Kayla Martinez')).toBe('Kayla Martinez');
+    expect(alertName('  Mary  Ann\tSmith ')).toBe('Mary Ann Smith');
+    expect(alertName('T.R.')).toBe('T.R.');
+    expect(alertName('Dana')).toBe('Dana');
+    expect(alertName('   ')).toBe('');
+    expect(alertName('')).toBe('');
+    expect(alertName(null)).toBe('');
+    expect(alertName(undefined)).toBe('');
+  });
+
+  it('alertName: a request id or phone number typed into a name never reaches a notification (scrubbed like a detail)', () => {
+    expect(alertName('Jane 4075550142')).toBe('Jane •••');
+    expect(alertName('Jane (407) 555-0142 Doe')).toBe('Jane ••• Doe');
+    expect(alertName('LP-1013 Jane Doe')).toBe('Jane Doe');
+    expect(alertName('Jane Doe lp 7')).toBe('Jane Doe');
+    // Short numbers in a real name stay.
+    expect(alertName('Jane Doe 3rd')).toBe('Jane Doe 3rd');
+    expect(alertName('Louis XIV')).toBe('Louis XIV');
   });
 
   it('initials (A4)', () => {

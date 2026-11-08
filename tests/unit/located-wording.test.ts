@@ -125,16 +125,16 @@ describe('Located / Not located: no status wording says "medical"', () => {
       expect(saysMedical([notice.title, notice.body]), row.status).toEqual([]);
     }
     const held = makeRow(30, { status: STATUS.waiting, recheckAt: RECHECK, notFoundChecks: 1 });
-    expect(holdAlert(held, TZ)).toMatchObject({ title: 'T.R.', subtitle: 'Pending · recheck 10:20 PM' });
-    expect(statusAlert(makeRow(31, { status: STATUS.inMedical }), TZ).title).toBe('LP-1031 · T.R. located');
-    expect(statusAlert(makeRow(32, { status: STATUS.notInMedical }), TZ).title).toBe('LP-1032 · T.R. — not located');
+    expect(holdAlert(held, TZ)).toMatchObject({ title: 'T. R30', subtitle: 'Pending · recheck 10:20 PM' });
+    expect(statusAlert(makeRow(31, { status: STATUS.inMedical }), TZ).title).toBe('LP-1031 · T. R31 located');
+    expect(statusAlert(makeRow(32, { status: STATUS.notInMedical }), TZ).title).toBe('LP-1032 · T. R32 — not located');
   });
 
   it('the Undo bar after a Not located answer', () => {
     const held = makeRow(40, { status: STATUS.waiting, recheckAt: RECHECK, notFoundChecks: 1 });
     expect(notFoundSnack(held, STATUS.notInMedical)).toEqual({ message: 'Pending · recheck in 20 min', said: 'Pending, recheck in 20 minutes.' });
     const closed = makeRow(41, { status: STATUS.notInMedical, notFoundChecks: 2, firstName: 'B.', lastName: 'W.' });
-    expect(notFoundSnack(closed, STATUS.notInMedical)).toEqual({ message: 'B.W. closed · not located', said: 'B.W. closed, not located.' });
+    expect(notFoundSnack(closed, STATUS.notInMedical)).toEqual({ message: 'B. W. closed · not located', said: 'B. W. closed, not located.' });
   });
 
   it('the Web Push and Activity words (contract B), the hold and the final answer included', () => {
@@ -158,7 +158,7 @@ describe('Located / Not located: no status wording says "medical"', () => {
     expect(details.slice(7, 11)).toEqual(['Pending · recheck 10:20 PM', 'Pending', 'Pending · recheck 10:20 PM', 'Not located']);
     for (const kind of ACTIVITY_KINDS) {
       for (const detail of details) {
-        const p = pushPayload({ requestId: 'r1', kind, detail }, 'J.D.', 1);
+        const p = pushPayload({ requestId: 'r1', kind, detail }, 'Jordan Diaz', 1);
         expect(saysMedical([p.title, p.body])).toEqual([]);
       }
     }
@@ -182,16 +182,17 @@ describe('Located / Not located: no status wording says "medical"', () => {
   });
 });
 
-describe('"<initials> located" says "Friend can head over", never Main Med (HIPAA, Brian 2026-11-07 14:18)', () => {
+describe('"<name> located" says "Friend can head over", never Main Med (HIPAA, Brian 2026-11-07 14:18)', () => {
   const MED = /\bmed\b|medical/i;
 
   it('the in-app alert and the system notification', () => {
     expect(LOCATED_SUBTITLE).toBe('Friend can head over');
     const row = makeRow(33, { status: STATUS.inMedical, medicalLocation: 'Chair 9' });
     const alert = statusAlert(row, TZ);
-    expect(alert).toMatchObject({ kind: 'in_medical', title: 'LP-1033 · T.R. located', subtitle: 'Friend can head over' });
+    expect(alert).toMatchObject({ kind: 'in_medical', title: 'LP-1033 · T. R33 located', subtitle: 'Friend can head over' });
     const notice = systemNotice(alert, (id) => (id === row.id ? row : undefined));
-    expect(notice.title).toBe('T.R. · Located');
+    expect(notice.title).toBe('T. R33');
+    expect(notice.body.split('\n')[0]).toMatch(/^Located\b/);
     expect(notice.body.split('\n').at(-1)).toBe('Friend can head over');
   });
 
@@ -239,6 +240,6 @@ describe('Activity rows written before the rename read with the new words', () =
       if (!row) continue;
       expect(saysMedical([activityLine2(row), activityAriaLabel(row, NOW)])).toEqual([]);
     }
-    expect(activityAriaLabel(located!, NOW)).toMatch(/^Request B W, answer: Located, Chair 9\./);
+    expect(activityAriaLabel(located!, NOW)).toMatch(/^Request B\. W\., answer: Located, Chair 9\./);
   });
 });

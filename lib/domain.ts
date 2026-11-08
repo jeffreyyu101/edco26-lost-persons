@@ -652,7 +652,20 @@ export function joinName(firstName: string | null | undefined, lastName: string 
 }
 
 /**
- * Initials for alerts and toasts (v2.1 A4): the first letters of the first and last word, uppercased,
+ * The request's name as alerts, toasts, Activity rows and notifications show it (Brian 2026-11-07: "the
+ * notification should just show the full value of what's in the name", replacing v2.1 A4's initials): the
+ * whole name as entered, whitespace collapsed. A request id or a phone number typed into the name never reaches a
+ * lock screen: they are scrubbed as lib/activity.ts scrubDetail scrubs a detail (an id dropped, a phone "•••"), so
+ * the name in a title and in a stored detail stay the same text. Empty → "".
+ */
+const NAME_REQUEST_ID = /\bLP[\s-]?\d{1,9}\b/gi;
+const NAME_PHONE_LIKE = /\+?\(?\d(?:[\s().-]{0,3}\d){6,}/g;
+export function alertName(name: string | null | undefined): string {
+  return (name ?? '').replace(NAME_REQUEST_ID, '').replace(NAME_PHONE_LIKE, '•••').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Initials (v2.1 A4, no longer used by alerts: alertName): the first letters of the first and last word, uppercased,
  * with periods. Periods count as word breaks, so "T.R." stays "T.R.". A single word keeps its first two
  * letters, uppercased ("Dana" → "DA"). Empty → "".
  */

@@ -18,7 +18,7 @@ export interface HoldDomain {
   STATUS_META: typeof Domain.STATUS_META;
   NOT_FOUND_YET_LABEL: typeof Domain.NOT_FOUND_YET_LABEL;
   RECHECK_MINUTES: typeof Domain.RECHECK_MINUTES;
-  initials: typeof Domain.initials;
+  alertName: typeof Domain.alertName;
   isHeld: typeof Domain.isHeld;
   notFoundHolds: typeof Domain.notFoundHolds;
   formatCaseNumber: typeof Format.formatCaseNumber;
@@ -69,7 +69,7 @@ export function holdRules(d: HoldDomain) {
 
   /**
    * The Undo bar after a Not found (Pending v9.1, Brian 2026-11-06): the first one, which put the request on hold,
-   * reads "Not found yet · recheck in 20 min"; the final one "B.W. closed · not found in medical" (the closed
+   * reads "Not found yet · recheck in 20 min"; the final one "Bea Walsh closed · not located" (the closed
    * status's own label, so F2's rename flows through). Null for any other tap (the store's "LP-1012 · In medical").
    */
   function notFoundSnack(row: RequestSummary, to: SettableStatus): SnackWords | null {
@@ -81,7 +81,7 @@ export function holdRules(d: HoldDomain) {
       };
     }
     if (row.status !== STATUS.notInMedical) return null;
-    const who = d.initials(row.name) || d.formatCaseNumber(row.caseNumber);
+    const who = d.alertName(row.name) || d.formatCaseNumber(row.caseNumber);
     const closed = d.STATUS_META[STATUS.notInMedical].label.toLowerCase();
     return { message: `${who} closed · ${closed}`, said: `${who} closed, ${closed}.` };
   }

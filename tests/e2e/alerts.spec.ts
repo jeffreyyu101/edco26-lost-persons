@@ -243,7 +243,7 @@ test.describe('no double alerts (F4 + system notifications)', () => {
       const worker = ctx.serviceWorkers().find((w) => w.url().startsWith(`${BASE}/sw.js`)) ?? (await ctx.waitForEvent('serviceworker'));
       const id = randomUUID();
       const synced = page.waitForRequest((r) => r.url().includes('/api/sync'), { timeout: 10_000 });
-      const shown = await dispatchPush(worker, { v: 1, title: 'J.D.', body: 'Located', tag: `lp-${id}`, url: `/?r=${id}`, kind: 'in_medical', requestId: id, renotify: false, badge: null });
+      const shown = await dispatchPush(worker, { v: 1, title: 'Jordan Diaz', body: 'Located', tag: `lp-${id}`, url: `/?r=${id}`, kind: 'in_medical', requestId: id, renotify: false, badge: null });
       expect(shown).toEqual([]);
       await synced;
 

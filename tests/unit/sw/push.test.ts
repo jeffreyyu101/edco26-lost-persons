@@ -132,7 +132,7 @@ describe('push (no window in front)', () => {
     const data = worker.notifications[0]?.data;
     const res = await worker.notificationClick(data);
     expect(res.closed).toBe(true);
-    expect(worker.opened).toEqual([`/?r=${ID}`]);
+    expect(worker.opened).toEqual([`${ORIGIN}/?r=${ID}`]);
   });
 });
 
