@@ -280,7 +280,7 @@ export const COPY = {
   sessionChanged: 'Session changed — try again',
 } as const;
 
-const UNDOABLE_KINDS: ReadonlySet<StatusKind> = new Set(['answer', 'change', 'reunite']);
+const UNDOABLE_KINDS: ReadonlySet<StatusKind> = new Set(['answer', 'change', 'reunite', 'inform']);
 const MAX_TOASTS = 3;
 const MAX_SYNC_PAGES = 40;
 const ROWS_WRITE_MS = 3_000;
@@ -2525,7 +2525,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
           if (res.data.changed && !quiet) {
             const title = swapToastTitle(swapAction, request);
             if (swapAction.action === 'request') {
-              showCustomUndo(title, UNDO_MS, () => void actions.swap(id, { action: 'decline' }, { quiet: true }));
+              showCustomUndo(title, UNDO_MS, () => void actions.swap(id, { action: 'withdraw' }, { quiet: true }));
             } else {
               showToast({ tone: swapAction.action === 'approve' ? 'green' : 'neutral', icon: swapAction.action === 'approve' ? 'check' : 'x', title, durationMs: 4_000 });
             }

@@ -128,7 +128,7 @@ describe('store.swap (the real store)', () => {
   installStoreHooks();
   const swapPosts = (server: FakeServer) => server.requests('POST', '/api/requests/').filter((r) => r.path.endsWith('/swap')).map((r) => r.body);
 
-  it('request: POST /swap {action: request} with the version, overlay, then Undo = decline', async () => {
+  it('request: POST /swap {action: request} with the version, overlay, then Undo = withdraw', async () => {
     const row = makeRow(1, { status: STATUS.accompanied, rowVersion: 3 });
     const server = new FakeServer([row]);
     const { a, s } = boot(server);
@@ -140,7 +140,7 @@ describe('store.swap (the real store)', () => {
     expect(s().snackbar?.message).toBe('LP-1001 · Friend swap requested');
     await finish(a.undo(s().snackbar?.id ?? ''));
     await advance(0);
-    expect(swapPosts(server).at(-1)).toEqual({ action: 'decline', expectedVersion: 4 });
+    expect(swapPosts(server).at(-1)).toEqual({ action: 'withdraw', expectedVersion: 4 });
     expect(s().confirmed.get(row.id)?.swapRequestedAt ?? null).toBeNull();
   });
 
@@ -161,12 +161,13 @@ describe('store.swap (the real store)', () => {
     ]);
   });
 
-  it('Friend informed and Swap done go through setStatus with Undo', async () => {
+  it('Friend informed goes through setStatus (kind inform) with Undo', async () => {
     const row = makeRow(1, { status: STATUS.accompanied, rowVersion: 3 });
     const server = new FakeServer([row]);
     const { a, s } = boot(server);
     await ready();
-    await finish(a.setStatus(row.id, STATUS.friendInformed, 'reunite'));
+    await finish(a.setStatus(row.id, STATUS.friendInformed, 'inform'));
+    expect(server.requests('POST', '/api/requests/').at(-1)?.body).toEqual({ status: STATUS.friendInformed, expectedVersion: 3, kind: 'inform' });
     expect(s().confirmed.get(row.id)?.status).toBe(STATUS.friendInformed);
     expect(s().snackbar?.message).toBe('LP-1001 · Friend informed');
     await advance(UNDO_MS - 100);
@@ -182,7 +183,7 @@ describe('store.swap (the real store)', () => {
     fe.setOnline(false);
     fe.fire('window', 'offline');
     expect(await finish(a.swap(row.id, { action: 'request' }))).toMatchObject({ ok: false, reason: 'offline' });
-    expect(await finish(a.setStatus(row.id, STATUS.friendInformed, 'reunite'))).toMatchObject({ ok: false, reason: 'offline' });
+    expect(await finish(a.setStatus(row.id, STATUS.friendInformed, 'inform'))).toMatchObject({ ok: false, reason: 'offline' });
     expect(swapPosts(server)).toHaveLength(0);
     expect(s().confirmed.get(row.id)?.status).toBe(STATUS.accompanied);
     expect(s().toasts.map((t) => t.title)).toContain(COPY.needsConnection);

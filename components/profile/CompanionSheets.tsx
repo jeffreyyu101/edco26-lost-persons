@@ -8,8 +8,8 @@
 import { DropdownMenu } from '@radix-ui/themes';
 import { Check, ChevronRight, Cross, RotateCcw, Tent, Users, X } from 'lucide-react';
 import type { ReactNode } from 'react';
-import type { RequestSummary, SwapPlace } from '@/lib/api-types';
-import { STATUS, type SettableStatus, type StatusKind } from '@/lib/domain';
+import type { RequestSummary } from '@/lib/api-types';
+import { STATUS, type SettableStatus, type StatusKind, type SwapPlace } from '@/lib/domain';
 import { changeAnswerChoices } from './change-answer';
 import { formatCaseNumber } from '@/lib/format';
 import { COMPANION_COMING_LABEL, friendMayBeWith, swapApprovedLabel, swapPlaceLabel } from '@/lib/client/swap';

@@ -58,7 +58,7 @@ test.afterEach(async () => {
       } else if (row.status === STATUS.inMedical) {
         await request.fetch(`/api/requests/${id}/status`, { method: 'POST', data: { status: STATUS.reunited, expectedVersion: row.rowVersion, kind: 'reunite' }, headers: { Origin: BASE } });
       } else if (row.status === STATUS.accompanied) {
-        await request.fetch(`/api/requests/${id}/status`, { method: 'POST', data: { status: STATUS.friendInformed, expectedVersion: row.rowVersion, kind: 'reunite' }, headers: { Origin: BASE } });
+        await request.fetch(`/api/requests/${id}/status`, { method: 'POST', data: { status: STATUS.friendInformed, expectedVersion: row.rowVersion, kind: 'inform' }, headers: { Origin: BASE } });
       }
     } catch {
       // Best effort.

@@ -3,7 +3,8 @@
 // FROZEN after Phase 1a: later phases may ADD exports, never change existing ones. One contract change
 // since (Jeffrey, 2026-11-06 10:31): age and gender are free text, sent trimmed with '' → null, like every
 // other text field; the form no longer checks an age range or a gender list.
-import type { FriendInMedical, RequestSummary } from '../api-types';
+import type { RequestSummary } from '../api-types';
+import type { FriendInMedical } from '../domain';
 import {
   AGE_MAX,
   AGE_MIN,

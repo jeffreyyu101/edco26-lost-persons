@@ -202,7 +202,7 @@ export class FakeServer {
     }
     if (action === '/swap') {
       // (Companion) request / approve(place) / decline, as the backend's POST /api/requests/:id/swap.
-      const body = req.body as { action: 'request' | 'approve' | 'decline'; place?: 'fa' | 'mm'; expectedVersion: number };
+      const body = req.body as { action: 'request' | 'approve' | 'decline' | 'withdraw'; place?: 'fa' | 'mm'; expectedVersion: number };
       if (body.expectedVersion !== cur.rowVersion) return apiError(409, 'conflict', 'Updated by someone else', { currentStatus: cur.status });
       if (cur.status !== STATUS.accompanied) return apiError(422, 'invalid', 'Not allowed');
       const staff = this.session?.staff;

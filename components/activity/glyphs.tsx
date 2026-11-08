@@ -29,7 +29,8 @@ export function WalkIcon({ size = 17, strokeWidth = 1.9, ...rest }: { size?: num
   );
 }
 
-const LUCIDE: Readonly<Record<Exclude<ActivityIcon, 'walk'>, ComponentType<IconProps>>> = {
+// Keyed by string so it compiles against lib/activity's ActivityIcon with or without the companion names.
+const LUCIDE: Readonly<Record<string, ComponentType<IconProps>>> = {
   'message-square': MessageSquare,
   cross: Cross,
   check: CheckIcon,
@@ -89,6 +90,6 @@ export function ActivityGlyphIcon({ icon, tone, size = 18, kind }: { icon: Activ
   }
   const style = { color: toneVar(tone) };
   if (icon === 'walk') return <WalkIcon size={size} style={style} data-icon={icon} data-tone={tone} />;
-  const Icon = (LUCIDE as Readonly<Record<string, ComponentType<IconProps>>>)[icon] ?? EXTRA[icon as CompanionIcon] ?? MessageSquare;
+  const Icon = EXTRA[icon as CompanionIcon] ?? LUCIDE[icon] ?? MessageSquare;
   return <Icon size={size} strokeWidth={1.9} aria-hidden style={style} data-icon={icon} data-tone={tone} />;
 }

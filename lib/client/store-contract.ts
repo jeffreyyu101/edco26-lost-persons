@@ -18,8 +18,8 @@ import type {
   RequestSummary,
   Stats,
   StatsRange,
-  SwapAction,
 } from '../api-types';
+import type { SwapAction } from './swap';
 import type { PhotoTiming, SettableStatus, StatusKind } from '../domain';
 import type { MessagingApi } from './messages-core';
 import { DEFAULT_PREFS, type Prefs } from './prefs';

@@ -139,7 +139,7 @@ export function createStubStore(options: StubOptions): AppStore {
       rowVersion: row.rowVersion + 1,
     };
     putRow(next);
-    if (kind !== 'undo' && ['answer', 'change', 'reunite'].includes(kind)) {
+    if (kind !== 'undo' && ['answer', 'change', 'reunite', 'inform'].includes(kind)) {
       const back = undoTarget(row.status);
       if (back) {
         const snackId = nextId('undo');

@@ -404,7 +404,7 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
             <SwapGlyph tone="gray" size={15} />
             {REQUEST_SWAP_LABEL}
           </Button>
-          <Button size="3" highContrast className="lp-hit" disabled={offline} onClick={() => send(STATUS.friendInformed, 'reunite')} data-testid="friend-informed">
+          <Button size="3" highContrast className="lp-hit" disabled={offline} onClick={() => send(STATUS.friendInformed, 'inform')} data-testid="friend-informed">
             <Check size={16} aria-hidden />
             {FRIEND_INFORMED_LABEL}
           </Button>

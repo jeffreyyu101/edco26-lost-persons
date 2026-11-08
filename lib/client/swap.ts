@@ -1,8 +1,14 @@
 // (Companion, 2026-11-08) Pure client rules for the friend swap and the companion states (spec: companion-v1 ?w=B).
 // Main Med allows one companion per patient: a request Located · already accompanied may ask for a friend swap,
 // the answerer approves it at the request's own post ('fa') or Main Med ('mm'), or declines it.
-import type { RequestSummary, SwapAction, SwapPlace } from '../api-types';
-import { STATUS, postShort } from '../domain';
+import type { RequestSummary } from '../api-types';
+import { STATUS, postShort, type SwapPlace } from '../domain';
+
+/**
+ * The body of POST /api/requests/:id/swap without its expectedVersion (lib/validation swapSchema). 'withdraw' is the
+ * requester's Undo of a request (nobody is told).
+ */
+export type SwapAction = { action: 'request' } | { action: 'approve'; place: SwapPlace } | { action: 'decline' } | { action: 'withdraw' };
 import { formatCaseNumber } from '../format';
 
 type SwapRow = Pick<RequestSummary, 'status' | 'swapRequestedAt' | 'swapPlace'>;
@@ -24,6 +30,7 @@ export function swapPlaceLabel(place: SwapPlace, row: Pick<RequestSummary, 'repo
 }
 
 export const SWAP_REQUESTED_LABEL = 'Friend swap requested';
+const STATUS_LABEL_ACCOMPANIED = 'Accompanied';
 export const SWAP_DONE_LABEL = 'Swap done';
 export const REQUEST_SWAP_LABEL = 'Request swap';
 export const FRIEND_INFORMED_LABEL = 'Friend informed';
@@ -51,6 +58,7 @@ export function swapOverlayFields(action: SwapAction, staff: string | null, nowI
     case 'approve':
       return { status: STATUS.inMedical, swapPlace: action.place, swapRequestedAt: null, swapRequestedBy: null };
     case 'decline':
+    case 'withdraw':
       return { swapRequestedAt: null, swapRequestedBy: null };
   }
 }
@@ -60,6 +68,7 @@ export function swapToastTitle(action: SwapAction, row: Pick<RequestSummary, 'ca
   const lp = formatCaseNumber(row.caseNumber);
   if (action.action === 'request') return `${lp} · ${SWAP_REQUESTED_LABEL}`;
   if (action.action === 'approve') return `${lp} · ${swapApprovedLabel(action.place, row)}`;
+  if (action.action === 'withdraw') return `${lp} · ${STATUS_LABEL_ACCOMPANIED}`;
   return `${lp} · Swap declined`;
 }
 
