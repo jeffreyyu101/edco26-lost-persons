@@ -177,9 +177,11 @@ function Who({ team }: { team: Stats['team'] }) {
     <Pop
       label="Who's on"
       trigger={(open) => (
-        <button type="button" className={s.who} aria-expanded={open} aria-label={`${n} people on in the last 10 minutes: ${sr}`} data-testid="who">
+        <button type="button" className={s.who} aria-expanded={open} data-testid="who">
           <i className={s.ld} aria-hidden />
-          <b>{n}</b>on
+          <b aria-hidden>{n}</b>
+          <span aria-hidden>on</span>
+          <VisuallyHidden>{`${n} people on in the last 10 minutes: ${sr}`}</VisuallyHidden>
           <span className={s.dots} aria-hidden>
             {rows.map((t) => (
               <i key={t.team} className={t.on ? s.tdot : `${s.tdot} ${s.off}`} />
@@ -253,9 +255,12 @@ function StatusCard({ stats }: { stats: Stats }) {
   const cuts = boundaries(parts);
   return (
     <section className={`${s.card} ${s.status} ${s.zStatus}`} aria-label={`Open ${open}: ${parts.map((p) => `${p.n} ${PART_SR[p.k]}`).join(', ')}`} data-testid="status">
-      <button type="button" className={s.open} onClick={() => navigate({ view: 'pending' })} aria-label={`Open ${open}. Show open requests`}>
-        <span>Open</span>
-        <b data-testid="open-count">{open}</b>
+      <button type="button" className={s.open} onClick={() => navigate({ view: 'pending' })}>
+        <span aria-hidden>Open</span>
+        <b data-testid="open-count" aria-hidden>
+          {open}
+        </b>
+        <VisuallyHidden>{`Open ${open}. Show open requests`}</VisuallyHidden>
       </button>
       <div className={s.cbar} aria-hidden>
         <div className={s.cbl}>
@@ -275,10 +280,11 @@ function StatusCard({ stats }: { stats: Stats }) {
       </div>
       <div className={s.slg}>
         {parts.map((p) => (
-          <button key={p.k} type="button" onClick={() => navigate(PART_GO[p.k])} data-testid={`status-${p.k}`} aria-label={`${p.n} ${PART_SR[p.k]}. Show them`}>
+          <button key={p.k} type="button" onClick={() => navigate(PART_GO[p.k])} data-testid={`status-${p.k}`}>
             <PartGlyph k={p.k} />
-            {p.name}
-            <b>{p.n}</b>
+            <span aria-hidden>{p.name}</span>
+            <b aria-hidden>{p.n}</b>
+            <VisuallyHidden>{`${p.n} ${PART_SR[p.k]}. Show them`}</VisuallyHidden>
           </button>
         ))}
       </div>
@@ -320,20 +326,25 @@ function Attention({ stats, skew }: { stats: Stats; skew: number }) {
         <ul className={s.att}>
           {rows.map((r) => (
             <li key={r.id}>
-              <button type="button" className={s.ar} onClick={() => navigate({ r: r.id })} aria-label={attentionPhrase(r)} data-testid="attention-row" data-kind={r.kind} data-sev={r.sev}>
+              <button type="button" className={s.ar} onClick={() => navigate({ r: r.id })} data-testid="attention-row" data-kind={r.kind} data-sev={r.sev}>
+                <VisuallyHidden>{attentionPhrase(r)}</VisuallyHidden>
                 <PartGlyph k={r.kind === 'wait' ? 'waiting' : r.kind === 'recheck' ? 'recheck' : 'located'} size={16} />
-                <span className={s.case}>{r.caseNumber}</span>
-                <span className={s.tchip}>{r.tent}</span>
+                <span className={s.case} aria-hidden>
+                  {r.caseNumber}
+                </span>
+                <span className={s.tchip} aria-hidden>
+                  {r.tent}
+                </span>
                 <span />
                 {r.enroute ? (
-                  <span className={s.eta}>
+                  <span className={s.eta} aria-hidden>
                     <WalkIcon size={15} />
                     {r.eta === null ? null : r.eta < 1 ? '<1m' : `${r.eta}m`}
                   </span>
                 ) : (
                   <span />
                 )}
-                <span className={s.tmr} data-sev={r.sev}>
+                <span className={s.tmr} data-sev={r.sev} aria-hidden>
                   <SevGlyph sev={r.sev} />
                   {timerText(r)}
                 </span>
@@ -381,15 +392,18 @@ function SpeedCol({ k, stat, range, skew }: { k: SpeedStat['key']; stat: SpeedSt
   const badge = stat ? speedBadge(stat) : null;
   const sr = !stat || stat.median === null ? `${label}: no data in range` : `${label}: median ${fmtM(stat.median)} minutes, ${badge?.sev === 'ok' ? 'under' : 'over'} the ${stat.target} minute target. Details`;
   const col = (open: boolean) => (
-    <button type="button" className={s.sp3} aria-expanded={open} aria-label={sr} data-testid={`speed-${k}`}>
-      <span className={s.l}>{label}</span>
+    <button type="button" className={s.sp3} aria-expanded={open} data-testid={`speed-${k}`}>
+      <VisuallyHidden>{sr}</VisuallyHidden>
+      <span className={s.l} aria-hidden>
+        {label}
+      </span>
       {badge ? (
         <span className={s.tb} data-sev={badge.sev} aria-hidden>
           {badge.sev === 'ok' ? <Check size={12} strokeWidth={2.5} /> : <ArrowUp size={12} strokeWidth={2.5} />}
           <span className={s.d}>{badge.delta}</span>
         </span>
       ) : null}
-      <span className={s.v}>
+      <span className={s.v} aria-hidden>
         <span className={s.n}>
           {fmtM(stat?.median)}
           {typeof stat?.median === 'number' ? <small>m</small> : null}

@@ -1085,3 +1085,36 @@
 .phone .rg + .rg::before {
   display: none;
 }
+
+/* ---- 44 px tap targets without moving anything (the lp-hit pattern; these controls reset `position`) ---------- */
+.who,
+.open,
+.slg button,
+.more,
+.tbl,
+.seg :global(.rt-SegmentedControlItem) {
+  position: relative;
+}
+.who::before,
+.tbl::before,
+.seg :global(.rt-SegmentedControlItem)::before {
+  content: '';
+  position: absolute;
+  inset: min(0px, calc((100% - 44px) / 2));
+}
+/* Open over the legend: Open's area reaches up, the legend's down, so the two never meet. */
+.open::before {
+  content: '';
+  position: absolute;
+  inset: -12px 0 -2px;
+}
+.slg button::before {
+  content: '';
+  position: absolute;
+  inset: -9px 0 -11px;
+}
+.more::before {
+  content: '';
+  position: absolute;
+  inset: -4px 0 -14px;
+}

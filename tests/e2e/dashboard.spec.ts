@@ -44,7 +44,7 @@ const statsUrls = (page: Page) => {
   return urls;
 };
 const hScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
-const n = async (page: Page, id: string) => Number(/(\d+)\s*$/.exec((await page.getByTestId(id).innerText()).trim())?.[1]);
+const n = async (page: Page, id: string) => Number(await page.getByTestId(id).locator('b').innerText());
 
 test('status: Open is Waiting + Pending + Located; the legend opens the lists; a Needs attention row opens its request', async ({ page, baseURL }) => {
   await createRequest(page, baseURL as string);
@@ -63,7 +63,7 @@ test('status: Open is Waiting + Pending + Located; the legend opens the lists; a
 
   const row = page.getByTestId('attention-row').first();
   await expect(row).toBeVisible();
-  await expect(row).toHaveAttribute('aria-label', /^Request \d+ at [^,]+, (waiting|re-check|located)/);
+  await expect(row).toHaveAccessibleName(/^Request \d+ at [^,]+, (waiting|re-check|located)/);
   // The timer pill always carries a glyph with its colour.
   await expect(row.locator('[data-sev] svg').first()).toBeVisible();
   await row.click();
@@ -158,8 +158,17 @@ test('phone: ‹ Dashboard with who is on, the range under it, one column in ord
     const t0 = await timer.innerText();
     await expect.poll(() => timer.innerText(), { timeout: 4_000 }).not.toBe(t0);
   }
-  // No helper sentences on screen: labels and values only.
-  await expect(page.getByTestId('dashboard')).not.toContainText(/Updated|minutes ago|last 2 hours/);
+  // No helper sentences on screen (the full sentences are for screen readers only): labels and values.
+  const visible = await page.getByTestId('dashboard').evaluate((root) => {
+    const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let out = '';
+    while (walk.nextNode()) {
+      const r = walk.currentNode.parentElement!.getBoundingClientRect();
+      if (r.width > 1 && r.height > 1) out += `${walk.currentNode.textContent} `;
+    }
+    return out;
+  });
+  expect(visible).not.toMatch(/Updated|minutes ago|last 2 hours|Show them/);
 });
 
 test('desk (1440 × 900): status across, Needs attention and Speed beside Calls; who is on and the range in the top bar', async ({ page }) => {

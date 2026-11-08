@@ -89,12 +89,12 @@ describe('Dashboard v4', () => {
 
   it('status: Open 15, the bar Waiting → Pending → Located with boundary values, and a glyph beside every count', () => {
     const html = render(storeWith(), <DashboardContent stats={v4Stats()} range="tonight" />);
-    expect(html).toMatch(/data-testid="open-count">15</);
+    expect(html).toMatch(/data-testid="open-count" aria-hidden="true">15</);
     expect(html).toContain('aria-label="Open 15: 6 waiting for a first check, 4 pending a re-check, 5 located, friend not here yet"');
     expect(html.match(/data-part="(\w+)"/g)).toEqual(['data-part="waiting"', 'data-part="pending"', 'data-part="located"']);
     expect(html).toMatch(/<span style="left:0%">0<\/span><span style="left:40%">6<\/span><span style="left:66\.6+%">10<\/span><span style="left:100%">15<\/span>/);
     for (const [k, n] of [['waiting', 6], ['pending', 4], ['located', 5]] as const) {
-      expect(html).toMatch(new RegExp(`data-testid="status-${k}"[^>]*><svg[^]*?<b>${n}</b>`));
+      expect(html).toMatch(new RegExp(`data-testid="status-${k}"><svg[^]*?<b aria-hidden="true">${n}</b>`));
     }
   });
 
@@ -102,10 +102,10 @@ describe('Dashboard v4', () => {
     const html = render(storeWith(), <DashboardContent stats={v4Stats()} range="tonight" />);
     const rows = [...html.matchAll(/data-testid="attention-row" data-kind="(\w+)" data-sev="(\w+)"/g)].map((m) => `${m[1]}:${m[2]}`);
     expect(rows).toEqual(['located:crit', 'recheck:crit', 'wait:crit', 'recheck:warn', 'located:warn']);
-    expect(html).toMatch(/>1137<\/span><span class="[^"]*tchip[^"]*">FA 3<\/span>/);
-    expect(html).toMatch(/aria-label="Request 1137 at FA 3, located 38 minutes ago, friend not here yet, on the way, about 2 minutes out"/);
-    expect(html).toMatch(/data-sev="crit"><svg[^>]*><circle[^>]*fill="var\(--red-9\)"/);
-    expect(html).toMatch(/data-sev="warn"><svg[^>]*lucide-clock/);
+    expect(html).toMatch(/>1137<\/span><span class="[^"]*tchip[^"]*" aria-hidden="true">FA 3<\/span>/);
+    expect(html).toMatch(/data-testid="attention-row"[^>]*><span[^>]*>Request 1137 at FA 3, located 38 minutes ago, friend not here yet, on the way, about 2 minutes out<\/span>/);
+    expect(html).toMatch(/data-sev="crit" aria-hidden="true"><svg[^>]*><circle[^>]*fill="var\(--red-9\)"/);
+    expect(html).toMatch(/data-sev="warn" aria-hidden="true"><svg[^>]*lucide-clock/);
     expect(html).toContain('+6:00');
     expect(html).toMatch(/data-testid="attention-more"[^>]*>\+<!-- -->8<!-- --> more/);
     expect(html).not.toMatch(/waiting \d+ minutes<\/span>/); // no sentence on screen
@@ -140,7 +140,7 @@ describe('Dashboard v4', () => {
   it('a server before v4: Open from Waiting + In medical, an empty attention list, the old reunited count', () => {
     const { range: _r, live: _l, attention: _a, speed: _s, calls: _c, heat: _h, recap: _p, team: _t, ...old } = v4Stats();
     const html = render(storeWith(), <DashboardContent stats={old} range="tonight" />);
-    expect(html).toMatch(/data-testid="open-count">15</);
+    expect(html).toMatch(/data-testid="open-count" aria-hidden="true">15</);
     expect(html).toContain('data-testid="attention-clear"');
     expect(html).toMatch(/data-testid="recap-reunited">32</);
   });
