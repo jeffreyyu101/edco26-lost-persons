@@ -748,7 +748,7 @@ test.describe('desktop 1440 × 900', () => {
     await expect(actions.getByRole('button', { name: 'Reunited' })).toBeVisible();
   });
 
-  test('the sidebar: the toggle, Cmd+B / Ctrl+B and its edge collapse and expand it, kept on this device from the first frame; collapsed, each icon shows its label on hover and focus', async ({ page }) => {
+  test('the sidebar: the toggle, Cmd+B / Ctrl+B and its edge collapse and expand it, kept on this device from the first frame; collapsed, each icon shows its label on hover and focus', async ({ page, browserName }) => {
     await createRequests(page, 1);
     await page.goto('/');
     await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
@@ -782,7 +782,8 @@ test.describe('desktop 1440 × 900', () => {
     await page.mouse.move(800, 600);
     await expect(tip(pending)).toBeHidden();
     await pending.focus();
-    await page.keyboard.press('Tab');
+    // Safari moves through links with Option+Tab (Tab alone skips them).
+    await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab');
     const mine = sidebar(page).getByRole('link', { name: /^My requests/ });
     await expect(mine).toBeFocused();
     await expect(tip(mine)).toBeVisible();
