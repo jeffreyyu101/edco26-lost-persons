@@ -261,4 +261,16 @@ describe('flow_alert and flow_push', () => {
     flows.tick(now + 16_000, false);
     expect(of('flow_push').at(-1)?.p).toEqual(expect.objectContaining({ out: 'not_shown', src: 'page' }));
   });
+
+  it('the click’s log entry taken after the request it opened is on screen (the log is read after the resume sync): flow_push ok', () => {
+    const clickAt = now;
+    now += 600;
+    flows.onView('profile', 'all', now);
+    expect(of('flow_push')).toEqual([]);
+    now += 2_000;
+    flows.onSwEntries([{ e: 'click', k: 'in_medical', ps: true, at: clickAt, age: 1_000, via: 'take-open' }]);
+    expect(of('flow_push')).toEqual([expect.objectContaining({ at: clickAt, ms: 600, p: expect.objectContaining({ out: 'ok', via: 'take-open' }) })]);
+    flows.tick(now + 16_000, false);
+    expect(of('flow_push')).toHaveLength(1);
+  });
 });

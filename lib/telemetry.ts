@@ -3,8 +3,9 @@
 // chunk), the ingest route's zod schema (lib/server/telemetry.ts) and the SQL CHECKs share. Pure: no zod, no React.
 //
 // Privacy by construction: an event is numbers, booleans, enum tokens and attribute-derived tokens only. A token can't
-// hold a space, a capital, an @ or a long digit run, so names, phone numbers and message text can't pass even by
-// mistake; the collector never reads screen text in the first place.
+// hold a space, a capital or an @, and the server refuses any string with 4+ digits in a row (DIGIT_RUN_RE: the zod
+// schema and the SQL CHECKs, not only the client's tok()), so names as typed, phone numbers and message text can't
+// pass even by mistake; the collector never reads screen text in the first place.
 import { canonicalTeam } from './domain';
 
 export const TEL_VERSION = 1;
@@ -125,6 +126,13 @@ export const CRUMB_RE = new RegExp(CRUMB_SOURCE);
 /** An enum value inside `p`. */
 export const ENUM_SOURCE = '^[a-z0-9_.:-]{1,24}$';
 export const ENUM_RE = new RegExp(ENUM_SOURCE);
+/**
+ * Four digits in a row: refused in every string the server stores (token, crumb, enum value), so a phone number can't
+ * pass even when the client's tok() was skipped. The longest legitimate run is the 3-digit `st` (401, 409, 429); hashes
+ * (fnv8) are letters only. The SQL CHECKs use the same pattern.
+ */
+export const DIGIT_RUN_SOURCE = '[0-9]{4}';
+export const DIGIT_RUN_RE = new RegExp(DIGIT_RUN_SOURCE);
 
 export const PLATFORMS = ['ios', 'android', 'mac', 'windows', 'linux', 'other'] as const;
 export const ENGINES = ['webkit', 'blink', 'gecko', 'other'] as const;

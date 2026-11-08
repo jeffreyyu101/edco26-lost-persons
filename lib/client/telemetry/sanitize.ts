@@ -268,12 +268,14 @@ export function pathPattern(url: string, origin: string): string | null {
   return TOKEN_RE.test(p) ? p : null;
 }
 
-/** FNV-1a, 8 hex characters. */
+/** FNV-1a as 8 letters (hex 0-f written a-p): no digit run for the server's DIGIT_RUN_RE to refuse. */
 export function fnv8(s: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i += 1) {
     h ^= s.charCodeAt(i);
     h = Math.imul(h, 0x01000193) >>> 0;
   }
-  return h.toString(16).padStart(8, '0');
+  let out = '';
+  for (const c of h.toString(16).padStart(8, '0')) out += String.fromCharCode(97 + Number.parseInt(c, 16));
+  return out;
 }

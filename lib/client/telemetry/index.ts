@@ -32,6 +32,8 @@ export interface TelemetryHandle {
 export const CHECK_MS = 30_000;
 const PUSH_STATE_MS = 5 * 60_000;
 const VITALS_AFTER_MS = 60_000;
+/** One api `slow` event (with its trail) per pattern and method per minute; the ones in between are its `k`. */
+export const SLOW_API_COOLDOWN_MS = 60_000;
 const SAMPLED_SET: ReadonlySet<string> = new Set(SAMPLED);
 
 function safeKv(win: Window): KV {
@@ -150,6 +152,12 @@ class Collector {
   private rows2xx = new Map<string, TelEvent>();
   private fullSyncs = 0;
   private stopped = false;
+  /** Per pattern|method: when the last api `slow` went out, and the slow ones since. */
+  private slowApi = new Map<string, { at: number; k: number }>();
+  /** The worker's log is taken after the first sync that follows a resume (or the next check), not in the resume itself. */
+  private drainDue = false;
+  /** A hidden page's beacon is refused where WebKit sends `Origin: null` without Sec-Fetch-Site (iOS before 16.4). */
+  private beaconAccepted = true;
 
   constructor(private readonly host: TelHost) {
     this.win = host.win;
@@ -191,6 +199,8 @@ class Collector {
     this.connAt = this.now();
     const native = typeof this.win.fetch === 'function' ? this.win.fetch : null;
     const send = native ? native.bind(this.win) : null;
+    // CompressionStream arrived with Safari 16.4, as did Sec-Fetch-Site: the stand-in for "a beacon can be accepted".
+    this.beaconAccepted = deviceContext(this.win).plat !== 'ios' || 'CompressionStream' in this.win;
     void this.host.batchStore().then(
       this.guard.wrap((store) => {
         if (!send) return;
@@ -198,6 +208,7 @@ class Collector {
           now: () => this.now(),
           fetch: send,
           beacon: (url, body) => (typeof this.win.navigator?.sendBeacon === 'function' ? this.win.navigator.sendBeacon(url, body) : false),
+          canBeacon: () => this.beaconAccepted && !this.appBusy(),
           compress: gzipText,
           online: () => this.win.navigator?.onLine !== false,
           kv: this.kv,
@@ -301,11 +312,18 @@ class Collector {
     });
 
     // Visibility, link, page lifecycle, the worker.
-    guard.on(doc, 'visibilitychange', () => this.onVisibility());
-    guard.on(win, 'pagehide', () => {
-      this.flows.unload(this.now());
-      this.flushHidden();
-    });
+    // Bubble phase, not capture: registered long after the store's own listeners, these run after the app's "save now"
+    // on hide (the draft and rows) and after its resume handling.
+    guard.on(doc, 'visibilitychange', () => this.onVisibility(), { capture: false });
+    guard.on(
+      win,
+      'pagehide',
+      () => {
+        this.flows.unload(this.now());
+        this.flushHidden();
+      },
+      { capture: false },
+    );
     guard.on(win, 'online', () => this.onLink(true));
     guard.on(win, 'offline', () => this.onLink(false));
     const sw = win.navigator?.serviceWorker;
@@ -392,7 +410,15 @@ class Collector {
     const api = this.host.store.actions.messages;
     if (!api || this.messagesBound === api) return;
     this.messagesBound = api;
-    this.guard.add(api.subscribe(this.guard.wrap(() => this.flows.onMessages(api.getSnapshot()))));
+    this.guard.add(
+      api.subscribe(
+        this.guard.wrap(() => {
+          const snap = api.getSnapshot();
+          if (snap.jobs.some((j) => j.state === 'sending')) this.sender?.yieldToApp();
+          this.flows.onMessages(snap);
+        }),
+      ),
+    );
     this.flows.onMessages(api.getSnapshot());
   }
 
@@ -402,6 +428,7 @@ class Collector {
     this.prev = s;
     const t = this.now();
     this.marks.store = t;
+    if (s.syncing || s.outbox.some((j) => j.state === 'sending')) this.sender?.yieldToApp();
     if (prev && sessionChanged(prev, s)) {
       void this.sender?.clearAll();
       this.crumbs.clear();
@@ -468,7 +495,13 @@ class Collector {
     }
     this.flows.onState(s, prev, tones);
     this.checkStuckSend(s, t);
-    if (prev?.syncing && !s.syncing) this.sender?.maybeSend();
+    if (prev?.syncing && !s.syncing) {
+      if (this.drainDue && this.visibleNow) {
+        this.drainDue = false;
+        this.drainSw();
+      }
+      this.sender?.maybeSend();
+    }
   }
 
   private checkStuckSend(s: StoreState, t: number): void {
@@ -484,19 +517,27 @@ class Collector {
     }
   }
 
+  /** An app request, outbox job or message job in flight. */
+  private appBusy(): boolean {
+    const s = this.host.store.getState();
+    if (s.outbox.some((j) => j.state === 'sending')) return true;
+    if ((this.messagesBound?.getSnapshot().jobs ?? []).some((j) => j.state === 'sending')) return true;
+    return !!this.fetchObs && this.fetchObs.inflight() > 0;
+  }
+
   private quiet(): boolean {
     const s = this.host.store.getState();
     if (!this.visibleNow || this.win.navigator?.onLine === false) return false;
     if (s.connection !== 'live' || s.session.status !== 'active' || s.syncing) return false;
-    if (s.outbox.some((j) => j.state === 'sending')) return false;
-    if ((this.messagesBound?.getSnapshot().jobs ?? []).some((j) => j.state === 'sending')) return false;
-    if (this.fetchObs && this.fetchObs.inflight() > 0) return false;
+    if (this.appBusy()) return false;
     return this.now() - this.marks.tap >= 1_500;
   }
 
   // ---- Network -------------------------------------------------------------------------------------
 
   private onNetStart(req: NetStart): void {
+    // The app's request goes first: a telemetry send in flight steps aside.
+    this.sender?.yieldToApp();
     this.marks.api = req.t;
     if (req.pattern === '/api/sync:full') this.fullSyncs += 1;
     this.flows.onNetStart(req);
@@ -514,8 +555,17 @@ class Collector {
     this.recordNet(req.pattern, req.method, req.st, ms, on, conn, retry, req.end);
     this.crumbs.add(req.end, `n:${req.pattern}:${crumbStatus(req.st)}:${secs(ms)}`);
     if (ms > (SLOW_MS.api ?? 3_000)) {
-      const eff = (this.win.navigator as Navigator & { connection?: { effectiveType?: string } })?.connection?.effectiveType ?? 'na';
-      this.frustration({ n: 'slow', at: req.end, a: req.pattern, ms, p: { what: 'api', m: req.method, st: req.st, on, conn, eff } });
+      // On a slow festival link most polls are slow: one event (and one trail) per pattern per minute, `k` counting the
+      // slow ones it stands for.
+      const seen = this.slowApi.get(key);
+      if (seen && req.end - seen.at < SLOW_API_COOLDOWN_MS) {
+        seen.k += 1;
+      } else {
+        const k = (seen?.k ?? 0) + 1;
+        this.slowApi.set(key, { at: req.end, k: 0 });
+        const eff = (this.win.navigator as Navigator & { connection?: { effectiveType?: string } })?.connection?.effectiveType ?? 'na';
+        this.frustration({ n: 'slow', at: req.end, a: req.pattern, ms, k, p: { what: 'api', m: req.method, st: req.st, on, conn, eff } });
+      }
     }
     this.flows.onNetEnd(req);
   }
@@ -643,8 +693,9 @@ class Collector {
       this.flushHidden();
       return;
     }
-    this.drainSw();
-    this.sender?.maybeSend();
+    // Nothing here on resume: the app's session check, resume sync and notification hand-off go first. The worker's log
+    // is taken after the first sync that follows (or at the next check), and a send waits for that sync too.
+    this.drainDue = true;
   }
 
   private flushHidden(): void {
@@ -731,6 +782,10 @@ class Collector {
     this.flows.tick(t, this.prev?.connection === 'offline');
     if (this.prev) this.checkStuckSend(this.prev, t);
     if (this.visibleNow) {
+      if (this.drainDue) {
+        this.drainDue = false;
+        this.drainSw();
+      }
       this.checkDeviceState();
       this.dom?.process();
       this.sender?.maybeSend();

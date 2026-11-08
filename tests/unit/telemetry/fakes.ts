@@ -158,7 +158,7 @@ export interface Fakes {
 }
 
 /** A window + document pair. Timers are the global ones (vi.useFakeTimers drives them). */
-export function fakeBrowser(opts: { width?: number; ua?: string; standalone?: boolean } = {}): Fakes {
+export function fakeBrowser(opts: { width?: number; ua?: string; standalone?: boolean; noCompressionStream?: boolean } = {}): Fakes {
   FakeMutationObserver.all = [];
   const storage = new FakeStorage();
   const body = el('body');
@@ -200,6 +200,8 @@ export function fakeBrowser(opts: { width?: number; ua?: string; standalone?: bo
       return fakes.respond(String(url), init);
     },
   });
+  // Safari 16.4+ (the default iPhone here) has CompressionStream; an older one doesn't.
+  if (!opts.noCompressionStream) Object.assign(win, { CompressionStream: class {} });
   Object.assign(fakes, { win, doc, body, storage, beacons, fetchCalls, nav });
   return fakes;
 }

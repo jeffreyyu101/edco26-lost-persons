@@ -89,7 +89,7 @@ async function flush(page: Page): Promise<void> {
 const names = (device: string) => psql(`select coalesce(string_agg(distinct name, ',' order by name), '') from public.lp_tel_events where device = '${device}'`).split(',');
 
 /** Records, for every telemetry fetch, how many other /api/* requests (not images) were in flight when it started. */
-function watchOverlap(page: Page): { overlaps: number[]; telemetry: () => number } {
+function watchOverlap(page: Page): { overlaps: number[]; telemetry: () => number; busy: () => number } {
   const inflight = new Set<unknown>();
   const overlaps: number[] = [];
   let count = 0;
@@ -105,7 +105,7 @@ function watchOverlap(page: Page): { overlaps: number[]; telemetry: () => number
   });
   page.on('requestfinished', (r) => inflight.delete(r));
   page.on('requestfailed', (r) => inflight.delete(r));
-  return { overlaps, telemetry: () => count };
+  return { overlaps, telemetry: () => count, busy: () => inflight.size };
 }
 
 test('a session lands in lp_tel_events with frustration signals and trails, and no personal data at all', async ({ page }) => {
@@ -136,6 +136,8 @@ test('a session lands in lp_tel_events with frustration signals and trails, and 
   await page.waitForTimeout(1_500);
   await page.evaluate(() => window.history.pushState({}, '', '/?q=Quorra'));
   await page.waitForTimeout(1_500);
+  // A hidden page beacons only while none of the app's requests is in flight: hide at such a moment.
+  await expect.poll(() => watch.busy(), { timeout: 10_000, intervals: [50] }).toBe(0);
   await flush(page);
 
   await expect.poll(() => names(device), { timeout: 30_000 }).toEqual(expect.arrayContaining(['app_start', 'view', 'rage_tap', 'stuck_scroll', 'net']));

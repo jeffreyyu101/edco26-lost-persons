@@ -1,15 +1,17 @@
 // Telemetry on the server (design/references/observability-design.md §3): the ingest route's config cache, body
 // reader and validation, the team key, and the rows the server writes itself (push_send, tel_switch). Server only.
 //
-//   * Fails closed: any error reading the settings (no table, a timeout) is "off", so the route answers 204 and every
-//     phone stops collecting.
+//   * Fails closed only when it is sure: a missing settings table or function is "off" (204, every phone stops). A
+//     transient failure (a 503, a timeout) is 503 for a few seconds, so phones keep their batches and back off.
 //   * The team comes from the session (lib/telemetry.ts teamKey), never from the body.
 //   * Never logs a body or an event; never throws from the server-event helpers.
 import 'server-only';
+import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 import { z } from 'zod';
 import {
   CRUMB_RE,
+  DIGIT_RUN_RE,
   ENGINES,
   ENUM_RE,
   EFFECTIVE,
@@ -71,17 +73,34 @@ export function parseTelemetryConfig(raw: unknown): TelemetryConfig {
   };
 }
 
-let cached: { at: number; value: Promise<TelemetryConfig> } | null = null;
+/** A failed read that isn't a definite "off" (a 503, a fetch error, the timeout) is cached this long only. */
+export const TELEMETRY_CONFIG_RETRY_MS = 5_000;
+/** The settings can't exist (the migration was never applied): off, cached like an answer. */
+const DEFINITELY_OFF: ReadonlySet<string> = new Set(['PGRST202', '42883', '42P01']);
 
-/** lp_tel_config(), cached TELEMETRY_CONFIG_TTL_MS per instance. Any error is off (cached too, so a broken table costs one call per 30 s). */
+let cached: { at: number; ttl: number; value: Promise<TelemetryConfig> } | null = null;
+
+/**
+ * lp_tel_config(), cached TELEMETRY_CONFIG_TTL_MS per instance. A missing function or table is off (cached too, so it
+ * costs one call per 30 s). Any other failure rejects with 503 unavailable for TELEMETRY_CONFIG_RETRY_MS: the phone
+ * keeps its batches and backs off, where a 204 would wipe them and stop it for 30 minutes.
+ */
 export function telemetryConfig(now = Date.now()): Promise<TelemetryConfig> {
-  if (cached && now - cached.at < TELEMETRY_CONFIG_TTL_MS) {
+  if (cached && now - cached.at < cached.ttl) {
     // The auto-off passes on its own, cached or not.
     return cached.value.then((c) => (c.on && Date.now() >= c.until ? { ...c, on: false } : c));
   }
-  const value = rpc<unknown>('lp_tel_config', {}).then(parseTelemetryConfig, () => TELEMETRY_OFF);
-  cached = { at: now, value };
-  return value;
+  const entry: { at: number; ttl: number; value: Promise<TelemetryConfig> } = { at: now, ttl: TELEMETRY_CONFIG_TTL_MS, value: Promise.resolve(TELEMETRY_OFF) };
+  entry.value = rpc<unknown>('lp_tel_config', {}).then(parseTelemetryConfig, (error: unknown) => {
+    const code = error instanceof ApiFailure ? error.dbCode : undefined;
+    if (code && DEFINITELY_OFF.has(code)) return TELEMETRY_OFF;
+    entry.ttl = TELEMETRY_CONFIG_RETRY_MS;
+    throw new ApiFailure('unavailable', undefined, { dbCode: code ?? 'tel_config' });
+  });
+  // Nobody may be waiting on the cached copy when it fails: never an unhandled rejection.
+  entry.value.catch(() => undefined);
+  cached = entry;
+  return entry.value;
 }
 
 /** The kill switch moved, or the ingest RPC said off: read the settings again next time. */
@@ -91,6 +110,15 @@ export function invalidateTelemetryConfig(): void {
 
 /** Tests: forget the cached config. */
 export const resetTelemetryConfigCache = invalidateTelemetryConfig;
+
+/**
+ * The per-hour quota key the server derives from the session (never from the body): a hash of the sign-in's sid, so a
+ * session that sends a new device id with every batch still meets one cap. Only this hash is stored (lp_tel_quota,
+ * deleted after 2 days).
+ */
+export function quotaKey(sid: string): string {
+  return `s${createHash('sha256').update(`lp-tel-quota|${sid}`).digest('hex').slice(0, 20)}`;
+}
 
 // ---------------------------------------------------------------------------------------------------
 // Origin
@@ -116,7 +144,7 @@ export function assertTelemetryOrigin(request: Request): void {
 // ---------------------------------------------------------------------------------------------------
 
 export interface TelemetryBody {
-  /** Bytes on the wire (what the per-device byte cap counts). */
+  /** Bytes of JSON after any gzip is inflated: what gets stored, and what the per-hour byte caps count. */
   bytes: number;
   text: string;
 }
@@ -146,7 +174,7 @@ export async function readTelemetryBody(request: Request): Promise<TelemetryBody
   } catch {
     throw new ApiFailure('bad_request', 'Body must be UTF-8');
   }
-  return { bytes: raw.byteLength, text };
+  return { bytes: buf.byteLength, text };
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -161,7 +189,9 @@ const DAY_MS = 86_400_000;
 /** The SQL CHECK caps props and trail at 4096 bytes of jsonb text, which adds spaces: stay well under. */
 const JSON_FIELD_MAX = 3_600;
 
-const token = z.string().regex(TOKEN_RE);
+/** No 4-digit run in any stored string (lib/telemetry.ts DIGIT_RUN_RE): the backstop behind the client's tok(). */
+const noDigitRun = (s: string): boolean => !DIGIT_RUN_RE.test(s);
+const token = z.string().regex(TOKEN_RE).refine(noDigitRun);
 
 /** Rough jsonb::text length: JSON plus the space jsonb prints after each ',' and ':'. */
 export function jsonbTextLength(value: unknown): number {
@@ -171,7 +201,7 @@ export function jsonbTextLength(value: unknown): number {
   return s.length + extra;
 }
 
-/** `p`: only PROP_KEYS, ≤ 24 keys; values an int, a bool or an enum token; `d` alone an int[] of up to 120 durations. */
+/** `p`: only PROP_KEYS, ≤ 24 keys; values an int, a bool or an enum token (no 4-digit run); `d` alone an int[] of up to 120 durations. */
 export function validProps(value: unknown): value is Record<string, number | boolean | string | number[]> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const entries = Object.entries(value as Record<string, unknown>);
@@ -185,7 +215,7 @@ export function validProps(value: unknown): value is Record<string, number | boo
     }
     if (typeof v === 'boolean') continue;
     if (typeof v === 'number' && Number.isInteger(v) && Math.abs(v) <= INT_MAX) continue;
-    if (typeof v === 'string' && ENUM_RE.test(v)) continue;
+    if (typeof v === 'string' && ENUM_RE.test(v) && noDigitRun(v)) continue;
     return false;
   }
   return jsonbTextLength(value) <= JSON_FIELD_MAX;
@@ -203,7 +233,7 @@ const eventSchema = z
     ok: z.boolean().optional(),
     p: z.custom<Record<string, number | boolean | string | number[]>>(validProps).optional(),
     tr: z
-      .array(z.tuple([z.number().int().min(-DAY_MS).max(0), z.string().regex(CRUMB_RE)]))
+      .array(z.tuple([z.number().int().min(-DAY_MS).max(0), z.string().regex(CRUMB_RE).refine(noDigitRun)]))
       .max(TEL_LIMITS.trail)
       .optional(),
   })

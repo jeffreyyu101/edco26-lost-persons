@@ -155,7 +155,10 @@ describe('pathPattern', () => {
     expect(pathPattern('/_next/static/x.js', O)).toBeNull();
   });
 
-  it('fnv8 is 8 hex characters', () => {
-    expect(fnv8('x')).toMatch(/^[0-9a-f]{8}$/);
+  it('fnv8 is 8 letters (hex 0-f as a-p): no digit run for the server to refuse', () => {
+    expect(fnv8('x')).toMatch(/^[a-p]{8}$/);
+    // FNV-1a of '' is 811c9dc5: i b h m j n m f.
+    expect(fnv8('')).toBe('ibbmjnmf');
+    expect(fnv8('/_next/static/chunks/0sjnextxajij_.js')).not.toMatch(/\d/);
   });
 });

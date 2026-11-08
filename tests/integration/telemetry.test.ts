@@ -1,7 +1,8 @@
 // Telemetry against the real routes and the local database (design §3 and §6 Integration): POST /api/telemetry (auth,
-// origin, caps on size, validation, the team from the session, skew, dedupe, the per-device-hour caps, 204 when off
-// with nothing written, no cookie re-issue), the kill switch route, GET /api/telemetry/health, the SQL (RLS with no
-// policies, privileges, exactly one retention job, retention itself, the standalone paste) and the Health aggregates.
+// origin, caps on size, validation, the team from the session, skew, dedupe, the per-hour caps per device, per
+// sign-in and fleet-wide, 204 when off with nothing written, no cookie re-issue), the kill switch route (off only),
+// GET /api/telemetry/health, the SQL (RLS with no policies, privileges, no 4-digit runs, exactly one retention job,
+// retention itself, the standalone paste) and the Health aggregates.
 // Synthetic devices and staff only; every row this file writes uses a `ti…` device id and is deleted at the end.
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -50,6 +51,7 @@ afterAll(async () => {
   await api('/api/telemetry/settings', { json: { enabled: true }, cookie: medic });
   psql(`delete from public.lp_tel_events where device like 'ti%'; delete from public.lp_tel_devices where device like 'ti%';
         delete from public.lp_tel_quota where device like 'ti%'; delete from public.lp_tel_batches where device like 'ti%'`);
+  setSettings('fleet_hour_cap = 60000, fleet_hour_bytes = 50331648');
 });
 
 describe('POST /api/telemetry', () => {
@@ -133,11 +135,13 @@ describe('POST /api/telemetry', () => {
   });
 
   it('the per-device-hour caps: 60 events at a cap of 50 store 50 (capped); a byte cap stores none', async () => {
+    // A sign-in of its own: the cap is also per sign-in, and the earlier tests' events count against `medic`'s.
+    const own = await cookieFor(newStaff('Medical'));
     setSettings('device_hour_cap = 50');
     try {
       const d = device();
       const ev = Array.from({ length: 60 }, () => ({ n: 'view', at: Date.now() }));
-      const res = await post(batch(d, ev), medic);
+      const res = await post(batch(d, ev), own);
       expect(res.body).toMatchObject({ on: true, capped: true });
       expect(Number(psql(`select count(*) from public.lp_tel_events where device = '${d}'`))).toBe(50);
     } finally {
@@ -146,7 +150,7 @@ describe('POST /api/telemetry', () => {
     setSettings('device_hour_bytes = 10');
     try {
       const d = device();
-      const res = await post(batch(d, [{ n: 'view', at: Date.now() }]), medic);
+      const res = await post(batch(d, [{ n: 'view', at: Date.now() }]), await cookieFor(newStaff('Medical')));
       expect(res.body.capped).toBe(true);
       expect(rows(d)).toBe('');
     } finally {
@@ -154,7 +158,42 @@ describe('POST /api/telemetry', () => {
     }
   });
 
-  it('the kill switch: 204 and nothing written (the next ones without a database call); back on through the switch route', async () => {
+  it('a new device id on every batch still meets the sign-in’s cap; the bytes counted are the inflated JSON', async () => {
+    const own = await cookieFor(newStaff('Medical'));
+    setSettings('device_hour_cap = 50');
+    try {
+      const [d1, d2] = [device(), device()];
+      const ev = Array.from({ length: 30 }, () => ({ n: 'view', at: Date.now() }));
+      expect((await post(batch(d1, ev), own)).body).toMatchObject({ on: true });
+      expect((await post(batch(d2, ev), own)).body).toMatchObject({ on: true, capped: true });
+      expect(Number(psql(`select count(*) from public.lp_tel_events where device in ('${d1}', '${d2}')`))).toBe(50);
+      expect(psql(`select count(*) from public.lp_tel_quota where hour = date_trunc('hour', now()) and device like 's%' and events = 60`)).not.toBe('0');
+    } finally {
+      setSettings('device_hour_cap = 3000');
+    }
+    // A gzip body: the quota counts what is stored (the JSON), not the smaller wire bytes.
+    const d = device();
+    const json = JSON.stringify(batch(d, Array.from({ length: 50 }, () => ({ n: 'view', at: Date.now(), v: 'pending', p: { from: 'all', lay: 'phone', filter: 'none' } }))));
+    const gz = gzipSync(json);
+    expect(gz.byteLength * 4).toBeLessThan(Buffer.byteLength(json));
+    expect((await post(null, own, { raw: gz, type: 'application/x-lp-tel+gzip' })).status).toBe(200);
+    expect(Number(psql(`select bytes from public.lp_tel_quota where device = '${d}' and hour = date_trunc('hour', now())`))).toBe(Buffer.byteLength(json));
+  });
+
+  it('the fleet-wide cap per hour bounds every device and sign-in together', async () => {
+    const used = Number(psql(`select coalesce((select events from public.lp_tel_quota where device = '*' and hour = date_trunc('hour', now())), 0)`));
+    setSettings(`fleet_hour_cap = ${used + 5}`);
+    try {
+      const d = device();
+      const res = await post(batch(d, Array.from({ length: 10 }, () => ({ n: 'view', at: Date.now() }))), await cookieFor(newStaff('Medical')));
+      expect(res.body).toMatchObject({ on: true, capped: true });
+      expect(Number(psql(`select count(*) from public.lp_tel_events where device = '${d}'`))).toBe(5);
+    } finally {
+      setSettings('fleet_hour_cap = 60000');
+    }
+  });
+
+  it('the kill switch: 204 and nothing written (the next ones without a database call); back on in SQL only', async () => {
     const d = device();
     setSettings('enabled = false');
     const first = await post(batch(d, [{ n: 'view', at: Date.now() }]), medic);
@@ -165,6 +204,13 @@ describe('POST /api/telemetry', () => {
     // lp_tel_ingest itself says off and writes nothing.
     expect(psql(`set role service_role; select public.lp_tel_ingest('direct00001', '${d}', 'sessint001', 'medical', 0, '{}', '[{"n":"view","at":1}]', 10)::text`)).toBe('{"on": false}');
     expect(rows(d)).toBe('');
+    // The route never turns it back on: 403, and it stays off.
+    const refused = await api('/api/telemetry/settings', { json: { enabled: true }, cookie: medic });
+    expect(refused.status).toBe(403);
+    expect(psql(`select enabled from public.lp_tel_settings`)).toBe('f');
+    expect((await post(batch(d, [{ n: 'view', at: Date.now() }]), medic)).status).toBe(204);
+    // Back on in SQL; {enabled: true} then only re-reads the settings for this server instance.
+    setSettings('enabled = true');
     const on = await api('/api/telemetry/settings', { json: { enabled: true }, cookie: medic });
     expect(on.status).toBe(200);
     expect(on.body).toMatchObject({ on: true, enabled: true });
@@ -184,19 +230,27 @@ describe('POST /api/telemetry', () => {
     }
   });
 
-  it('the switch route records tel_switch (team only) and needs a session', async () => {
+  it('the switch route turns it off, records tel_switch (team only, before the flip) and needs a session', async () => {
     expect((await api('/api/telemetry/settings', { json: { enabled: false }, cookie: null })).status).toBe(401);
-    const before = Number(psql(`select count(*) from public.lp_tel_events where name = 'tel_switch' and team = 'dispatch'`));
-    const res = await api('/api/telemetry/settings', { json: { enabled: true }, cookie: dispatcher });
-    expect(res.status).toBe(200);
-    expect(Number(psql(`select count(*) from public.lp_tel_events where name = 'tel_switch' and team = 'dispatch'`))).toBe(before + 1);
-    psql(`delete from public.lp_tel_events where name = 'tel_switch' and device = 'server' and received_at > now() - interval '1 minute'`);
+    const before = Number(psql(`select count(*) from public.lp_tel_events where name = 'tel_switch' and team = 'dispatch' and ok = false`));
+    try {
+      const res = await api('/api/telemetry/settings', { json: { enabled: false }, cookie: dispatcher });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ on: false, enabled: false });
+      expect(psql(`select enabled from public.lp_tel_settings`)).toBe('f');
+      expect(Number(psql(`select count(*) from public.lp_tel_events where name = 'tel_switch' and team = 'dispatch' and ok = false`))).toBe(before + 1);
+    } finally {
+      setSettings('enabled = true');
+      await api('/api/telemetry/settings', { json: { enabled: true }, cookie: medic });
+      psql(`delete from public.lp_tel_events where name = 'tel_switch' and device = 'server' and received_at > now() - interval '1 minute'`);
+    }
   });
 });
 
 describe('GET /api/telemetry/health and the aggregates', () => {
   it('seeded rows: problems ranked by devices then count, flows p50 / p95, net failure rates by state, errors by fingerprint', async () => {
-    const area = `tiarea${uniq().replace(/[^a-z0-9]/g, '').slice(0, 10)}`;
+    // Letters only: a stored string can't hold 4 digits in a row (lp_tel_events_no_digit_run).
+    const area = `tiarea${uniq().replace(/[^a-z0-9]/g, '').replace(/\d/g, (c) => 'abcdefghij'[Number(c)] ?? 'a').slice(0, 10)}`;
     const ins = (d: string, name: string, extra: string) =>
       `insert into public.lp_tel_events (at, device, session, team, name, view, area, ctl, ms, n, ok, props) values (now(), '${d}', 'sessint001', 'medical', '${name}', ${extra});`;
     const d1 = device();
@@ -212,7 +266,7 @@ describe('GET /api/telemetry/health and the aggregates', () => {
         ins(d3, 'stuck_scroll', `'profile', '${area}-b', null, null, 3, null, '{"dir":"up"}'`),
         ins(d1, 'net', `null, '/api/ti-${area}', null, null, 10, null, '{"m":"get","st":"2xx","on":true,"conn":"live","d":[100,200,300]}'`),
         ins(d1, 'net', `null, '/api/ti-${area}', null, null, 5, null, '{"m":"get","st":"timeout","on":false,"conn":"offline"}'`),
-        ins(d1, 'error', `'profile', 'chunk:${area.slice(0, 8)}', 'typeerror', null, 2, null, '{"type":"typeerror","kind":"error","fp":"tifp0001","line":1,"col":42}'`),
+        ins(d1, 'error', `'profile', 'chunk:${area.slice(0, 8)}', 'typeerror', null, 2, null, '{"type":"typeerror","kind":"error","fp":"tifpabcd","line":1,"col":42}'`),
       ].join('\n'),
     );
     const res = await api('/api/telemetry/health?window=1h', { cookie: medic });
@@ -226,7 +280,7 @@ describe('GET /api/telemetry/health and the aggregates', () => {
     ]);
     const net = (res.body.net.rows as Array<{ pattern: string; n: number; failed: number; timeouts: number; p50: number; states: Record<string, { n: number; failed: number }> }>).find((r) => r.pattern === `/api/ti-${area}`);
     expect(net).toMatchObject({ n: 15, failed: 5, timeouts: 5, p50: 200, states: { live: { n: 10, failed: 0 }, link_down: { n: 5, failed: 5 } } });
-    expect((res.body.errors as Array<{ fp: string; n: number }>).find((e) => e.fp === 'tifp0001')).toMatchObject({ n: 2, type: 'typeerror' });
+    expect((res.body.errors as Array<{ fp: string; n: number }>).find((e) => e.fp === 'tifpabcd')).toMatchObject({ n: 2, type: 'typeerror' });
     expect(res.body.kpis.devices).toBeGreaterThanOrEqual(3);
     expect(Array.isArray(res.body.coverage)).toBe(true);
   });
@@ -251,6 +305,23 @@ describe('the SQL', () => {
             from pg_proc p where p.proname like 'lp\\_tel\\_%'`),
     ).toBe('true/false/false');
     expect(psql(`select count(*) from pg_proc where proname like 'lp\\_tel\\_%'`)).toBe('6');
+  });
+
+  it('no 4 digits in a row in a stored string (area, control, an enum in props, a crumb); numbers are fine', () => {
+    const d = device();
+    const ins = (cols: string) => spawnSync('psql', [dbUrl(), '-v', 'ON_ERROR_STOP=1', '-q', '-c', `insert into public.lp_tel_events (at, device, session, team, name, area, ctl, props, trail) values (now(), '${d}', 'sessint001', 'medical', 'tap', ${cols})`], { encoding: 'utf8' });
+    for (const bad of [
+      `'4075550199', null, null, null`,
+      `'thread', 'x-0199', null, null`,
+      `'thread', null, '{"what":"q4075"}', null`,
+      `'thread', null, null, '[[-10, "t:quorra/4075550199"]]'`,
+    ]) {
+      const r = ins(bad);
+      expect(r.status, bad).not.toBe(0);
+      expect(r.stderr).toContain('lp_tel_events_no_digit_run');
+    }
+    expect(ins(`'thread', 'composer-send', '{"st":"409","line":12345,"d":[12345,67890]}', '[[-12345, "n:/api/sync:delta:5xx:12s"]]'`).status).toBe(0);
+    expect(rows(d)).toBe('tap');
   });
 
   it('exactly one lp-tel-retention job (daily 09:17 UTC), and retention deletes after 30 days only', () => {

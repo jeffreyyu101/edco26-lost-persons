@@ -1,6 +1,7 @@
 // Sending (lib/client/telemetry/send.ts, design §4.4): only when quiet, spacing (60 s discrete, 300 s counts only),
 // gzip where CompressionStream exists, the answers (200 settings and skew, 204 off for 30 min, 401 pause, 413/422
-// drop, 5xx keep and back off 5 min, 3 tries then drop, capped pauses to the next hour), and the hidden page's beacon.
+// drop, 5xx keep and back off 5 min, 3 tries then drop, capped pauses to the next hour), stepping aside for the app's
+// own requests, and the hidden page's beacon (only when the app is idle and it can be accepted; never kept after).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventBuffer, type StoredBatch } from '@/lib/client/telemetry/buffer';
 import { Sender, gzipText, nextHour, type SenderDeps } from '@/lib/client/telemetry/send';
@@ -16,6 +17,7 @@ interface Setup {
   beacons: Array<{ url: string; body: string }>;
   quiet: { v: boolean };
   online: { v: boolean };
+  canBeacon: { v: boolean };
   answer: { status: number; body?: unknown; throws?: boolean };
   off: { n: number };
   answers: unknown[];
@@ -29,6 +31,7 @@ function setup(over: Partial<SenderDeps> = {}): Setup {
   const beacons: Setup['beacons'] = [];
   const quiet = { v: true };
   const online = { v: true };
+  const canBeacon = { v: true };
   const answer: Setup['answer'] = { status: 200, body: { on: true, until: Date.now() + 86_400_000, flushSeconds: 60, sample: 1, now: Date.now() } };
   const off = { n: 0 };
   const answers: unknown[] = [];
@@ -45,6 +48,7 @@ function setup(over: Partial<SenderDeps> = {}): Setup {
       beacons.push({ url, body });
       return true;
     },
+    canBeacon: () => canBeacon.v,
     compress: async () => null,
     online: () => online.v,
     kv: { get: (k) => storage.getItem(k), set: (k, v) => storage.setItem(k, v), remove: (k) => storage.removeItem(k) },
@@ -62,7 +66,7 @@ function setup(over: Partial<SenderDeps> = {}): Setup {
     onAuth: () => undefined,
     ...over,
   });
-  return { sender, buffer, store, storage, posts, beacons, quiet, online, answer, off, answers };
+  return { sender, buffer, store, storage, posts, beacons, quiet, online, canBeacon, answer, off, answers };
 }
 
 const flush = async () => {
@@ -231,8 +235,55 @@ describe('answers', () => {
   });
 });
 
+describe('stepping aside for the app', () => {
+  /** A fetch that only ends when it is aborted (a slow festival link). */
+  const hanging = (posts: Setup['posts']) => async (url: string, init: RequestInit) => {
+    posts.push({ url, init, body: JSON.parse(String(init.body)) });
+    return new Promise<Response>((_, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))));
+  };
+
+  it('a send in flight is aborted when the app starts a request: the batch is kept, no try counted, no backoff', async () => {
+    const posts: Setup['posts'] = [];
+    const t = setup({ fetch: hanging(posts) });
+    t.buffer.push({ n: 'view', at: Date.now() });
+    t.sender.maybeSend();
+    await flush();
+    expect(posts).toHaveLength(1);
+    t.sender.yieldToApp();
+    await flush();
+    expect(t.sender.storedCount).toBe(1);
+    expect([...t.store.map.values()]).toEqual([expect.objectContaining({ b: (posts[0]?.body as { b: string }).b, tries: 0 })]);
+    // Not the 5-minute backoff: the next quiet, due moment (a minute on) sends it again, same id.
+    vi.advanceTimersByTime(61_000);
+    expect(t.sender.due()).toBe(true);
+  });
+
+  it('an abort by the 8 s timeout is a failed try (backoff), not a step aside', async () => {
+    const posts: Setup['posts'] = [];
+    const t = setup({ fetch: hanging(posts) });
+    t.buffer.push({ n: 'view', at: Date.now() });
+    t.sender.maybeSend();
+    await flush();
+    vi.advanceTimersByTime(8_000);
+    await flush();
+    expect([...t.store.map.values()]).toEqual([expect.objectContaining({ tries: 1 })]);
+    vi.advanceTimersByTime(61_000);
+    expect(t.sender.due()).toBe(false);
+  });
+
+  it('nothing in flight: yieldToApp does nothing', async () => {
+    const t = setup();
+    t.sender.yieldToApp();
+    t.buffer.push({ n: 'view', at: Date.now() });
+    t.sender.maybeSend();
+    await flush();
+    expect(t.posts).toHaveLength(1);
+    expect(t.sender.storedCount).toBe(0);
+  });
+});
+
 describe('a hidden page', () => {
-  it('builds one batch, stores it, and hands it to sendBeacon (online only); the next start sends it again with the same id', async () => {
+  it('hands one batch to sendBeacon (online, the app idle) and keeps no copy: nothing is sent again, now or at the next start', async () => {
     const t = setup();
     t.buffer.push({ n: 'view', at: Date.now() });
     t.sender.flushHidden();
@@ -240,18 +291,30 @@ describe('a hidden page', () => {
     expect(t.beacons).toHaveLength(1);
     const beaconed = JSON.parse(t.beacons[0]?.body ?? '{}') as { b: string; ev: unknown[] };
     expect(beaconed.ev).toHaveLength(1);
-    expect([...t.store.map.values()]).toEqual([expect.objectContaining({ b: beaconed.b, beacon: true })]);
-    // Same page: the beacon copy is not resent.
+    expect(t.store.map.size).toBe(0);
     vi.advanceTimersByTime(120_000);
     t.sender.maybeSend();
     await flush();
     expect(t.posts).toHaveLength(0);
-    // The next start: it goes again (the server drops the repeat).
     const next = setup({ store: t.store });
     await next.sender.load();
     next.sender.maybeSend();
     await flush();
-    expect((next.posts[0]?.body as { b: string }).b).toBe(beaconed.b);
+    expect(next.posts).toHaveLength(0);
+  });
+
+  it('the app busy (or a beacon this engine would have refused): no beacon, the batch waits in IndexedDB and goes when visible', async () => {
+    const t = setup();
+    t.canBeacon.v = false;
+    t.buffer.push({ n: 'view', at: Date.now() });
+    t.sender.flushHidden();
+    await flush();
+    expect(t.beacons).toHaveLength(0);
+    const [stored] = [...t.store.map.values()];
+    expect(stored?.ev).toHaveLength(1);
+    t.sender.maybeSend();
+    await flush();
+    expect((t.posts[0]?.body as { b: string }).b).toBe(stored?.b);
   });
 
   it('offline: no beacon, the batch waits in IndexedDB', async () => {
@@ -261,6 +324,6 @@ describe('a hidden page', () => {
     t.sender.flushHidden();
     await flush();
     expect(t.beacons).toHaveLength(0);
-    expect([...t.store.map.values()][0]).toMatchObject({ beacon: false } satisfies Partial<StoredBatch>);
+    expect([...t.store.map.values()][0]).toMatchObject({ tries: 0 } satisfies Partial<StoredBatch>);
   });
 });

@@ -713,6 +713,16 @@ const TEL_TAKE_MESSAGE = 'lp-tel-take';
 const TEL_LOG_MAX = 100;
 const TEL_LOG_MS = 24 * 60 * 60 * 1000;
 
+// Its own chain, never the pending-open one: a log write or take must not run ahead of a click's hand-off.
+let telQueue = Promise.resolve();
+
+/** Run `step` on the log after every earlier log step. */
+function telStep(step) {
+  const run = telQueue.then(step);
+  telQueue = run.catch(() => undefined);
+  return run;
+}
+
 async function readTelLog(meta) {
   try {
     const res = await meta.match(TEL_LOG_KEY);
@@ -725,7 +735,7 @@ async function readTelLog(meta) {
 
 /** Appends one entry (numbers, booleans and enums only). Never rejects. */
 function telLog(entry) {
-  return pendingStep(async () => {
+  return telStep(async () => {
     const meta = await caches.open(META);
     const now = Date.now();
     const list = (await readTelLog(meta)).filter((x) => x && typeof x.at === 'number' && now - x.at <= TEL_LOG_MS);
@@ -737,7 +747,7 @@ function telLog(entry) {
 
 /** The log, handed over once and cleared. */
 function takeTelLog() {
-  return pendingStep(async () => {
+  return telStep(async () => {
     const meta = await caches.open(META);
     if (!(await meta.match(TEL_LOG_KEY))) return [];
     const list = await readTelLog(meta);

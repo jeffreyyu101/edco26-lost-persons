@@ -134,6 +134,8 @@ export class Flows {
   private candidates: AlertCandidate[] = [];
   private lastAlertAt: number | null = null;
   private clicks: PendingClick[] = [];
+  /** When the profile view last opened (a click's log entry can arrive after the request it opened). */
+  private profileAt: number | null = null;
   /** Server clock − this device's clock (ms), from the last sync (lastSyncAt) or the ingest answer. */
   private skew: number | null = null;
   private connection: StoreState['connection'] = 'live';
@@ -324,7 +326,11 @@ export class Flows {
         const e: TelEvent = { n: 'notif_click', at: x.at, p };
         if (x.age !== null && x.age >= 0) e.ms = Math.round(x.age);
         this.env.emit(e);
-        this.clicks.push({ at: x.at, via: x.via, kind: x.k, src, cold: x.at < this.env.timeOrigin });
+        const click: PendingClick = { at: x.at, via: x.via, kind: x.k, src, cold: x.at < this.env.timeOrigin };
+        // The log is taken after the resume's sync, so the request this click opened may already be on screen.
+        const shownAt = this.viewName === 'profile' ? this.profileAt : null;
+        if (shownAt !== null && shownAt > x.at && shownAt - Math.max(x.at, this.env.timeOrigin) <= PUSH_SHOW_MS) this.emitPush(click, 'ok', shownAt);
+        else this.clicks.push(click);
       }
     }
   }
@@ -416,6 +422,7 @@ export class Flows {
       this.endNew('abandon', t);
     }
     if (name === 'profile') {
+      if (prev !== 'profile') this.profileAt = t;
       for (const c of [...this.clicks]) {
         if (t - Math.max(c.at, this.env.timeOrigin) <= PUSH_SHOW_MS) {
           this.clicks = this.clicks.filter((x) => x !== c);

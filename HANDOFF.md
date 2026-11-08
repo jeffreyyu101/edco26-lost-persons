@@ -32,7 +32,8 @@ screenshots.
   requests, errors, sync and push health, and timed flows (open, resume, answer, message, new request, alert), as
   numbers and attribute names only, by team. A desktop-only **`/health`** page shows the problem spots with their
   breadcrumb trails, the critical paths, request failure rates, push delivery and alert coverage. It stops by itself at
-  **2026-11-10 06:00 ET**; the kill switch is on `/health` and in SQL. See "Telemetry in production" below.
+  **2026-11-10 06:00 ET**; the kill switch is on `/health` (off only) and in SQL (off and back on). See "Telemetry in
+  production" below.
 
 ### 2026-11-06 morning (v2.5, Brian + Jeffrey)
 
@@ -261,7 +262,7 @@ transaction (it never re-runs the whole file mid-event). `node scripts/telemetry
 `/tmp/observability/migration.sql` (ending in `commit;`) and `/tmp/observability/dry-run.sql` (ending in `rollback;`).
 It needs only `public.lp_push_subscriptions` (F4), takes no lock on any existing table (every table is new), and the
 live build never touches it. **Order: migration first, then deploy** (the build works without it too: the ingest route
-answers 204 and every phone turns itself off).
+answers 204 and every phone turns itself off; a transient database error is a 503 instead, and phones keep their data).
 
 1. **Before:** `select to_regclass('public.lp_push_subscriptions') is not null;` returns `true`.
 2. **Dry run.** Paste `dry-run.sql` and run it. It must finish without an error; the NOTICE says
@@ -278,13 +279,15 @@ answers 204 and every phone turns itself off).
    shows `app_start`, `view`, `net`, `sync`, `device_state`; open `/health` on a laptop (any signed-in session) and
    the devices number is above 0.
 7. **Watch the budget** now and then: `select pg_size_pretty(pg_total_relation_size('public.lp_tel_events'));` (expect
-   well under 200 MB); `select device, events from public.lp_tel_quota where hour = date_trunc('hour', now()) order by events desc limit 5;`
-   (no device near 3,000).
+   well under 200 MB; the hard bound is the fleet cap, 60,000 events / 48 MB of JSON an hour);
+   `select device, events, bytes from public.lp_tel_quota where hour = date_trunc('hour', now()) order by events desc limit 5;`
+   (rows are a device id, a sign-in `s…`, and `*` for the fleet; no device or sign-in near 3,000 events or 2 MB).
 
 **Turn it off** (any of these): the switch on `/health` (with a confirm), or
 `update public.lp_tel_settings set enabled = false, updated_at = now();` (server instances answer 204 within 30 s; each
 phone stops at its next send, restores everything it attached, and probes once every 30 minutes). Move the auto-off:
-`update public.lp_tel_settings set off_at = timestamptz '2026-11-09 06:00-05', updated_at = now();`. Back on:
+`update public.lp_tel_settings set off_at = timestamptz '2026-11-09 06:00-05', updated_at = now();`. **Back on is SQL
+only** (the `/health` switch can only turn it off, so nobody restarts a collection stopped for a reason):
 `update public.lp_tel_settings set enabled = true, updated_at = now();`. Pause retention:
 `select cron.unschedule('lp-tel-retention');`.
 
@@ -296,7 +299,7 @@ begin;
 select cron.unschedule(jobid) from cron.job where jobname = 'lp-tel-retention';
 drop function if exists public.lp_tel_health(text, timestamptz, integer), public.lp_tel_retention(),
   public.lp_tel_set(boolean, timestamptz), public.lp_tel_server_events(jsonb), public.lp_tel_config(),
-  public.lp_tel_ingest(text, text, text, text, bigint, jsonb, jsonb, integer);
+  public.lp_tel_ingest(text, text, text, text, bigint, jsonb, jsonb, integer, text);
 drop table if exists public.lp_tel_events, public.lp_tel_devices, public.lp_tel_quota, public.lp_tel_batches,
   public.lp_tel_settings;
 notify pgrst, 'reload schema';

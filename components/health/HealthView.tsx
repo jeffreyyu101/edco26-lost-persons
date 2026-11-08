@@ -2,7 +2,7 @@
 // The Health page (/health, desktop only; design/references/observability-design.md §5): what staff ran into on the
 // floor, from the in-house telemetry. Data loads on mount and on Refresh only (no polling). Values first and large,
 // labels small; glyphs and colour carry state; screen readers hear full sentences. The switch turns collection off
-// (behind a confirm) or back on through POST /api/telemetry/settings.
+// (behind a confirm) through POST /api/telemetry/settings; once off it is disabled (back on is SQL only).
 // Plain elements on Radix Themes' CSS variables, inline glyphs, no lib/telemetry: this chunk shares no module with
 // `/`'s first load, which the bundler otherwise regroups (+320 B gzipped, over A25's 42 KB).
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
@@ -172,14 +172,14 @@ export function HealthView() {
     };
   }, [apply]);
 
-  const setEnabled = async (enabled: boolean) => {
+  const turnOff = async () => {
     setSwitching(true);
     try {
       const res = await fetch('/api/telemetry/settings', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ enabled }),
+        body: JSON.stringify({ enabled: false }),
       });
       if (res.ok) {
         const config = (await res.json()) as HealthData['config'];
@@ -236,12 +236,11 @@ export function HealthView() {
           role="switch"
           className={s.switch}
           aria-checked={!!cfg?.enabled}
-          aria-label="Collection"
-          disabled={!cfg || switching}
+          aria-label={cfg && !cfg.enabled ? 'Collection is off. It is turned back on in SQL only' : 'Collection'}
+          disabled={!cfg?.enabled || switching}
           data-testid="health-switch"
           onClick={() => {
-            if (!cfg?.enabled) void setEnabled(true).then(() => refresh());
-            else setConfirmOff(true);
+            if (cfg?.enabled) setConfirmOff(true);
           }}
         >
           <span className={s.thumb} />
@@ -249,7 +248,7 @@ export function HealthView() {
       </header>
       {data ? <HealthDashboard data={data} onTrail={setTrail} /> : <p className={s.empty}>{loading ? '' : DASH}</p>}
       <TrailDrawer problem={trail} examples={data?.examples ?? []} onClose={closeTrail} />
-      <ConfirmOff open={confirmOff} onClose={closeConfirm} onConfirm={() => void setEnabled(false).then(() => refresh())} />
+      <ConfirmOff open={confirmOff} onClose={closeConfirm} onConfirm={() => void turnOff().then(() => refresh())} />
     </main>
   );
 }

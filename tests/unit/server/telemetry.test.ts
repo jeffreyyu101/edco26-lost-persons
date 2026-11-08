@@ -1,6 +1,7 @@
 // lib/server/telemetry.ts: the team key (from the session, never the body), the skew clamp, envelope versus per-event
-// validation, the body reader's caps (48 KB wire, 256 KB inflated, a gzip bomb stops), the config cache and its
-// fail-closed default, and the server rows (push_send per team).
+// validation (no 4-digit run in any stored string), the body reader's caps (48 KB wire, 256 KB inflated, a gzip bomb
+// stops; bytes counted inflated), the config cache (off only when the settings can't exist, 503 for a transient
+// failure), the session quota key, and the server rows (push_send per team).
 import { gzipSync } from 'node:zlib';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -14,7 +15,8 @@ vi.mock('@/lib/server/supabase', () => ({
   },
 }));
 
-const { assertTelemetryOrigin, clampSkew, parseBatch, readTelemetryBody, recordPushSend, resetTelemetryConfigCache, teamKey, telemetryConfig } = await import('@/lib/server/telemetry');
+const { assertTelemetryOrigin, clampSkew, parseBatch, quotaKey, readTelemetryBody, recordPushSend, resetTelemetryConfigCache, teamKey, telemetryConfig } = await import('@/lib/server/telemetry');
+const { ApiFailure } = await import('@/lib/server/errors');
 
 const SENT = 1_762_600_000_000;
 const ctx = { plat: 'ios', osv: 18, eng: 'webkit', sa: true, lay: 'phone', dpr: 3, touch: true, build: 'none', eff: 'na', mem: -1 };
@@ -98,6 +100,21 @@ describe('parseBatch', () => {
     expect(p.rejected).toBe(8);
   });
 
+  it('no 4 digits in a row in any string: token, enum value or crumb (the backstop behind tok()); 3-digit statuses and letter hashes pass', () => {
+    const p = parseBatch(
+      batch([
+        { n: 'tap', at: SENT, a: '407-555-0199', c: 'quorra-zyxwvut' },
+        { n: 'tap', at: SENT, a: 'thread', c: 'x4075550199' },
+        { n: 'tap', at: SENT, a: 'thread', p: { what: 'x40755' } },
+        { n: 'rage_tap', at: SENT, a: 'thread', tr: [[0, 't:quorra/4075550199']] },
+        { n: 'error', at: SENT, a: 'chunk:pnamfaih', c: 'typeerror', p: { type: 'typeerror', kind: 'error', fp: 'pnamfaih', line: 12345 }, tr: [[-10, 'n:/api/sync:delta:5xx:12s']] },
+        { n: 'net', at: SENT, a: '/api/requests/:id', k: 1, p: { m: 'post', st: '409', on: true, conn: 'live', d: [12345] } },
+      ]),
+    );
+    expect(p.ev.map((e) => e.n)).toEqual(['error', 'net']);
+    expect(p.rejected).toBe(4);
+  });
+
   it('the body’s team is never read (it is not in the schema)', () => {
     const p = parseBatch(batch([{ n: 'view', at: SENT }], { team: 'medical' }));
     expect(JSON.stringify(p)).not.toContain('team');
@@ -111,7 +128,8 @@ describe('readTelemetryBody', () => {
     expect((await readTelemetryBody(req(text, 'text/plain;charset=UTF-8'))).text).toBe(text);
     const gz = gzipSync(text);
     const out = await readTelemetryBody(req(gz, 'application/x-lp-tel+gzip'));
-    expect(out).toEqual({ bytes: gz.byteLength, text });
+    // The byte caps count what gets stored: the inflated JSON, not the gzip on the wire.
+    expect(out).toEqual({ bytes: Buffer.byteLength(text), text });
     await expect(readTelemetryBody(req(text, 'application/octet-stream'))).rejects.toMatchObject({ status: 415 });
   });
 
@@ -125,18 +143,50 @@ describe('readTelemetryBody', () => {
 });
 
 describe('the config cache', () => {
-  it('one RPC per 30 s; off when it can’t be read; the auto-off passes on its own', async () => {
+  it('one RPC per 30 s; the auto-off passes on its own', async () => {
     expect((await telemetryConfig(1_000)).on).toBe(true);
     await telemetryConfig(20_000);
     expect(rpcMock.calls.filter(([fn]) => fn === 'lp_tel_config')).toHaveLength(1);
     await telemetryConfig(40_000);
     expect(rpcMock.calls.filter(([fn]) => fn === 'lp_tel_config')).toHaveLength(2);
     resetTelemetryConfigCache();
-    rpcMock.answer = () => new Error('relation "lp_tel_settings" does not exist');
-    expect((await telemetryConfig()).on).toBe(false);
-    resetTelemetryConfigCache();
     rpcMock.answer = () => ({ on: true, enabled: true, until: Date.now() - 1, flushSeconds: 60, sample: 1 });
     expect((await telemetryConfig()).on).toBe(false);
+  });
+
+  it('off (cached 30 s) only when the settings can’t exist: no function, no table', async () => {
+    for (const dbCode of ['PGRST202', '42883', '42P01']) {
+      resetTelemetryConfigCache();
+      rpcMock.calls = [];
+      rpcMock.answer = () => new ApiFailure('unavailable', undefined, { dbCode });
+      expect((await telemetryConfig(1_000)).on).toBe(false);
+      expect((await telemetryConfig(20_000)).on).toBe(false);
+      expect(rpcMock.calls).toHaveLength(1);
+    }
+  });
+
+  it('a transient failure (a 503, a fetch error, the timeout) is 503 unavailable, cached 5 s only, never "off"', async () => {
+    for (const dbCode of ['PGRST000', 'fetch', '57014']) {
+      resetTelemetryConfigCache();
+      rpcMock.calls = [];
+      rpcMock.answer = () => new ApiFailure('unavailable', undefined, { dbCode });
+      await expect(telemetryConfig(1_000)).rejects.toMatchObject({ status: 503 });
+      await expect(telemetryConfig(4_000)).rejects.toMatchObject({ status: 503 });
+      expect(rpcMock.calls).toHaveLength(1);
+      rpcMock.answer = (fn) => (fn === 'lp_tel_config' ? { on: true, enabled: true, until: Date.now() + 3_600_000, flushSeconds: 60, sample: 1 } : 1);
+      expect((await telemetryConfig(6_500)).on).toBe(true);
+      expect(rpcMock.calls).toHaveLength(2);
+    }
+  });
+});
+
+describe('quotaKey', () => {
+  it('from the session’s sid: stable, distinct per sign-in, and never the sid itself', () => {
+    const sid = '1762600000.a1b2c3d4e5f6a1b2c3d4e5f6';
+    expect(quotaKey(sid)).toMatch(/^s[0-9a-f]{20}$/);
+    expect(quotaKey(sid)).toBe(quotaKey(sid));
+    expect(quotaKey(`${sid}0`)).not.toBe(quotaKey(sid));
+    expect(quotaKey(sid)).not.toContain('a1b2c3');
   });
 });
 

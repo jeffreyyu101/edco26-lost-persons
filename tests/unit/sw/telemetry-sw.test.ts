@@ -71,6 +71,27 @@ describe('push log', () => {
   });
 });
 
+describe('the log’s own queue', () => {
+  it('a take never waits behind the pending-open steps (a click’s hand-off is never delayed by the log)', async () => {
+    const caches = new FakeCacheStorage();
+    const { w } = worker([], caches);
+    await w.push(payload());
+    const meta = await caches.open('lp:meta');
+    const match = meta.match.bind(meta);
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    meta.match = async (input, options) => {
+      if (!String(typeof input === 'string' ? input : input.url).includes('/__lp/tel')) await gate;
+      return match(input, options);
+    };
+    // The pending-open chain is stuck on its read; the log is still handed over.
+    const takeOpen = w.message({ type: 'lp-take-open' });
+    expect(await take(w)).toEqual([expect.objectContaining({ e: 'rx', k: 'in_medical' })]);
+    release();
+    await takeOpen;
+  });
+});
+
 describe('click log', () => {
   it('after the click opened it, with via: lp-open when a window answered, nav when the worker navigated or opened one', async () => {
     const answering: PageClient = {

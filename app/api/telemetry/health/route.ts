@@ -1,6 +1,11 @@
 // GET /api/telemetry/health?window=1h|3h|12h|all (design §3, §5.3): the Health page's data. Every section is one
-// lp_tel_health() call, all in parallel; a section that fails or times out is null (its panel shows "—") while the
-// others render. `all` is the last 30 days (what retention keeps). Loaded on the page's mount and its Refresh only.
+// lp_tel_health() call; a section that fails or times out is null (its panel shows "—") while the others render.
+// `all` is the last 30 days (what retention keeps). Loaded on the page's mount and its Refresh only.
+//
+// The live app shares PostgREST's pool and the database's CPU with these aggregates, so they never run all at once:
+// at most SECTION_CONCURRENCY sections at a time, one computation per window shared by every request that arrives
+// while it runs, and `all` (the whole table: no index helps) kept for ALL_CACHE_MS. The config is always read fresh
+// (its own 30 s cache, cleared by the kill switch), so a flip shows on the next Refresh.
 import { HEALTH_SECTIONS, HEALTH_WINDOWS, type HealthSection, type HealthWindow } from '@/lib/telemetry';
 import { json } from '@/lib/server/http';
 import { authedRoute } from '@/lib/server/route';
@@ -17,19 +22,45 @@ const WINDOW_MS: Readonly<Record<HealthWindow, number>> = {
   all: 30 * 24 * 3_600_000,
 };
 
+const SECTION_CONCURRENCY = 2;
+const ALL_CACHE_MS = 30_000;
+
+type Sections = Record<HealthSection, unknown>;
+const computed = new Map<HealthWindow, { at: number; done: boolean; value: Promise<Sections> }>();
+
+async function loadSections(since: string): Promise<Sections> {
+  const out: unknown[] = HEALTH_SECTIONS.map(() => null);
+  let next = 0;
+  const worker = async () => {
+    while (next < HEALTH_SECTIONS.length) {
+      const i = next;
+      next += 1;
+      out[i] = await rpc<unknown>('lp_tel_health', { p_section: HEALTH_SECTIONS[i], p_since: since, p_limit: 50 }).then(
+        (data) => data ?? null,
+        () => null,
+      );
+    }
+  };
+  await Promise.all(Array.from({ length: SECTION_CONCURRENCY }, worker));
+  return Object.fromEntries(HEALTH_SECTIONS.map((s, i) => [s, out[i] ?? null])) as Sections;
+}
+
+/** The sections for a window and when they were read (a shared or cached answer keeps its own time). */
+function sectionsFor(window: HealthWindow, now: number): { at: number; value: Promise<Sections> } {
+  const hit = computed.get(window);
+  if (hit && (!hit.done || (window === 'all' && now - hit.at < ALL_CACHE_MS))) return hit;
+  const entry = { at: now, done: false, value: loadSections(new Date(now - WINDOW_MS[window]).toISOString()) };
+  void entry.value.finally(() => {
+    entry.done = true;
+  });
+  computed.set(window, entry);
+  return entry;
+}
+
 export const GET = authedRoute('GET /api/telemetry/health', {}, async ({ request }) => {
   const asked = new URL(request.url).searchParams.get('window');
   const window: HealthWindow = (HEALTH_WINDOWS as readonly string[]).includes(asked ?? '') ? (asked as HealthWindow) : '3h';
-  const since = new Date(Date.now() - WINDOW_MS[window]).toISOString();
-  const [config, ...sections] = await Promise.all([
-    telemetryConfig(),
-    ...HEALTH_SECTIONS.map((section) =>
-      rpc<unknown>('lp_tel_health', { p_section: section, p_since: since, p_limit: 50 }).then(
-        (data) => data ?? null,
-        () => null,
-      ),
-    ),
-  ]);
-  const out = Object.fromEntries(HEALTH_SECTIONS.map((s: HealthSection, i) => [s, sections[i] ?? null]));
-  return json({ generatedAt: new Date().toISOString(), window, config, ...out });
+  const read = sectionsFor(window, Date.now());
+  const [config, sections] = await Promise.all([telemetryConfig().catch(() => null), read.value]);
+  return json({ generatedAt: new Date(read.at).toISOString(), window, config, ...sections });
 });

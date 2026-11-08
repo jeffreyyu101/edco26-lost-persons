@@ -186,8 +186,10 @@ describe('privacy: a scripted session with names and phone numbers everywhere', 
     for (const p of sent) {
       for (const [key, value] of strings(p.ev)) {
         expect(value, `${key}: "${value}"`).not.toMatch(/\s/);
-        // Digit runs: only status codes (st), fingerprints (fp) and chunk hashes are allowed to hold them.
-        if (key === 'st' || key === 'fp' || value.startsWith('chunk:')) continue;
+        // Digit runs: only status codes (st) may hold them (fingerprints and chunk hashes are letters), and nothing
+        // reaches the 4 digits the server refuses.
+        expect(value, `${key}: "${value}"`).not.toMatch(/\d{4,}/);
+        if (key === 'st') continue;
         expect(value, `${key}: "${value}"`).not.toMatch(/\d{3,}/);
       }
     }

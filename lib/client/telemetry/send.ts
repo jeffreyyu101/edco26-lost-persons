@@ -1,9 +1,11 @@
 // Sending (design §4.4). A send only happens when the phone is online, visible, idle (no sync, outbox job, message
 // job or other /api request in flight, no tap in the last 1.5 s), at most once a minute for discrete events (every 5
 // minutes when only counts wait), with the body gzipped where CompressionStream exists. It never goes through the
-// store's request path and adds nothing to any app request. A hidden page hands its batch to sendBeacon (and keeps a
-// copy in IndexedDB, resent at the next start; the server dedupes). A failed send is tried 3 times, 5 minutes apart,
-// then dropped. The server's 204 turns everything off.
+// store's request path and adds nothing to any app request: when the app starts a request of its own while a send is
+// in flight, the send is aborted (yieldToApp) and its batch kept as if it was never sent (no try counted, no backoff).
+// A hidden page hands its batch to sendBeacon only when the app has nothing in flight and the beacon can be accepted;
+// a beaconed batch is not kept (a lost beacon is accepted), anything else waits in IndexedDB for the next visible
+// moment. A failed send is tried 3 times, 5 minutes apart, then dropped. The server's 204 turns everything off.
 import { TEL_GZIP_TYPE, TEL_KEYS, TEL_LIMITS, TEL_PATH, TEL_VERSION } from '../../telemetry';
 import type { BatchStore, EventBuffer, StoredBatch, TelEvent } from './buffer';
 import { trimStored } from './buffer';
@@ -33,6 +35,8 @@ export interface SenderDeps {
   /** The page's own fetch as it was before the collector started (never the observed one). */
   fetch: (url: string, init: RequestInit) => Promise<Response>;
   beacon(url: string, body: string): boolean;
+  /** Whether a hidden page may beacon now: nothing of the app's in flight, and a beacon this engine's can be accepted. */
+  canBeacon(): boolean;
   compress(text: string): Promise<ArrayBuffer | null>;
   online(): boolean;
   kv: KV;
@@ -84,6 +88,9 @@ export class Sender {
   private flushMs: number = TEL_LIMITS.flushSeconds * 1000;
   /** The last answer's status (0: no answer). */
   private lastStatus = 0;
+  /** The send in flight (aborted when the app starts a request of its own). */
+  private inflight: AbortController | null = null;
+  private yielded = false;
   /** The current batch's session for probes and new batches. */
   constructor(private readonly deps: SenderDeps) {}
 
@@ -141,6 +148,16 @@ export class Sender {
     return false;
   }
 
+  /**
+   * The app started a request of its own (or a sync, an outbox or a message send): a send in flight steps aside so it
+   * never shares the link with it. Its batch is kept as if never sent.
+   */
+  yieldToApp(): void {
+    if (!this.inflight) return;
+    this.yielded = true;
+    this.inflight.abort();
+  }
+
   /** Sends one batch when due and quiet, in idle time. */
   maybeSend(): void {
     if (!this.due() || !this.deps.quiet()) return;
@@ -173,6 +190,15 @@ export class Sender {
     if (!batch) return;
     this.lastSend = now;
     const outcome = await this.post(this.build(batch.ev, batch.b, batch.s, now));
+    if (outcome === 'yield') {
+      // Stepped aside for the app: not a try, no backoff; it goes again at the next quiet, due moment (same id, so the
+      // server dedupes one that landed anyway).
+      if (!retry) {
+        this.stored.push(batch);
+        void this.deps.store?.put(batch).catch(() => undefined);
+      }
+      return;
+    }
     if (outcome === 'retry') {
       this.backoffUntil = this.deps.now() + TEL_LIMITS.backoffMs;
       batch.tries += 1;
@@ -194,14 +220,20 @@ export class Sender {
     void this.deps.store?.del([b]).catch(() => undefined);
   }
 
-  /** One POST. 'done': delivered or refused for good; 'retry': 5xx, network or timeout; 'off': 204. */
-  async post(json: string): Promise<'done' | 'retry' | 'off'> {
+  /** One POST. 'done': delivered or refused for good; 'retry': 5xx, network or timeout; 'off': 204; 'yield': aborted for the app. */
+  async post(json: string): Promise<'done' | 'retry' | 'off' | 'yield'> {
     const started = this.deps.now();
-    const gz = await this.deps.compress(json);
     const controller = typeof AbortController === 'undefined' ? null : new AbortController();
+    this.inflight = controller;
+    this.yielded = false;
+    this.lastStatus = 0;
+    const gz = await this.deps.compress(json);
+    if (this.yielded) {
+      this.inflight = null;
+      return 'yield';
+    }
     const timer = this.deps.setTimeout(() => controller?.abort(), TEL_LIMITS.sendTimeoutMs);
     let res: Response;
-    this.lastStatus = 0;
     try {
       res = await this.deps.fetch(TEL_PATH, {
         method: 'POST',
@@ -214,9 +246,10 @@ export class Sender {
         signal: controller?.signal,
       } as RequestInit);
     } catch {
-      return 'retry';
+      return this.yielded ? 'yield' : 'retry';
     } finally {
       this.deps.clearTimeout(timer);
+      this.inflight = null;
     }
     this.lastStatus = res.status;
     if (res.status === 204) {
@@ -267,23 +300,25 @@ export class Sender {
   }
 
   /**
-   * The page is hiding: everything waiting becomes one batch, stored in IndexedDB and handed to sendBeacon
-   * (uncompressed: there is no time to compress; only when online, and only ≤ 48 KB).
+   * The page is hiding: everything waiting becomes one batch, handed to sendBeacon (uncompressed: there is no time to
+   * compress; only when online, ≤ 48 KB, and canBeacon) and then forgotten, or else stored in IndexedDB for the next
+   * visible moment.
    */
   flushHidden(): void {
     if (this.stopped) return;
     const batch = this.newBatch();
     if (!batch) return;
-    const json = this.build(batch.ev, batch.b, batch.s, this.deps.now());
     let beaconed = false;
-    if (this.deps.online() && json.length <= TEL_LIMITS.batchBytes && !this.authPaused) {
-      try {
-        beaconed = this.deps.beacon(TEL_PATH, json);
-      } catch {
-        beaconed = false;
+    try {
+      if (this.deps.online() && !this.authPaused && this.deps.canBeacon()) {
+        const json = this.build(batch.ev, batch.b, batch.s, this.deps.now());
+        beaconed = json.length <= TEL_LIMITS.batchBytes && this.deps.beacon(TEL_PATH, json);
       }
+    } catch {
+      beaconed = false;
     }
-    batch.beacon = beaconed;
+    // Handed over: not kept (resending it at the next start would upload it twice, ahead of new data).
+    if (beaconed) return;
     this.stored.push(batch);
     const { keep, drop } = trimStored(this.stored, this.deps.now());
     this.stored = keep;

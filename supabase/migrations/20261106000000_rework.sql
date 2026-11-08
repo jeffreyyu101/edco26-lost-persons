@@ -3426,6 +3426,11 @@ create table if not exists public.lp_tel_settings (
   updated_at timestamptz not null default now()
 );
 insert into public.lp_tel_settings (id) values (true) on conflict (id) do nothing;
+-- The fleet-wide cap per hour (every device and sign-in together): total growth is bounded whatever a body claims.
+-- About 20 times what 40 phones send on a normal hour; bytes are JSON after gzip is inflated.
+alter table public.lp_tel_settings
+  add column if not exists fleet_hour_cap integer not null default 60000 check (fleet_hour_cap between 0 and 10000000),
+  add column if not exists fleet_hour_bytes integer not null default 50331648 check (fleet_hour_bytes between 0 and 1073741824);
 
 -- 10b. Events: one row per event (aggregates are already one row per key per flush). Every column is checked: a
 -- token can't hold a space, a capital or an @, so no name, phone number or message text fits by construction.
@@ -3446,6 +3451,17 @@ create table if not exists public.lp_tel_events (
   props jsonb check (props is null or (pg_catalog.jsonb_typeof(props) = 'object' and pg_catalog.octet_length(props::text) <= 4096)),
   trail jsonb check (trail is null or (pg_catalog.jsonb_typeof(trail) = 'array' and pg_catalog.octet_length(trail::text) <= 4096))
 );
+-- No 4 digits in a row in any stored string (lib/telemetry.ts DIGIT_RUN_RE; the route's zod refuses them first): a
+-- phone number can't be stored even when a collector skipped tok(). Hashes are letters only; the longest legitimate
+-- run is a 3-digit status. NOT VALID: every new row is checked, rows already there are not re-read (a second paste
+-- is quick and can't fail on them).
+alter table public.lp_tel_events drop constraint if exists lp_tel_events_no_digit_run;
+alter table public.lp_tel_events add constraint lp_tel_events_no_digit_run check (
+  coalesce(area, '') !~ '[0-9]{4}'
+  and coalesce(ctl, '') !~ '[0-9]{4}'
+  and (props is null or not pg_catalog.jsonb_path_exists(props, 'lax $.* ? (@.type() == "string" && @ like_regex "[0-9]{4}")'))
+  and (trail is null or not pg_catalog.jsonb_path_exists(trail, 'lax $[*][*] ? (@.type() == "string" && @ like_regex "[0-9]{4}")'))
+) not valid;
 create index if not exists lp_tel_events_at_idx on public.lp_tel_events (at);
 create index if not exists lp_tel_events_name_at_idx on public.lp_tel_events (name, at);
 create index if not exists lp_tel_events_device_at_idx on public.lp_tel_events (device, at);
@@ -3470,7 +3486,8 @@ create table if not exists public.lp_tel_devices (
 );
 create index if not exists lp_tel_devices_last_seen_idx on public.lp_tel_devices (last_seen);
 
--- 10d. The per device per hour quota, and batch dedupe (a beacon that landed and its later resend).
+-- 10d. The per-hour quota, and batch dedupe (a beacon that landed and its later resend). A quota row's `device` is
+-- the body's device id, the route's hash of the sign-in ('s…'), or '*' for the whole fleet.
 create table if not exists public.lp_tel_quota (
   device text not null,
   hour timestamptz not null,
@@ -3502,6 +3519,7 @@ grant usage, select on sequence public.lp_tel_events_id_seq to service_role;
 -- 10e. Functions (service_role only). Dropped first, so a second paste is clean.
 drop function if exists public.lp_tel_config();
 drop function if exists public.lp_tel_ingest(text, text, text, text, bigint, jsonb, jsonb, integer);
+drop function if exists public.lp_tel_ingest(text, text, text, text, bigint, jsonb, jsonb, integer, text);
 drop function if exists public.lp_tel_server_events(jsonb);
 drop function if exists public.lp_tel_set(boolean, timestamptz);
 drop function if exists public.lp_tel_retention();
@@ -3537,11 +3555,12 @@ end
 $fn$;
 
 -- lp_tel_ingest: one batch from one phone, in one statement's worth of work. Off (kill switch, past off_at, no
--- settings row) → {on: false} and nothing is written. A batch id seen before → {dup: true}. The quota row counts
--- every event offered this hour; past the event or byte cap the rest is dropped ({capped: true}). The event time is
--- the phone's plus the route's skew correction, clamped to [now − 2 days, now].
+-- settings row) → {on: false} and nothing is written. A batch id seen before → {dup: true}. Three quota rows count
+-- every event and byte offered this hour: the body's device id and the route's sign-in key (p_quota) against the
+-- device caps, and '*' against the fleet caps. Past any of them the rest is dropped ({capped: true}). The event time
+-- is the phone's plus the route's skew correction, clamped to [now − 2 days, now].
 create function public.lp_tel_ingest(p_batch text, p_device text, p_session text, p_team text, p_skew_ms bigint,
-                                     p_ctx jsonb, p_events jsonb, p_bytes integer)
+                                     p_ctx jsonb, p_events jsonb, p_bytes integer, p_quota text default null)
 returns jsonb
 language plpgsql
 volatile
@@ -3558,6 +3577,11 @@ declare
   v_prev_bytes integer;
   v_allowed integer;
   v_inserted integer := 0;
+  v_hour timestamptz := pg_catalog.date_trunc('hour', v_now);
+  v_bytes integer := greatest(coalesce(p_bytes, 0), 0);
+  v_key text;
+  v_cap integer;
+  v_cap_bytes integer;
 begin
   select * into v_set from public.lp_tel_settings where id;
   if not found or not v_set.enabled or v_now >= v_set.off_at then
@@ -3576,13 +3600,18 @@ begin
     return pg_catalog.jsonb_build_object('on', true, 'accepted', 0, 'dropped', 0, 'dup', true);
   end if;
 
-  insert into public.lp_tel_quota as q (device, hour, events, bytes)
-  values (p_device, pg_catalog.date_trunc('hour', v_now), v_count, greatest(coalesce(p_bytes, 0), 0))
-  on conflict (device, hour) do update set events = q.events + excluded.events, bytes = q.bytes + excluded.bytes
-  returning q.events - v_count, q.bytes - greatest(coalesce(p_bytes, 0), 0) into v_prev_events, v_prev_bytes;
-
-  v_allowed := case when v_prev_bytes + greatest(coalesce(p_bytes, 0), 0) > v_set.device_hour_bytes then 0
-                    else greatest(0, least(v_count, v_set.device_hour_cap - v_prev_events)) end;
+  v_allowed := v_count;
+  foreach v_key in array array[p_device, nullif(p_quota, p_device), '*'] loop
+    continue when v_key is null;
+    v_cap := case when v_key = '*' then v_set.fleet_hour_cap else v_set.device_hour_cap end;
+    v_cap_bytes := case when v_key = '*' then v_set.fleet_hour_bytes else v_set.device_hour_bytes end;
+    insert into public.lp_tel_quota as q (device, hour, events, bytes)
+    values (v_key, v_hour, v_count, v_bytes)
+    on conflict (device, hour) do update set events = q.events + excluded.events, bytes = q.bytes + excluded.bytes
+    returning q.events - v_count, q.bytes - v_bytes into v_prev_events, v_prev_bytes;
+    v_allowed := least(v_allowed, case when v_prev_bytes + v_bytes > v_cap_bytes then 0
+                                       else greatest(0, v_cap - v_prev_events) end);
+  end loop;
 
   if v_allowed > 0 then
     insert into public.lp_tel_events (at, device, session, team, name, view, area, ctl, ms, n, ok, props, trail)
@@ -3609,8 +3638,8 @@ end
 $fn$;
 
 -- lp_tel_server_events: rows the server writes itself (device = session = 'server'): push_send after a push, and
--- tel_switch when the kill switch is flipped from /health. p_rows = [{n, team, ms, k, ok, p}], ≤ 20. Gated by the
--- same settings check (a flip that turns collection on is recorded once it is on). Returns how many were written.
+-- tel_switch when collection is turned off from /health (written just before the flip). p_rows = [{n, team, ms, k,
+-- ok, p}], ≤ 20. Gated by the same settings check. Returns how many were written.
 create function public.lp_tel_server_events(p_rows jsonb)
 returns integer
 language plpgsql
@@ -3645,8 +3674,8 @@ begin
 end
 $fn$;
 
--- lp_tel_set: the kill switch (from /health, or by hand). p_off_at moves the auto-off when given. Returns
--- lp_tel_config().
+-- lp_tel_set: the kill switch. /health only ever calls it with false; turning collection back on is this, by hand
+-- (HANDOFF.md "Telemetry in production"). p_off_at moves the auto-off when given. Returns lp_tel_config().
 create function public.lp_tel_set(p_enabled boolean, p_off_at timestamptz default null)
 returns jsonb
 language plpgsql
@@ -3926,13 +3955,13 @@ end
 $fn$;
 
 revoke all on function public.lp_tel_config() from public, anon, authenticated;
-revoke all on function public.lp_tel_ingest(text, text, text, text, bigint, jsonb, jsonb, integer) from public, anon, authenticated;
+revoke all on function public.lp_tel_ingest(text, text, text, text, bigint, jsonb, jsonb, integer, text) from public, anon, authenticated;
 revoke all on function public.lp_tel_server_events(jsonb) from public, anon, authenticated;
 revoke all on function public.lp_tel_set(boolean, timestamptz) from public, anon, authenticated;
 revoke all on function public.lp_tel_retention() from public, anon, authenticated;
 revoke all on function public.lp_tel_health(text, timestamptz, integer) from public, anon, authenticated;
 grant execute on function public.lp_tel_config() to service_role;
-grant execute on function public.lp_tel_ingest(text, text, text, text, bigint, jsonb, jsonb, integer) to service_role;
+grant execute on function public.lp_tel_ingest(text, text, text, text, bigint, jsonb, jsonb, integer, text) to service_role;
 grant execute on function public.lp_tel_server_events(jsonb) to service_role;
 grant execute on function public.lp_tel_set(boolean, timestamptz) to service_role;
 grant execute on function public.lp_tel_retention() to service_role;

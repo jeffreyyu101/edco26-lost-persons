@@ -7,11 +7,13 @@ import { sessionCookieHeader, signedInAs, signedInState } from './helpers/sessio
 // The Health page (/health, design/references/observability-design.md §5), at a laptop's 1440 × 900 in both projects:
 // without a session it goes to sign-in and back; seeded rows render every panel; Refresh makes exactly one request and
 // nothing polls; a phone width says Desktop only; the desk sidebar's Health link shows only on a device that opened
-// /health; the switch (behind its confirm) turns collection off and back on; axe finds nothing.
+// /health; the switch (behind its confirm) turns collection off, and then can't turn it back on (SQL only); axe finds
+// nothing.
 
 const BASE = testBaseUrl();
 const STAFF = { staffName: 'TEST-e2e Health', team: 'GC/HX - Dispatch' };
-const AREA = `tie2e${Date.now().toString(36)}`;
+// Letters only: a stored string can't hold 4 digits in a row (lp_tel_events_no_digit_run).
+const AREA = `tie${Date.now().toString(36).replace(/\d/g, (c) => 'abcdefghij'[Number(c)] ?? 'a')}`;
 const DEVICE = `tie2e${Date.now().toString(36)}`.padEnd(16, '0').slice(0, 16);
 
 test.use({ serviceWorkers: 'block', bypassCSP: true });
@@ -28,7 +30,7 @@ test.beforeAll(() => {
       ins('rage_tap', `'pending', '${AREA}-b', 'check-card', null, 3, '{"ptr":"touch"}', '[[-500, "t:pending-column-#/check-card"]]'`),
       ins('flow_open', `'all', null, null, 1800, null, '{"out":"ok","cache":"yes"}', null`),
       ins('net', `null, '/api/sync:delta', null, null, 12, '{"m":"get","st":"2xx","on":true,"conn":"live","d":[120,240,300]}', null`),
-      ins('error', `'profile', 'chunk:e2e00001', 'typeerror', null, 1, '{"type":"typeerror","kind":"error","fp":"e2efp001","line":1,"col":9}', '[[-10, "e:typeerror"]]'`),
+      ins('error', `'profile', 'chunk:e2eaaaab', 'typeerror', null, 1, '{"type":"typeerror","kind":"error","fp":"e2efp001","line":1,"col":9}', '[[-10, "e:typeerror"]]'`),
     ].join('\n'),
   );
 });
@@ -68,7 +70,7 @@ test('seeded rows render every panel; Refresh makes exactly one request; nothing
   await openHealth(page);
   await expect(page.getByTestId('health-problem').filter({ hasText: AREA }).first()).toBeVisible();
   for (const id of ['panel-paths', 'panel-net', 'panel-push', 'panel-coverage', 'panel-errors']) await expect(page.getByTestId(id)).toBeVisible();
-  await expect(page.getByTestId('panel-errors')).toContainText('chunk:e2e00001');
+  await expect(page.getByTestId('panel-errors')).toContainText('chunk:e2eaaaab');
   await expect(page.getByTestId('health-status')).toContainText('Collecting');
   // The trail drawer.
   await page.locator('[data-testid="health-problem"][data-signal="stuck_scroll"]').filter({ hasText: AREA }).first().getByTestId('health-trail-open').click();
@@ -112,7 +114,7 @@ test('the desk sidebar shows Health only on a device that opened /health', async
   }
 });
 
-test('the switch turns collection off behind its confirm (ingest then 204), and back on', async ({ page }) => {
+test('the switch turns collection off behind its confirm (ingest then 204); back on is SQL only', async ({ page }) => {
   await openHealth(page);
   const sw = page.getByTestId('health-switch');
   await expect(sw).toHaveAttribute('aria-checked', 'true');
@@ -127,9 +129,17 @@ test('the switch turns collection off behind its confirm (ingest then 204), and 
     data: { v: 1, b: 'e2eoffbatch01', d: DEVICE, s: 'sesse2e001', sent: Date.now(), ctx: { plat: 'mac', osv: 0, eng: 'blink', sa: false, lay: 'desktop', dpr: 2, touch: false, build: 'none', eff: 'na', mem: -1 }, ev: [{ n: 'view', at: Date.now() }] },
   });
   expect(ingest.status()).toBe(204);
-  await sw.click();
+  // Off, the switch can't be used, and the route refuses to turn it back on.
+  await expect(sw).toBeDisabled();
+  const on = await page.request.post('/api/telemetry/settings', { headers: { origin: BASE, 'content-type': 'application/json' }, data: { enabled: true } });
+  expect(on.status()).toBe(403);
+  expect(psql(`select enabled from public.lp_tel_settings`)).toBe('f');
+  // Back on in SQL: the next load shows it on (the route's {enabled: true} only re-reads the settings).
+  psql(`update public.lp_tel_settings set enabled = true, updated_at = now()`);
+  expect((await page.request.post('/api/telemetry/settings', { headers: { origin: BASE, 'content-type': 'application/json' }, data: { enabled: true } })).status()).toBe(200);
+  await page.getByTestId('health-refresh').click();
   await expect(sw).toHaveAttribute('aria-checked', 'true');
-  expect(psql(`select enabled from public.lp_tel_settings`)).toBe('t');
+  await expect(sw).toBeEnabled();
 });
 
 test('axe finds nothing on /health', async ({ page }) => {

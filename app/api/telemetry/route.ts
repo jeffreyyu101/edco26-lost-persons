@@ -1,10 +1,12 @@
 // POST /api/telemetry (design/references/observability-design.md §3): one batch of telemetry from a phone's collector
 // (lib/client/telemetry). Cheap checks first: origin, session, the cached config, then the body, then ONE RPC that
-// dedupes the batch, enforces the per-device-per-hour caps and writes the rows.
+// dedupes the batch, enforces the per-hour caps (per device id, per sign-in from the session, and fleet-wide; bytes
+// counted after gzip is inflated) and writes the rows.
 //
 //   200 {on: true, until, flushSeconds, sample, now, rejected, capped?}
-//   204 collection is off (the kill switch, past off_at, settings that can't be read): nothing is read or written,
-//       and the phone stops and checks back every 30 minutes
+//   204 collection is off (the kill switch, past off_at, no settings table): nothing is read or written, and the
+//       phone stops and checks back every 30 minutes
+//   503 the settings couldn't be read just now: the phone keeps its batches and backs off
 //   401 / 403 / 413 / 415 / 422 / 503 through the wrapper (the log line has the route, status and timing only)
 //
 // `refresh: false`: a telemetry answer never re-issues the session cookie (a late one must not bring back a cookie the
@@ -19,6 +21,7 @@ import {
   clampSkew,
   invalidateTelemetryConfig,
   parseBatch,
+  quotaKey,
   readTelemetryBody,
   teamKey,
   telemetryConfig,
@@ -49,6 +52,7 @@ export const POST = authedRoute('POST /api/telemetry', { refresh: false, sameOri
     p_ctx: batch.ctx,
     p_events: batch.ev,
     p_bytes: bytes,
+    p_quota: quotaKey(session.claims.sid),
   });
   if (!res || res.on === false) {
     invalidateTelemetryConfig();
