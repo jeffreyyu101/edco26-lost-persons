@@ -71,11 +71,47 @@ describe('decideShortcut', () => {
   });
 
   it('leaves every Cmd / Ctrl / Alt combination to the browser and the form', () => {
-    for (const k of ['l', 't', 'w', 'n', 'N', 'Enter', 'k', 'j', '/']) {
+    for (const k of ['l', 't', 'w', 'n', 'N', 'Enter', 'k', 'j', '/', 'Escape']) {
       expect(decideShortcut(key(k, { metaKey: true }), BODY, CLOSED), `Cmd+${k}`).toBeNull();
       expect(decideShortcut(key(k, { ctrlKey: true }), BODY, CLOSED), `Ctrl+${k}`).toBeNull();
       expect(decideShortcut(key(k, { altKey: true }), BODY, CLOSED), `Alt+${k}`).toBeNull();
     }
+  });
+
+  it('Cmd+B / Ctrl+B toggles the sidebar from the page, a row, a control or an open request', () => {
+    for (const target of [BODY, ROW, BUTTON]) {
+      for (const ctx of [CLOSED, OPEN]) {
+        expect(decideShortcut(key('b', { metaKey: true }), target, ctx)).toBe('toggleSidebar');
+        expect(decideShortcut(key('b', { ctrlKey: true }), target, ctx)).toBe('toggleSidebar');
+      }
+    }
+    // Caps lock.
+    expect(decideShortcut(key('B', { metaKey: true }), BODY, CLOSED)).toBe('toggleSidebar');
+    // B alone is a letter, and Alt or Shift with it is another shortcut (Cmd+Shift+B: the browser's bookmarks bar).
+    expect(decideShortcut(key('b'), BODY, CLOSED)).toBeNull();
+    expect(decideShortcut(key('b', { metaKey: true, shiftKey: true }), BODY, CLOSED)).toBeNull();
+    expect(decideShortcut(key('B', { ctrlKey: true, shiftKey: true }), BODY, CLOSED)).toBeNull();
+    expect(decideShortcut(key('b', { metaKey: true, altKey: true }), BODY, CLOSED)).toBeNull();
+    expect(decideShortcut(key('b', { altKey: true }), BODY, CLOSED)).toBeNull();
+  });
+
+  it('Cmd+B is left alone while typing (bold, the field’s own) and under a dialog, menu or form, like every other key', () => {
+    expect(decideShortcut(key('b', { metaKey: true }), INPUT, CLOSED)).toBeNull();
+    expect(decideShortcut(key('b', { ctrlKey: true }), INPUT, OPEN)).toBeNull();
+    expect(decideShortcut(key('b', { metaKey: true }), IN_MENU, CLOSED)).toBeNull();
+    expect(decideShortcut(key('b', { metaKey: true }), BODY, { ...CLOSED, overlayOpen: true })).toBeNull();
+    expect(decideShortcut(key('b', { metaKey: true }), BODY, { ...CLOSED, formOpen: true })).toBeNull();
+    expect(decideShortcut(key('b', { metaKey: true, isComposing: true }), BODY, CLOSED)).toBeNull();
+    expect(decideShortcut(key('b', { metaKey: true, defaultPrevented: true }), BODY, CLOSED)).toBeNull();
+  });
+
+  it('Esc closes the sidebar opened over the content first, then the open request', () => {
+    expect(decideShortcut(key('Escape'), BODY, { ...OPEN, sidebarOverlay: true })).toBe('closeSidebar');
+    expect(decideShortcut(key('Escape'), BUTTON, { ...CLOSED, sidebarOverlay: true })).toBe('closeSidebar');
+    expect(decideShortcut(key('Escape'), BODY, { ...OPEN, sidebarOverlay: false })).toBe('close');
+    // A menu or dialog open over it takes its own Esc first.
+    expect(decideShortcut(key('Escape'), IN_MENU, { ...CLOSED, sidebarOverlay: true })).toBeNull();
+    expect(decideShortcut(key('Escape'), BODY, { ...CLOSED, sidebarOverlay: true, overlayOpen: true })).toBeNull();
   });
 
   it('ignores composition, handled events and other keys', () => {

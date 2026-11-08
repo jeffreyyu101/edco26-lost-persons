@@ -1,7 +1,8 @@
 'use client';
-// The main column's top bar (design/screens/desktop-log.html .top): the view's title and count, search
-// (a field with the "/" cap when the column has room, else an icon that opens search), and New request
-// with the "N" cap ("New" when the column is narrow, desktop-new-tablet.html iPad landscape). The live line
+// The main column's top bar (design/screens/desktop-sidebar-inset.html .top, inside the inset card): the sidebar's
+// toggle (shadcn SidebarTrigger, PanelLeft, Cmd+B / Ctrl+B) and a short line, the view's title and count, search
+// (a field with the "/" cap when the column has room, else an icon that opens search), New request with the "N"
+// cap ("New" when the column is narrow, desktop-new-tablet.html iPad landscape), and the Activity bell. The live line
 // (v2.2 afternoon, F1.2: "Updated just now", or "Last updated 3:42 PM" while a banner shows, and Refresh now)
 // sits next to the title on every view (design/screens/live-indicator.html, the Desktop frame): the store's
 // last sync on the lists, the last stats fetch on the dashboard (published by the dashboard, which has no
@@ -10,7 +11,7 @@
 // Search drives the existing Search view through ?q= (lib/client/nav): the first character opens it (one
 // history entry), later ones replace it, Esc clears and then leaves.
 import { IconButton } from '@radix-ui/themes';
-import { Plus, Search, X } from 'lucide-react';
+import { PanelLeft, Plus, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { ActivityBellSlot } from '@/components/activity/slots';
 import { useDashboardLive } from '@/components/dashboard/connection-signal';
@@ -21,6 +22,8 @@ import { useAppStore } from '@/lib/client/store-contract';
 import { useLiveStatus } from '@/lib/client/use-live-status';
 import { Kbd, useMainCount } from './parts';
 import { mainTitle } from './nav-model';
+import { SIDEBAR_ID } from './sidebar-model';
+import { toggleSidebar, useSidebar } from './sidebar-state';
 import type { MainView } from './views';
 import d from './desk.module.css';
 
@@ -29,13 +32,29 @@ const MAX_QUERY = 200;
 
 export interface DeskTopProps {
   main: MainView;
+  /** A request is open in the pane (the sidebar's toggle then opens it over the content where it would not fit). */
+  pane?: boolean;
 }
 
-export function DeskTop({ main }: DeskTopProps) {
+export function DeskTop({ main, pane = false }: DeskTopProps) {
   const count = useMainCount(main);
   const searching = main.name === 'search';
+  const sidebar = useSidebar(pane);
   return (
     <div className={d.topbar} data-searching={searching ? '' : undefined} data-testid="desk-topbar">
+      <button
+        type="button"
+        className={`${d.trigger} lp-hit`}
+        aria-label="Toggle sidebar"
+        aria-expanded={sidebar.expanded}
+        aria-controls={SIDEBAR_ID}
+        aria-keyshortcuts="Meta+B Control+B"
+        onClick={toggleSidebar}
+        data-testid="desk-sidebar-toggle"
+      >
+        <PanelLeft size={16} strokeWidth={1.75} aria-hidden />
+      </button>
+      <span className={d.vsep} aria-hidden />
       <h1 className={d.title}>
         {mainTitle(main)}
         {count === null ? null : (
@@ -56,18 +75,21 @@ export function DeskTop({ main }: DeskTopProps) {
         aria-keyshortcuts="/"
         onClick={() => navigate({ q: '' })}
       >
-        <Search size={17} strokeWidth={1.75} aria-hidden />
+        <Search size={16} strokeWidth={1.75} aria-hidden />
       </IconButton>
       {/* Named by its visible text: "New request", or "New" when the column is narrow (an aria-label would
           not match the visible text, axe label-content-name-mismatch). */}
       <button type="button" className={`${d.newb} lp-hit`} aria-keyshortcuts="N" onClick={() => navigate({ new: true })} data-testid="desk-new">
-        <Plus size={15} strokeWidth={2.25} aria-hidden />
+        <Plus size={16} strokeWidth={2} aria-hidden />
         <span className={d.newLong}>New request</span>
         <span className={d.newShort}>New</span>
         <Kbd className={d.newKbd}>N</Kbd>
       </button>
-      {/* F4: the Activity bell, its popover anchored here (the sidebar's Activity item opens the same one). */}
-      <ActivityBellSlot place="desk" />
+      {/* F4: the Activity bell, its popover anchored here (the sidebar's Activity item opens the same one). Its box
+          keeps the bell's 28 px while the chunk loads. */}
+      <span className={d.bellBox}>
+        <ActivityBellSlot place="desk" />
+      </span>
     </div>
   );
 }

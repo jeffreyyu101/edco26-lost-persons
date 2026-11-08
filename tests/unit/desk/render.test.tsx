@@ -1,5 +1,5 @@
 // Server renders of the desk shell (components/desk) against the stub store: the frame's slots, the
-// sidebar / rail with live counts and the current view, the top bar and the pane header. Synthetic only.
+// sidebar with live counts and the current view, the top bar and the pane header. Synthetic only.
 import { Theme } from '@radix-ui/themes';
 import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
@@ -117,17 +117,20 @@ describe('DeskFrame', () => {
 describe('DeskNav', () => {
   const counts = viewCounts(stubRows(NOW), [], new Set(), null);
 
-  it('lists the views with live counts, a divider, Dashboard, Alerts and the person', () => {
+  it('one sidebar: the lockup, the views with live counts, a divider, Dashboard, then the person; no rail', () => {
     const store = storeWith((s) => ({ ...s, myIds: new Set() }));
     const html = render(<DeskNav main={ALL_VIEW} />, store);
-    const sidebarHtml = html.slice(html.indexOf('data-testid="desk-sidebar"'), html.indexOf('data-testid="desk-rail"'));
-    const sidebar = text(sidebarHtml);
-    // The compact logo lockup first: EDC Orlando | Ground Control (decoration inside the sync button).
-    const lockup = sidebarHtml.slice(sidebarHtml.indexOf('data-testid="desk-live"'));
-    expect(lockup).toMatch(/^data-testid="desk-live" data-variant="side"/);
+    expect(html).not.toContain('desk-rail');
+    expect(html.match(/data-testid="desk-sidebar"/g)).toHaveLength(1);
+    const sidebar = text(html);
+    // The logo lockup first: EDC Orlando | Ground Control (decoration inside the sync button).
+    const lockup = html.slice(html.indexOf('data-testid="desk-live"'));
     expect(lockup.indexOf('src="/logos/edc-orlando.png"')).toBeGreaterThan(0);
     expect(lockup.indexOf('src="/logos/ground-control.png"')).toBeGreaterThan(lockup.indexOf('edc-orlando.png'));
-    expect(sidebarHtml.indexOf('data-testid="desk-live"')).toBeLessThan(sidebarHtml.indexOf('href="/"'));
+    // The hover rainbow sits on the EDC Orlando logo only, hidden from screen readers.
+    expect(lockup).toMatch(/src="\/logos\/edc-orlando.png"[^>]*\/?><span[^>]*aria-hidden="true"[^>]*data-testid="desk-live-rainbow"/);
+    expect(lockup.indexOf('desk-live-rainbow')).toBeLessThan(lockup.indexOf('ground-control.png'));
+    expect(html.indexOf('data-testid="desk-live"')).toBeLessThan(html.indexOf('href="/"'));
     expect(sidebar).not.toContain('Is my friend in medical?');
     expect(sidebar).toContain(`All requests ${counts.all}`);
     expect(sidebar).toContain(`Pending ${counts.pending}`);
@@ -137,12 +140,39 @@ describe('DeskNav', () => {
     expect(sidebar).toContain('Dispatch');
     expect(html).toContain('href="/?view=pending"');
     expect(html).toContain('href="/?dashboard=1"');
+    // The views, a divider, Dashboard, in this order, inside the "Views" landmark.
+    const nav = html.slice(html.indexOf('aria-label="Views"'), html.indexOf('</nav>'));
+    const at = (needle: string) => nav.indexOf(needle);
+    expect(at('href="/"')).toBeGreaterThan(0);
+    expect(at('href="/?view=pending"')).toBeGreaterThan(at('href="/"'));
+    expect(at('href="/?view=mine"')).toBeGreaterThan(at('href="/?view=pending"'));
+    expect(nav.indexOf('aria-hidden="true"></span>', at('href="/?view=mine"'))).toBeGreaterThan(0);
+    expect(at('href="/?dashboard=1"')).toBeGreaterThan(at('href="/?view=mine"'));
+    // Each item carries its tooltip (shown only while collapsed), hidden from assistive tech.
+    for (const label of ['All requests', 'Pending', 'My requests', 'Dashboard']) {
+      expect(html).toMatch(new RegExp(`aria-hidden="true">${label}</span></a>`));
+    }
     // F4: Alerts and Activity are client-only slots (components/activity/slots.tsx, their own chunk), drawn
     // after hydration: the e2e specs check them (alerts.spec.ts, activity.spec.ts, desk-shell.spec.ts).
     expect(html).not.toMatch(/role="switch"/);
-    // The current view is marked in the sidebar and in the rail.
-    expect((html.match(/aria-current="page"/g) ?? []).length).toBe(2);
+    // The current view is marked once.
+    expect((html.match(/aria-current="page"/g) ?? []).length).toBe(1);
     expect(html).toMatch(/href="\/"[^>]*aria-current="page"/);
+    // The edge (a pointer shortcut: out of the tab order, hidden from assistive tech; the top bar has the toggle).
+    expect(html).toMatch(/<button type="button" class="[^"]*" tabindex="-1" aria-hidden="true" data-testid="desk-sidebar-rail"><\/button>/);
+    // No scrim unless it is open over the content.
+    expect(html).not.toContain('desk-sidebar-scrim');
+  });
+
+  it('expanded on the server (the desktop) with nothing chosen; the id the top bar toggle controls', () => {
+    const html = render(<DeskNav main={ALL_VIEW} />);
+    expect(html).toMatch(/<div id="desk-sidebar" class="[^"]*" data-testid="desk-sidebar" data-state="expanded">/);
+    const top = render(<DeskTop main={ALL_VIEW} />);
+    expect(top).toMatch(
+      /<button type="button" class="[^"]*lp-hit" aria-label="Toggle sidebar" aria-expanded="true" aria-controls="desk-sidebar" aria-keyshortcuts="Meta\+B Control\+B" data-testid="desk-sidebar-toggle">/,
+    );
+    // The toggle and its line come first in the bar, before the title.
+    expect(top.indexOf('desk-sidebar-toggle')).toBeLessThan(top.indexOf('<h1'));
   });
 
   it('marks Pending, then Dashboard, as current; search marks nothing', () => {
@@ -151,15 +181,11 @@ describe('DeskNav', () => {
     expect(render(<DeskNav main={main('q=kay')} />)).not.toContain('aria-current');
   });
 
-  it('the rail names each icon and badges Pending with its count', () => {
+  it('names each item by its label and count, the same collapsed (the label is only visually hidden then)', () => {
     const html = render(<DeskNav main={ALL_VIEW} />);
-    const rail = html.slice(html.indexOf('data-testid="desk-rail"'));
-    // The rail's lockup: both logos stacked on the square.
-    expect(rail).toMatch(/data-testid="desk-live" data-variant="rail"[^>]*>(<img [^>]*>)<span[^>]*><\/span>(<img [^>]*>)/);
-    expect(rail).toContain('aria-label="All requests"');
-    expect(rail).toContain(`aria-label="Pending ${counts.pending}"`);
-    expect(rail).toContain('aria-label="My requests"');
-    expect(rail).toContain('aria-label="Dashboard"');
+    // No aria-label on the items: the name is the label and the count the item shows.
+    expect(html).not.toMatch(/<a [^>]*aria-label=/);
+    expect(text(html)).toContain(`Pending ${counts.pending}`);
   });
 
   it('shows no counts until data has loaded', () => {

@@ -1,12 +1,15 @@
 'use client';
-// The desk frame (design/screens/desktop-log.html, desktop-new-tablet.html): rendered at every width and on
+// The desk frame (design/screens/desktop-log.html, desktop-sidebar-inset.html): rendered at every width and on
 // the server, laid out only by CSS media queries (frame.module.css), so the columns are there from the
 // first paint with no layout flash. Under 768 px every slot but the main content is display: none and the
 // wrappers are plain blocks: the phone app renders exactly as before.
 //
-//   ≥ 768   [rail 60 | main]               a request opens as a 480 px sheet over the list (no scrim)
-//   ≥ 1024  [rail 60 | main | pane 420]    the request docks on the right
-//   ≥ 1280  [sidebar 232 | main | pane 452]
+// From 768 px the sidebar (shadcn/ui's, variant "inset": 256 px, or 64 px of icons) sits on the page and the
+// main column, with the request pane when one is open, is one rounded card inset 8 px from the window:
+//
+//   ≥ 768   [sidebar 64 | card: main]                a request opens as a 480 px sheet over the list (no scrim)
+//   ≥ 1024  [sidebar 64 or 256 | card: main | 420]   the request docks on the right
+//   ≥ 1280  [sidebar 256 or 64 | card: main | 452]
 //
 // On All requests the main column opens with Jeffrey's brand row (the `brand` slot, above the top bar): it
 // scrolls away and the top bar stays. The app shell renders it from the server on, so it is in place at the
@@ -14,7 +17,7 @@
 // list draws its own row). The row's X has no handler of its own (the server drew it): the slot catches its
 // click ([data-brand-hide]) and calls `onHideBrand`.
 //
-// The slot contents (sidebar / rail, top bar, pane header) come from the desk chunk
+// The slot contents (sidebar, top bar, pane header) come from the desk chunk
 // (components/desk/DeskChrome.tsx), loaded only on the desk; this file stays tiny because it is on the
 // first-load path of `/` (spec §7 Performance, the A25 budget).
 import { useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject } from 'react';
@@ -43,7 +46,7 @@ export function useBrandInHtml(serverValue: boolean): boolean {
 export interface DeskFrameProps {
   /** From 768 px (useIsDesk). False on the server and in the hydration render. */
   desk: boolean;
-  /** Sidebar + rail (both rendered; CSS shows one). */
+  /** The sidebar. */
   nav?: ReactNode;
   /** The brand row at the top of the main column, above the top bar (All requests only), or null. */
   brand?: ReactNode;
@@ -105,23 +108,25 @@ export function DeskFrame({ desk, nav = null, brand = null, onHideBrand, top = n
         <div className={f.nav} inert={covered}>
           {nav}
         </div>
-        <div className={f.main} data-desk-main="" inert={covered}>
-          {brand ? (
-            // The click handler only forwards the X's click (a real button, so keyboards reach it) bubbling up.
-            <div className={f.brand} data-testid="desk-brand" onClick={brandClick}>
-              {brand}
+        <div className={f.inset}>
+          <div className={f.main} data-desk-main="" inert={covered}>
+            {brand ? (
+              // The click handler only forwards the X's click (a real button, so keyboards reach it) bubbling up.
+              <div className={f.brand} data-testid="desk-brand" onClick={brandClick}>
+                {brand}
+              </div>
+            ) : null}
+            <div className={f.top} ref={topRef}>
+              {top}
+            </div>
+            <div className={f.content}>{children}</div>
+          </div>
+          {pane ? (
+            <div className={f.pane} inert={covered} data-desk-pane="">
+              {pane}
             </div>
           ) : null}
-          <div className={f.top} ref={topRef}>
-            {top}
-          </div>
-          <div className={f.content}>{children}</div>
         </div>
-        {pane ? (
-          <div className={f.pane} inert={covered} data-desk-pane="">
-            {pane}
-          </div>
-        ) : null}
         {form ? (
           <div className={f.form} ref={formRef} data-desk-form="">
             {form}

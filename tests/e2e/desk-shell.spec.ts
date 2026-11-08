@@ -5,12 +5,13 @@ import { testBaseUrl } from '../../scripts/test-env.mjs';
 import { axeViolations, brandContrast, overlappingTargets, smallTargets } from './helpers/a11y';
 import { signedInAs } from './helpers/session';
 
-// Desk shell (components/desk; design/screens/desktop-log.html, desktop-new-tablet.html): the sidebar or
-// icon rail, the top bar, the request docked beside the list (a sheet over it on iPad portrait), and the
-// keyboard: "/" search, N new request, J/K and the arrows, Enter, Esc. All requests opens with Jeffrey's
-// brand card above the top bar, and the sidebar / rail start with the compact logo lockup. The pane shows the
-// profile with its actions under the status block, and the Undo snackbar stays clear of it. Under 768 px the
-// phone app is unchanged. Synthetic rows only (TEST-shell-e2e-…), closed afterwards.
+// Desk shell (components/desk; design/screens/desktop-sidebar-inset.html, desktop-log.html,
+// desktop-new-tablet.html): the sidebar (shadcn/ui's, variant "inset": 256 px, or 64 px of icons), the top bar
+// and the request docked beside the list in one inset card (a sheet over it on iPad portrait), and the keyboard:
+// "/" search, N new request, J/K and the arrows, Enter, Esc, Cmd+B. All requests opens with Jeffrey's brand card
+// above the top bar, and the sidebar starts with the logo lockup. The pane shows the profile with its actions
+// under the status block, and the Undo snackbar stays clear of it. Under 768 px the phone app is unchanged.
+// Synthetic rows only (TEST-shell-e2e-…), closed afterwards.
 
 const BASE = testBaseUrl();
 const STAFF = { staffName: 'TEST-shell Desk', team: 'GC/HX - Dispatch' };
@@ -93,11 +94,15 @@ async function rowOrder(page: Page): Promise<string[]> {
   });
 }
 
-/** The docked pane's column: what is right of the main column (the pane plus its 1 px border). */
+/** The docked pane's column in the card (the pane plus its 1 px border). */
 async function paneColumn(page: Page): Promise<number> {
-  const box = (await main(page).boundingBox())!;
-  return page.viewportSize()!.width - (box.x + box.width);
+  return (await page.locator('[data-desk-pane]').boundingBox())!.width;
 }
+
+/** The card's 8 px from the window's top: where the top bar sticks. */
+const GAP = 8;
+
+const sidebar = (page: Page) => page.getByTestId('desk-sidebar');
 
 const activeRowId = (page: Page) => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset?.requestId ?? null);
 
@@ -212,12 +217,15 @@ test.describe('desktop 1440 × 900', () => {
     const rows = await createRequests(page, 3, tag);
     await openSearchResults(page, tag);
 
-    // Sidebar (not the rail), the top bar, and no phone chrome inside the main column.
+    // The sidebar expanded (1440 px, nothing chosen), the top bar, and no phone chrome inside the main column.
     const sidebar = page.getByTestId('desk-sidebar');
     await expect(sidebar).toBeVisible();
-    await expect(page.getByTestId('desk-rail')).toBeHidden();
-    // The sidebar column is 232 px: the main column starts there.
-    expect((await main(page).boundingBox())?.x).toBeCloseTo(232, 0);
+    await expect(sidebar).toHaveAttribute('data-state', 'expanded');
+    await expect(page.getByTestId('desk-rail')).toHaveCount(0);
+    // The sidebar column is 256 px: the inset card (the main column) starts there, 8 px from the top.
+    const column = (await main(page).boundingBox())!;
+    expect(column.x).toBeCloseTo(256, 0);
+    expect(column.y).toBeCloseTo(GAP, 0);
     // F3: Pending carries an "Unread messages" dot while a Pending request has unread messages.
     for (const name of [/^All requests \d+$/, /^Pending \d+( Unread messages)?$/, /^My requests \d+$/, /^Dashboard$/]) {
       await expect(sidebar.getByRole('link', { name })).toBeVisible();
@@ -472,50 +480,53 @@ test.describe('desktop 1440 × 900', () => {
     await expect(card.getByRole('heading')).toHaveCount(0);
     await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
 
-    // The top of the main column, lined up with the top bar's title (24 px in), 20 px from the right; one row
-    // about 60 px tall, the title one line of 19 px, the dates beside it.
+    // The top of the card, 24 px in (where the rows' text starts) and 20 px from its right; one row about 60 px
+    // tall, the title one line of 19 px, the dates beside it.
     const column = (await main(page).boundingBox())!;
     const box = (await card.boundingBox())!;
     expect(box.x).toBeCloseTo(column.x + 24, 0);
     expect(box.width).toBeCloseTo(column.width - 44, 0);
-    expect(box.y).toBeCloseTo(14, 0);
+    expect(box.y).toBeCloseTo(GAP + 14, 0);
     expect(box.height).toBeLessThanOrEqual(64);
     const title = await brandTitle(card);
     expect(title.size).toBe(19);
     expect(title.height).toBeLessThan(title.size * 1.5);
     const dates = (await card.locator('[class*="datesLong"]').boundingBox())!;
     expect(dates.x).toBeGreaterThan(title.right);
+    // The top bar under it: the sidebar's toggle and its line, then the title.
     const heading = (await page.getByTestId('desk-topbar').getByRole('heading', { level: 1 }).boundingBox())!;
-    expect(Math.abs(box.x - heading.x)).toBeLessThanOrEqual(1);
+    const toggle = (await page.getByTestId('desk-sidebar-toggle').boundingBox())!;
+    expect(toggle.x).toBeCloseTo(column.x + 12, 0);
+    expect(heading.x).toBeGreaterThan(toggle.x + toggle.width + 16);
     const bar = page.getByTestId('desk-topbar');
     expect((await bar.boundingBox())!.y).toBeGreaterThanOrEqual(box.y + box.height);
     // Every text on it at 4.5:1 or more against every pixel behind it, at this size too.
     await expect.poll(() => imagesLoaded(card)).toBe(true);
     expect(await brandContrast(page, card)).toEqual([]);
 
-    // It scrolls away; the top bar stays at the top with search and New request. (With only a few open rows the
-    // table's min-height lets the page scroll exactly the row's height and margin: its bottom edge then sits
-    // at 0, which is gone too.)
+    // It scrolls away under the card's top edge; the top bar stays at the top with search and New request. (With
+    // only a few open rows the table's min-height lets the page scroll exactly the row's height and margin: its
+    // bottom edge then sits at the card's top, under the 8 px mask, which is gone too.)
     await page.evaluate(() => window.scrollTo(0, 600));
     await expect.poll(async () => {
       const b = (await card.boundingBox())!;
       return b.y + b.height;
-    }).toBeLessThanOrEqual(0);
-    expect((await bar.boundingBox())!.y).toBeCloseTo(0, 0);
+    }).toBeLessThanOrEqual(GAP);
+    expect((await bar.boundingBox())!.y).toBeCloseTo(GAP, 0);
     await expect(page.getByRole('searchbox', { name: 'Search requests' })).toBeInViewport();
     await expect(page.getByTestId('desk-new')).toBeInViewport();
 
-    // The sidebar starts with the compact lockup: both logos on the brand's dark gradient, the live dot on its
-    // corner; it is the sync button, named by the live state.
+    // The sidebar starts with the lockup: both logos on the brand's dark gradient, the live dot on its corner;
+    // it is the sync button, named by the live state. 48 px tall, the sidebar's width less its 8 px sides.
     const lockup = page.getByTestId('desk-sidebar').getByTestId('desk-live');
     await expect(lockup).toHaveAccessibleName(/^(Live\. Tap to sync now|Syncing)$/);
     await expect(lockup.locator('img')).toHaveCount(2);
     await expect.poll(() => imagesLoaded(lockup)).toBe(true);
     const lock = (await lockup.boundingBox())!;
-    expect(lock.height).toBe(44);
-    expect(lock.width).toBeGreaterThan(180);
-    expect(lock.y).toBeLessThan(20);
-    expect(await lockup.evaluate((el) => getComputedStyle(el).backgroundImage)).toContain('linear-gradient');
+    expect(lock.height).toBe(48);
+    expect(lock.width).toBe(240);
+    expect([lock.x, lock.y]).toEqual([8, 8]);
+    expect(await lockup.locator('[class*="lockArt"]').evaluate((el) => getComputedStyle(el).backgroundImage)).toContain('linear-gradient');
 
     // A request open beside the list: the row stays at the top of the narrower column, title one line.
     await page.goto(`/?r=${one!.id}`);
@@ -536,7 +547,7 @@ test.describe('desktop 1440 × 900', () => {
       await page.goto(url);
       await expect(page.getByRole('heading', { level: 1, name: heading }), url).toBeVisible();
       await expect(page.getByTestId('brand-card'), url).toHaveCount(0);
-      expect((await bar.boundingBox())!.y, url).toBeCloseTo(0, 0);
+      expect((await bar.boundingBox())!.y, url).toBeCloseTo(GAP, 0);
     }
   });
 
@@ -562,7 +573,7 @@ test.describe('desktop 1440 × 900', () => {
     await expect(page.getByTestId('brand-card')).toHaveCount(0);
     await expect(page.getByTestId('desk-brand')).toHaveCount(0);
     expect((await bar.boundingBox())!.y).toBeLessThan(barBefore.y);
-    expect((await bar.boundingBox())!.y).toBeCloseTo(0, 0);
+    expect((await bar.boundingBox())!.y).toBeCloseTo(GAP, 0);
     expect(await page.evaluate(() => document.activeElement?.closest('[data-testid="desk-topbar"]') !== null)).toBe(true);
     expect(await page.evaluate(() => localStorage.getItem('lp-brand-hidden'))).toBe('1');
     await expect(page.locator('html')).toHaveAttribute('data-brand-hidden', '');
@@ -588,9 +599,9 @@ test.describe('desktop 1440 × 900', () => {
     expect(await page.evaluate(() => (window as unknown as { __frames?: number }).__frames)).toBeGreaterThan(5);
     expect(await page.evaluate(() => (window as unknown as { __brandShown?: boolean }).__brandShown)).toBe(false);
     await expect(page.getByTestId('brand-card')).toHaveCount(0);
-    expect((await bar.boundingBox())!.y).toBeCloseTo(0, 0);
+    expect((await bar.boundingBox())!.y).toBeCloseTo(GAP, 0);
 
-    // Pending's menu doesn't offer it (the row lives on All); All's does, in the sidebar and in the rail.
+    // Pending's menu doesn't offer it (the row lives on All); All's does.
     await page.goto('/?view=pending');
     await expect(page.getByRole('heading', { level: 1, name: /^Pending/ })).toBeVisible();
     await page.getByTestId('desk-sidebar').getByTestId('account-trigger').click();
@@ -737,6 +748,90 @@ test.describe('desktop 1440 × 900', () => {
     await expect(actions.getByRole('button', { name: 'Reunited' })).toBeVisible();
   });
 
+  test('the sidebar: the toggle, Cmd+B / Ctrl+B and its edge collapse and expand it, kept on this device from the first frame; collapsed, each icon shows its label on hover and focus', async ({ page, browserName }) => {
+    await createRequests(page, 1);
+    await page.goto('/');
+    await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
+    const toggle = page.getByTestId('desk-sidebar-toggle');
+    const columnX = async () => (await main(page).boundingBox())!.x;
+    await expect(sidebar(page)).toHaveAttribute('data-state', 'expanded');
+    await expect(toggle).toHaveAccessibleName('Toggle sidebar');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(toggle).toHaveAttribute('aria-controls', 'desk-sidebar');
+
+    // The top bar's button: 64 px of icons, the card follows (a 200 ms slide).
+    await toggle.click();
+    await expect(sidebar(page)).toHaveAttribute('data-state', 'collapsed');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect.poll(columnX).toBeCloseTo(64, 0);
+    expect(await page.evaluate(() => localStorage.getItem('lp-desk-sidebar'))).toBe('collapsed');
+    await expect(page.locator('html')).toHaveAttribute('data-desk-sidebar', 'collapsed');
+    // The names stay whole (labels and counts are only visually hidden), and the icons are 32 px, centred.
+    const pending = sidebar(page).getByRole('link', { name: /^Pending \d+( Unread messages)?$/ });
+    await expect(sidebar(page).getByRole('link', { name: /^All requests \d+$/ })).toBeVisible();
+    const item = (await pending.boundingBox())!;
+    expect([item.x, item.width, item.height]).toEqual([16, 32, 32]);
+    await expect(sidebar(page).getByTestId('desk-alerts')).toHaveAccessibleName(/^Alerts( (On|Off|Blocked))?$/);
+
+    // The label as a tooltip on hover, and on keyboard focus.
+    const tip = (link: Locator) => link.locator('[class*="tip"]');
+    await expect(tip(pending)).toBeHidden();
+    await pending.hover();
+    await expect(tip(pending)).toBeVisible();
+    await expect(tip(pending)).toHaveText('Pending');
+    await page.mouse.move(800, 600);
+    await expect(tip(pending)).toBeHidden();
+    await pending.focus();
+    // Safari moves through links with Option+Tab (Tab alone skips them).
+    await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab');
+    const mine = sidebar(page).getByRole('link', { name: /^My requests/ });
+    await expect(mine).toBeFocused();
+    await expect(tip(mine)).toBeVisible();
+    await expect(tip(mine)).toHaveText('My requests');
+
+    // Kept after a reload, from the first frame: the card never starts at 256 px.
+    await page.addInitScript(() => {
+      const w = window as unknown as { __maxX?: number; __frames?: number };
+      w.__maxX = 0;
+      w.__frames = 0;
+      const tick = () => {
+        const el = document.querySelector('[data-desk-main]');
+        if (el) w.__maxX = Math.max(w.__maxX ?? 0, el.getBoundingClientRect().x);
+        w.__frames = (w.__frames ?? 0) + 1;
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    await page.reload();
+    await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
+    await expect(sidebar(page)).toHaveAttribute('data-state', 'collapsed');
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => (window as unknown as { __frames?: number }).__frames)).toBeGreaterThan(5);
+    expect(await page.evaluate(() => (window as unknown as { __maxX?: number }).__maxX)).toBeLessThan(65);
+
+    // Cmd+B and Ctrl+B from the page; never while typing.
+    await page.locator('body').press('Meta+b');
+    await expect(sidebar(page)).toHaveAttribute('data-state', 'expanded');
+    await page.locator('body').press('Control+b');
+    await expect(sidebar(page)).toHaveAttribute('data-state', 'collapsed');
+    const field = page.getByRole('searchbox', { name: 'Search requests' });
+    await field.focus();
+    await page.keyboard.press('Meta+b');
+    await page.keyboard.press('Control+b');
+    await expect(sidebar(page)).toHaveAttribute('data-state', 'collapsed');
+    await field.press('Escape');
+
+    // The sidebar's edge (a 16 px strip on its right side) toggles it too.
+    await page.getByTestId('desk-sidebar-rail').click();
+    await expect(sidebar(page)).toHaveAttribute('data-state', 'expanded');
+    await expect.poll(columnX).toBeCloseTo(256, 0);
+    expect(await page.evaluate(() => localStorage.getItem('lp-desk-sidebar'))).toBe('expanded');
+    // Expanded, no tooltips.
+    await sidebar(page).getByRole('link', { name: /^Pending/ }).hover();
+    await page.waitForTimeout(500);
+    await expect(tip(sidebar(page).getByRole('link', { name: /^Pending/ }))).toBeHidden();
+  });
+
   for (const theme of ['light', 'dark'] as const) {
     test(`passes axe with a request open (${theme})`, async ({ page }) => {
       await page.addInitScript((t) => {
@@ -759,7 +854,7 @@ test.describe('desktop 1440 × 900', () => {
 test.describe('laptop 1024 × 768', () => {
   test.use({ viewport: { width: 1024, height: 768 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
 
-  test('the brand row fits its column: the title stays one line when a request docks beside the list; the rail lockup', async ({ page }) => {
+  test('the brand row fits its column: the title stays one line when a request docks beside the list; the collapsed lockup', async ({ page }) => {
     const [one] = await createRequests(page, 1);
     await page.goto('/');
     await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
@@ -769,13 +864,16 @@ test.describe('laptop 1024 × 768', () => {
     expect(wide.height).toBeLessThan(wide.size * 1.5);
     await expect(card.locator('[class*="datesLong"]')).toBeVisible();
 
-    // The rail's lockup: a 44 px square with both logos.
-    const lockup = page.getByTestId('desk-rail').getByTestId('desk-live');
+    // Collapsed under 1280 px: the lockup is a 32 px tile with the EDC logo alone (and the live dot).
+    await expect(sidebar(page)).toHaveAttribute('data-state', 'collapsed');
+    const lockup = sidebar(page).getByTestId('desk-live');
     const lock = (await lockup.boundingBox())!;
-    expect([lock.width, lock.height]).toEqual([44, 44]);
+    expect([lock.width, lock.height]).toEqual([32, 32]);
+    await expect(lockup.locator('img').first()).toBeVisible();
+    await expect(lockup.locator('img').nth(1)).toBeHidden();
     await expect.poll(() => imagesLoaded(lockup)).toBe(true);
 
-    // A 544 px column next to the 420 px pane: the short dates go back under the title, which stays one line,
+    // A 532 px column next to the 420 px pane: the short dates go back under the title, which stays one line,
     // a little smaller, clear of the X.
     await page.goto(`/?r=${one!.id}`);
     await expect(page.getByTestId('desk-pane')).toBeVisible({ timeout: 15_000 });
@@ -794,18 +892,59 @@ test.describe('laptop 1024 × 768', () => {
   });
 });
 
-test.describe('iPad landscape 1180 × 820 (touch)', () => {
-  test.use({ viewport: { width: 1180, height: 820 }, isMobile: false, hasTouch: true, deviceScaleFactor: 1 });
+test.describe('laptop 1100 × 800', () => {
+  test.use({ viewport: { width: 1100, height: 800 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
 
-  test('icon rail; the request docks at 420 px; 44 px targets that never overlap', async ({ page }) => {
+  test('collapsed by default; expanded it docks beside the list (kept), and gives way to an open request, opening over it then', async ({ page }) => {
     const [one] = await createRequests(page, 1);
     await page.goto('/');
     await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
-    const rail = page.getByTestId('desk-rail');
-    await expect(rail).toBeVisible();
-    await expect(page.getByTestId('desk-sidebar')).toBeHidden();
-    expect((await main(page).boundingBox())?.x).toBeCloseTo(60, 0);
-    await expect(rail.getByRole('link', { name: /^Pending( \d+)?$/ })).toBeVisible();
+    const toggle = page.getByTestId('desk-sidebar-toggle');
+    await expect(sidebar(page)).toHaveAttribute('data-state', 'collapsed');
+    expect((await main(page).boundingBox())!.x).toBeCloseTo(64, 0);
+
+    // Room for the list beside 256 px: it docks and the choice is kept.
+    await toggle.click();
+    await expect(sidebar(page)).toHaveAttribute('data-state', 'expanded');
+    await expect.poll(async () => (await main(page).boundingBox())!.x).toBeCloseTo(256, 0);
+    await expect(page.getByTestId('desk-sidebar-scrim')).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem('lp-desk-sidebar'))).toBe('expanded');
+
+    // A request docks at 420 px: the sidebar goes back to its icons rather than squeeze the list.
+    await row(page, one!.id).click();
+    await expect(page.getByTestId('desk-pane')).toBeVisible({ timeout: 15_000 });
+    await expect(sidebar(page)).toHaveAttribute('data-state', 'collapsed');
+    await expect.poll(async () => (await main(page).boundingBox())!.x).toBeCloseTo(64, 0);
+    expect(await paneColumn(page)).toBeCloseTo(420, 0);
+    // The toggle opens it over the list and the request; Esc closes it first, the request stays.
+    await toggle.click();
+    await expect(sidebar(page)).toHaveAttribute('data-overlay', '');
+    await expect(page.getByTestId('desk-sidebar-scrim')).toBeVisible();
+    expect((await main(page).boundingBox())!.x).toBeCloseTo(64, 0);
+    await page.keyboard.press('Escape');
+    await expect(sidebar(page)).not.toHaveAttribute('data-overlay', '');
+    await expect(page.getByTestId('desk-pane')).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem('lp-desk-sidebar'))).toBe('expanded');
+
+    // Closed: expanded beside the list again.
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('desk-pane')).toHaveCount(0);
+    await expect(sidebar(page)).toHaveAttribute('data-state', 'expanded');
+  });
+});
+
+test.describe('iPad landscape 1180 × 820 (touch)', () => {
+  test.use({ viewport: { width: 1180, height: 820 }, isMobile: false, hasTouch: true, deviceScaleFactor: 1 });
+
+  test('the sidebar collapsed to icons; the request docks at 420 px; 44 px targets that never overlap', async ({ page }) => {
+    const [one] = await createRequests(page, 1);
+    await page.goto('/');
+    await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
+    const rail = sidebar(page);
+    await expect(rail).toHaveAttribute('data-state', 'collapsed');
+    expect((await main(page).boundingBox())?.x).toBeCloseTo(64, 0);
+    // Named by its label and count, as when expanded (the label is only visually hidden).
+    await expect(rail.getByRole('link', { name: /^Pending( \d+)?( Unread messages)?$/ })).toBeVisible();
 
     await page.goto(`/?r=${one!.id}`);
     const pane = page.getByTestId('desk-pane');
@@ -819,7 +958,7 @@ test.describe('iPad landscape 1180 × 820 (touch)', () => {
 
     const coarse = await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
     test.skip(!coarse, 'this browser does not report a coarse pointer for touch emulation');
-    for (const scope of ['[data-testid="desk-rail"]', '[data-testid="desk-topbar"]', '[data-testid="desk-pane"] header', '[data-testid="desk-pane"] [data-testid="profile-actions"]']) {
+    for (const scope of ['[data-testid="desk-sidebar"]', '[data-testid="desk-topbar"]', '[data-testid="desk-pane"] header', '[data-testid="desk-pane"] [data-testid="profile-actions"]']) {
       expect(await smallTargets(page, scope), scope).toEqual([]);
       expect(await overlappingTargets(page, scope), scope).toEqual([]);
     }
@@ -916,7 +1055,7 @@ test.describe('iPad portrait 820 × 1180 (touch)', () => {
     const tag = nextTag();
     const rows = await createRequests(page, 2, tag);
     await openSearchResults(page, tag);
-    await expect(page.getByTestId('desk-rail')).toBeVisible();
+    await expect(sidebar(page)).toHaveAttribute('data-state', 'collapsed');
     // Room for the full top bar: the search field with "/" and "New request" (desktop-new-tablet.html).
     await expect(page.getByRole('searchbox', { name: 'Search requests' })).toBeVisible();
     await expect.poll(async () => (await page.getByTestId('desk-new').innerText()).replace(/\s+/g, ' ').trim()).toBe('New request N');
@@ -943,6 +1082,45 @@ test.describe('iPad portrait 820 × 1180 (touch)', () => {
     expect(rows.map((r) => r.id)).toContain(order[1]);
   });
 
+  test('the sidebar opens over the list with a scrim (no squeeze); Esc, the scrim or a view chosen closes it; nothing is kept', async ({ page }) => {
+    await createRequests(page, 1);
+    await page.goto('/');
+    await expect(main(page).locator('[data-request-id]').first()).toBeVisible({ timeout: 15_000 });
+    const toggle = page.getByTestId('desk-sidebar-toggle');
+    const scrim = page.getByTestId('desk-sidebar-scrim');
+    const column = (await main(page).boundingBox())!;
+    expect(column.x).toBeCloseTo(64, 0);
+
+    await toggle.click();
+    await expect(sidebar(page)).toHaveAttribute('data-overlay', '');
+    await expect(sidebar(page)).toHaveAttribute('data-state', 'expanded');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(scrim).toBeVisible();
+    await expect.poll(async () => (await sidebar(page).boundingBox())!.width).toBeCloseTo(256, 0);
+    // The list keeps its width under it.
+    expect((await main(page).boundingBox())!.width).toBe(column.width);
+    await expect(sidebar(page).getByRole('link', { name: /^All requests \d+$/ })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(scrim).toHaveCount(0);
+    await expect(sidebar(page)).toHaveAttribute('data-state', 'collapsed');
+
+    await page.locator('body').press('Control+b');
+    await expect(scrim).toBeVisible();
+    await scrim.click({ position: { x: 600, y: 600 } });
+    await expect(scrim).toHaveCount(0);
+
+    await toggle.click();
+    await sidebar(page).getByRole('link', { name: /^Pending/ }).click();
+    await expect.poll(() => paramOf(page, 'view')).toBe('pending');
+    await expect(scrim).toHaveCount(0);
+    await expect(sidebar(page)).toHaveAttribute('data-state', 'collapsed');
+    // Back to All from the icons: it stays closed.
+    await sidebar(page).getByRole('link', { name: /^All requests/ }).click();
+    await expect.poll(() => paramOf(page, 'view')).toBeNull();
+    await expect(scrim).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem('lp-desk-sidebar'))).toBeNull();
+  });
+
   test('All requests opens with the brand row; the sheet answers under its status, and Undo shows at the foot of the sheet', async ({ page }) => {
     const [one] = await createRequests(page, 1);
     await page.goto('/');
@@ -952,7 +1130,7 @@ test.describe('iPad portrait 820 × 1180 (touch)', () => {
     const title = await brandTitle(card);
     expect(title.size).toBe(19);
     expect(title.height).toBeLessThan(title.size * 1.5);
-    expect((await card.boundingBox())!.x).toBeCloseTo(60 + 24, 0);
+    expect((await card.boundingBox())!.x).toBeCloseTo(64 + 24, 0);
 
     await page.goto(`/?r=${one!.id}`);
     const pane = page.getByTestId('desk-pane');

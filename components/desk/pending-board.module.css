@@ -12,11 +12,11 @@
 
 .cols {
   --qh-top: 0px;
-  /* The window under the desk's top bar and anything pinned above the board (the connection banner: the list
-     root's --lp-sticky-h, hooks.ts useStickyHeight; F4's alerts banner: --lp-alerts-h, useHeightVar): the
-     columns scroll, the page does not. */
-  height: calc(100vh - var(--desk-top, 56px) - var(--lp-sticky-h, 0px) - var(--lp-alerts-h, 0px));
-  height: calc(100dvh - var(--desk-top, 56px) - var(--lp-sticky-h, 0px) - var(--lp-alerts-h, 0px));
+  /* The card under the desk's top bar, less anything pinned above the board (the connection banner: the list
+     root's --lp-sticky-h, hooks.ts useStickyHeight; F4's alerts banner: --lp-alerts-h, useHeightVar) and the card's
+     8 px from the window's foot (frame.module.css --desk-gap-bottom): the columns scroll, the page does not. */
+  height: calc(100vh - var(--desk-top, 56px) - var(--desk-gap-bottom, 0px) - var(--lp-sticky-h, 0px) - var(--lp-alerts-h, 0px));
+  height: calc(100dvh - var(--desk-top, 56px) - var(--desk-gap-bottom, 0px) - var(--lp-sticky-h, 0px) - var(--lp-alerts-h, 0px));
   box-sizing: border-box;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

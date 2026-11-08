@@ -1,22 +1,28 @@
 'use client';
-// Sidebar (from 1280 px) and icon rail (768–1279), design/screens/desktop-log.html .side and
-// desktop-new-tablet.html .rl. Both render; CSS shows one. At the top, the compact logo lockup (EDC Orlando |
-// Ground Control, the brand card's colours) with the live dot; then views with live counts, a divider, Dashboard;
-// at the bottom the Alerts row (it opens the Alerts sheet, F4) and the signed-in person with the phone's
-// account menu (with "Show header" on All requests while its brand row is hidden, as on the phone). F4 adds
-// Activity under the views, with the bell's unread count; it opens the top bar's Activity popover. Rail icons
-// show their label as a tooltip on hover and keyboard focus. (Telemetry, 2026-11-08) Health, the in-house telemetry's
-// page (/health, its own route), sits under Dashboard only on a device that has opened /health once
-// (localStorage lp-health): floor staff never see it.
-import { Activity, ChartColumn, ChevronDown, Inbox, List, UserRound, type LucideIcon } from 'lucide-react';
-import { useSyncExternalStore } from 'react';
+// The desk sidebar, from 768 px: shadcn/ui's Sidebar (collapsible="icon", variant="inset") in Radix Themes tokens,
+// design/screens/desktop-sidebar-inset.html (Brian 2026-11-08). One component replaced the 232 px sidebar and the
+// 60 px icon rail: 256 px with labels and counts, or 64 px of icons with the label as a tooltip. Expanded from
+// 1280 px, collapsed below, until someone toggles it (the top bar's button, the sidebar's edge, Cmd+B / Ctrl+B);
+// where an expanded sidebar would squeeze the list and an open request it opens over them instead, with a scrim
+// (./sidebar-model.ts, ./sidebar-state.ts).
+//
+// Header: the logo lockup (EDC Orlando | Ground Control, the brand card's colours) with the live dot; tap syncs.
+// Content: the views with live counts (hidden while loading), Pending's unread-messages bubble, F4's Activity (it
+// opens the top bar's Activity popover), a separator, Dashboard, and Health (the in-house telemetry's page, its own
+// route) only on a device that has opened /health once (localStorage lp-health): floor staff never see it.
+// Footer: Alerts (its switch shows this computer's alerts; the row opens the Alerts sheet) and the signed-in
+// person with the phone's account menu (with "Show header" on All requests while its brand row is hidden).
+import { Activity, ChartColumn, ChevronsUpDown, Inbox, List, UserRound, type LucideIcon } from 'lucide-react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { AccountMenu } from '@/components/account/AccountMenu';
-import { ActivityNavItemSlot, DeskAlertsRowSlot, DeskRailActivitySlot, DeskRailAlertsSlot } from '@/components/activity/slots';
+import { DeskActivitySlot, DeskAlertsRowSlot } from '@/components/activity/slots';
 import { PendingDot } from '@/components/messages/CardActivity';
 import { useActions, usePrefs, useCounts, useIsLoading, useSession } from '@/lib/client/store-contract';
 import { teamShort } from '@/lib/domain';
 import { LiveMark, Tip, ViewLink } from './parts';
 import { NAV_LABEL, NAV_PARAMS, navKeyOf, type NavKey } from './nav-model';
+import { SIDEBAR_ID } from './sidebar-model';
+import { closeSidebarOverlay, toggleSidebar, useSidebar } from './sidebar-state';
 import type { MainView } from './views';
 import d from './desk.module.css';
 
@@ -45,6 +51,8 @@ function useHealthLink(): boolean {
 export interface DeskNavProps {
   /** The view in the main column. */
   main: MainView;
+  /** A request is open in the pane (where an expanded sidebar would not fit beside it, it opens over it). */
+  pane?: boolean;
 }
 
 /**
@@ -61,58 +69,87 @@ function useShowHeader(main: MainView): (() => void) | undefined {
   };
 }
 
-export function DeskNav({ main }: DeskNavProps) {
-  return (
-    <>
-      <Sidebar main={main} />
-      <Rail main={main} />
-    </>
-  );
-}
-
-function Sidebar({ main }: DeskNavProps) {
+export function DeskNav({ main, pane = false }: DeskNavProps) {
+  const sidebar = useSidebar(pane);
   const health = useHealthLink();
   const active = navKeyOf(main);
   const counts = useCounts();
   const loading = useIsLoading();
   const showHeader = useShowHeader(main);
+
+  // Open over the content until the address changes (a view chosen, a request or a form opened) or the sidebar
+  // docks (a wider window, the request closed): then it is closed for good, not waiting to come back.
+  useEffect(() => {
+    if (!sidebar.overlay) closeSidebarOverlay();
+  });
+
+  const item = (k: NavKey) => {
+    const Icon = ICONS[k];
+    const count = k === 'dashboard' || loading ? null : counts[k];
+    return (
+      <ViewLink key={k} params={NAV_PARAMS[k]} current={active === k} className={d.item}>
+        <Icon size={16} strokeWidth={1.75} aria-hidden />
+        <span className={d.label}>{NAV_LABEL[k]}</span>
+        {count === null ? null : (
+          <>
+            {' '}
+            <span className={d.badge}>{count}</span>
+          </>
+        )}
+        {/* F3, message lane: the filled bubble while a Pending request has unread messages, right after the label
+            (read after the count: "Pending 4 Unread messages"); a dot on the icon while collapsed. */}
+        {k === 'pending' ? <PendingDot /> : null}
+        <Tip>{NAV_LABEL[k]}</Tip>
+      </ViewLink>
+    );
+  };
+
   return (
-    <div className={d.side} data-testid="desk-sidebar">
-      <div className={d.brand}>
-        <LiveMark variant="side" />
+    <>
+      <div
+        id={SIDEBAR_ID}
+        className={d.sidebar}
+        data-testid="desk-sidebar"
+        data-state={sidebar.expanded ? 'expanded' : 'collapsed'}
+        data-overlay={sidebar.overlay ? '' : undefined}
+      >
+        <div className={d.sideHead}>
+          <LiveMark />
+        </div>
+        <nav className={d.sideContent} aria-label="Views">
+          <div className={d.group}>
+            <div className={d.menu}>
+              {VIEW_KEYS.map(item)}
+              <DeskActivitySlot />
+            </div>
+          </div>
+          <span className={d.sep} aria-hidden />
+          <div className={`${d.group} ${d.groupNext}`}>
+            <div className={d.menu}>
+              {item('dashboard')}
+              {health ? (
+                // A plain link: /health is its own route.
+                <a href="/health" className={d.item} data-testid="desk-health">
+                  <Activity size={16} strokeWidth={1.75} aria-hidden />
+                  <span className={d.label}>Health</span>
+                  <Tip>Health</Tip>
+                </a>
+              ) : null}
+            </div>
+          </div>
+        </nav>
+        <div className={d.sideFoot}>
+          <div className={d.menu}>
+            <DeskAlertsRowSlot />
+            <Person onShowHeader={showHeader} />
+          </div>
+        </div>
+        {/* The sidebar's edge (shadcn SidebarRail): a click toggles it. A pointer shortcut only: keyboards have the
+            top bar's button and Cmd+B, so it is out of the tab order and hidden from assistive tech. */}
+        <button type="button" className={d.rail} tabIndex={-1} aria-hidden onClick={toggleSidebar} data-testid="desk-sidebar-rail" />
       </div>
-      <nav className={d.views} aria-label="Views">
-        {VIEW_KEYS.map((k) => {
-          const Icon = ICONS[k];
-          return (
-            <ViewLink key={k} params={NAV_PARAMS[k]} current={active === k} className={d.ni}>
-              <Icon size={16} strokeWidth={1.75} aria-hidden />
-              <span className={d.nl}>{NAV_LABEL[k]}</span>{' '}
-              {loading ? null : <span className={d.nc}>{counts[k]}</span>}
-              {/* F3, message lane: the filled bubble while a Pending request has unread messages. Drawn right after the
-                  label (CSS order), read after the count: "Pending 4 Unread messages". */}
-              {k === 'pending' ? <PendingDot /> : null}
-            </ViewLink>
-          );
-        })}
-        <ActivityNavItemSlot />
-        <span className={d.sep} aria-hidden />
-        <ViewLink params={NAV_PARAMS.dashboard} current={active === 'dashboard'} className={d.ni}>
-          <ChartColumn size={16} strokeWidth={1.75} aria-hidden />
-          <span className={d.nl}>{NAV_LABEL.dashboard}</span>
-        </ViewLink>
-        {health ? (
-          // A plain link: /health is its own route.
-          <a href="/health" className={d.ni} data-testid="desk-health">
-            <Activity size={16} strokeWidth={1.75} aria-hidden />
-            <span className={d.nl}>Health</span>
-          </a>
-        ) : null}
-      </nav>
-      <span className={d.sp} />
-      <DeskAlertsRowSlot />
-      <Person onShowHeader={showHeader} />
-    </div>
+      {sidebar.overlay ? <div className={d.scrim} aria-hidden onClick={closeSidebarOverlay} data-testid="desk-sidebar-scrim" /> : null}
+    </>
   );
 }
 
@@ -123,60 +160,14 @@ function Person({ onShowHeader }: { onShowHeader: (() => void) | undefined }) {
   const name = session.staffName ?? prefs.rememberedName ?? '';
   const team = session.team ?? prefs.rememberedTeam ?? '';
   return (
-    <div className={d.me}>
+    <div className={d.person}>
       <AccountMenu size="2" onShowHeader={onShowHeader} />
-      <span className={d.mt} aria-hidden>
-        <span className={d.mn}>{name || 'Signed in'}</span>
-        {team ? <span className={d.mteam}>{teamShort(team)}</span> : null}
+      <span className={d.personText} aria-hidden>
+        <span className={d.personName}>{name || 'Signed in'}</span>
+        {team ? <span className={d.personTeam}>{teamShort(team)}</span> : null}
       </span>
-      <ChevronDown size={14} strokeWidth={1.75} className={d.mchev} aria-hidden />
-    </div>
-  );
-}
-
-function Rail({ main }: DeskNavProps) {
-  const health = useHealthLink();
-  const active = navKeyOf(main);
-  const counts = useCounts();
-  const loading = useIsLoading();
-  const showHeader = useShowHeader(main);
-  const pending = loading ? 0 : counts.pending;
-  const item = (k: NavKey) => {
-    const Icon = ICONS[k];
-    const badge = k === 'pending' && pending > 0 ? pending : null;
-    return (
-      <ViewLink key={k} params={NAV_PARAMS[k]} current={active === k} className={`${d.ri} lp-hit`} label={badge === null ? NAV_LABEL[k] : `${NAV_LABEL[k]} ${badge}`}>
-        <Icon size={19} strokeWidth={1.75} aria-hidden />
-        {k === 'pending' ? <PendingDot rail /> : null}
-        {badge === null ? null : (
-          <span className={d.bd} aria-hidden>
-            {badge > 99 ? '99+' : badge}
-          </span>
-        )}
-        <Tip>{NAV_LABEL[k]}</Tip>
-      </ViewLink>
-    );
-  };
-  return (
-    <div className={d.rail} data-testid="desk-rail">
-      <LiveMark variant="rail" className={d.railMark} />
-      <nav className={d.railViews} aria-label="Views">
-        {VIEW_KEYS.map(item)}
-        <DeskRailActivitySlot />
-        <span className={d.railSep} aria-hidden />
-        {item('dashboard')}
-        {health ? (
-          <a href="/health" className={`${d.ri} lp-hit`} aria-label="Health" data-testid="desk-rail-health">
-            <Activity size={19} strokeWidth={1.75} aria-hidden />
-            <Tip>Health</Tip>
-          </a>
-        ) : null}
-      </nav>
-      <span className={d.sp} />
-      <DeskRailAlertsSlot />
-      <div className={d.railMe}>
-        <AccountMenu size="2" onShowHeader={showHeader} />
-      </div>
+      <ChevronsUpDown size={16} strokeWidth={1.75} className={d.personEnd} aria-hidden />
+      <Tip>{name || 'Account'}</Tip>
     </div>
   );
 }

@@ -11,7 +11,7 @@
 // needs attention) opens over it as a dialog. A form keeps one place in the tree at every width (after the
 // main column's view), so crossing 768 px (an iPad mini rotated, a window snapped to half a screen) only
 // changes how it is presented and never drops what is being typed. The frame is CSS-only and always
-// rendered (no layout flash); its sidebar / rail, top bar, pane header and keyboard come from the desk
+// rendered (no layout flash); its sidebar, top bar, pane header and keyboard come from the desk
 // chunk, loaded only on the desk. All
 // requests, My requests and Search are the desk's request table there (components/desk/table, its own
 // chunk, also desk only); Pending and the dashboard render their views as they are.
@@ -115,10 +115,10 @@ function ViewRouter({ brand }: { brand: ReactNode }) {
     <>
       <DeskFrame
         desk={desk}
-        nav={desk ? <DeskNav main={main} /> : null}
+        nav={desk ? <DeskNav main={main} pane={paneId !== null} /> : null}
         brand={showBrand ? brand : null}
         onHideBrand={hideBrand}
-        top={desk ? <DeskTop main={main} /> : null}
+        top={desk ? <DeskTop main={main} pane={paneId !== null} /> : null}
         pane={
           paneId ? (
             <DeskPane id={paneId} main={main}>

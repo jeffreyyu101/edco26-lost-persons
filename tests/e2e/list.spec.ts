@@ -301,7 +301,7 @@ test('brand row on All only: one compact row with the logos, the title and the d
   // row of its own.
   await page.setViewportSize({ width: 820, height: 1180 });
   await page.goto('/');
-  await expect(page.getByTestId('desk-rail')).toBeVisible();
+  await expect(page.getByTestId('desk-sidebar')).toHaveAttribute('data-state', 'collapsed');
   await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 10_000 });
   await expect(page.locator('[data-view] [data-testid="brand-card"]')).toHaveCount(0);
   await expect(brand(page)).toHaveCount(1);

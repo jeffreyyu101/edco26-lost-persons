@@ -5,12 +5,12 @@
 //     dimmed page above it (a tap there closes it), ✕ in its header, and a swipe down from its grabber or
 //     header (or its list scrolled to the top) closes it; focus goes back to the bell.
 //   * Desk (place "desk", in the top bar): a Popover anchored to the bell, 380 wide, at most 480 tall. The
-//     sidebar's Activity item (ActivityNavItem) and the rail's (DeskRailActivity) open the same popover.
+//     sidebar's Activity item (F4Parts DeskActivityItem) opens the same popover.
 //     Opened from any of them, focus moves into the popover (it is portalled to the end of the page, so Tab
 //     would never reach it otherwise): Tab goes on to Mark all read and the rows; Escape gives focus back to
 //     whatever opened it.
 // The open state is shared (lib/client/activity-client.ts), so the bell and the sidebar item are one control.
-import { Dialog, IconButton, Popover, VisuallyHidden } from '@radix-ui/themes';
+import { Dialog, IconButton, Popover } from '@radix-ui/themes';
 import { X } from 'lucide-react';
 import { useEffect, useRef, useState, type ComponentPropsWithRef, type ReactElement } from 'react';
 import { useInDesk } from '@/components/desk/desk-context';
@@ -112,7 +112,7 @@ export function ActivityBell({ place }: ActivityBellProps) {
   const activity = useActivity();
   const inDesk = useInDesk();
   const client = activityClient();
-  /** What had focus when the popover opened (the bell, the sidebar or the rail item): Escape returns there. */
+  /** What had focus when the popover opened (the bell or the sidebar's item): Escape returns there. */
   const opener = useRef<HTMLElement | null>(null);
   /** It closed because of a click or focus outside: focus stays where the person put it. */
   const outside = useRef(false);
@@ -161,32 +161,5 @@ export function ActivityBell({ place }: ActivityBellProps) {
         />
       </Popover.Content>
     </Popover.Root>
-  );
-}
-
-/** The sidebar's Activity item, with the same count; it opens the top bar's popover. */
-export function ActivityNavItem() {
-  useStarted();
-  const activity = useActivity();
-  const text = badgeText(activity.unread);
-  return (
-    <button
-      type="button"
-      className={s.navItem}
-      aria-haspopup="dialog"
-      aria-expanded={activity.open}
-      onClick={() => activityClient().setOpen(true)}
-      data-testid="desk-activity"
-    >
-      <BellIcon size={16} strokeWidth={1.75} />
-      {/* Named by what it shows, "Activity 3", then " unread" for screen readers (WCAG 2.5.3). */}
-      <span className={s.navLabel}>Activity</span>{' '}
-      {text ? (
-        <>
-          <span className={s.navBadge}>{text}</span>
-          <VisuallyHidden> unread</VisuallyHidden>
-        </>
-      ) : null}
-    </button>
   );
 }

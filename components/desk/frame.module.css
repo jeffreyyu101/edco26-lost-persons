@@ -1,7 +1,12 @@
-/* Desk frame (design/screens/desktop-log.html .win / .side / .main / .top / .panel, desktop-new-tablet.html
-   .rail / .sheet). Under 768 px nothing here applies except hiding the empty desk slots: the phone app is
-   unchanged. The document stays the scroller on the desk too (the list's scroll memory and sticky bars keep
-   working); the sidebar, top bar and docked pane are sticky. */
+/* Desk frame (design/screens/desktop-sidebar-inset.html, shadcn/ui Sidebar variant="inset", Brian 2026-11-08; the
+   pane and sheet from desktop-log.html .panel and desktop-new-tablet.html .sheet). From 768 px the page behind is the
+   sidebar's colour and the main column (top bar, list, and the request pane when it is open) is ONE rounded card,
+   8 px from the window's top, right and bottom. Under 768 px nothing here applies except hiding the empty desk slots
+   (the card's wrapper is display: contents): the phone app is unchanged.
+   The document stays the scroller on the desk too (the list's scroll memory and sticky bars keep working): the
+   sidebar, the top bar and the docked pane are sticky, and two fixed masks (the frame's ::before and ::after) keep
+   the card's rounded edge 8 px inside the window's top and bottom while the page scrolls under them. At rest they
+   lie exactly over the card's own corners and edge line, which they redraw. */
 
 .nav,
 .brand,
@@ -9,36 +14,114 @@
   display: none;
 }
 
+.inset {
+  display: contents;
+}
+
+/* The sidebar's column: 256 px expanded, 64 px collapsed to icons (components/desk/sidebar-model.ts). Expanded from
+   1280 px, collapsed below, unless chosen on this device: <html data-desk-sidebar>, set before the first paint
+   (lib/desk-sidebar-pref.ts), so the column has its width from the start. At 1024–1279 a chosen expanded sidebar
+   docks only while no request is open; with one, the toggle opens it over the content (the sidebar's data-overlay).
+   On <html> so the Undo snackbar, outside the frame, can follow the columns. */
+@media (min-width: 768px) {
+  :global(html):has(.frame) {
+    --desk-nav: calc(64px + env(safe-area-inset-left));
+    --desk-gap-top: calc(8px + env(safe-area-inset-top));
+    --desk-gap-right: calc(8px + env(safe-area-inset-right));
+    --desk-gap-bottom: calc(8px + env(safe-area-inset-bottom));
+    /* Where the content starts under the stuck top bar (48 px): the sticky table header, Pending's board, the
+       list's sticky chips and scroll margins use it. */
+    --desk-top: calc(var(--desk-gap-top) + 48px);
+    --desk-pane: 0px;
+    /* The card's edge where the masks redraw it: its ring on top, ring and shadow under it. */
+    --desk-edge-top: rgb(0 0 0 / 0.04);
+    --desk-edge-bottom: rgb(0 0 0 / 0.1);
+  }
+  :global(html.dark):has(.frame) {
+    --desk-edge-top: transparent;
+    --desk-edge-bottom: rgb(0 0 0 / 0.45);
+  }
+  :global(body):has(.frame[data-desk]) {
+    background: var(--gray-2);
+  }
+}
+
+@media (min-width: 1024px) {
+  :global(html[data-desk-sidebar='expanded']):has(.frame:not([data-pane])) {
+    --desk-nav: calc(256px + env(safe-area-inset-left));
+  }
+  :global(html):has(.frame[data-pane]) {
+    --desk-pane: 420px;
+  }
+}
+
+@media (min-width: 1280px) {
+  :global(html):has(.frame) {
+    --desk-nav: calc(256px + env(safe-area-inset-left));
+  }
+  :global(html[data-desk-sidebar='collapsed']):has(.frame) {
+    --desk-nav: calc(64px + env(safe-area-inset-left));
+  }
+  :global(html):has(.frame[data-pane]) {
+    --desk-pane: 452px;
+  }
+}
+
 @media (min-width: 768px) {
   .frame {
-    --desk-nav: calc(60px + env(safe-area-inset-left));
-    --desk-top: calc(56px + env(safe-area-inset-top));
     display: grid;
     grid-template-columns: var(--desk-nav) minmax(0, 1fr);
     min-height: 100vh;
     min-height: 100dvh;
-    background: var(--color-background);
+    background: var(--gray-2);
+    transition: grid-template-columns 200ms linear;
   }
 
   .nav {
-    display: flex;
-    flex-direction: column;
+    display: block;
     position: sticky;
     top: 0;
     align-self: start;
-    z-index: 6;
+    z-index: 7;
     height: 100vh;
     height: 100dvh;
-    box-sizing: border-box;
-    padding-left: env(safe-area-inset-left);
+    min-width: 0;
     background: var(--gray-2);
-    border-right: 1px solid var(--gray-a4);
+  }
+  /* Open over the content: above the card, its masks and a request sheet. */
+  .nav:has([data-overlay]) {
+    z-index: 9;
+  }
+
+  /* The inset card: the main column and the docked pane. overflow: clip (not hidden) rounds its corners without
+     making it a scroller, so the top bar and the pane stay sticky to the page. Its colour is the page's background
+     (shadcn's SidebarInset bg-background): gray-1 in dark mode; white in light, where the table's selected row on
+     gray-1 left its blue status under 4.5:1. */
+  .inset {
+    grid-column: 2;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    min-width: 0;
+    min-height: calc(100vh - var(--desk-gap-top) - var(--desk-gap-bottom));
+    min-height: calc(100dvh - var(--desk-gap-top) - var(--desk-gap-bottom));
+    margin: var(--desk-gap-top) var(--desk-gap-right) var(--desk-gap-bottom) 0;
+    border-radius: 12px;
+    overflow: clip;
+    background: var(--color-background);
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.08),
+      0 0 0 1px rgb(0 0 0 / 0.04);
+  }
+  :global(.dark) .inset {
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.5);
   }
 
   .main {
     min-width: 0;
     display: flex;
     flex-direction: column;
+    align-self: stretch;
   }
 
   /* Jeffrey's brand row on All requests (components/list/brand.module.css places it for the desk): above the
@@ -46,7 +129,6 @@
   .brand {
     display: block;
     container: desk-brand / inline-size;
-    padding-top: env(safe-area-inset-top);
   }
   /* Hidden with its X on this device: the pre-paint script marks <html> (lib/brand-pref.ts), so the row the
      server drew never shows, not even before hydration drops it. */
@@ -57,11 +139,10 @@
   .top {
     display: block;
     position: sticky;
-    top: 0;
+    top: var(--desk-gap-top);
     z-index: 5;
-    height: var(--desk-top);
+    height: 48px;
     box-sizing: border-box;
-    padding-top: env(safe-area-inset-top);
     background: var(--color-background);
     border-bottom: 1px solid var(--gray-a4);
   }
@@ -71,18 +152,58 @@
     min-width: 0;
   }
 
-  /* 768–1023: the request is a 480 px sheet over the right of the list. No scrim: the list stays visible and
-     usable behind it. No transform (an animated sheet would trap the photo viewer's position: fixed). */
+  /* The masks: the band over the window's top and bottom 8 px (the page's colour) and the card's rounded corners
+     under and over it, so rows scrolling past the top bar or the window's foot meet the card's edge, not the
+     window's. Each corner is a 13 px tile (the 12 px radius and the 1 px edge line outside it). They follow the
+     sidebar's column as it opens and closes. */
+  .frame::before,
+  .frame::after {
+    content: '';
+    position: fixed;
+    z-index: 6;
+    left: calc(var(--desk-nav) - 1px);
+    right: 0;
+    pointer-events: none;
+    transition: left 200ms linear;
+  }
+  .frame::before {
+    top: 0;
+    height: calc(var(--desk-gap-top) + 12px);
+    background:
+      linear-gradient(var(--desk-edge-top), var(--desk-edge-top)) left 13px top calc(var(--desk-gap-top) - 1px) /
+        calc(100% - 25px - var(--desk-gap-right)) 1px no-repeat,
+      linear-gradient(var(--gray-2), var(--gray-2)) left top / 100% var(--desk-gap-top) no-repeat,
+      radial-gradient(circle at 100% 100%, transparent 12px, var(--desk-edge-top) 12px, var(--desk-edge-top) 13px, var(--gray-2) 13px) left 0
+        top calc(var(--desk-gap-top) - 1px) / 13px 13px no-repeat,
+      radial-gradient(circle at 0 100%, transparent 12px, var(--desk-edge-top) 12px, var(--desk-edge-top) 13px, var(--gray-2) 13px)
+        right calc(var(--desk-gap-right) - 1px) top calc(var(--desk-gap-top) - 1px) / 13px 13px no-repeat;
+  }
+  .frame::after {
+    bottom: 0;
+    height: calc(var(--desk-gap-bottom) + 12px);
+    background:
+      linear-gradient(var(--desk-edge-bottom), var(--desk-edge-bottom)) left 13px bottom calc(var(--desk-gap-bottom) - 1px) /
+        calc(100% - 25px - var(--desk-gap-right)) 1px no-repeat,
+      linear-gradient(var(--gray-2), var(--gray-2)) left bottom / 100% var(--desk-gap-bottom) no-repeat,
+      radial-gradient(circle at 100% 0, transparent 12px, var(--desk-edge-bottom) 12px, var(--desk-edge-bottom) 13px, var(--gray-2) 13px)
+        left 0 bottom calc(var(--desk-gap-bottom) - 1px) / 13px 13px no-repeat,
+      radial-gradient(circle at 0 0, transparent 12px, var(--desk-edge-bottom) 12px, var(--desk-edge-bottom) 13px, var(--gray-2) 13px)
+        right calc(var(--desk-gap-right) - 1px) bottom calc(var(--desk-gap-bottom) - 1px) / 13px 13px no-repeat;
+  }
+
+  /* 768–1023: the request is a 480 px sheet over the right of the list, in the card's place. No scrim: the list
+     stays visible and usable behind it. No transform (an animated sheet would trap the photo viewer's position:
+     fixed). */
   .pane {
     position: fixed;
     z-index: 7;
-    top: calc(10px + env(safe-area-inset-top));
-    right: calc(10px + env(safe-area-inset-right));
-    bottom: calc(10px + env(safe-area-inset-bottom));
-    width: min(480px, calc(100vw - var(--desk-nav) - 20px));
+    top: var(--desk-gap-top);
+    right: var(--desk-gap-right);
+    bottom: var(--desk-gap-bottom);
+    width: min(480px, calc(100vw - var(--desk-nav) - 16px));
     display: flex;
     flex-direction: column;
-    border-radius: 14px;
+    border-radius: 12px;
     overflow: hidden;
     background: var(--color-background);
     box-shadow:
@@ -90,18 +211,20 @@
       0 24px 64px -12px rgba(0, 0, 0, 0.45);
   }
 
-  /* A form covers the main column and the pane; the sidebar stays in view (inert while it is open). Layout
-     containment makes this layer the containing block of the form's own position: fixed frame. */
+  /* A form covers the card (the main column and the pane); the sidebar stays in view (inert while it is open).
+     Layout containment makes this layer the containing block of the form's own position: fixed frame. */
   .form {
     position: fixed;
     z-index: 8;
-    top: 0;
-    right: 0;
-    bottom: 0;
+    top: var(--desk-gap-top);
+    right: var(--desk-gap-right);
+    bottom: var(--desk-gap-bottom);
     left: var(--desk-nav);
     contain: layout;
+    border-radius: 12px;
+    overflow: hidden;
     background: var(--color-background);
-    border-left: 1px solid var(--gray-a4);
+    box-shadow: 0 0 0 1px var(--gray-a4);
   }
   /* The form portalled its own dialog (side sheet / modal): nothing to cover, the list shows behind it. */
   .form:empty {
@@ -139,80 +262,70 @@
   .content > [data-view] > main {
     padding-bottom: 24px;
   }
-  /* Pending's board fills the window under the top bar and scrolls in its columns (pending-board.module.css). */
+  /* Pending's board fills the card under the top bar and scrolls in its columns (pending-board.module.css). */
   .content > [data-view='pending'] > main {
     padding-bottom: 0;
   }
   .content [data-request-id] {
     scroll-margin-top: calc(var(--desk-top) + 72px);
-    scroll-margin-bottom: 16px;
+    scroll-margin-bottom: calc(var(--desk-gap-bottom) + 16px);
   }
 }
 
 @media (min-width: 1024px) {
-  .frame[data-pane] {
-    grid-template-columns: var(--desk-nav) minmax(0, 1fr) 420px;
+  .frame[data-pane] .inset {
+    grid-template-columns: minmax(0, 1fr) var(--desk-pane);
   }
 
-  /* Docked beside the list. */
+  /* Docked beside the list, inside the card. */
   .pane {
     position: sticky;
-    top: 0;
+    top: var(--desk-gap-top);
     right: auto;
     bottom: auto;
     align-self: start;
     z-index: 4;
     width: auto;
-    height: 100vh;
-    height: 100dvh;
+    height: calc(100vh - var(--desk-gap-top) - var(--desk-gap-bottom));
+    height: calc(100dvh - var(--desk-gap-top) - var(--desk-gap-bottom));
     border-radius: 0;
     box-shadow: none;
     border-left: 1px solid var(--gray-a4);
   }
 }
 
-@media (min-width: 1280px) {
-  .frame {
-    --desk-nav: calc(232px + env(safe-area-inset-left));
-  }
-  .frame[data-pane] {
-    grid-template-columns: var(--desk-nav) minmax(0, 1fr) 452px;
+@media (min-width: 768px) and (prefers-reduced-motion: reduce) {
+  .frame,
+  .frame::before,
+  .frame::after {
+    transition: none;
   }
 }
 
 /* ---- The Undo snackbar on the desk ------------------------------------------------------------------------
    The shell's snackbar (components/ui/Toast.tsx, .lp-snack) is centred on the window on a phone. On the desk
-   it stays in the main column, clear of the sidebar / rail and of an open request: it never covers the
+   it stays in the card's main column, clear of the sidebar and of an open request: it never covers the
    pane's actions, and the pane never covers it. On an iPad in portrait the request is a sheet over the list,
    so the snackbar sits at the foot of that sheet, where the answer was given. */
 @media (min-width: 768px) {
   :global(body):has(.frame[data-desk]) :global(.lp-snack) {
-    left: calc(60px + env(safe-area-inset-left) + 12px);
-    right: calc(12px + env(safe-area-inset-right));
+    left: calc(var(--desk-nav) + 12px);
+    right: calc(var(--desk-gap-right) + 12px);
   }
 }
 
 @media (min-width: 768px) and (max-width: 1023.98px) {
   :global(body):has(.frame[data-desk][data-pane]) :global(.lp-snack) {
     left: auto;
-    right: calc(22px + env(safe-area-inset-right));
+    right: calc(var(--desk-gap-right) + 12px);
     box-sizing: border-box;
-    width: min(456px, calc(100vw - 60px - 44px));
+    width: min(456px, calc(100vw - var(--desk-nav) - 40px));
     margin: 0;
   }
 }
 
 @media (min-width: 1024px) {
   :global(body):has(.frame[data-desk][data-pane]) :global(.lp-snack) {
-    right: calc(420px + 12px);
-  }
-}
-
-@media (min-width: 1280px) {
-  :global(body):has(.frame[data-desk]) :global(.lp-snack) {
-    left: calc(232px + env(safe-area-inset-left) + 12px);
-  }
-  :global(body):has(.frame[data-desk][data-pane]) :global(.lp-snack) {
-    right: calc(452px + 12px);
+    right: calc(var(--desk-gap-right) + var(--desk-pane) + 12px);
   }
 }

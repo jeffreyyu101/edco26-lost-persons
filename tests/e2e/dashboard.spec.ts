@@ -576,7 +576,7 @@ test.describe('with /api/stats mocked', () => {
     await page.setViewportSize({ width: 1100, height: 800 });
     await page.goto('/?dashboard=1');
     await expect(page.getByTestId('open-count')).toHaveText('7');
-    await expect(page.getByTestId('desk-rail')).toBeVisible();
+    await expect(page.getByTestId('desk-sidebar')).toHaveAttribute('data-state', 'collapsed');
     // The shell's top bar is the title: one h1, no Back, and the live line beside it (live-indicator.html,
     // Desktop frame): the last stats fetch in minutes and Refresh now. One line on the page; no chip.
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Dashboard');
@@ -589,9 +589,10 @@ test.describe('with /api/stats mocked', () => {
     await expect(page.getByTestId('live-indicator')).toHaveCount(1);
     await expect(page.getByTestId('dashboard-connection')).toHaveCount(0);
     await expect(page.getByTestId('connection-banner')).toHaveCount(0);
-    // The tiles start where the top bar's title does.
-    const title = (await page.getByRole('heading', { level: 1 }).boundingBox())!;
-    expect(Math.abs((await box(page, 'tile-open')).x - Math.round(title.x))).toBeLessThanOrEqual(1);
+    // The tiles start 24 px into the card, where the rows' text and the brand row start (the top bar's title now
+    // follows the sidebar's toggle).
+    const column = (await page.locator('[data-desk-main]').boundingBox())!;
+    expect(Math.abs((await box(page, 'tile-open')).x - Math.round(column.x + 24))).toBeLessThanOrEqual(1);
 
     // 1100 px (a 1040 px column): six in one row, values on one line, the split bar and Reunited's
     // "+1 discharged · 1 cancelled" under them.

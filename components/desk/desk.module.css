@@ -1,12 +1,11 @@
-/* Desk chrome, ported from design/screens/desktop-log.html (.side, .ni, .bell, .me, .top, .search, .kbd,
-   .newb, .panel, .ph, .ib) and desktop-new-tablet.html (.rl, .ri, .bd). Text that the mockups draw in
-   gray-9 / gray-10 uses gray-11 here: gray-10 is under 4.5:1 on these backgrounds (spec §7, WCAG AA).
-   Touch screens (iPad, also in the sidebar layout on a 12.9" iPad) get 44 px targets. */
+/* Desk chrome: the sidebar and top bar from design/screens/desktop-sidebar-inset.html (shadcn/ui Sidebar,
+   variant "inset", Brian 2026-11-08), the search field, caps and pane from desktop-log.html (.search, .kbd, .panel,
+   .ph, .ib). Text that the mockups draw in gray-9 / gray-10 uses gray-11 here: gray-10 is under 4.5:1 on these
+   backgrounds (spec §7, WCAG AA). Touch screens (iPad, also with the sidebar open on a 12.9" iPad) get 44 px
+   targets. */
 
-.side,
-.side *,
-.rail,
-.rail *,
+.sidebar,
+.sidebar *,
 .topbar,
 .topbar *,
 .pane,
@@ -18,71 +17,256 @@
   flex: 1;
 }
 
-/* ---- Sidebar (≥ 1280) and rail (768–1279): CSS shows one ------------------------------------------ */
+/* ---- The sidebar (from 768 px) -----------------------------------------------------------------------------
+   shadcn/ui's Sidebar (collapsible="icon", variant="inset") in Radix Themes tokens, design/screens/
+   desktop-sidebar-inset.html: header (the lockup), content (groups of 32 px items with a separator), footer (Alerts,
+   the person). It fills its column (frame.module.css --desk-nav: 256 px, or 64 px of icons), or opens 256 px wide
+   over the content (data-overlay, with a scrim). data-state: expanded | collapsed. */
 
-.side,
-.rail {
-  display: none;
+.sidebar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: var(--desk-nav, 256px);
+  height: 100%;
+  min-height: 0;
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left);
+  background: var(--gray-2);
+  color: var(--gray-12);
+  font-size: 14px;
+  transition: width 200ms linear;
 }
 
-@media (min-width: 768px) and (max-width: 1279.98px) {
-  .rail {
-    display: flex;
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .switch,
+  .switch::after {
+    transition: none;
   }
 }
 
-@media (min-width: 1280px) {
-  .side {
-    display: flex;
-  }
+.sidebar[data-overlay] {
+  position: fixed;
+  z-index: 1;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: calc(256px + env(safe-area-inset-left));
+  box-shadow:
+    0 0 0 1px var(--gray-a4),
+    0 16px 48px -8px rgb(0 0 0 / 0.35);
 }
 
-.side {
+.scrim {
+  position: fixed;
+  z-index: 0;
+  inset: 0;
+  background: var(--black-a6);
+}
+
+.sideHead,
+.sideFoot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+}
+
+.sideContent {
   flex: 1;
   min-height: 0;
-  flex-direction: column;
-  padding: calc(14px + env(safe-area-inset-top)) 10px calc(14px + env(safe-area-inset-bottom));
-}
-
-.brand {
   display: flex;
-  min-width: 0;
-  padding: 0 0 14px;
+  flex-direction: column;
+  gap: 8px;
 }
 
-/* The compact logo lockup (LiveMark): EDC Orlando (made white) | Ground Control on the brand card's dark
-   gradient (components/list/brand.module.css), the same in both themes. Its corner dot is the live state
-   (the phone header's live dot). Tap to sync now. */
-.lockup {
+.group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 8px;
+}
+/* The group after the separator starts right under it (the mockup's 16 px above the line, 8 px below). */
+.groupNext {
+  padding-top: 0;
+}
+
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.sep {
+  display: block;
+  flex: none;
+  height: 1px;
+  margin: 0 16px;
+  background: var(--gray-a4);
+}
+
+/* A menu item (SidebarMenuButton): 32 px, label and icon at full contrast; hover and the current view on gray-4. */
+.item {
   position: relative;
-  isolation: isolate;
-  flex: 1;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--gray-12);
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.item > svg {
+  flex: none;
+}
+.item:hover,
+.item[aria-current='page'] {
+  background: var(--gray-4);
+}
+.item[aria-current='page'] {
+  font-weight: 500;
+}
+.item:focus-visible,
+.lockup:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -2px;
+}
+/* Expanded, a row clips what does not fit yet while the sidebar opens (collapsed, its tooltip must show). */
+.sidebar[data-state='expanded'] .item {
+  overflow: hidden;
+}
+
+.label {
   min-width: 0;
-  height: 44px;
-  padding: 0 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The count (SidebarMenuBadge): at the row's right edge. */
+.badge {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  translate: 0 -50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  min-width: 20px;
+  padding: 0 4px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--gray-12);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Pending's unread-messages bubble (components/messages PendingDot), right after the label. */
+.item [data-testid='unread-mark'] {
+  width: 12px;
+  height: 12px;
+  margin-left: 2px;
+}
+
+/* The Alerts switch (shadcn Switch, 32 × 18): this computer's alerts, on / off; dimmed when the browser blocks
+   them. Decoration: the row is a button that opens the Alerts sheet, named "Alerts On". */
+.switch {
+  position: relative;
+  flex: none;
+  margin-left: auto;
+  width: 32px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--gray-a5);
+  transition: background-color 0.15s;
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-background);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
+  transition: transform 0.15s;
+}
+:global(.dark) .switch::after {
+  background: var(--gray-12);
+}
+.switch[data-on] {
+  background: var(--gray-12);
+}
+.switch[data-on]::after {
+  background: var(--gray-1);
+  box-shadow: none;
+  transform: translateX(14px);
+}
+.switch[data-blocked] {
+  opacity: 0.5;
+}
+
+/* The logo lockup (LiveMark): EDC Orlando (made white) | Ground Control on the brand card's dark gradient
+   (components/list/brand.module.css), the same in both themes; its corner dot is the live state (the phone
+   header's live dot). Tap to sync now. Collapsed: the EDC logo alone on a 32 px tile. */
+.lockup {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+/* 44 px to tap while collapsed (lp-hit's rule: nothing added to a larger box). */
+.lockup::before {
+  content: '';
+  position: absolute;
+  inset: min(0px, calc((100% - 44px) / 2));
+}
+
+.lockArt {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  overflow: hidden;
+  isolation: isolate;
   border: 1px solid #44316c;
-  border-radius: 10px;
+  border-radius: inherit;
   background:
     radial-gradient(ellipse at 10% 140%, rgb(232 63 145 / 0.55) 0, transparent 55%),
     radial-gradient(ellipse at 88% -50%, rgb(37 199 215 / 0.45) 0, transparent 50%),
     linear-gradient(112deg, #181329 4%, #36205a 55%, #211835 100%);
   color-scheme: dark;
-  font: inherit;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
 }
-.lockup:hover {
+.lockup:hover .lockArt {
   border-color: #5b4589;
 }
-.lockup:focus-visible {
-  outline: 2px solid var(--focus-8);
-  outline-offset: 2px;
-}
 
-.lockup img {
+.lockArt img {
   display: block;
   width: auto;
   flex: none;
@@ -93,6 +277,54 @@
 .lockEdc {
   height: 24px;
   filter: brightness(0) invert(1);
+}
+
+/* Easter egg: hovering the lockup with a mouse runs a rainbow left to right through the white EDC Orlando
+   logo. The layer sits exactly on the logo and is masked by the logo's own alpha, so only the white part
+   changes; Ground Control and the card stay as they are. Mouse / trackpad only (never touch screens); a still
+   rainbow under reduced motion. */
+.lockEdcWrap {
+  position: relative;
+  display: block;
+  flex: none;
+  line-height: 0;
+}
+.lockRainbow {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, #ff3cac, #ff8a3d, #ffe14d, #4dffa6, #2bd9fe, #6a7bff, #c86bff, #ff3cac);
+  background-size: 200% 100%;
+  -webkit-mask: url('/logos/edc-orlando.png') center / contain no-repeat;
+  mask: url('/logos/edc-orlando.png') center / contain no-repeat;
+  transition: opacity 0.25s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .lockup:hover .lockRainbow {
+    opacity: 1;
+    animation: edcRainbow 2.4s linear infinite;
+  }
+  .lockup:hover .lockEdcWrap {
+    filter: drop-shadow(0 0 6px rgb(255 120 220 / 0.35));
+  }
+}
+/* background-position 200% → 0 moves the 2×-wide gradient to the right: the colours run left to right. */
+@keyframes edcRainbow {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lockRainbow {
+    transition: none;
+  }
+  .lockup:hover .lockRainbow {
+    animation: none;
+  }
 }
 
 .lockDiv {
@@ -106,31 +338,12 @@
   height: 19px;
 }
 
-/* The rail: a 44 px square, the two logos stacked. */
-.lockup[data-variant='rail'] {
-  flex: none;
-  width: 44px;
-  padding: 0;
-  flex-direction: column;
-  justify-content: center;
-  gap: 3px;
-}
-.lockup[data-variant='rail'] .lockDiv {
-  display: none;
-}
-.lockup[data-variant='rail'] .lockEdc {
-  height: 16px;
-}
-.lockup[data-variant='rail'] .lockGc {
-  height: 11px;
-}
-
 .live {
   position: absolute;
+  top: -3px;
   right: -3px;
-  bottom: -3px;
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: var(--green-9);
   box-shadow: 0 0 0 2px var(--gray-2);
@@ -144,274 +357,184 @@
   background: var(--gray-8);
 }
 
-.views {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.ni {
+/* The signed-in person (a 48 px SidebarMenuButton size lg): the account menu's avatar button stretches its hit
+   area over the whole row; a 32 px rounded-square avatar, the name, the team, ⇅ at the end. */
+.person {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: 32px;
-  padding: 0 8px;
-  border-radius: 7px;
-  font-size: 14px;
-  line-height: 1;
-  color: var(--gray-11);
-  text-decoration: none;
-  -webkit-tap-highlight-color: transparent;
-}
-.ni svg {
-  flex: none;
-  color: var(--gray-10);
-}
-.ni:hover {
-  background: var(--gray-a3);
-  color: var(--gray-12);
-}
-.ni[aria-current='page'] {
-  background: var(--gray-a4);
-  color: var(--gray-12);
-  font-weight: 500;
-}
-.ni[aria-current='page'] svg {
-  color: var(--gray-12);
-}
-.ni:focus-visible,
-.bell:focus-visible,
-.ri:focus-visible {
-  outline: 2px solid var(--focus-8);
-  outline-offset: -2px;
-}
-
-.nl {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.nc {
-  order: 2;
-  margin-left: auto;
-  font-size: 12.5px;
-  font-weight: 400;
-  color: var(--gray-11);
-  font-variant-numeric: tabular-nums;
-}
-
-.sep {
-  display: block;
-  height: 1px;
-  background: var(--gray-a4);
-  margin: 10px 8px;
-}
-
-/* The Alerts row is the switch. */
-.bell {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  height: 32px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 7px;
-  background: none;
-  font: inherit;
-  font-size: 14px;
-  line-height: 1;
-  color: var(--gray-11);
-  text-align: left;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.bell svg {
-  flex: none;
-  color: var(--gray-10);
-}
-.bell:hover {
-  background: var(--gray-a3);
-}
-.bell[aria-checked='true'] svg {
+  height: 48px;
+  min-width: 0;
+  padding: 8px;
+  border-radius: 6px;
   color: var(--gray-12);
 }
-
-.sw {
-  position: relative;
-  flex: none;
-  margin-left: auto;
-  width: 28px;
-  height: 16px;
-  border-radius: 8px;
-  box-shadow: inset 0 0 0 1.5px var(--gray-a8);
-  transition: background-color 0.15s;
+.person:hover {
+  background: var(--gray-4);
 }
-.sw::after {
-  content: '';
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--gray-10);
-  transition: transform 0.15s;
-}
-.sw[data-on] {
-  background: var(--gray-12);
-  box-shadow: none;
-}
-.sw[data-on]::after {
-  top: 2px;
-  left: 2px;
-  width: 12px;
-  height: 12px;
-  background: var(--gray-1);
-  transform: translateX(12px);
-}
-
-/* The signed-in person. The account menu's avatar button stretches its hit area over the whole row. */
-.me {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 2px;
-  padding: 8px;
-  border-radius: 8px;
-  min-width: 0;
-}
-.me:hover {
-  background: var(--gray-a3);
-}
-.me:has(:focus-visible) {
+.person:has(:focus-visible) {
   outline: 2px solid var(--focus-8);
   outline-offset: -2px;
 }
-.me [data-testid='account-trigger'] {
+.person [data-testid='account-trigger'] {
   position: static;
   flex: none;
-}
-.me [data-testid='account-trigger']::after {
-  inset: 0;
   border-radius: 8px;
 }
-.me [data-testid='account-trigger']:focus-visible {
+.person [data-testid='account-trigger']::after {
+  inset: 0;
+  border-radius: 6px;
+}
+.person [data-testid='account-trigger']:focus-visible {
   outline: none;
 }
-
-.mt {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
+.person :global(.rt-AvatarRoot) {
+  border-radius: 8px;
+}
+.person :global(.rt-AvatarFallback) {
+  background-color: var(--gray-5);
+  color: var(--gray-12);
+  font-size: 12px;
+  font-weight: 600;
 }
 
-.mn,
-.mteam {
+.personText {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.25;
+  text-align: left;
+}
+
+.personName,
+.personTeam {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.mn {
-  font-size: 13.5px;
+.personName {
+  font-size: 14px;
   font-weight: 500;
-  color: var(--gray-12);
 }
 
-.mteam {
+.personTeam {
   font-size: 12px;
   color: var(--gray-11);
 }
 
-.mchev {
+.personEnd {
   flex: none;
-  color: var(--gray-10);
+  margin-left: auto;
 }
 
-/* Rail */
+/* The sidebar's edge (SidebarRail): 16 px to click, a 2 px line on hover. Not on touch screens. */
 .rail {
-  flex: 1;
-  min-height: 0;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: calc(14px + env(safe-area-inset-top)) 0 calc(14px + env(safe-area-inset-bottom));
-}
-
-.railMark {
-  margin-bottom: 8px;
-}
-
-.railViews {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-
-.ri {
-  width: 40px;
-  height: 40px;
-  border: 0;
-  padding: 0;
-  border-radius: 9px;
-  display: grid;
-  place-items: center;
-  background: none;
-  color: var(--gray-11);
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.ri:hover {
-  background: var(--gray-a3);
-  color: var(--gray-12);
-}
-.ri[aria-current='page'],
-.ri[data-on] {
-  color: var(--gray-12);
-}
-.ri[aria-current='page'] {
-  background: var(--gray-a4);
-}
-
-.bd {
   position: absolute;
-  top: 4px;
-  right: 3px;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 3px;
-  border-radius: 8px;
-  background: var(--gray-12);
-  color: var(--gray-1);
-  font-size: 9.5px;
-  font-weight: 600;
-  line-height: 1;
-  display: grid;
-  place-items: center;
-  font-variant-numeric: tabular-nums;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  right: -8px;
+  width: 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: w-resize;
+}
+.sidebar[data-state='collapsed'] .rail {
+  cursor: e-resize;
+}
+.rail::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 7px;
+  width: 2px;
+  background: transparent;
+  transition: background-color 0.15s;
+}
+.rail:hover::after {
+  background: var(--gray-a6);
+}
+@media (hover: none), (pointer: coarse) {
+  .rail {
+    display: none;
+  }
 }
 
-.railSep {
-  display: block;
-  width: 28px;
+/* ---- Collapsed: 32 px icons, centred; labels, counts, the switch and ⇅ hidden (the names stay for screen
+   readers: labels and counts are visually hidden, not removed). ---- */
+.sidebar[data-state='collapsed'] :is(.menu, .sideHead) {
+  align-items: center;
+}
+.sidebar[data-state='collapsed'] .item {
+  width: 32px;
+  padding: 8px;
+}
+.sidebar[data-state='collapsed'] :is(.label, .badge) {
+  position: absolute;
+  width: 1px;
   height: 1px;
-  margin: 4px 0;
-  background: var(--gray-a4);
+  min-width: 0;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  translate: none;
+}
+.sidebar[data-state='collapsed'] :is(.switch, .personText, .personEnd) {
+  display: none;
+}
+/* Pending's unread messages: a 7 px dot on the icon's top right. */
+.sidebar[data-state='collapsed'] .item [data-testid='unread-mark'] {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  margin: 0;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 2px var(--gray-2);
+}
+.sidebar[data-state='collapsed'] .item:is(:hover, [aria-current='page']) [data-testid='unread-mark'] {
+  box-shadow: 0 0 0 2px var(--gray-4);
+}
+.sidebar[data-state='collapsed'] .item [data-testid='unread-mark'] > * {
+  display: none;
+}
+.sidebar[data-state='collapsed'] .lockup {
+  width: 32px;
+  height: 32px;
+  flex: none;
+}
+.sidebar[data-state='collapsed'] .lockArt {
+  gap: 0;
+}
+.sidebar[data-state='collapsed'] :is(.lockDiv, .lockGc) {
+  display: none;
+}
+.sidebar[data-state='collapsed'] .lockEdc {
+  height: 15px;
+}
+.sidebar[data-state='collapsed'] .person {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+/* Collapsed, the avatar is the whole row: its own 44 px hit area (account.module.css .trigger) is back. */
+.sidebar[data-state='collapsed'] .person [data-testid='account-trigger'] {
+  position: relative;
+}
+.sidebar[data-state='collapsed'] .person [data-testid='account-trigger']::after {
+  inset: -6px;
 }
 
-.railMe {
-  margin-top: 6px;
-  display: grid;
-  place-items: center;
-}
-
-/* Tooltips (Tip): to the right of a rail icon, or under a pane button. */
+/* Tooltips (Tip): beside each item of the collapsed sidebar, or under a pane button. */
 .tip {
   position: absolute;
   z-index: 10;
@@ -443,11 +566,16 @@
   right: 0;
   translate: none;
 }
-:is(.ri, .ib):hover > .tip,
-:is(.ri, .ib):focus-visible > .tip {
+.ib:hover > .tip,
+.ib:focus-visible > .tip,
+.sidebar[data-state='collapsed'] :is(.item, .lockup):is(:hover, :focus-visible) > .tip,
+.sidebar[data-state='collapsed'] .person:is(:hover, :has(:focus-visible)) > .tip {
   opacity: 1;
   visibility: visible;
   transition-delay: 0.3s, 0.3s;
+}
+.sidebar[data-state='expanded'] .tip {
+  display: none;
 }
 @media (hover: none) {
   .tip {
@@ -461,9 +589,41 @@
   container-type: inline-size;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 4px;
   height: 100%;
-  padding: 0 calc(20px + env(safe-area-inset-right)) 0 24px;
+  padding: 0 16px;
+}
+
+/* The sidebar's toggle (SidebarTrigger, a 28 px ghost icon button) and the 16 px line after it. */
+.trigger {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-left: -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--gray-12);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.trigger:hover {
+  background: var(--gray-4);
+}
+.trigger:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 0;
+}
+
+.vsep {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  margin: 0 8px;
+  background: var(--gray-a5);
 }
 
 /* The title and its count are never cut (a value); what gives way is the search field, then the line's words. */
@@ -471,10 +631,9 @@
   flex: none;
   margin: 0;
   min-width: 0;
-  font-size: 17px;
-  font-weight: 600;
-  line-height: 1.3;
-  letter-spacing: -0.01em;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
   color: var(--gray-12);
   white-space: nowrap;
   overflow: hidden;
@@ -495,7 +654,7 @@
    dot above.) */
 .liveLine {
   flex: 0 1 auto;
-  margin-left: 4px;
+  margin-left: 8px;
 }
 
 .kbd {
@@ -522,7 +681,7 @@
   width: 260px;
   height: 32px;
   padding: 0 8px 0 10px;
-  border-radius: 8px;
+  border-radius: 6px;
   box-shadow: inset 0 0 0 1px var(--gray-a5);
   color: var(--gray-11);
 }
@@ -579,25 +738,48 @@
   color: var(--gray-12);
 }
 
+/* Ghost icon buttons at 28 px (search when the field has no room; the Activity bell's box). */
 .searchIcon {
+  width: 28px !important;
+  height: 28px !important;
   margin: 0 !important;
-  color: var(--gray-11) !important;
+  border-radius: 6px !important;
+  color: var(--gray-12) !important;
+}
+
+.bellBox {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+}
+.topbar .bellBox [data-testid='activity-bell'] {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+.topbar .bellBox [data-testid='activity-bell'] svg {
+  width: 16px;
+  height: 16px;
+  color: var(--gray-12);
 }
 
 .newb {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex: none;
   height: 32px;
+  margin: 0 4px;
   padding: 0 12px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--gray-12);
   color: var(--gray-1);
   font: inherit;
-  font-size: 13.5px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
@@ -617,8 +799,13 @@
 }
 
 .newKbd {
+  min-width: 0;
+  height: auto;
+  padding: 3px 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: var(--gray-1);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gray-1) 35%, transparent);
+  background: rgb(127 127 127 / 0.22);
+  box-shadow: none;
 }
 
 /* In Search the field shows at any width. */
@@ -658,7 +845,7 @@
     display: none;
   }
   .newb {
-    padding: 0 10px 0 12px;
+    padding: 0 6px 0 12px;
   }
   .newLong {
     display: inline;
@@ -686,7 +873,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  height: 56px;
+  height: 48px;
   padding: 0 12px 0 20px;
   border-bottom: 1px solid var(--gray-a4);
 }
@@ -742,11 +929,23 @@
 /* ---- Touch screens: 44 px targets ---------------------------------------------------------------- */
 
 @media (pointer: coarse) {
-  .ni,
-  .bell {
+  .item {
     height: 44px;
   }
-  /* The field keeps the mockup's 32 px; its input and clear button reach 44 px past it (the bar is 56). */
+  .sidebar[data-state='collapsed'] .item {
+    width: 44px;
+    padding: 14px;
+  }
+  .sidebar[data-state='collapsed'] .item [data-testid='unread-mark'] {
+    top: 11px;
+    right: 11px;
+  }
+  .sidebar[data-state='collapsed'] .person {
+    width: 44px;
+    height: 44px;
+    padding: 6px;
+  }
+  /* The field keeps the mockup's 32 px; its input and clear button reach 44 px past it (the bar is 48). */
   .searchInput {
     height: 44px;
     margin: -6px 0;
