@@ -33,7 +33,7 @@ import { STATUS_GROUP_META, type StatusGroupName } from '@/lib/client/status-ord
 import type { SortOrder } from '@/lib/client/view-prefs';
 import { waitTone } from '@/lib/domain';
 import { stageLook, type DisplayStage } from '@/lib/stages';
-import { NOT_UPDATED } from '@/lib/format';
+import { NOT_UPDATED, formatCaseNumber } from '@/lib/format';
 import { archivedFoldLabel, highlightParts, isClosed, logNumber, logNumberRanges, messagesSentence, type Ranges } from '@/components/list/list-helpers';
 import {
   TABLE_COLUMNS,
@@ -196,6 +196,8 @@ interface CellsProps {
   ageGender: string;
   /** The matched text of a search result, on a second line under the name. */
   line?: ReactNode;
+  /** (Message lane) A number hit's LP number under the name, shown only while docked (the # column is gone there). */
+  numLine?: ReactNode;
   glyph: ReactNode;
   tone: string;
   statusLabel: string;
@@ -228,6 +230,7 @@ function Cells(p: CellsProps) {
           {p.ageGender ? <span className={t.ag}>{p.ageGender}</span> : null}
         </span>
         {p.line ? <span className={t.match}>{p.line}</span> : null}
+        {p.numLine ? <span className={cx(t.match, t.numLine)}>{p.numLine}</span> : null}
       </span>
       <span className={cx(t.cStatus, t.st)} data-col="status" data-tone={p.tone} aria-hidden>
         {p.glyph}
@@ -366,10 +369,12 @@ export const SearchRow = memo(function SearchRow({ hit, times, selected, stage, 
   const closed = isClosed(row.status);
   const look = stage ?? stageLook(row, now);
   const friend = friendCell(row);
+  // A number hit: docked, # goes, so the LP number shows highlighted under the name (as on the phone's SearchLogRow).
+  const numHit = !line && caseRanges.length > 0;
   return (
     <button
       type="button"
-      className={cx(t.grid, t.row, closed && t.closed, !!line && t.two)}
+      className={cx(t.grid, t.row, closed && t.closed, !!line && t.two, numHit && t.twoDocked)}
       data-request-id={row.id}
       data-closed={closed ? '' : undefined}
       data-selected={selected ? '' : undefined}
@@ -383,6 +388,7 @@ export const SearchRow = memo(function SearchRow({ hit, times, selected, stage, 
         name={<Highlight text={friend.name} ranges={row.name ? nameRanges : []} />}
         ageGender={friend.ageGender}
         line={line ? <Highlight text={line} ranges={lineRanges} /> : null}
+        numLine={numHit ? <Highlight text={formatCaseNumber(row.caseNumber)} ranges={caseRanges} /> : null}
         glyph={<StageGlyph glyph={look.glyph} className={t.glyph} />}
         tone={look.tone}
         statusLabel={look.label}

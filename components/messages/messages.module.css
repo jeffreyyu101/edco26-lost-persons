@@ -780,13 +780,14 @@ button.enr:focus-visible {
 }
 
 /* The filled bubble after a label (the nav's Pending, Pending's Friend coming header): "unread messages here", in
-   the badge blue. Doubled class: the nav's `.ni svg` grey must not win. */
-.unreadMark.unreadMark {
+   the badge blue. Tripled class (0,3,0): the nav's `.ni svg` and the current item's `.ni[aria-current='page'] svg`
+   (0,2,1) grey must not win. */
+.unreadMark.unreadMark.unreadMark {
   flex: none;
   color: var(--blue-11);
 }
 
-:global(.dark) .unreadMark.unreadMark {
+:global(.dark) .unreadMark.unreadMark.unreadMark {
   color: var(--blue-8);
 }
 

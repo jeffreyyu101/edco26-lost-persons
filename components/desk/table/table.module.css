@@ -74,6 +74,15 @@
   [data-pane] .cBy {
     display: none;
   }
+  /* A search that matched the number: with # gone, the LP number shows highlighted under the name. */
+  [data-pane] .numLine {
+    display: block;
+  }
+  [data-pane] .twoDocked {
+    min-height: 56px;
+    padding-top: 7px;
+    padding-bottom: 7px;
+  }
 }
 
 /* Docked at 1024–1279, the main column is 544–799 px: the same five, tighter. The status column still takes
@@ -323,6 +332,11 @@ button.row:focus-visible {
   font-size: 12.5px;
   line-height: 17px;
   color: var(--gray-11);
+}
+
+/* A number hit's LP number under the name: only while docked (the # column shows it otherwise). */
+.numLine {
+  display: none;
 }
 
 /* Status: glyph and label. Only the open states have colour (blue Waiting, green In medical). The cell is a

@@ -314,5 +314,27 @@ test.describe('desk 1440 × 900', () => {
     await lane(row(unread)).click();
     await expectAtThread(page);
     await expect(page.getByTestId('messages').getByTestId('composer-input')).toBeFocused(SYNC);
+
+    // A search by the number: undocked, # highlights it (nothing under the name); docked, # is gone and the LP
+    // number shows highlighted under the name instead.
+    await page.goto(`/?q=${unread.caseNumber}`);
+    const num = String(unread.caseNumber);
+    await expect(row(unread).locator('[data-col="number"] mark')).toHaveText(num, SYNC);
+    await expect(row(unread).locator('[data-col="friend"] mark')).toBeHidden();
+    await row(unread).locator('[data-col="friend"]').click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(unread.id);
+    await expect(page.getByTestId('desk-pane')).toBeVisible();
+    await expect(row(unread).locator('[data-col="number"]')).toBeHidden();
+    await expect(row(unread).locator('[data-col="friend"] mark')).toBeVisible();
+    await expect(row(unread).locator('[data-col="friend"] mark')).toHaveText(num);
+    await expect(row(unread).locator('[data-col="friend"]')).toContainText(`LP-${num.padStart(4, '0')}`);
+
+    // The nav's Pending as the current page, in light mode: still the badge blue, not the current item's grey.
+    await page.goto('/?view=pending');
+    await expect(page.locator('html')).toHaveClass(/\blight\b/);
+    await expect(page.getByTestId('desk-sidebar').locator('[aria-current="page"]')).toContainText('Pending');
+    await expect(navMark).toBeVisible(SYNC);
+    const [pr, , pb] = (await navMark.evaluate((el) => getComputedStyle(el).color)).match(/\d+/g)!.map(Number);
+    expect(pb! - pr!, 'blue on the current Pending, not its grey').toBeGreaterThan(80);
   });
 });

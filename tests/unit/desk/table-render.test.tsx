@@ -321,6 +321,9 @@ describe('Search table', () => {
     const byNumber = render(storeWith(), <DeskSearchTable q="1012" />);
     expect(cell(byNumber, 1012, 'number')).toBe('1012');
     expect(rowHtml(byNumber, 1012)).toMatch(/<mark[^>]*>1012<\/mark>/);
+    // Docked, # is hidden: the LP number, highlighted, under the name (shown by CSS under [data-pane] only).
+    expect(rowHtml(byNumber, 1012)).toMatch(/data-col="friend"[\s\S]*LP-<\/span><mark[^>]*>1012<\/mark>/);
+    expect(rowHtml(html, 998).split('data-col="friend"')[1]).not.toContain('LP-');
 
     expect(text(render(storeWith(), <DeskSearchTable q="zzzz-nothing" />))).toContain('No matches');
     const blank = render(storeWith(), <DeskSearchTable q="" />);
