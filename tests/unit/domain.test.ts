@@ -10,6 +10,7 @@ import {
   TEAM_ALIASES,
   TRANSITIONS,
   ageGender,
+  alertName,
   appendChip,
   avatarInitials,
   canCancel,
@@ -265,6 +266,17 @@ describe('names', () => {
     expect(splitName('J.D.')).toEqual({ firstName: 'J.D.', lastName: null });
     expect(splitName('   ')).toEqual({ firstName: null, lastName: null });
     expect(splitName(null)).toEqual({ firstName: null, lastName: null });
+  });
+
+  it('alertName: the whole name as entered, whitespace collapsed (alerts and notifications, Brian 2026-11-07)', () => {
+    expect(alertName('Kayla Martinez')).toBe('Kayla Martinez');
+    expect(alertName('  Mary  Ann\tSmith ')).toBe('Mary Ann Smith');
+    expect(alertName('T.R.')).toBe('T.R.');
+    expect(alertName('Dana')).toBe('Dana');
+    expect(alertName('   ')).toBe('');
+    expect(alertName('')).toBe('');
+    expect(alertName(null)).toBe('');
+    expect(alertName(undefined)).toBe('');
   });
 
   it('initials (A4)', () => {

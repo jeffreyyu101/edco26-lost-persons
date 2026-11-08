@@ -71,8 +71,8 @@ describe('Undo on every answer path (the real store)', () => {
   });
 
   // [from, to, kind, snackbar text]: the profile buttons and Pending cards (answer, reunite) and the menu (change).
-  // (Pending v9.1) A Not found that closes the request says so: "T.R. closed · not in medical" (the status label).
-  const closed = `T.R. closed · ${STATUS_META[STATUS.notInMedical].label.toLowerCase()}`;
+  // (Pending v9.1) A Not found that closes the request says so: "T. R1 closed · not in medical" (the status label).
+  const closed = `T. R1 closed · ${STATUS_META[STATUS.notInMedical].label.toLowerCase()}`;
   const paths: Array<[string, SettableStatus, StatusKind, string]> = [
     [STATUS.waiting, STATUS.notInMedical, 'answer', closed],
     [STATUS.waiting, STATUS.inMedical, 'answer', 'LP-1001 · Located'],

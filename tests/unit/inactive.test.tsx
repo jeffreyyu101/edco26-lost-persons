@@ -225,10 +225,10 @@ describe('Activity and alerts', () => {
     expect(activityGlyph('closed_inactive', inactiveDetail())).toEqual({ icon: 'timer-off', tone: 'gray' });
     expect(pushUrgency('closed_inactive')).toBe('normal');
     expect(pushTtl('closed_inactive')).toBe(900);
-    const payload = pushPayload({ requestId: '00000000-0000-4000-8000-000000000001', kind: 'closed_inactive', detail: inactiveDetail() }, 'S.L.', 1);
-    expect(payload).toMatchObject({ title: 'S.L.', body: 'Closed · inactive', tag: 'lp-00000000-0000-4000-8000-000000000001', renotify: true, requireInteraction: false });
-    const said = activityAriaLabel({ kind: 'closed_inactive', title: 'S.L.', detail: inactiveDetail(), at: iso(1), read: false }, NOW);
-    expect(said).toBe('Request S L, closed: Closed, inactive. 1 minute ago. Unread.');
+    const payload = pushPayload({ requestId: '00000000-0000-4000-8000-000000000001', kind: 'closed_inactive', detail: inactiveDetail() }, 'Sky Lane', 1);
+    expect(payload).toMatchObject({ title: 'Sky Lane', body: 'Closed · inactive', tag: 'lp-00000000-0000-4000-8000-000000000001', renotify: true, requireInteraction: false });
+    const said = activityAriaLabel({ kind: 'closed_inactive', title: 'Sky Lane', detail: inactiveDetail(), at: iso(1), read: false }, NOW);
+    expect(said).toBe('Request Sky Lane, closed: Closed, inactive. 1 minute ago. Unread.');
     // Only the server's auto-close raises it; no status route ever does.
     expect(statusChangeEvent(STATUS.inactive, null)).toBeNull();
     // The SQL whitelist takes it.
@@ -237,7 +237,7 @@ describe('Activity and alerts', () => {
 
   it('the in-app alert reads the status, and a sticky "is in medical" toast closes once the request is inactive', () => {
     const r = row({ caseNumber: 1004, name: 'Sky Lane' });
-    expect(statusAlert(r)).toMatchObject({ kind: 'status_changed', title: 'LP-1004 · S.L. — closed · inactive' });
+    expect(statusAlert(r)).toMatchObject({ kind: 'status_changed', title: 'LP-1004 · Sky Lane — closed · inactive' });
     expect(alertStillCurrent('in_medical', STATUS.inMedical, r)).toBe(false);
   });
 
@@ -248,7 +248,7 @@ describe('Activity and alerts', () => {
     const backlog = row({ caseNumber: 1005, name: 'Ari Moss', quietClose: true });
     const before = new Map([fresh, backlog].map((r) => [r.id, inMedical(r)]));
     const c = ctx();
-    expect(diffAlerts(before, [fresh, backlog], c)).toEqual([expect.objectContaining({ requestId: fresh.id, title: 'LP-1004 · S.L. — closed · inactive' })]);
+    expect(diffAlerts(before, [fresh, backlog], c)).toEqual([expect.objectContaining({ requestId: fresh.id, title: 'LP-1004 · Sky Lane — closed · inactive' })]);
     // Nothing was marked seen for the quiet one: a later real change of it (Reopen by someone else) still alerts.
     expect(c.seen.has(`${backlog.id}:${backlog.rowVersion}`)).toBe(false);
     const reopened: RequestSummary = { ...backlog, status: STATUS.inMedical, closedAt: null, updatedBy: 'Rae Chen · Medical', rowVersion: backlog.rowVersion + 1, quietClose: false };

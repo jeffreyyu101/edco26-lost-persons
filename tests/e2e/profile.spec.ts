@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type APIRequestContext, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import type { CreateResponse, ChangeResponse, RequestDetail, RequestSummary } from '../../lib/api-types';
-import { STATUS, STATUS_META, initials } from '../../lib/domain';
+import { STATUS, STATUS_META, alertName } from '../../lib/domain';
 import { axeViolations, smallTargets } from './helpers/a11y';
 import { newSignedInContext, signedInAs } from './helpers/session';
 import { answerSaved } from './helpers/sync';
@@ -79,8 +79,8 @@ const changeAnswer = (page: Page) => page.getByTestId('profile-actions').getByRo
 const undoButton = (page: Page) => page.getByRole('button', { name: 'Undo', exact: true });
 /** (Pending v9.1) The left answer on a request Waiting for check: "Pending" (the hold), then "Not located". */
 const notFoundAnswer = (page: Page) => page.getByTestId('not-found-answer');
-/** (Pending v9.1) The Undo bar after a Not found that closed the request: "K.Z. closed · not located". */
-const closedSnack = (name: string) => `${initials(name)} closed · ${STATUS_META[STATUS.notInMedical].label.toLowerCase()}`;
+/** (Pending v9.1) The Undo bar after a Not found that closed the request: "<full name> closed · not located". */
+const closedSnack = (name: string) => `${alertName(name)} closed · ${STATUS_META[STATUS.notInMedical].label.toLowerCase()}`;
 /** Let the menu's open animation (a slight scale-in) finish before measuring it. */
 const settle = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
 /** Change answer → one of its menu choices ("Not located", "Located", "Back to Waiting for check"). */

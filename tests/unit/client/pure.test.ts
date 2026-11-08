@@ -112,13 +112,13 @@ describe('alerts diff (spec §7 Alerts)', () => {
     const next = { ...mine, status: STATUS.inMedical, rowVersion: 3, updatedBy: STAFF.rae.staff };
     const alerts = diffAlerts(map(mine), [next], ctx());
     expect(alerts).toEqual([
-      { kind: 'in_medical', requestId: mine.id, title: 'LP-1004 · S.L. located', subtitle: 'Friend can head over', count: 1 },
+      { kind: 'in_medical', requestId: mine.id, title: 'LP-1004 · Sofia Lopez located', subtitle: 'Friend can head over', count: 1 },
     ]);
-    expect(diffAlerts(map(mine), [{ ...next, status: STATUS.notInMedical }], ctx())[0]?.title).toBe('LP-1004 · S.L. — not located');
-    expect(diffAlerts(map(mine), [{ ...next, status: STATUS.reunited }], ctx())[0]?.title).toBe('LP-1004 · S.L. reunited');
+    expect(diffAlerts(map(mine), [{ ...next, status: STATUS.notInMedical }], ctx())[0]?.title).toBe('LP-1004 · Sofia Lopez — not located');
+    expect(diffAlerts(map(mine), [{ ...next, status: STATUS.reunited }], ctx())[0]?.title).toBe('LP-1004 · Sofia Lopez reunited');
     expect(diffAlerts(map(mine), [{ ...next, status: STATUS.waiting, rowVersion: 3 }], ctx({}))).toEqual([]); // same status
     const back = diffAlerts(map({ ...mine, status: STATUS.inMedical }), [{ ...next, status: STATUS.waiting }], ctx());
-    expect(back[0]).toMatchObject({ kind: 'status_changed', title: 'LP-1004 · S.L. — waiting for check' });
+    expect(back[0]).toMatchObject({ kind: 'status_changed', title: 'LP-1004 · Sofia Lopez — waiting for check' });
   });
 
   it('counts phone-created ids as mine (canonical created_by too, aliases included)', () => {
@@ -148,7 +148,7 @@ describe('alerts diff (spec §7 Alerts)', () => {
     const fresh = makeRow(13, { firstName: 'T.', lastName: 'R.', age: '24', gender: 'Male', createdBy: STAFF.sam.staff, caseNumber: 1013 });
     expect(diffAlerts(new Map(), [fresh], ctx())).toEqual([]);
     expect(diffAlerts(new Map(), [fresh], ctx({ bell: true }))).toEqual([
-      { kind: 'new_request', requestId: fresh.id, title: 'New request · LP-1013', subtitle: 'T.R. 24 M · FA 4', count: 1 },
+      { kind: 'new_request', requestId: fresh.id, title: 'New request · LP-1013', subtitle: 'T. R. 24 M · FA 4', count: 1 },
     ]);
     expect(diffAlerts(new Map(), [{ ...fresh, createdBy: STAFF.dana.staff }], ctx({ bell: true }))).toEqual([]);
     expect(diffAlerts(new Map(), [{ ...fresh, clientMutationId: 'abc' }], ctx({ bell: true, ownMutationIds: new Set(['abc']) }))).toEqual([]);

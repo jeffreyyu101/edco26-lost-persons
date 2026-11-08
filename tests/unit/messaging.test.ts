@@ -422,7 +422,7 @@ describe('message alerts', () => {
     const seen = new Set<string>();
     const alerts = diffMessageAlerts(prev, [next], seen, () => false);
     expect(alerts).toHaveLength(1);
-    expect(alerts[0]?.alert).toMatchObject({ kind: 'message', title: 'J.D.', subtitle: 'Rae C.: Any tattoos or marks?' });
+    expect(alerts[0]?.alert).toMatchObject({ kind: 'message', title: 'J. D.', subtitle: 'Rae C.: Any tattoos or marks?' });
     expect(alerts[0]?.alert.title).not.toMatch(/LP-/);
     expect(diffMessageAlerts(prev, [next], seen, () => false)).toHaveLength(0);
     expect(diffMessageAlerts(prev, [next], new Set(), () => true)).toHaveLength(0);

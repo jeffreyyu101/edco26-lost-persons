@@ -178,10 +178,10 @@ describe('the left answer, by hold state', () => {
     expect(html).toContain('data-tone="gray" data-testid="card-minutes"');
   });
 
-  it('the Undo bar: "Pending · recheck in 20 min", then "<initials> closed · not located"', () => {
+  it('the Undo bar: "Pending · recheck in 20 min", then "<full name> closed · not located"', () => {
     expect(notFoundSnack(PV, STATUS.notInMedical)).toEqual({ message: 'Pending · recheck in 20 min', said: 'Pending, recheck in 20 minutes.' });
     const words = STATUS_META[STATUS.notInMedical].label.toLowerCase();
-    expect(notFoundSnack({ ...BW, name: 'Bea Walsh', status: STATUS.notInMedical }, STATUS.notInMedical)).toEqual({ message: `B.W. closed · ${words}`, said: `B.W. closed, ${words}.` });
+    expect(notFoundSnack({ ...BW, name: 'Bea Walsh', status: STATUS.notInMedical }, STATUS.notInMedical)).toEqual({ message: `Bea Walsh closed · ${words}`, said: `Bea Walsh closed, ${words}.` });
     expect(notFoundSnack({ ...BW, name: '', status: STATUS.notInMedical }, STATUS.notInMedical)?.message).toMatch(/^LP-\d{4} closed · /);
     expect(notFoundSnack(BW, STATUS.inMedical)).toBeNull();
   });

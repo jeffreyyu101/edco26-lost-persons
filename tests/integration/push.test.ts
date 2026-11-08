@@ -2,7 +2,7 @@
 // the local stack and a fake push service that decrypts every push (tests/integration/push-service.ts).
 //   * POST /api/push/prefs, POST/DELETE /api/push/subscribe, POST /api/push/test: session, same-origin,
 //     validation, defaults (Medical: New requests on), re-binding, endpoint rotation, 410 deletes.
-//   * The routes notify (after the response): In medical reaches the logger (Activity row + push, initials as
+//   * The routes notify (after the response): In medical reaches the logger (Activity row + push, the full name as
 //     the title, no ids or contact details), never the actor; a Not in medical answer sends NOTHING (F5 owns
 //     it); new requests reach whoever has New requests on; the location completes the answer or moves it.
 //   * GET /api/activity, GET /api/activity/unread, POST /api/activity/read | unread, and sync's activityUnread
@@ -396,7 +396,7 @@ describe('POST /api/push/test', () => {
 });
 
 describe('the routes notify (contract D)', () => {
-  it('In medical: the logger gets one Activity row and one push (initials, no ids or contact details); the actor nothing', async () => {
+  it('In medical: the logger gets one Activity row and one push (the full name, no ids or contact details); the actor nothing', async () => {
     const dana = newStaff();
     const rae = medical();
     const danaPhone = push.device();
@@ -415,13 +415,12 @@ describe('the routes notify (contract D)', () => {
     expect(await activityOf(rae, r.id)).toBeNull();
     await eventually(() => danaPhone.deliveries.length === 1);
     const p = danaPhone.deliveries[0]!;
-    expect(p.payload).toMatchObject({ title: 'J.D.', body: 'Located', tag: `lp-${r.id}`, url: `/?r=${r.id}`, kind: 'in_medical', renotify: true, requireInteraction: true });
+    expect(p.payload).toMatchObject({ title: 'Jordan TEST-S Diaz', body: 'Located', tag: `lp-${r.id}`, url: `/?r=${r.id}`, kind: 'in_medical', renotify: true, requireInteraction: true });
     expect(p.urgency).toBe('high');
     expect(p.ttl).toBe('3600');
     const text = JSON.stringify(p.payload);
     expect(text).not.toMatch(/LP-?\d/);
     expect(text).not.toContain('555');
-    expect(text).not.toContain('Jordan');
     // The actor never hears about their own answer (the new-request push Rae's switch asked for is another event).
     expect(raePhone.deliveries.filter((d) => d.payload.requestId === r.id && d.payload.kind !== 'new_request')).toHaveLength(0);
     // The where completes the answer ("Located · Chair 9"), then a move reads "Chair 9 → Bed 3".
@@ -505,9 +504,9 @@ describe('the routes notify (contract D)', () => {
     const id = res.body.request.id as string;
     await eventually(() => raePhone.deliveries.some((d) => d.payload.requestId === id));
     const p = raePhone.deliveries.find((d) => d.payload.requestId === id)!;
-    expect(p.payload).toMatchObject({ title: 'New request', body: 'T.R. · 24 M · FA 4', kind: 'new_request' });
+    expect(p.payload).toMatchObject({ title: 'New request', body: 'Tara TEST-S Ruiz · 24 M · FA 4', kind: 'new_request' });
     expect(JSON.stringify(p.payload)).not.toContain('555');
-    expect(await activityOf(rae, id)).toMatchObject({ kind: 'new_request', detail: 'T.R. · 24 M · FA 4' });
+    expect(await activityOf(rae, id)).toMatchObject({ kind: 'new_request', detail: 'Tara TEST-S Ruiz · 24 M · FA 4' });
     expect(await activityOf(dana, id)).toBeNull();
     expect(offPhone.deliveries.some((d) => d.payload.requestId === id)).toBe(false);
     const n = raePhone.deliveries.length;
@@ -569,15 +568,18 @@ describe('Activity routes', () => {
     expect((await api('/api/activity/unread', { json: { requestIds: [] }, cookie })).status).toBe(422);
   });
 
-  it('GET: one row per request, newest first, initials only; sync carries the unread count', async () => {
+  it('GET: one row per request, newest first, the full name and no contact details; sync carries the unread count', async () => {
     const { a, b, cookie } = await seeded();
     const res = await api('/api/activity', { cookie });
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
     const rows = res.body.rows as Array<{ requestId: string; title: string; detail: string; kind: string; read: boolean }>;
     expect(rows.map((r) => r.requestId)).toEqual([b.id, a.id]);
-    expect(rows[0]).toMatchObject({ title: 'B.W.', detail: 'Located', kind: 'in_medical', read: false });
-    expect(JSON.stringify(res.body)).not.toContain('TEST-S');
+    expect(rows[0]).toMatchObject({ title: 'Ben TEST-S Wu', detail: 'Located', kind: 'in_medical', read: false });
+    expect(rows[1]).toMatchObject({ title: 'Ava TEST-S Lane' });
+    const listed = JSON.stringify(res.body);
+    for (const secret of ['TEST-S Friend', 'TEST-S red hoodie', '555']) expect(listed).not.toContain(secret);
+    expect(listed).not.toMatch(/LP-?\d/);
     const sync = (await api('/api/sync', { cookie })).body as SyncResponse & Record<string, unknown>;
     expect(sync.activityUnread).toBe(2);
     expect(sync.activityKey).toMatch(/^[0-9a-f]{16}$/);

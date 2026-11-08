@@ -26,7 +26,7 @@ import { pendingGroups } from '@/lib/client/selectors';
 import { StoreContext, type AppStore, type StoreState } from '@/lib/client/store-contract';
 import { createStubStore } from '@/lib/client/store-stub';
 import { STUB_SESSION, stubRows } from '@/lib/client/stub-data';
-import { RECHECK_MINUTES, STATUS, STATUS_META, actionLabel, initials, isHeld, isRecheckDue, primaryActions } from '@/lib/domain';
+import { RECHECK_MINUTES, STATUS, STATUS_META, actionLabel, alertName, isHeld, isRecheckDue, primaryActions } from '@/lib/domain';
 import { holdDetail } from '@/lib/hold-detail';
 import { STAGE_META, displayStage, notFoundAnswer, etaText, holdAnsweredAt, isMedicalTeam, shortStaffName, stageLook, stagePhrase, type StageKey, type StageSource } from '@/lib/stages';
 import { formatClockAmPm } from '@/lib/format';
@@ -251,7 +251,7 @@ describe('labels', () => {
     for (const key of ['needsInfo', 'notFoundYet', 'recheckDue', 'enroute', 'arrived'] as const) expect(STAGE_META[key].bucket).toBe('open');
   });
 
-  it('the answer buttons and the Undo bar (Pending v9.1): "Pending · recheck in 20 min", then "<initials> closed · …"', () => {
+  it('the answer buttons and the Undo bar (Pending v9.1): "Pending · recheck in 20 min", then "<full name> closed · …"', () => {
     const [notFound, inMedical] = primaryActions(STATUS.waiting);
     expect(notFound?.label).toBe(actionLabel('notInMedical'));
     expect(inMedical?.label).toBe(actionLabel('inMedical'));
@@ -263,7 +263,7 @@ describe('labels', () => {
     expect(holdSnackMessage(row(), STATUS.notInMedical)).toBeNull();
     const closed = row({ name: 'Bea Walsh', status: STATUS.notInMedical, notFoundChecks: 2 });
     const words = STATUS_META[STATUS.notInMedical].label.toLowerCase();
-    expect(notFoundSnack(closed, STATUS.notInMedical)).toEqual({ message: `B.W. closed · ${words}`, said: `B.W. closed, ${words}.` });
+    expect(notFoundSnack(closed, STATUS.notInMedical)).toEqual({ message: `Bea Walsh closed · ${words}`, said: `Bea Walsh closed, ${words}.` });
   });
 
   it('the notification detail: "Pending · recheck 4:40 PM", or the final status label from STATUS_META', () => {
@@ -406,13 +406,13 @@ describe('alerts', () => {
   const ctx = (): AlertContext => ({ sessionStaff: STUB_SESSION.staff, myIds: new Set(), ownMutationIds: new Set(), ownKeys: new Set(), bell: false, seen: new Set(), timeZone: TZ });
   const RAE = 'Rae Chen · Medical';
 
-  it('my request going on hold (someone else, status unchanged) alerts once: the initials, "Pending · recheck 4:50 PM"', () => {
+  it('my request going on hold (someone else, status unchanged) alerts once: the full name, "Pending · recheck 4:50 PM"', () => {
     const before = row({ createdBy: STUB_SESSION.staff, rowVersion: 3 });
     const after = row({ createdBy: STUB_SESSION.staff, rowVersion: 4, updatedBy: RAE, recheckAt: at(20), notFoundChecks: 1 });
     const c = ctx();
     const alerts = diffAlerts(new Map([[before.id, before]]), [after], c);
     expect(alerts).toEqual([holdAlert(after, TZ)]);
-    expect(alerts[0]).toMatchObject({ kind: 'status_changed', requestId: after.id, title: initials(after.name), subtitle: 'Pending · recheck 4:50 PM' });
+    expect(alerts[0]).toMatchObject({ kind: 'status_changed', requestId: after.id, title: alertName(after.name), subtitle: 'Pending · recheck 4:50 PM' });
     expect(diffAlerts(new Map([[before.id, before]]), [after], c)).toEqual([]);
     // Not mine, or by me: nothing.
     expect(diffAlerts(new Map([[before.id, before]]), [{ ...after, createdBy: 'Lee Park · GC/HX - Base' }], ctx())).toEqual([]);
@@ -424,13 +424,13 @@ describe('alerts', () => {
     const alert = holdAlert(held, TZ);
     const notice = systemNotice(alert, () => held);
     expect({ title: notice.title, body: notice.body, tag: notice.tag, url: notice.url }).toEqual({
-      title: initials(held.name),
+      title: alertName(held.name),
       body: 'Pending · recheck 4:50 PM',
       tag: `lp-${held.id}`,
       url: `/?r=${held.id}`,
     });
     for (const text of [alert.title, alert.subtitle, notice.title, notice.body]) expect(text).not.toMatch(/LP-?\d/);
-    // No name: no initials, never the number.
+    // No name: "Request", never the number.
     expect(holdAlert({ ...held, name: '' }, TZ).title).toBe(HOLD_ALERT_UNNAMED);
   });
 
