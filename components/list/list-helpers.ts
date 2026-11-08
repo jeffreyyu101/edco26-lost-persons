@@ -6,6 +6,7 @@ import { STATUS, ageGender, isInMedical, isRecheckDue, postShort, sameStaff, sta
 import { stagePhrase, type StageSource } from '@/lib/stages';
 import { formatCaseNumber } from '@/lib/format';
 import { unreadOf } from '@/lib/messaging-activity';
+import { messageMark } from './message-mark';
 
 /** Shown where a request has no name (a photo or description alone is a valid request). */
 export const NO_NAME = 'No name';
@@ -376,26 +377,9 @@ export function archivedFoldLabel(count: number, label = 'Archived', unread = 0)
 //   no messages ........... nothing
 // ---------------------------------------------------------------------------------------------------
 
-/** The most the lane's bubble prints: 1, 12, 99, then "99+" (the 31 px lane fits "99+" and nothing wider). */
-export const MARK_MAX = 99;
-
-/** The bubble's text: "1", "12", "99", "99+". */
-export function markCount(n: number): string {
-  return n > MARK_MAX ? `${MARK_MAX}+` : String(n);
-}
-
-export type MessageMark = { kind: 'unread'; count: number; text: string } | { kind: 'read'; count: number } | null;
-
-/**
- * What a row's message lane shows: the unread bubble (others' messages after my read cursor), else the read
- * outline while the request has messages, else nothing. Rows cached before F3 carry neither count: nothing.
- */
-export function messageMark(row: Partial<Pick<RequestSummary, 'unread' | 'messageCount'>>): MessageMark {
-  const unread = unreadOf(row);
-  if (unread > 0) return { kind: 'unread', count: unread, text: markCount(unread) };
-  const total = typeof row.messageCount === 'number' && row.messageCount > 0 ? row.messageCount : 0;
-  return total > 0 ? { kind: 'read', count: total } : null;
-}
+// The mark itself (MARK_MAX, markCount, messageMark) lives in ./message-mark: the request page's CardActivity draws
+// it too, and importing it from here would bring every list helper into the request page's code.
+export { MARK_MAX, markCount, messageMark, type MessageMark } from './message-mark';
 
 /** The lane in words, for the row's sentence: " 2 unread messages." / " 4 messages." / '' (no messages). */
 export function messagesSentence(row: Partial<Pick<RequestSummary, 'unread' | 'messageCount'>>): string {

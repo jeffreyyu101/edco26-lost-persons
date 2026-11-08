@@ -9,8 +9,9 @@ import { newSignedInContext, signedInAs } from './helpers/session';
 // with two phones on the real store, API and database:
 //   medical asks from a To check card on a Waiting request → front of house sees the badge and the preview,
 //   replies → medical sees the reply and "Read" → In medical → En route ~5 min → Change ETA → Cancel + Undo →
-//   Arrived → Reunited clears it; medical sees the row read-only; an offline message is sent once later;
-//   and no F3 screen overflows at 375, 390, 820, 1180 or 1440 px.
+//   the card's Reunited closes it (2026-11-08: no Arrived anywhere, on the card or the request); medical sees the
+//   row read-only; an offline message is sent once later; times on message runs (T5); and no F3 screen overflows
+//   at 375, 390, 820, 1180 or 1440 px (an older build's "Friend arrived" still shows, with Reunited on its card).
 // Synthetic rows only (TEST-F3-…), closed again afterwards.
 
 const BASE = testBaseUrl();
@@ -82,6 +83,19 @@ async function openComing(page: Page): Promise<void> {
 }
 const messages = (page: Page) => page.getByTestId('messages');
 const SYNC = { timeout: 20_000 };
+/** A run label's time and a bubble's spoken time (T5): the clock today. */
+const CLOCK = String.raw`\d{1,2}:\d\d (AM|PM)`;
+
+/**
+ * (2026-11-08) Nothing on the page offers Arrived: no button named for it, no Arrived quick line. (An older build's
+ * "Friend arrived" still shows as a stage; that is not an offer.)
+ */
+async function expectNoArrived(page: Page): Promise<void> {
+  await expect(page.getByRole('button', { name: /arrived/i })).toHaveCount(0);
+  await expect(page.getByTestId('arrived-button')).toHaveCount(0);
+  await expect(page.locator('[data-kind="arrived"]')).toHaveCount(0);
+  await expect(page.getByTestId('quick-lines').getByText('Arrived', { exact: true })).toHaveCount(0);
+}
 
 /** The composer's selection [start, end]. */
 const caret = (input: Locator) => input.evaluate((el) => [(el as HTMLTextAreaElement).selectionStart, (el as HTMLTextAreaElement).selectionEnd]);
@@ -100,7 +114,7 @@ async function openMine(page: Page, id: string): Promise<Locator> {
   return card;
 }
 
-test('medical asks from To check; front of house replies; read; en route, change, cancel + undo, arrived; reunited clears it', async ({ page, browser }) => {
+test('medical asks from To check; front of house replies; read; en route, change, cancel + undo; the card\'s Reunited closes it, no Arrived', async ({ page, browser }) => {
   test.setTimeout(180_000);
   const medCtx: BrowserContext = await newSignedInContext(browser, MED, { viewport: { width: 390, height: 844 } });
   const med = await medCtx.newPage();
@@ -147,6 +161,17 @@ test('medical asks from To check; front of house replies; read; en route, change
     // Medical sees the reply and "Read" under the question.
     await expect(messages(med).getByTestId('bubble-them')).toHaveText('Butterfly tattoo, left wrist', SYNC);
     await expect(messages(med).getByTestId('receipt')).toHaveText(/^Read \d{1,2}:\d\d (AM|PM)$/, SYNC);
+    // (T5) A time on every run: "Name · Team · 4:12 PM" over theirs, the time alone at the right over mine, and in
+    // each bubble's label.
+    const labels = messages(med).getByTestId('run-label');
+    await expect(labels).toHaveCount(2);
+    await expect(labels.first()).toHaveText(new RegExp(`^${CLOCK}$`));
+    await expect(labels.first()).toHaveAttribute('data-mine', '');
+    await expect(labels.last()).toHaveText(new RegExp(`^TEST-F3 .+ · .+ · ${CLOCK}$`));
+    const [mineBox, timeBox] = await Promise.all([messages(med).getByTestId('bubble-mine').boundingBox(), labels.first().boundingBox()]);
+    expect(Math.abs(mineBox!.x + mineBox!.width - (timeBox!.x + timeBox!.width))).toBeLessThan(16);
+    await expect(messages(med).getByTestId('bubble-mine')).toHaveAttribute('aria-label', new RegExp(`^You, ${CLOCK}: Any tattoos or marks\\?\\.$`));
+    await expect(messages(med).getByTestId('bubble-them')).toHaveAttribute('aria-label', new RegExp(`^TEST-F3 .+, ${CLOCK}: Butterfly tattoo, left wrist\\.$`));
     // Screen readers heard it.
     await expect(med.getByTestId('thread-live')).toHaveText(/Butterfly tattoo, left wrist/);
 
@@ -163,7 +188,11 @@ test('medical asks from To check; front of house replies; read; en route, change
     const row = card2.getByTestId('enroute-row');
     await expect(row).toContainText('Friend en route');
     await expect(row).toContainText(/~[45] min/);
-    await expect(card2.getByTestId('arrived-button')).toBeVisible();
+    // (2026-11-08) No Arrived: en route, the card's next step is the request's Reunited.
+    await expect(card2.getByTestId('reunited-button')).toBeVisible();
+    await expect(card2.getByTestId('reunited-button')).toHaveAccessibleName(/^Reunited: /);
+    await expect(card2.getByTestId('enroute-button')).toHaveCount(0);
+    await expectNoArrived(page);
 
     // Medical sees it read-only (no names), on the request. Not a live region: its minute countdown is never
     // announced; a screen reader reads one sentence.
@@ -193,20 +222,24 @@ test('medical asks from To check; front of house replies; read; en route, change
     await snack.getByRole('button', { name: 'Undo' }).click();
     await expect(card2.getByTestId('enroute-row')).toContainText(/~(9|10) min/, SYNC);
 
-    // Arrived.
-    await card2.getByTestId('arrived-button').click();
-    await expect(card2.getByTestId('enroute-row')).toContainText('Friend arrived', SYNC);
-    await expect.poll(async () => (await call<ThreadPage>(page.request, 'GET', `/api/requests/${r.id}/messages`)).activity.enroute?.state, SYNC).toBe('arrived');
-    // The request's quick lines no longer offer En route (or Arrived) once the friend arrived, as on the card.
+    // The request while I am en route: no Arrived anywhere; the quick lines are "Friend left the area" only (my row in
+    // the status block changes or cancels the en route; "Can't find them" went 2026-11-07); Reunited is in its bar.
     await page.goto(`/?r=${r.id}`);
-    await expect(page.getByTestId('status-block').getByTestId('enroute-row')).toContainText('Friend arrived', SYNC);
-    // (2026-11-07) "Can't find them" is gone.
+    await expect(page.getByTestId('status-block').getByTestId('enroute-row')).toContainText('Friend en route', SYNC);
     await expect(messages(page).getByTestId('quick-lines').getByRole('button')).toHaveText(['Friend left the area']);
+    await expect(page.getByTestId('profile-actions').getByRole('button', { name: /^Reunited/ })).toBeVisible();
+    await expectNoArrived(page);
 
-    // Reunited clears it.
-    await openMine(page, r.id);
-    await setStatus(med.request, r.id, 'Reunited – Closed', 'reunite');
-    await expect(card2.getByTestId('enroute-row')).toHaveCount(0, SYNC);
+    // The card: En route → Reunited, one tap, with Undo; the en route row goes with it.
+    const card3 = await openMine(page, r.id);
+    await expect(card3.getByTestId('enroute-row')).toContainText('Friend en route', SYNC);
+    await expectNoArrived(page);
+    await card3.getByTestId('reunited-button').click();
+    await expect(snack).toContainText(/reunited/i);
+    await expect(snack.getByRole('button', { name: 'Undo' })).toBeVisible();
+    await expect.poll(async () => (await call<RequestDetail>(page.request, 'GET', `/api/requests/${r.id}`)).status, SYNC).toBe('Reunited – Closed');
+    await expect.poll(async () => (await call<ThreadPage>(page.request, 'GET', `/api/requests/${r.id}/messages`)).activity.enroute ?? null, SYNC).toBeNull();
+    await expect(medRow).toHaveCount(0, SYNC);
   } finally {
     await medCtx.close();
   }
@@ -373,6 +406,12 @@ test.describe('no overflow', () => {
             await expectNoOverflow(p, `[data-testid="mine-card"]:has([data-request-id="${id}"])`);
           }
           await expect(mineCard(p, arrived.id).getByTestId('enroute-row')).toContainText('Friend arrived');
+          // (2026-11-08) An older build's Arrived still reads "Friend arrived"; the card's next step is Reunited, and
+          // nothing offers Arrived.
+          await expect(mineCard(p, arrived.id).getByTestId('reunited-button')).toBeVisible();
+          await expect(mineCard(p, r.id).getByTestId('reunited-button')).toBeVisible();
+          await expect(mineCard(p, others.id).getByTestId('enroute-button')).toBeVisible();
+          await expectNoArrived(p);
           await card.getByTestId('enroute-row').click();
           await expect(p.getByTestId('enroute-sheet')).toBeVisible();
           await expectNoOverflow(p, '[data-testid="enroute-sheet"]');

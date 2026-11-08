@@ -2,6 +2,8 @@
 // header → status block → (the latest-message line) → Details → Photos → Messages → Audit trail, on the phone and in
 // the desk pane; the latest-message line shows only while the request needs info or has unread messages for me;
 // and every "open this request for its messages" entry point asks for the thread ("/?r=<id>&to=thread", the jump).
+// (2026-11-08, request page tonight) The line carries no second Needs info chip (T1), wraps to two lines and shows the
+// message's time at its right, said as "at 12:24 PM" (T2).
 // Server renders against the stub store with a stand-in messages engine; stubbed window / history. Synthetic ids.
 import { Theme } from '@radix-ui/themes';
 import type { ReactNode } from 'react';
@@ -14,6 +16,7 @@ import type { LastMessage, RequestSummary } from '@/lib/api-types';
 import type { MessagingApi } from '@/lib/client/messages-core';
 import { StoreContext, type AlertEvent, type AppStore } from '@/lib/client/store-contract';
 import { createStubStore } from '@/lib/client/store-stub';
+import { formatCreatedTime } from '@/lib/format';
 import { stubId } from '@/lib/client/stub-data';
 import { openFromNotification, systemNotice } from '@/lib/client/system-notify';
 import {
@@ -33,6 +36,10 @@ const WAITING = stubId(1012);
 const IN_MEDICAL = stubId(1004);
 const FROM_MEDICAL: LastMessage = { by: 'Rae C.', mine: false, text: 'Any tattoos or marks?' };
 const MINE: LastMessage = { by: 'Dana K.', mine: true, text: 'Butterfly tattoo, left wrist' };
+const TZ = 'America/New_York';
+/** When the latest message was written (3 minutes ago), and the time the line shows for it ("12:24 PM"). */
+const LAST_AT = new Date(NOW - 3 * 60_000).toISOString();
+const lastTime = () => formatCreatedTime(LAST_AT, Date.now(), TZ);
 
 /** The engine's two reads a server render makes; nothing else is called before effects run. */
 const ENGINE = {
@@ -41,7 +48,7 @@ const ENGINE = {
 } as unknown as MessagingApi;
 
 function store(id: string, patch: (row: RequestSummary) => RequestSummary = (r) => r, synced = true): AppStore {
-  const base = createStubStore({ eventTimezone: 'America/New_York', now: NOW });
+  const base = createStubStore({ eventTimezone: TZ, now: NOW });
   const state = base.getState();
   const confirmed = new Map(state.confirmed);
   confirmed.set(id, patch(confirmed.get(id)!));
@@ -87,31 +94,46 @@ const preview = (html: string) => {
 };
 
 describe('the latest-message line (R1)', () => {
-  it('Needs info: the amber chip, "Rae C.: Any tattoos or marks?", the unread dot, one button that says it all', () => {
-    const html = render(store(WAITING, (r) => ({ ...r, needsInfo: true, lastMessage: FROM_MEDICAL, messageCount: 1, unread: 1 })), <ProfileView id={WAITING} />);
+  it('Needs info: "Rae C.: Any tattoos or marks?", its time, the unread dot, one button that says it all; no second chip (T1)', () => {
+    const html = render(store(WAITING, (r) => ({ ...r, needsInfo: true, lastMessage: FROM_MEDICAL, lastMessageAt: LAST_AT, messageCount: 1, unread: 1 })), <ProfileView id={WAITING} />);
     const line = preview(html)!;
     expect(line).not.toBeNull();
-    expect(line).toMatch(/data-testid="stage-chip"[^>]*>[^]*Needs info/);
-    expect(line).toContain('data-tone="amber"');
+    // (T1) The status block above says Needs info (in words and glyph): the line has no chip of its own.
+    expect(line).not.toContain('stage-chip');
+    expect(line).not.toContain('data-tone="amber"');
+    expect(html.slice(at(html, 'data-testid="status-block"'), at(html, 'data-testid="thread-preview"'))).toContain('Needs info');
     expect(line).toContain('data-testid="preview-unread"');
     expect(line.replace(/<!-- -->/g, '')).toMatch(/Rae C\.:<\/span> Any tattoos or marks\?/);
-    expect(line).toContain('Needs info. Last message, unread, from Rae C.: Any tattoos or marks? Go to messages.');
+    // (T2) The time at the right, before the ⌄, and in the sentence.
+    expect(line.replace(/<!-- -->/g, '')).toMatch(new RegExp(`data-testid="preview-time"[^>]*>${lastTime()}</span><svg`));
+    expect(line).toContain(`Last message, unread, from Rae C. at ${lastTime()}: Any tattoos or marks? Go to messages.`);
+    expect(line).not.toContain('Needs info');
   });
 
-  it('Needs info when my own question is the latest: the chip and "You: …", no dot', () => {
-    const html = render(store(WAITING, (r) => ({ ...r, needsInfo: true, lastMessage: { ...FROM_MEDICAL, mine: true }, messageCount: 1, unread: 0 })), <ProfileView id={WAITING} />);
+  it('Needs info when my own question is the latest: "You: …" and its time, no dot, no chip', () => {
+    const html = render(store(WAITING, (r) => ({ ...r, needsInfo: true, lastMessage: { ...FROM_MEDICAL, mine: true }, lastMessageAt: LAST_AT, messageCount: 1, unread: 0 })), <ProfileView id={WAITING} />);
     const line = preview(html)!;
-    expect(line).toContain('data-testid="stage-chip"');
+    expect(line).not.toContain('stage-chip');
     expect(line).not.toContain('preview-unread');
-    expect(line).toContain('Last message, from you: Any tattoos or marks?');
+    expect(line).toContain(`Last message, from you at ${lastTime()}: Any tattoos or marks?`);
   });
 
-  it('Located with unread messages for me: the line with its dot, no chip', () => {
-    const html = render(store(IN_MEDICAL, (r) => ({ ...r, lastMessage: { by: 'Rae C.', mine: false, text: 'Bring 1 person only' }, messageCount: 3, unread: 2 })), <ProfileView id={IN_MEDICAL} />);
+  it('Located with unread messages for me: the line with its dot and time, no chip', () => {
+    const html = render(store(IN_MEDICAL, (r) => ({ ...r, lastMessage: { by: 'Rae C.', mine: false, text: 'Bring 1 person only' }, lastMessageAt: LAST_AT, messageCount: 3, unread: 2 })), <ProfileView id={IN_MEDICAL} />);
     const line = preview(html)!;
     expect(line).not.toContain('stage-chip');
     expect(line).toContain('data-testid="preview-unread"');
-    expect(line).toContain('Last message, unread, from Rae C.: Bring 1 person only. Go to messages.');
+    expect(line).toContain('data-testid="preview-time"');
+    expect(line).toContain(`Last message, unread, from Rae C. at ${lastTime()}: Bring 1 person only. Go to messages.`);
+  });
+
+  it('(T2) without a readable time for the latest message: no time, the sentence as before', () => {
+    for (const lastMessageAt of [null, 'not a time']) {
+      const html = render(store(IN_MEDICAL, (r) => ({ ...r, lastMessage: { by: 'Rae C.', mine: false, text: 'Bring 1 person only' }, lastMessageAt, messageCount: 3, unread: 2 })), <ProfileView id={IN_MEDICAL} />);
+      const line = preview(html)!;
+      expect(line, String(lastMessageAt)).not.toContain('preview-time');
+      expect(line).toContain('Last message, unread, from Rae C.: Bring 1 person only. Go to messages.');
+    }
   });
 
   it('not otherwise: no messages, messages all read, or my own reply the latest', () => {
@@ -134,7 +156,8 @@ describe('the latest-message line (R1)', () => {
     // Needs info is not a kept count: it shows from the row as it is.
     const asked = (r: RequestSummary) => ({ ...r, needsInfo: true, lastMessage: FROM_MEDICAL, messageCount: 1, unread: 1 });
     const line = preview(render(store(WAITING, asked, false), <ProfileView id={WAITING} />))!;
-    expect(line).toContain('data-testid="stage-chip"');
+    expect(line).toContain('Any tattoos or marks?');
+    expect(line).not.toContain('stage-chip');
     expect(line).not.toContain('preview-unread');
   });
 

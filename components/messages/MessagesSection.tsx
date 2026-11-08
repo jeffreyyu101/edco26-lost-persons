@@ -1,22 +1,27 @@
 'use client';
 // Messages on a request (F3; design/screens/updates.html v7 "1 · Messages on the request", #clarify 6–7,
 // f34-states.html 6). A chat thread that belongs to the request, at every status: bubbles only (no system
-// lines, no timestamps), iMessage grouping with "Name · Team" above the first bubble of someone else's run,
-// and under MY latest message "Delivered" or "Read 4:14 PM" in words. Queued bubbles are dimmed with
-// "Sending…"; failed ones say "Not delivered · Retry". Long-press (or right-click, or the ⋯ on a desktop)
-// gives Copy, and Unsend for my own within 15 minutes. Plain text only.
+// lines), iMessage grouping with "Name · Team · 12:14 PM" above the first bubble of someone else's run and the
+// time alone at the right over my own (2026-11-08, T5: reverses F3's "no timestamps"; a run also breaks after
+// 5 minutes, messages-logic buildBubbles), and under MY latest message "Delivered" or "Read 4:14 PM" in words.
+// Queued bubbles are dimmed with "Sending…"; failed ones say "Not delivered · Retry". Long-press (or right-click,
+// or the ⋯ on a desktop) gives Copy, and Unsend for my own within 15 minutes. Plain text only.
 //
-// (R1, Brian 2026-11-07) It sits below the request's details and photos. A jump (R2: a Message button, a desk
-// row's unread badge, a message's Activity row, toast or notification, the page's own preview line) brings it
-// into view at its newest message, and focuses the composer on a computer only.
+// (R1, Brian 2026-11-07) It sits below the request's details and photos. A jump (R2: a Message button, a row's
+// message lane, a message's Activity row, toast or notification, the page's own preview line) brings it
+// into view at its newest message, and focuses the composer on a computer only. It lands as the message lane's
+// frame 5 (design/screens/msg-indicator-5.png), held there while the request settles (holdLanding).
 //
-// The thread scrolls in its own box and opens at the newest message; "New messages" shows when new ones
-// arrive while it is scrolled up; screen readers hear new incoming messages (polite). The composer is one
-// rounded field with the send arrow inside it and the quick lines for this status and side above it. A message
-// quick line fills the field (appended after a space to anything typed), and nothing is posted until Send
-// (Brian 2026-11-07 13:55); En route opens its sheet and Arrived acts at once, as before.
+// (2026-11-08) On a phone the thread is part of the page, not a box of its own: a swipe anywhere on it scrolls the
+// page, the newest message is at the bottom, and the page follows a new message while the reader is at the thread's
+// end ("New messages" while they read higher up). "Earlier messages" keeps the message on screen where it was. The
+// desk pane keeps the thread's own scroller (it opens at the newest message) with its overscroll contained. Screen
+// readers hear new incoming messages (polite). The composer is one rounded field with the send arrow inside it and
+// the quick lines for this status and side above it (they wrap).
+// A message quick line fills the field (appended after a space to anything typed), and nothing is posted until
+// Send (Brian 2026-11-07 13:55); En route opens its sheet. (2026-11-08) There is no Arrived quick line any more.
 import { Button, ContextMenu, DropdownMenu, IconButton, Skeleton, TextArea, VisuallyHidden } from '@radix-ui/themes';
-import { ArrowDown, ArrowUp, Check, CloudOff, Copy, Ellipsis, MessageCircle, RotateCcw, Trash2, Undo2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, CloudOff, Copy, Ellipsis, MessageCircle, RotateCcw, Trash2, Undo2 } from 'lucide-react';
 import { WalkIcon } from './WalkIcon';
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { createPortal, flushSync } from 'react-dom';
@@ -28,21 +33,40 @@ import { useActions, useEventTimezone, useNow, useSession } from '@/lib/client/s
 import { formatCreatedTime } from '@/lib/format';
 import { MESSAGE_COUNTER_FROM, MESSAGE_MAX, UNSEND_WINDOW_MS, fillWithQuickLine, messageLength, quickLines, quickStage, sideOfTeam } from '@/lib/messaging';
 import { dropOtherThreadJump, subscribeThreadJump, takeThreadJump, threadJumpWaiting } from '@/lib/client/thread-jump';
+import { keyboardBox } from '@/lib/client/visual-viewport';
 import { DESK_QUERY } from '@/components/desk/breakpoints';
 import { useEnrouteControl } from './Enroute';
 import s from './messages.module.css';
 
 export interface MessagesSectionProps {
   row: RequestSummary;
-  /** In the desk pane (the quick lines wrap instead of scrolling sideways). */
+  /**
+   * In the desk pane (the thread scrolls in its own box, and a jump lands under the pane's top). Else the phone's
+   * page: the thread is part of the page and scrolls with it.
+   */
   panel?: boolean;
 }
 
 const AT_BOTTOM_PX = 32;
+/** (2026-11-08) After the phone's page is scrolled to the thread's end, its scroll events don't count for this long. */
+const OWN_SCROLL_MS = 900;
+/** The desk pane's "New messages" pill sits this far above the bottom of the thread (a phone's: KEEP_GAP_PX above the bar). */
+const PILL_GAP_PX = 8;
 const FINE_POINTER = '(hover: hover) and (pointer: fine)';
 /** (R2) A jump focuses the composer here only: the desk layout with a mouse or trackpad. */
 const COMPUTER = `${DESK_QUERY} and ${FINE_POINTER}`;
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+/**
+ * The reader's own input (they are moving the page themselves): it hands back a jump's hold on its landing
+ * (holdLanding), and (2026-11-08) ends a phone's wait for a thread that had not shown yet when its jump landed (it
+ * lands again when it shows, however long that takes, unless one of these comes first).
+ */
+const READER_INPUT = ['touchstart', 'pointerdown', 'wheel', 'keydown'] as const;
+/**
+ * Room a jump keeps under the composer: on a phone between the message field and the request's sticky action bar (or
+ * the keyboard), in the desk pane between the section's end and the pane's bottom edge.
+ */
+const KEEP_GAP_PX = 8;
 
 export function MessagesSection({ row, panel = false }: MessagesSectionProps) {
   const api = useMessaging();
@@ -66,8 +90,10 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
   const receipt = receiptFor(messages, thread?.receipt ?? null);
   const enroute = useEnrouteControl(row);
 
-  // --- scrolling: open at the newest; "New messages" when new ones arrive while scrolled up ------------
-  const scroller = useRef<HTMLDivElement>(null);
+  // --- scrolling: the newest at the bottom; "New messages" when new ones arrive while the reader is higher up ---
+  // The desk pane's thread is its own scroller. (2026-11-08) On a phone the thread is part of the page: "at the
+  // bottom" is its end on screen above the sticky action bar, and the scroll to the end is the page's.
+  const box = useRef<HTMLDivElement>(null);
   const section = useRef<HTMLElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -75,18 +101,101 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
   const atBottom = useRef(true);
   const lastKey = useRef<string | null>(null);
   const firstShown = useRef(false);
-  const [newPill, setNewPill] = useState(false);
+  /** A phone's jump landed while the thread was loading: it lands again once the thread shows (until the reader's input). */
+  const settle = useRef(false);
+  /** Ends `settle` and stops listening for the reader's input. */
+  const unsettle = useRef<() => void>(() => undefined);
+  /** Releases the latest jump's hold on its landing (holdLanding). */
+  const holding = useRef<() => void>(() => undefined);
+  /** (Phone) Until when the page's scroll events are this thread's own scroll to its end (they keep atBottom). */
+  const ownScroll = useRef(0);
+  /**
+   * "Earlier messages": the first bubble and its top (bubbleTop), from the tap until older ones show above it (then it is
+   * kept there). The top follows the reader's own scrolling meanwhile.
+   */
+  const anchor = useRef<{ key: string; top: number } | null>(null);
+  const loadingEarlier = thread?.loadingEarlier === true;
+  const wasLoadingEarlier = useRef(false);
+  /** "New messages" (null: hidden), with its distance from the bottom of the thread's scrollport (px). */
+  const [newPill, setNewPill] = useState<number | null>(null);
 
-  const scrollToEnd = useCallback((smooth: boolean) => {
-    const el = scroller.current;
-    if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
-    atBottom.current = true;
-  }, []);
+  const scrollToEnd = useCallback(
+    (smooth: boolean) => {
+      atBottom.current = true;
+      if (panel) {
+        const el = box.current;
+        el?.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+        return;
+      }
+      // The phone: the page, so the message field (under the newest message) ends above the action bar. Never up.
+      const sec = section.current;
+      const field = input.current;
+      if (!sec || !field) return;
+      const by = field.getBoundingClientRect().bottom - pageView(sec).bottom;
+      if (by <= 0) return;
+      ownScroll.current = Date.now() + OWN_SCROLL_MS;
+      window.scrollTo({ top: window.scrollY + by, behavior: smooth ? motion() : 'auto' });
+    },
+    [panel],
+  );
   const toBottom = useCallback(() => {
     scrollToEnd(true);
-    setNewPill(false);
+    setNewPill(null);
   }, [scrollToEnd]);
+
+  /**
+   * (R2) Lands the section where a jump lands (landingTop: on a phone with the message field above the action bar) and
+   * holds it there while the request settles (holdLanding), in place of any earlier hold.
+   */
+  const landSection = useCallback(
+    (behavior: ScrollBehavior) => {
+      holding.current();
+      holding.current = () => undefined;
+      const el = section.current;
+      if (!el) return;
+      const keep = panel ? null : input.current;
+      scrollToSection(el, behavior, keep);
+      holding.current = holdLanding(el, keep);
+    },
+    [panel],
+  );
+
+  /** Whether the thread's end is on screen (the pane: its scroller at its end; the phone: above the action bar). */
+  const measureAtBottom = useCallback((): boolean => {
+    const el = box.current;
+    if (!el) return true;
+    if (panel) return el.scrollHeight - el.scrollTop - el.clientHeight < AT_BOTTOM_PX;
+    const end = el.getBoundingClientRect().bottom;
+    const view = pageView(el);
+    return end >= view.top && end <= view.bottom + AT_BOTTOM_PX;
+  }, [panel]);
+
+  /** Where the reader wants the pill (its sticky `bottom`): the pane's 8 px, a phone's just above the bar or keyboard. */
+  const pillLift = useCallback((): number => {
+    const sec = section.current;
+    return panel || !sec ? PILL_GAP_PX : window.innerHeight - pageView(sec).bottom;
+  }, [panel]);
+
+  useLayoutEffect(() => {
+    // "Earlier messages": the bubble that was first on screen stays where it was (no jump), on the page as in the pane.
+    // Only the older page going in above it moves anything; any other render keeps its place as it is now.
+    const held = anchor.current;
+    if (held) {
+      const top = bubbleTop(box.current, held.key, panel);
+      if (bubbles[0]?.key !== held.key) {
+        const by = top === null ? 0 : top - held.top;
+        if (Math.abs(by) >= 1) {
+          if (panel) box.current?.scrollBy({ top: by });
+          else window.scrollBy({ top: by });
+        }
+        anchor.current = null;
+      } else if (wasLoadingEarlier.current && !loadingEarlier) {
+        // The load ended with nothing new (it failed): nothing to keep.
+        anchor.current = null;
+      } else if (top !== null) held.top = top;
+    }
+    wasLoadingEarlier.current = loadingEarlier;
+  }, [bubbles, loadingEarlier, panel]);
 
   useLayoutEffect(() => {
     const last = bubbles[bubbles.length - 1];
@@ -97,7 +206,18 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
     if (!last) return;
     if (!firstShown.current) {
       firstShown.current = true;
-      scrollToEnd(false);
+      // The pane opens its thread at the newest message; the phone's page stays where it is (the request's top).
+      if (panel) scrollToEnd(false);
+      else atBottom.current = measureAtBottom();
+      // (2026-11-08) The thread came in under a phone's jump (however late, the reader hasn't moved the page since):
+      // land again, so the newest messages and the field end up above the bar, not under it, held like the jump's own
+      // landing (a smooth scroll that stops short is aimed again without animation).
+      if (section.current && settle.current) {
+        landSection(motion());
+        atBottom.current = true;
+        ownScroll.current = Date.now() + OWN_SCROLL_MS;
+      }
+      unsettle.current();
       return;
     }
     // Only a new message at the end counts (an older page loaded above changes nothing here).
@@ -108,15 +228,57 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
       scrollToEnd(true);
       return;
     }
-    const frame = requestAnimationFrame(() => setNewPill(true));
+    // Reading higher up: nothing moves, the pill says so (on a phone just above the action bar).
+    const lift = pillLift();
+    const frame = requestAnimationFrame(() => setNewPill(lift));
     return () => cancelAnimationFrame(frame);
-  }, [bubbles, scrollToEnd]);
+  }, [bubbles, scrollToEnd, measureAtBottom, pillLift, panel, landSection]);
 
-  const onScroll = () => {
-    const el = scroller.current;
-    if (!el) return;
-    atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < AT_BOTTOM_PX;
-    if (atBottom.current) setNewPill(false);
+  /** (Phone) The check after this thread's own scroll to its end has finished. */
+  const later = useRef(0);
+  const onScroll = useCallback(() => {
+    // "Earlier messages" while it loads: the kept bubble's top is where the reader's own scrolling has put it.
+    const held = anchor.current;
+    if (held) held.top = bubbleTop(box.current, held.key, panel) ?? held.top;
+    const check = () => {
+      atBottom.current = measureAtBottom();
+      if (atBottom.current) {
+        setNewPill(null);
+        return;
+      }
+      // The pill stays just above the bar, or the keyboard, as they come and go (a phone's keyboard pans and resizes).
+      const lift = pillLift();
+      setNewPill((p) => (p === null ? null : lift));
+    };
+    window.clearTimeout(later.current);
+    const wait = panel ? 0 : ownScroll.current - Date.now();
+    if (wait > 0) later.current = window.setTimeout(check, wait);
+    else check();
+  }, [panel, measureAtBottom, pillLift]);
+
+  // (2026-11-08) The phone's thread scrolls with the page: the page's scroll (and the keyboard's) decides atBottom.
+  useEffect(() => {
+    if (panel) return;
+    const vv = window.visualViewport;
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    vv?.addEventListener('resize', onScroll);
+    vv?.addEventListener('scroll', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+      vv?.removeEventListener('resize', onScroll);
+      vv?.removeEventListener('scroll', onScroll);
+      window.clearTimeout(later.current);
+    };
+  }, [panel, onScroll]);
+
+  const loadEarlier = () => {
+    // The first bubble's place on screen now: it stays there once the older messages show above it.
+    const first = bubbles[0];
+    const top = first ? bubbleTop(box.current, first.key, panel) : null;
+    anchor.current = first && top !== null && thread?.hasEarlier && !thread.loadingEarlier ? { key: first.key, top } : null;
+    void api?.loadEarlier(row.id);
   };
 
   // --- read: the thread on screen marks itself read up to its newest message ---------------------------
@@ -141,24 +303,39 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
   }, [api, row.id, lastAt, count]);
 
   // --- (R2) a jump to the thread (lib/client/thread-jump): into view, at its newest; the composer focused on a
-  // computer only (a phone keeps its keyboard down: the heading takes the focus) --------------------------
+  // computer only (a phone keeps its keyboard down: the heading takes the focus). (2026-11-08) On a phone the page
+  // lands with the message field above the sticky action bar and the newest messages over it, the heading going under
+  // the top bar when the section can't fit; a jump that lands while the thread is still loading lands again when it
+  // shows, however long that takes, unless the reader touches, scrolls or types first. The desk pane scrolls itself to
+  // the section and its thread to the newest. Either way the landing is held while the request settles (holdLanding:
+  // the thread replacing its skeleton, the details or a photo loading, a smooth scroll WebKit stopped short). --------
   useEffect(() => {
     const id = row.id;
     let frame = 0;
-    let release = () => {};
     const land = () => {
       if (!threadJumpWaiting(id) || frame) return;
       // After this commit's other effects (the page and the desk pane start a request at its top).
       frame = requestAnimationFrame(() => {
         frame = 0;
         if (!takeThreadJump(id)) return;
-        release();
-        if (section.current) {
-          scrollToSection(section.current, window.matchMedia(REDUCED_MOTION).matches ? 'auto' : 'smooth');
-          release = holdLanding(section.current);
+        unsettle.current();
+        if (!panel && !firstShown.current) {
+          settle.current = true;
+          const off = () => {
+            settle.current = false;
+            unsettle.current = () => undefined;
+            READER_INPUT.forEach((type) => window.removeEventListener(type, off, true));
+          };
+          READER_INPUT.forEach((type) => window.addEventListener(type, off, { capture: true, passive: true }));
+          unsettle.current = off;
         }
-        scrollToEnd(false);
-        setNewPill(false);
+        landSection(motion());
+        if (panel) scrollToEnd(false);
+        else {
+          atBottom.current = true;
+          ownScroll.current = Date.now() + OWN_SCROLL_MS;
+        }
+        setNewPill(null);
         if (window.matchMedia(COMPUTER).matches) input.current?.focus({ preventScroll: true });
         else heading.current?.focus({ preventScroll: true });
       });
@@ -169,9 +346,10 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
     return () => {
       off();
       cancelAnimationFrame(frame);
-      release();
+      unsettle.current();
+      holding.current();
     };
-  }, [row.id, scrollToEnd]);
+  }, [row.id, panel, scrollToEnd, landSection]);
 
   const side = sideOfTeam(session.team);
   const lines = quickLines(quickStage(row), side, enroute.mine, enroute.enroute?.state === 'arrived');
@@ -191,16 +369,9 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
       <h2 className={s.head} id={headingId} ref={heading} tabIndex={-1}>
         Messages
       </h2>
-      <div className={s.scroller} ref={scroller} onScroll={onScroll} data-testid="thread">
+      <div className={s.thread} ref={box} onScroll={panel ? onScroll : undefined} data-testid="thread">
         {thread?.hasEarlier ? (
-          <Button
-            variant="ghost"
-            color="gray"
-            size="2"
-            className={`${s.earlier} lp-hit`}
-            loading={thread.loadingEarlier}
-            onClick={() => void api?.loadEarlier(row.id)}
-          >
+          <Button variant="ghost" color="gray" size="2" className={`${s.earlier} lp-hit`} loading={thread.loadingEarlier} onClick={loadEarlier}>
             Earlier messages
           </Button>
         ) : null}
@@ -222,51 +393,50 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
           </div>
         ) : (
           <div className={s.chat} role="log" aria-label="Messages">
-            {bubbles.map((b, i) => (
-              <Fragment key={b.key}>
-                {b.runStart && i > 0 ? <div className={s.gap} aria-hidden /> : null}
-                {b.runStart && !b.mine ? (
-                  <span className={s.from} aria-hidden>
-                    <b>{b.by}</b>
-                    {b.team ? ` · ${b.team}` : ''}
-                  </span>
-                ) : null}
-                <BubbleRow
-                  bubble={b}
-                  now={now}
-                  onCopy={() => copy(b.body)}
-                  onUnsend={b.message && b.mine ? () => void api?.unsend(row.id, b.message!.id) : null}
-                  onRetry={b.jobId ? () => api?.retry(b.jobId!) : null}
-                  onDelete={b.jobId && b.pending === 'failed' ? () => void api?.discard(b.jobId!) : null}
-                />
-                {b.pending === 'sending' ? (
-                  <span className={s.receipt} data-testid="receipt-sending">
-                    Sending…
-                  </span>
-                ) : b.pending === 'failed' ? (
-                  <span className={`${s.receipt} ${s.failed}`} data-testid="receipt-failed">
-                    <b>Not delivered</b> ·
-                    <button type="button" className={s.retry} onClick={() => b.jobId && api?.retry(b.jobId)}>
-                      Retry
-                    </button>
-                  </span>
-                ) : receipt && b.message?.id === receipt.messageId ? (
-                  <span className={s.receipt} data-testid="receipt">
-                    {receipt.readAt ? (
-                      <>
-                        <b>Read</b> {formatCreatedTime(receipt.readAt, now, timeZone)}
-                      </>
-                    ) : (
-                      'Delivered'
-                    )}
-                  </span>
-                ) : null}
-              </Fragment>
-            ))}
+            {bubbles.map((b, i) => {
+              const time = timeOf(b.createdAt, now, timeZone);
+              return (
+                <Fragment key={b.key}>
+                  {b.runStart && i > 0 ? <div className={s.gap} aria-hidden /> : null}
+                  {b.runStart ? <RunLabel bubble={b} time={time} /> : null}
+                  <BubbleRow
+                    bubble={b}
+                    time={time}
+                    now={now}
+                    onCopy={() => copy(b.body)}
+                    onUnsend={b.message && b.mine ? () => void api?.unsend(row.id, b.message!.id) : null}
+                    onRetry={b.jobId ? () => api?.retry(b.jobId!) : null}
+                    onDelete={b.jobId && b.pending === 'failed' ? () => void api?.discard(b.jobId!) : null}
+                  />
+                  {b.pending === 'sending' ? (
+                    <span className={s.receipt} data-testid="receipt-sending">
+                      Sending…
+                    </span>
+                  ) : b.pending === 'failed' ? (
+                    <span className={`${s.receipt} ${s.failed}`} data-testid="receipt-failed">
+                      <b>Not delivered</b> ·
+                      <button type="button" className={s.retry} onClick={() => b.jobId && api?.retry(b.jobId)}>
+                        Retry
+                      </button>
+                    </span>
+                  ) : receipt && b.message?.id === receipt.messageId ? (
+                    <span className={s.receipt} data-testid="receipt">
+                      {receipt.readAt ? (
+                        <>
+                          <b>Read</b> {formatCreatedTime(receipt.readAt, now, timeZone)}
+                        </>
+                      ) : (
+                        'Delivered'
+                      )}
+                    </span>
+                  ) : null}
+                </Fragment>
+              );
+            })}
           </div>
         )}
-        {newPill ? (
-          <button type="button" className={s.newPill} onClick={toBottom} data-testid="new-messages">
+        {newPill !== null ? (
+          <button type="button" className={s.newPill} style={{ bottom: newPill }} onClick={toBottom} data-testid="new-messages">
             <ArrowDown size={15} strokeWidth={2.25} aria-hidden />
             New messages
           </button>
@@ -292,12 +462,46 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
           return ok;
         }}
         onEnroute={enroute.openNew}
-        onArrived={enroute.arrive}
       />
       {enroute.sheet}
     </section>
   );
 }
+
+/** "12:14 PM" ("Thu 11:02 PM" an earlier day) for a bubble's run label and its screen-reader label; '' when unreadable. */
+export function timeOf(iso: string, now: number, timeZone: string): string {
+  return Number.isFinite(Date.parse(iso)) ? formatCreatedTime(iso, now, timeZone) : '';
+}
+
+/**
+ * (2026-11-08, T5) The line over a run: "Rae C. · Medical · 12:14 PM" over someone else's, the time alone at the right
+ * over mine. Hidden from screen readers: each bubble's label says who and when.
+ */
+export function RunLabel({ bubble, time }: { bubble: Pick<Bubble, 'by' | 'team' | 'mine'>; time: string }) {
+  if (bubble.mine) {
+    return time ? (
+      <span className={`${s.from} ${s.fromMe}`} aria-hidden data-testid="run-label" data-mine="">
+        {time}
+      </span>
+    ) : null;
+  }
+  return (
+    <span className={s.from} aria-hidden data-testid="run-label">
+      <b>{bubble.by}</b>
+      {bubble.team ? ` · ${bubble.team}` : ''}
+      {time ? ` · ${time}` : ''}
+    </span>
+  );
+}
+
+/** A bubble's screen-reader label: "Rae C., Medical, 12:14 PM: Any tattoos or marks?." / "You, 12:16 PM: …. Sending.". */
+export function bubbleSaid(bubble: Pick<Bubble, 'by' | 'team' | 'mine' | 'body' | 'pending'>, time: string): string {
+  const who = bubble.mine ? 'You' : `${bubble.by}${bubble.team ? `, ${bubble.team}` : ''}`;
+  const state = bubble.pending === 'sending' ? ' Sending.' : bubble.pending === 'failed' ? ' Not delivered.' : '';
+  return `${who}${time ? `, ${time}` : ''}: ${bubble.body}.${state}`;
+}
+
+const motion = (): ScrollBehavior => (window.matchMedia(REDUCED_MOTION).matches ? 'auto' : 'smooth');
 
 /** The request's own scroller: the desk pane's body, or null for the page. */
 function scrollBoxOf(el: HTMLElement): HTMLElement | null {
@@ -308,34 +512,34 @@ function scrollBoxOf(el: HTMLElement): HTMLElement | null {
   return null;
 }
 
-/** Space kept between the composer and the phone's action bar (or the pane's bottom edge). */
-const COMPOSER_GAP = 8;
-
 /**
  * (R2, design/screens/msg-indicator-5.png) Where a jump lands, as the scroller's scrollTop: the section's top under its
- * scroll-margin (the Messages heading right under the phone's top bar, 4 px into the desk pane). Where the screen is
- * too short for the whole section, a little further, so the composer still clears the phone's action bar (stuck to
- * the foot of the screen, ProfileView's [data-sticky-foot]) or the pane's bottom edge: the newest messages sit right
- * above it.
+ * scroll-margin (the Messages heading right under the phone's top bar, 4 px into the desk pane), or a little further
+ * where the screen is too short for the whole section. In the desk pane, so the section's end (the composer) clears
+ * the pane's bottom edge by KEEP_GAP_PX. (2026-11-08) On the page (a phone), so `keep` (the message field) ends at least
+ * KEEP_GAP_PX above the request's sticky action bar, or the keyboard while it is up (pageView): the newest messages sit
+ * right above it.
  */
-function landingTop(el: HTMLElement, box: HTMLElement | null): number {
+function landingTop(el: HTMLElement, box: HTMLElement | null, keep: HTMLElement | null): number {
   const margin = parseFloat(getComputedStyle(el).scrollMarginTop) || 0;
-  const frame = box ? box.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
-  const foot = (box ?? document).querySelector<HTMLElement>('[data-sticky-foot]');
-  const visibleBottom = frame.bottom - (foot ? foot.offsetHeight : 0);
   const rect = el.getBoundingClientRect();
-  const head = rect.top - frame.top - margin;
-  const fit = rect.bottom + COMPOSER_GAP - visibleBottom;
-  return (box ? box.scrollTop : window.scrollY) + Math.max(head, fit);
+  if (box) {
+    const frame = box.getBoundingClientRect();
+    const foot = box.querySelector<HTMLElement>('[data-sticky-foot]');
+    const visibleBottom = frame.bottom - (foot ? foot.offsetHeight : 0);
+    return box.scrollTop + Math.max(rect.top - frame.top - margin, rect.bottom + KEEP_GAP_PX - visibleBottom);
+  }
+  const head = rect.top - margin;
+  return window.scrollY + (keep ? Math.max(head, keep.getBoundingClientRect().bottom - pageView(el).bottom) : head);
 }
 
 /**
  * (R2) Scrolls the request's own scroller (the desk pane's body, else the page) so the section lands (landingTop).
  * Not scrollIntoView: that moves every scroller around it, the desk's list included.
  */
-function scrollToSection(el: HTMLElement, behavior: ScrollBehavior): void {
+function scrollToSection(el: HTMLElement, behavior: ScrollBehavior, keep: HTMLElement | null = null): void {
   const box = scrollBoxOf(el);
-  const to = { top: landingTop(el, box), behavior };
+  const to = { top: landingTop(el, box, keep), behavior };
   if (box) box.scrollTo(to);
   else window.scrollTo(to);
 }
@@ -344,21 +548,21 @@ function scrollToSection(el: HTMLElement, behavior: ScrollBehavior): void {
 const HOLD_MS = 5_000;
 /** A jump's smooth scroll has ended by now (or stopped short: WebKit stops one when the page grows under it). */
 const SETTLE_MS = 900;
-const HAND_BACK = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
 
 /**
  * (R2) Holds a jump's landing while the request settles. What shows after the jump (the thread replacing its
  * skeleton, the request's details, a photo) changes the height around the section, so a scroll aimed before that
- * stops short (the page could not yet scroll that far) or lands off. Until the person scrolls, taps or types, or
- * HOLD_MS pass, every change of the layout aims it again, without animation, as does the end of the smooth scroll.
- * A scroll from anywhere else (the status bar, a scrollbar, a script) hands it back too. Call it right after the
- * jump's scrollToSection. Returns the release.
+ * stops short (the page could not yet scroll that far) or lands off. Until the reader scrolls, taps or types
+ * (READER_INPUT), or HOLD_MS pass, every change of the layout aims it again, without animation, as does the end of
+ * the smooth scroll. A scroll from anywhere else (the status bar, a scrollbar, a script) hands it back too. Call it
+ * right after the jump's scrollToSection, with the same `keep`. Returns the release.
+ * (2026-11-08) A phone's thread that shows only after HOLD_MS still lands again, from MessagesSection's settle.
  */
-function holdLanding(el: HTMLElement): () => void {
+function holdLanding(el: HTMLElement, keep: HTMLElement | null): () => void {
   const box = scrollBoxOf(el);
   const at = () => (box ? box.scrollTop : window.scrollY);
   // The smooth scroll's goal, and where it has got to: it only ever closes in on the goal.
-  const goal = landingTop(el, box);
+  const goal = landingTop(el, box, keep);
   let last = at();
   // Where the section sits in what scrolls, and how tall that is: both stay put while it scrolls.
   const layout = () => {
@@ -372,7 +576,7 @@ function holdLanding(el: HTMLElement): () => void {
   const aim = () => {
     if (done || !el.isConnected) return;
     seen = layout();
-    scrollToSection(el, 'auto');
+    scrollToSection(el, 'auto', keep);
     aimed = at();
   };
   const moved = () => {
@@ -396,7 +600,7 @@ function holdLanding(el: HTMLElement): () => void {
   const scroller: EventTarget = box ?? window;
   scroller.addEventListener('scroll', onScroll, { passive: true });
   scroller.addEventListener('scrollend', settle);
-  for (const type of HAND_BACK) window.addEventListener(type, release, { capture: true, passive: true });
+  for (const type of READER_INPUT) window.addEventListener(type, release, { capture: true, passive: true });
   const settleTimer = window.setTimeout(settle, SETTLE_MS);
   const holdTimer = window.setTimeout(release, HOLD_MS);
   function release() {
@@ -405,11 +609,36 @@ function holdLanding(el: HTMLElement): () => void {
     observer?.disconnect();
     scroller.removeEventListener('scroll', onScroll);
     scroller.removeEventListener('scrollend', settle);
-    for (const type of HAND_BACK) window.removeEventListener(type, release, { capture: true });
+    for (const type of READER_INPUT) window.removeEventListener(type, release, { capture: true });
     window.clearTimeout(settleTimer);
     window.clearTimeout(holdTimer);
   }
   return release;
+}
+
+/**
+ * (2026-11-08) What of the phone's page is on screen around the request's thread, in viewport px: from under the sticky
+ * top bar (the section's scroll-margin) to KEEP_GAP_PX above the sticky action bar (ProfileView's [data-sticky-foot]),
+ * or above the on-screen keyboard while it is up (it covers the bar; the visual viewport is what shows).
+ */
+function pageView(el: HTMLElement): { top: number; bottom: number } {
+  const sec = el.closest<HTMLElement>('[data-testid="messages"]') ?? el;
+  const bar = el.closest('[data-testid="profile"]')?.querySelector<HTMLElement>('[data-sticky-foot]');
+  const vv = window.visualViewport;
+  const keyboard = vv ? keyboardBox(window.innerHeight, vv) : null;
+  const shown = keyboard ? keyboard.top + keyboard.height : window.innerHeight;
+  const bottom = Math.min(window.innerHeight - (bar?.offsetHeight ?? 0), shown) - KEEP_GAP_PX;
+  return { top: parseFloat(getComputedStyle(sec).scrollMarginTop) || 0, bottom };
+}
+
+/**
+ * The top of the bubble row `key` in the thread `box`, or null when it isn't there: on screen (viewport px), or in the
+ * desk pane (`inBox`) from the top of the box that scrolls it, so scrolling the pane around the box doesn't count.
+ */
+function bubbleTop(box: HTMLElement | null, key: string, inBox: boolean): number | null {
+  const el = box?.querySelector<HTMLElement>(`[data-bubble="${CSS.escape(key)}"]`);
+  if (!box || !el) return null;
+  return el.getBoundingClientRect().top - (inBox ? box.getBoundingClientRect().top : 0);
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -426,6 +655,7 @@ interface MenuItem {
 
 function BubbleRow({
   bubble,
+  time,
   now,
   onCopy,
   onUnsend,
@@ -433,6 +663,8 @@ function BubbleRow({
   onDelete,
 }: {
   bubble: Bubble;
+  /** "12:14 PM": said in the bubble's label (the run's label shows it once on screen). */
+  time: string;
   now: number;
   onCopy: () => void;
   onUnsend: (() => void) | null;
@@ -445,8 +677,6 @@ function BubbleRow({
   if (bubble.pending === 'failed' && onRetry) items.push({ key: 'retry', label: 'Retry', icon: RotateCcw, run: onRetry });
   if (onDelete) items.push({ key: 'delete', label: 'Delete', icon: Trash2, danger: true, run: onDelete });
   const run = bubble.runStart && bubble.runEnd ? 'single' : bubble.runStart ? 'start' : bubble.runEnd ? 'end' : 'mid';
-  const who = bubble.mine ? 'You' : `${bubble.by}${bubble.team ? `, ${bubble.team}` : ''}`;
-  const state = bubble.pending === 'sending' ? ' Sending.' : bubble.pending === 'failed' ? ' Not delivered.' : '';
   const more = (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger>
@@ -465,7 +695,7 @@ function BubbleRow({
     </DropdownMenu.Root>
   );
   return (
-    <div className={s.row} data-mine={bubble.mine ? '' : undefined}>
+    <div className={s.row} data-mine={bubble.mine ? '' : undefined} data-bubble={bubble.key}>
       {bubble.mine ? more : null}
       <ContextMenu.Root>
         <ContextMenu.Trigger>
@@ -476,7 +706,7 @@ function BubbleRow({
             data-testid={bubble.mine ? 'bubble-mine' : 'bubble-them'}
             role="article"
             tabIndex={0}
-            aria-label={`${who}: ${bubble.body}.${state}`}
+            aria-label={bubbleSaid(bubble, time)}
           >
             {bubble.body}
           </div>
@@ -504,13 +734,11 @@ function Composer({
   inputRef,
   onSendText,
   onEnroute,
-  onArrived,
 }: {
   lines: ReturnType<typeof quickLines>;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   onSendText: (text: string) => Promise<boolean>;
   onEnroute: () => void;
-  onArrived: () => void;
 }) {
   const [value, setValue] = useState('');
   const counterId = useId();
@@ -566,13 +794,11 @@ function Composer({
               data-kind={l.kind}
               onClick={() => {
                 if (l.kind === 'enroute') onEnroute();
-                else if (l.kind === 'arrived') onArrived();
                 else fill(l.text);
               }}
-              aria-label={l.kind === 'message' ? `Add to message: ${l.text}` : l.kind === 'enroute' ? 'En route: bringing the friend' : 'Arrived with the friend'}
+              aria-label={l.kind === 'enroute' ? 'En route: bringing the friend' : `Add to message: ${l.text}`}
             >
               {l.kind === 'enroute' ? <WalkIcon size={15} strokeWidth={2} aria-hidden /> : null}
-              {l.kind === 'arrived' ? <Check size={15} strokeWidth={2} aria-hidden /> : null}
               {l.text}
             </button>
           ))}

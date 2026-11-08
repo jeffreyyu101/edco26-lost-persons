@@ -634,15 +634,16 @@ describe('renders', () => {
     expect(html).not.toContain('data-testid="later-group"');
   });
 
-  it('the request (medical): violet block, who answered, "Recheck 4:40 PM", and the answers inside the block', () => {
+  it('the request (medical): violet block, "Pending · not located yet", "Medical rechecks 4:40 PM", and the answers inside the block', () => {
     const store = heldStore({ team: 'Medical', staff: 'Rae Chen · Medical', staffName: 'Rae Chen' });
     const held = [...store.getState().confirmed.values()].find((r) => isHeld(r) && Date.parse(r.recheckAt!) > RECHECK_NOW)!;
     const html = render(store, <ProfileView id={held.id} />);
     const i = html.indexOf('data-testid="status-block"');
     const block = html.slice(html.lastIndexOf('<div', i), html.indexOf('data-testid="person-details"') > 0 ? html.indexOf('data-testid="person-details"') : i + 4000);
     expect(block).toContain('data-tone="violet"');
-    expect(block).toContain('>Pending<');
-    expect(block).toContain(`Recheck ${formatClockAmPm(held.recheckAt!, TZ)}`);
+    // (2026-11-08, Pending clarity) The block says what the hold means; lists keep "Pending".
+    expect(block).toContain('>Pending · not located yet<');
+    expect(block).toMatch(new RegExp(`data-testid="recheck-text"[^>]*>Medical rechecks(<!-- -->)? <b>${formatClockAmPm(held.recheckAt!, TZ)}</b>`));
     // (Pending v9.1 GLYPHS) Recheck is lucide history, as on the chip and the heading; refresh-cw is the live line's.
     const recheck = block.slice(block.indexOf('data-testid="recheck-row"'), block.indexOf('data-testid="recheck-row"') + 1200);
     expect(recheck).toContain('lucide-history');
@@ -686,7 +687,9 @@ describe('renders', () => {
     const time = formatClockAmPm(held.recheckAt!, TZ);
     const profile = render(store, <ProfileView id={held.id} />);
     expect(profile).toContain('data-stage="needsInfo"');
-    expect(profile).toMatch(new RegExp(`data-testid="recheck-row"[\\s\\S]*?Recheck ${time}`));
+    // (2026-11-08) The same hold row as Pending's: "Medical rechecks 4:40 PM", the minutes left and the bar.
+    expect(profile).toMatch(new RegExp(`data-testid="recheck-row"[\\s\\S]*?Medical rechecks(<!-- -->)? <b>${time}</b>`));
+    expect(profile).toContain('data-testid="recheck-bar"');
     const mine = render(store, <MineView />);
     const i = mine.indexOf(`data-request-id="${held.id}"`);
     const next = mine.indexOf('data-testid="mine-card"', i + 1);

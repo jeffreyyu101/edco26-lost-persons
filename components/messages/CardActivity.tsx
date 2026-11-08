@@ -3,7 +3,7 @@
 // #clarify 3 and 5, #edit 1–3). Self-contained slots: each reads the store itself, so the cards they sit in
 // only place them.
 //   My requests (every status): the en route row (In medical), the last-message preview (when there are
-//   messages), then En route / Arrived (front of house, In medical) and Message with its unread count.
+//   messages), then Message with its unread count and En route / Reunited (front of house, In medical).
 //   Pending → To check: the preview above the answers, and a 44 px Message button left of them.
 //   Pending → Friend coming: the en route row, then Message | Reunited.
 //   Log rows and desk tables (message lane, design/screens/msg-indicator.html, 2026-11-07): one mark leading the
@@ -18,11 +18,13 @@ import type { ReactNode } from 'react';
 import type { RequestSummary } from '@/lib/api-types';
 import { useMessaging } from '@/lib/client/messages-hooks';
 import { navigate } from '@/lib/client/nav';
-import { usePending, useSession } from '@/lib/client/store-contract';
+import { useEventTimezone, useNow, usePending, useSession } from '@/lib/client/store-contract';
 import { openThread, requestThreadJump } from '@/lib/client/thread-jump';
-import { alertName, isInMedical } from '@/lib/domain';
+import { STATUS, alertName, isInMedical } from '@/lib/domain';
+import { formatCreatedTime } from '@/lib/format';
+import { useStatusTap } from '@/components/list/hooks';
 import { previewText, sideOfTeam, unreadOf } from '@/lib/messaging';
-import { markCount, messageMark } from '@/components/list/list-helpers';
+import { markCount, messageMark } from '@/components/list/message-mark';
 import type { DisplayStage } from '@/lib/stages';
 import { StageChip } from '@/components/list/StageChips';
 import { EnrouteFailed, EnrouteRow, useEnrouteControl } from './Enroute';
@@ -116,16 +118,20 @@ const closed = (text: string) => (/[.?!…]$/.test(text) ? text : `${text}.`);
 
 /**
  * (Request page order R1, Brian 2026-11-07) The request page's latest-message line, under the status block: the
- * cards' preview (the amber Needs info chip when it applies, "Rae C.: Any tattoos or marks?" on one line, the unread
- * dot) as one 44 px button that brings the thread into view, and on a computer focuses the composer. The page
- * decides when it shows (lib/messaging threadPreviewShown).
+ * cards' preview ("Rae C.: Any tattoos or marks?", the unread dot) as one 44 px button that brings the thread into
+ * view, and on a computer focuses the composer. The page decides when it shows (lib/messaging threadPreviewShown).
+ * (2026-11-08, T1 + T2) Up to two lines (three under 360 px) with the message's time at the right ("12:24 PM"), and
+ * the page passes no Needs info chip (its status block says it). `needsInfo` still puts the chip first if passed.
  */
 export function ThreadPreview({ row, needsInfo, unread }: { row: RequestSummary; needsInfo: DisplayStage | null; unread: boolean }) {
+  const now = useNow();
+  const timeZone = useEventTimezone();
   const last = row.lastMessage && (row.messageCount ?? 0) > 0 ? row.lastMessage : null;
   const p = last ? previewText(last) : null;
+  const at = last && row.lastMessageAt && Number.isFinite(Date.parse(row.lastMessageAt)) ? formatCreatedTime(row.lastMessageAt, now, timeZone) : null;
   const said = [
     needsInfo ? `${needsInfo.label}.` : '',
-    last && p ? closed(`Last message${unread ? ', unread' : ''}, from ${last.mine ? 'you' : p.who}: ${p.text}`) : '',
+    last && p ? closed(`Last message${unread ? ', unread' : ''}, from ${last.mine ? 'you' : p.who}${at ? ` at ${at}` : ''}: ${p.text}`) : '',
     'Go to messages.',
   ];
   return (
@@ -142,6 +148,11 @@ export function ThreadPreview({ row, needsInfo, unread }: { row: RequestSummary;
             <span className={s.previewWho}>{p.who}:</span> {p.text}
           </span>
         ) : null}
+        {at ? (
+          <span className={s.tpTime} data-testid="preview-time">
+            {at}
+          </span>
+        ) : null}
         <ChevronDown size={16} strokeWidth={2} className={s.tpGo} />
       </span>
       <VisuallyHidden>{said.filter(Boolean).join(' ')}</VisuallyHidden>
@@ -154,22 +165,34 @@ function Slot({ children, mine }: { children: ReactNode; mine?: boolean }) {
 }
 
 /**
- * My requests: en route row (In medical), preview, then [En route | Arrived] (front of house, In medical,
- * until the friend arrived) and [Message].
+ * My requests: en route row (In medical), preview, then [Message] and [En route | Reunited] (front of house, In
+ * medical). (2026-11-08, Arrived dropped: design/DECISIONS.md "Request page tonight") Once I am en route, or the
+ * friend arrived on an old row, the card offers the request's Reunited instead: the same tap as Pending's Friend
+ * coming card (useStatusTap → setStatus reunite, with its Undo; "Needs a connection" offline), on the same side as
+ * there: Message left, the action right, so a tap meant for Message never closes the request.
  */
 export function MineActivity({ row }: { row: RequestSummary }) {
   const api = useMessaging();
   const session = useSession();
   const enroute = useEnrouteControl(row);
+  const { offline, tap } = useStatusTap();
   if (!api) return null;
   const foh = sideOfTeam(session.team) === 'foh';
   const inMedical = isInMedical(row.status);
   const arrived = enroute.enroute?.state === 'arrived';
-  const action = foh && inMedical && !arrived ? (
-    enroute.mine ? (
-      <Button size="3" variant="outline" color="gray" highContrast className={`${s.btn} ${s.btnQuiet}`} onClick={enroute.arrive} data-testid="arrived-button" aria-label={`Arrived with the friend of ${who(row)}`}>
-        <Check size={16} strokeWidth={2} aria-hidden />
-        Arrived
+  const action = foh && inMedical ? (
+    enroute.mine || arrived ? (
+      <Button
+        size="3"
+        highContrast
+        className={s.btn}
+        {...(offline ? { 'aria-disabled': true, 'data-disabled': '' } : {})}
+        onClick={() => void tap(row.id, STATUS.reunited, 'reunite')}
+        data-testid="reunited-button"
+        aria-label={`Reunited: ${who(row)}`}
+      >
+        <Check size={16} strokeWidth={2.25} aria-hidden />
+        Reunited
       </Button>
     ) : (
       <Button size="3" variant="outline" color="gray" highContrast className={`${s.btn} ${s.btnQuiet}`} onClick={enroute.openNew} data-testid="enroute-button" aria-label={`En route: bringing the friend of ${who(row)}`}>
@@ -186,8 +209,8 @@ export function MineActivity({ row }: { row: RequestSummary }) {
       <EnrouteFailed control={enroute} />
       <PreviewRow row={row} />
       <div className={s.cardBtns} data-count={action ? 2 : 1}>
-        {action}
         <MessageButton row={row} />
+        {action}
       </div>
       {enroute.sheet}
     </Slot>
