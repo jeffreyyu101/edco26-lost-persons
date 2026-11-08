@@ -1,7 +1,8 @@
 'use client';
 // Toasts at the top (requests.html .toast: icon circle, title, subtitle, View) and the Undo snackbar at the
-// bottom (.snack). Both are announced politely. A toast closes on tap (or its hidden Dismiss button for
-// screen readers and keyboards); sticky ones (durationMs null) stay until then.
+// bottom (.snack). Both are announced politely. A toast closes on tap anywhere or on its ✕ (Dismiss; Brian
+// 2026-11-07: the alerts waiting when the phone is opened close with an x too); sticky ones (durationMs null)
+// stay until then.
 import { Button, Text } from '@radix-ui/themes';
 import { Bell, Check, CircleAlert, CloudOff, Footprints, Info, MessageCircle, RefreshCw, X } from 'lucide-react';
 import type { MouseEvent } from 'react';
@@ -79,8 +80,8 @@ export function Toast({ toast, onDismiss }: ToastProps) {
           {toast.action.label}
         </Button>
       ) : null}
-      <button type="button" className={styles.visuallyHidden} onClick={onDismiss}>
-        Dismiss
+      <button type="button" className="lp-toast-x lp-hit" aria-label="Dismiss" onClick={onDismiss}>
+        <X />
       </button>
     </div>
   );

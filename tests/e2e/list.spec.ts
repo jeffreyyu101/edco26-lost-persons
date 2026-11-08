@@ -1013,6 +1013,11 @@ test('front of house logs a request with a photo; the liaison sees it in Pending
     await expect(notInMedical).toBeVisible({ timeout: 15_000 });
     await expect(toast).toHaveCount(0);
     await expect(a.locator('.lp-toast').filter({ hasText: 'Friend can head over' })).toHaveCount(0);
+    // (Brian 2026-11-07) An alert waiting at the top closes on its visible ✕ too.
+    const dismiss = notInMedical.getByRole('button', { name: 'Dismiss' });
+    await expect(dismiss).toBeVisible();
+    await dismiss.click();
+    await expect(notInMedical).toHaveCount(0);
   } finally {
     if (id) {
       // Leave nothing open for the other specs.
