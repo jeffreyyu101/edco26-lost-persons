@@ -235,13 +235,16 @@ export interface AlertEvent {
    * 'status_changed' (added in Phase 1b): any other status change of one of my requests by someone else
    * (back to Waiting after an Undo, Discharged, Cancelled), since spec §7 alerts on ANY status change.
    */
-  kind: 'in_medical' | 'not_in_medical' | 'reunited' | 'new_request' | 'combined' | 'status_changed' | 'message';
+  kind: 'in_medical' | 'not_in_medical' | 'reunited' | 'new_request' | 'combined' | 'status_changed' | 'message' | CompanionAlertKind;
   /** Absent for 'combined'. */
   requestId?: string;
   title: string;
   subtitle?: string;
   count: number;
 }
+
+/** (Companion) The friend swap / companion alerts (same names as the Activity kinds). */
+export type CompanionAlertKind = 'accompanied' | 'swap_requested' | 'swap_approved' | 'swap_declined' | 'friend_informed';
 
 export interface StoreActions {
   /** Tap-the-live-dot / Try again. Coalesced with any poll in flight. */

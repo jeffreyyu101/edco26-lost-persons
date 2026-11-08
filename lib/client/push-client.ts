@@ -603,7 +603,20 @@ export const SIGN_OUT_WAIT_MS = 3_000;
  * requests"): the page never shows a system notification for one, but in front it skips the toast of a message
  * sent while it was hidden, which the push already showed (store-core pushedWhileHidden).
  */
-export const PUSHED_ALERT_KINDS: ReadonlySet<AlertEvent['kind']> = new Set<AlertEvent['kind']>(['in_medical', 'not_in_medical', 'reunited', 'new_request', 'status_changed', 'message']);
+export const PUSHED_ALERT_KINDS: ReadonlySet<AlertEvent['kind']> = new Set<AlertEvent['kind']>([
+  'in_medical',
+  'not_in_medical',
+  'reunited',
+  'new_request',
+  'status_changed',
+  'message',
+  // (Companion) The server pushes these too (lib/server/notify.ts).
+  'accompanied',
+  'swap_requested',
+  'swap_approved',
+  'swap_declined',
+  'friend_informed',
+]);
 
 /**
  * The push carries this alert on this device: subscribed (the server confirmed it), the server pushes the
