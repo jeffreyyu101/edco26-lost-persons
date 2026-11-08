@@ -6,6 +6,10 @@
 // Refresh now button. The words and the state come from the view's useLiveStatus() (lib/client/
 // live-status.ts), the same object its banner and avatar badge read.
 //
+// (2026-11-08, network fix 1d) While the list shown is not this visit's yet (just opened, or back from the lock
+// screen with a sync 15 s old or more) the line reads "Updating…" with a turning arrow in the dot's place, and no
+// Refresh now (a sync is already on its way); the age and the button come back as soon as it lands.
+//
 // Screen readers get the line as one sentence ("List updated just now.") instead of the clipped visible words.
 // State changes are announced once, by the view's ConnectionBanner, never by this line. The line keeps its
 // height before the first sync (when it shows nothing), so nothing under it moves when it appears.
@@ -88,16 +92,17 @@ export const LiveIndicator = memo(function LiveIndicator({ line, onRefresh, clas
     <div
       className={`${styles.live}${className ? ` ${className}` : ''}`}
       data-state={line.text ? line.state : 'none'}
+      data-updating={line.updating ? '' : undefined}
       data-testid="live-indicator"
     >
       {line.text ? (
         <>
-          <span className={styles.liveDot} aria-hidden />
+          {line.updating ? <RefreshCw className={styles.liveSpin} size={11} strokeWidth={2.5} aria-hidden /> : <span className={styles.liveDot} aria-hidden />}
           <span className={styles.liveText} aria-hidden data-testid="live-text">
             {line.text}
           </span>
           <VisuallyHidden>{line.sentence}</VisuallyHidden>
-          <RefreshButton onRefresh={onRefresh} />
+          {line.updating ? null : <RefreshButton onRefresh={onRefresh} />}
         </>
       ) : null}
     </div>

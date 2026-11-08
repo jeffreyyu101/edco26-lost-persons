@@ -251,12 +251,16 @@ describe('outbox and sync rules', () => {
     expect([1, 2, 3, 4, 9].map(outboxBackoffMs)).toEqual([5_000, 15_000, 60_000, 120_000, 120_000]);
   });
 
-  it('polls every 6 s ± 1 s visible, 60 s hidden, with 6/12/24/60 s backoff', () => {
+  it('polls every 6 s ± 1 s visible, 60 s hidden, with 6 s then 12 s backoff (network fix 6: was 6/12/24/60 s)', () => {
     expect(nextPollDelay(0, true, 0)).toBe(5_000);
     expect(nextPollDelay(0, true, 1)).toBe(7_000);
     expect(nextPollDelay(0, false, 0.5)).toBe(60_000);
-    expect([1, 2, 3, 4, 7].map(syncBackoffMs)).toEqual([6_000, 12_000, 24_000, 60_000, 60_000]);
+    expect([1, 2, 3, 4, 7].map(syncBackoffMs)).toEqual([6_000, 12_000, 12_000, 12_000, 12_000]);
     expect(nextPollDelay(2, true, 0.5)).toBe(12_000);
+    // A visible phone in a dead zone tries every 12 s at most; a hidden one never more often than once a minute.
+    expect(nextPollDelay(4, true, 0.5)).toBe(12_000);
+    expect(nextPollDelay(4, false, 0.5)).toBe(60_000);
+    expect(nextPollDelay(1, false, 0.5)).toBe(60_000);
   });
 
   const job = (id: string, staff: string, patch: Partial<OutboxItem> = {}): OutboxItem => ({

@@ -6,6 +6,10 @@
 // A hidden page hands its batch to sendBeacon only when the app has nothing in flight and the beacon can be accepted;
 // a beaconed batch is not kept (a lost beacon is accepted), anything else waits in IndexedDB for the next visible
 // moment. A failed send is tried 3 times, 5 minutes apart, then dropped. The server's 204 turns everything off.
+// (network fix 8, 2026-11-08) Worst cases capped: a beacon carries 8 KB at most (a bigger batch, up to 48 KB, could
+// still be uploading on a 250 kbps link when the phone is opened again seconds later, competing with the resume sync;
+// it waits in IndexedDB for an idle gzip send instead), and a batch that stepped aside for the app 3 times in a row
+// (too big to finish between two polls on that link) goes on as two halves instead of coming back every minute.
 import { TEL_GZIP_TYPE, TEL_KEYS, TEL_LIMITS, TEL_PATH, TEL_VERSION } from '../../telemetry';
 import type { BatchStore, EventBuffer, StoredBatch, TelEvent } from './buffer';
 import { trimStored } from './buffer';
@@ -58,6 +62,11 @@ export interface SenderDeps {
   /** 401 / 403: pause until the session is active again. */
   onAuth(): void;
 }
+
+/** The biggest batch a hidden page hands to sendBeacon (JSON characters). */
+export const BEACON_MAX_BYTES = 8 * 1024;
+/** Sends in a row that stepped aside for the app before the batch is split in two. */
+export const YIELDS_BEFORE_SPLIT = 3;
 
 /** 12 random base36 characters (a batch id). */
 export function randomId(random: () => number, length: number): string {
@@ -192,13 +201,23 @@ export class Sender {
     const outcome = await this.post(this.build(batch.ev, batch.b, batch.s, now));
     if (outcome === 'yield') {
       // Stepped aside for the app: not a try, no backoff; it goes again at the next quiet, due moment (same id, so the
-      // server dedupes one that landed anyway).
-      if (!retry) {
-        this.stored.push(batch);
-        void this.deps.store?.put(batch).catch(() => undefined);
+      // server dedupes one that landed anyway). The third time in a row it goes on as two halves (the first keeps the
+      // id), each quicker to finish between the app's requests.
+      batch.yields = (batch.yields ?? 0) + 1;
+      if (!retry) this.stored.push(batch);
+      const parts = [batch];
+      if (batch.yields >= YIELDS_BEFORE_SPLIT && batch.ev.length > 1) {
+        const half = Math.ceil(batch.ev.length / 2);
+        const rest: StoredBatch = { ...batch, b: randomId(this.deps.random, 12), ev: batch.ev.slice(half), yields: 0 };
+        batch.ev = batch.ev.slice(0, half);
+        batch.yields = 0;
+        this.stored.push(rest);
+        parts.push(rest);
       }
+      for (const part of parts) void this.deps.store?.put(part).catch(() => undefined);
       return;
     }
+    batch.yields = 0;
     if (outcome === 'retry') {
       this.backoffUntil = this.deps.now() + TEL_LIMITS.backoffMs;
       batch.tries += 1;
@@ -301,7 +320,7 @@ export class Sender {
 
   /**
    * The page is hiding: everything waiting becomes one batch, handed to sendBeacon (uncompressed: there is no time to
-   * compress; only when online, ≤ 48 KB, and canBeacon) and then forgotten, or else stored in IndexedDB for the next
+   * compress; only when online, ≤ 8 KB, and canBeacon) and then forgotten, or else stored in IndexedDB for the next
    * visible moment.
    */
   flushHidden(): void {
@@ -312,7 +331,7 @@ export class Sender {
     try {
       if (this.deps.online() && !this.authPaused && this.deps.canBeacon()) {
         const json = this.build(batch.ev, batch.b, batch.s, this.deps.now());
-        beaconed = json.length <= TEL_LIMITS.batchBytes && this.deps.beacon(TEL_PATH, json);
+        beaconed = json.length <= BEACON_MAX_BYTES && this.deps.beacon(TEL_PATH, json);
       }
     } catch {
       beaconed = false;

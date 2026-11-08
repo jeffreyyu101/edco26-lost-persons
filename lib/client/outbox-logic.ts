@@ -16,7 +16,7 @@ export function outboxBackoffMs(attempts: number): number {
   return OUTBOX_BACKOFF_MS[i] ?? 120_000;
 }
 
-/** Sync backoff after consecutive failures: 6, 12, 24, then 60 s. */
+/** Sync backoff after consecutive failures: 6 s, then 12 s (SYNC.backoffMs; hidden pages: nextPollDelay keeps 60 s). */
 export function syncBackoffMs(failures: number): number {
   const steps = SYNC.backoffMs;
   return steps[Math.min(Math.max(failures, 1) - 1, steps.length - 1)] ?? 60_000;

@@ -174,6 +174,8 @@ export interface StoredBatch {
   next: number;
   /** A beacon carried it as the page hid: resent at the next start only (the server dedupes). */
   beacon?: boolean;
+  /** Sends in a row that stepped aside for the app (send.ts: three split it in two). */
+  yields?: number;
 }
 
 export interface BatchStore {

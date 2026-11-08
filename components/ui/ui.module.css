@@ -541,6 +541,19 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* "Updating…" (network fix 1d): an 11 px arrow in the dot's place, in its green, turning; it takes the dot's 7 px so
+   the words never move. With reduced motion it stands still. */
+.liveSpin {
+  flex: none;
+  margin: 0 -2px;
+  color: var(--green-9);
+  animation: lp-live-spin 0.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .liveSpin {
+    animation: none;
+  }
+}
 
 /* Refresh now: a 32 px circle right after the words (its 15 px glyph 10 px after the text), with a 44 × 44 tap
    area that reaches down and to the sides but not up, so it never takes a tap meant for the title above. */

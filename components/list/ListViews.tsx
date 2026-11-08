@@ -66,7 +66,7 @@ import { MineCard, OutboxCard } from './cards';
 import { displayName } from './list-helpers';
 import { PendingQueues, useLeaving } from './PendingQueues';
 import { SortToggle } from './SortToggle';
-import { primeKeyboard, useHeightVar, useScrollMemory, useStatusTap, useStickyHeight } from './hooks';
+import { primeKeyboard, refuseOffline, useHeightVar, useScrollMemory, useStatusTap, useStickyHeight } from './hooks';
 import { mineFreshTone, resultCount, searchDisplay, stageClock, unreadTotal, updatedSince } from './list-helpers';
 import { AllSkeleton, MineSkeleton, PendingSkeleton } from './ListSkeletons';
 import { ArchivedFold, ArchivedRows, ColumnHeader, GroupDivider, LogGrid, LogRow, OutboxLogRow, SearchLogRow } from './rows';
@@ -528,7 +528,7 @@ export function PendingView({ selected = null }: PendingViewProps = {}) {
   const onLocate = useCallback(
     (row: RequestSummary, card: HTMLElement | null) => {
       if (offline) {
-        actions.showToast({ tone: 'amber', icon: 'cloud-off', title: 'Needs a connection', durationMs: 3_000 });
+        refuseOffline(actions);
         return;
       }
       if (!inDesk) primeKeyboard();

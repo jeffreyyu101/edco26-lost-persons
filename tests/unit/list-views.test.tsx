@@ -675,11 +675,14 @@ describe('list views render', () => {
     expect(render(store, <SearchView q="" />)).not.toContain('live-indicator');
   });
 
-  it('the line shows nothing before the first sync (and keeps its row): no words, no button', () => {
+  it('before the first sync the line reads "Updating…" with a turning arrow, no age, no button (network fix 1d)', () => {
     const before = render(storeWith((s) => ({ ...s, lastSyncLocalAt: null })), <PendingView />);
-    expect(before).toMatch(/data-state="none" data-testid="live-indicator"><\/div>/);
+    expect(before).toMatch(/data-state="healthy" data-updating="" data-testid="live-indicator"><svg[^>]*class="[^"]*liveSpin[^"]*"[^>]*>(?:<path[^>]*><\/path>)+<\/svg><span[^>]*data-testid="live-text">Updating…<\/span><span[^>]*>Updating the list\.<\/span><\/div>/);
     expect(before).not.toContain('Updated');
     expect(before).not.toContain('Refresh now');
+    // Offline before the first sync: nothing on the line (the banner says Offline), as before.
+    const offline = render(storeWith((s) => ({ ...s, lastSyncLocalAt: null, connection: 'offline' })), <PendingView />);
+    expect(offline).toMatch(/data-state="none" data-testid="live-indicator"><\/div>/);
   });
 
   it('one state for the line, the banner and the badge: requests failing with a connection read Reconnecting everywhere', () => {

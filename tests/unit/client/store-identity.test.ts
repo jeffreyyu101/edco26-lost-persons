@@ -45,11 +45,13 @@ describe('a resumed tab confirms who is signed in (regression)', () => {
     const before = server.log.length;
     resume(tab);
     await advance(100);
+    await advance(100);
     const after = server.log.slice(before);
     expect(after[0]).toMatchObject({ method: 'GET', path: '/api/session' });
     expect(tab.s().session).toMatchObject({ status: 'active', staffName: 'Sam Lee', staff: STAFF.sam.staff });
     // The per-staff cache starts clean for Sam (a full fetch), and My requests follow him.
-    expect(after.find((r) => r.path === '/api/sync')?.query.get('since')).toBeNull();
+    // (lab) The first page went out with the check and was dropped (stale); the sync applied is Sam's full fetch.
+    expect(after.some((r) => r.path === '/api/sync' && r.query.get('since') === null)).toBe(true);
     expect(tab.s().confirmed.size).toBe(2);
     expect(mine()).toEqual([sams.id]);
   });
@@ -258,5 +260,130 @@ describe('switching to the new staff is one step (regression: nothing in between
     expect(server.log[before]).toMatchObject({ method: 'GET', path: '/api/session' });
     expect(tab.s().session.staff).toBe(STAFF.sam.staff);
     expect(heard).toEqual([]); // Dana's alert is not raised for Sam
+  });
+});
+
+// (network fix 1a, 2026-11-08) Open / resume → fresh data in one round trip: GET /api/session goes out WITH the first
+// sync page instead of before it, and nothing of that page is applied until the check confirms the session.
+describe('the resume / cold-load session check runs alongside the first sync (fix 1a)', () => {
+  /** Every request answers after `ms` of fake time; `seen` records [path, started, answered]. */
+  function slow(server: FakeServer, ms: (path: string) => number) {
+    const seen: Array<{ path: string; at: number; answered: number | null }> = [];
+    server.override = async (req) => {
+      const rec = { path: req.path, at: Date.now(), answered: null as number | null };
+      seen.push(rec);
+      await new Promise((r) => setTimeout(r, ms(req.path)));
+      rec.answered = Date.now();
+      return undefined;
+    };
+    return seen;
+  }
+
+  it('on resume, GET /api/session and GET /api/sync both start before either answers', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    const tab = boot(server);
+    await ready();
+    tab.fe.setVisible(false);
+    tab.fe.fire('document', 'visibilitychange');
+    const seen = slow(server, () => 1_000);
+    resume(tab);
+    await advance(100);
+    const session = seen.find((r) => r.path === '/api/session');
+    const sync = seen.find((r) => r.path === '/api/sync');
+    expect(session).toBeDefined();
+    expect(sync).toBeDefined();
+    expect(session?.answered).toBeNull();
+    expect(sync?.answered).toBeNull();
+    expect(Math.abs((sync?.at ?? 0) - (session?.at ?? 0))).toBeLessThan(50);
+  });
+
+  it('a cold load sends both at once too', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    const seen = slow(server, () => 1_000);
+    boot(server);
+    await ready();
+    await advance(100);
+    const session = seen.find((r) => r.path === '/api/session');
+    const sync = seen.find((r) => r.path === '/api/sync');
+    expect(session?.answered).toBeNull();
+    expect(sync?.answered).toBeNull();
+    expect(server.requests('GET', '/api/session')).toHaveLength(1);
+  });
+
+  it('nothing of the page is applied until the session answers ok', async () => {
+    const row = makeRow(1);
+    const server = new FakeServer([row]);
+    const tab = boot(server);
+    await ready();
+    tab.fe.setVisible(false);
+    tab.fe.fire('document', 'visibilitychange');
+    server.change(row.id, { status: STATUS.inMedical });
+    slow(server, (path) => (path === '/api/session' ? 2_000 : 100));
+    resume(tab);
+    await advance(1_000); // the page has answered, the check has not
+    expect(tab.s().confirmed.get(row.id)?.status).toBe(STATUS.waiting);
+    expect(tab.s().syncing).toBe(true); // one sync, from poll start to its end, covers the check too
+    await advance(1_200);
+    expect(tab.s().confirmed.get(row.id)?.status).toBe(STATUS.inMedical);
+    expect(tab.s().syncing).toBe(false);
+  });
+
+  it('another staff on the cookie: the page is dropped, the store resets and their full fetch starts at once', async () => {
+    const danas = makeRow(1, { createdBy: STAFF.dana.staff });
+    const sams = makeRow(2, { createdBy: STAFF.sam.staff });
+    const server = new FakeServer([danas, sams]);
+    const tab = boot(server);
+    await ready();
+    const mine = () => mineRows([...tab.s().confirmed.values()], tab.s().myIds, tab.s().session.staff).map((r) => r.id);
+    suspendWhileSamSignsIn(tab, server);
+    const seen = slow(server, (path) => (path === '/api/session' ? 1_000 : 200));
+    resume(tab);
+    await advance(1_050); // the check answered Sam at 1 000 ms (his cache loads from IndexedDB in real time)
+    await advance(10); // the poll that dropped Dana's page schedules Sam's at 0 ms
+    expect(tab.s().session.staff).toBe(STAFF.sam.staff);
+    const syncs = seen.filter((r) => r.path === '/api/sync');
+    expect(syncs).toHaveLength(2);
+    // The second is Sam's full fetch, sent the moment the check answered (no backoff, no poll interval).
+    expect(syncs[1]!.at - (seen.find((r) => r.path === '/api/session')?.answered ?? 0)).toBeLessThan(50);
+    expect(server.log.filter((r) => r.path === '/api/sync').at(-1)?.query.get('since')).toBeNull();
+    await advance(300);
+    expect(mine()).toEqual([sams.id]);
+  });
+
+  it('a 401 from the check runs the expired flow and applies nothing', async () => {
+    const row = makeRow(1);
+    const server = new FakeServer([row]);
+    const tab = boot(server);
+    await ready();
+    tab.fe.setVisible(false);
+    tab.fe.fire('document', 'visibilitychange');
+    server.change(row.id, { status: STATUS.inMedical });
+    server.session = null;
+    resume(tab);
+    await advance(100);
+    expect(tab.s().session.status).toBe('expired');
+    expect(tab.s().confirmed.get(row.id)?.status).toBe(STATUS.waiting);
+    await advance(1_000);
+    expect(tab.fe.redirects.at(-1)).toMatch(/^\/signin\?next=/);
+  });
+
+  it('the check fails on the network: nothing is applied and the poll backs off', async () => {
+    const row = makeRow(1);
+    const server = new FakeServer([row]);
+    const tab = boot(server);
+    await ready();
+    tab.fe.setVisible(false);
+    tab.fe.fire('document', 'visibilitychange');
+    server.change(row.id, { status: STATUS.inMedical });
+    server.override = (req) => (req.path === '/api/session' ? 'network' : undefined);
+    resume(tab);
+    await advance(100);
+    expect(tab.s().confirmed.get(row.id)?.status).toBe(STATUS.waiting);
+    const syncs = server.requests('GET', '/api/sync').length;
+    await advance(5_000); // backoff 6 s: no poll yet
+    expect(server.requests('GET', '/api/sync')).toHaveLength(syncs);
+    server.override = null;
+    await advance(1_100);
+    expect(tab.s().confirmed.get(row.id)?.status).toBe(STATUS.inMedical);
   });
 });

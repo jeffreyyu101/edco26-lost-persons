@@ -461,6 +461,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   /** Bumped by every reason to re-check; a check only clears sessionCheckDue for the reasons it saw. */
   let sessionCheckSeq = 0;
   let sessionCheck: Promise<PollOutcome> | null = null;
+  /** Local time the check in flight was sent. */
+  let sessionCheckSentAt = 0;
   /** Local time of the last GET /api/session that confirmed the session. */
   let sessionCheckedAt = 0;
   /** When the scheduled poll is due: a timer that fires far later means the tab was frozen meanwhile. */
@@ -988,6 +990,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   /** One GET /api/session at a time; the sync loop and writes share it. */
   const verifySession = (): Promise<PollOutcome> => {
     if (!sessionCheck) {
+      sessionCheckSentAt = now();
       sessionCheck = checkSession().finally(() => {
         sessionCheck = null;
       });
@@ -1183,20 +1186,15 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const syncPages = async (gen: number): Promise<PollOutcome> => {
     const e = env;
     if (!e) return 'stale';
-    // Confirm who is signed in first when this tab can't be sure (never checked, a 401, resumed, or a
-    // sign-in in another tab): the cookie may now belong to someone else.
-    if (state.session.status !== 'active' || sessionCheckDue) {
-      const s = await confirmSession();
-      if (s !== 'ok') return s;
-    }
+    // When this tab can't be sure who is signed in (never checked, a 401, resumed, or a sign-in in another tab),
+    // GET /api/session goes out with the first page, and nothing is applied until it confirms the session: the
+    // cookie may now belong to someone else, and their session resets the cache and staffEpoch (stale() below).
+    const check = state.session.status !== 'active' || sessionCheckDue ? confirmSession() : null;
     // Every page is for this staff: if the data switches to another staff meanwhile (a write or the outbox
     // confirmed a new session), nothing more of this sync is applied, and the cursor is not written.
     const epoch = staffEpoch;
     const stale = () => gen !== state.generation || !running || epoch !== staffEpoch;
-    const full =
-      cursor === null ||
-      now() - cursorAt > SYNC.fullFetchAfterMs ||
-      (cursorAt < SYNC.logResetResyncAt && now() >= SYNC.logResetResyncAt);
+    const full = cursor === null || now() - cursorAt > SYNC.fullFetchAfterMs;
     const reconcile = !full && reconcileDue;
     const since = full ? null : cursor;
     touchedDuringPoll.clear();
@@ -1207,6 +1205,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     for (let page = 0; page < MAX_SYNC_PAGES; page += 1) {
       const path = syncPathFor(since, page === 0 && reconcile, after);
       const res = await call<SyncResponse>(path, { timeoutMs: SYNC.requestTimeoutMs, signal: pollAbort?.signal });
+      if (check && (await check) !== 'ok') return check;
       if (stale()) return 'stale';
       if (!res.ok) return failureOutcome(res);
       const body = res.data;
@@ -2761,8 +2760,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       e.on('document', 'visibilitychange', () => {
         markHidden(!e.visible());
         if (e.visible()) {
-          // A resumed tab confirms who is signed in before it syncs on, writes or sends queued requests.
-          sessionMayHaveChanged();
+          // A resumed tab confirms who is signed in before it syncs on, writes or sends queued requests. A check sent
+          // under 2 s ago (the overdue poll timer runs before this event) already answers who is signed in now.
+          if (!sessionCheck || now() - sessionCheckSentAt > 2e3) sessionMayHaveChanged();
           triggerSync();
         } else {
           // iOS may kill a hidden page without a pagehide: save now.

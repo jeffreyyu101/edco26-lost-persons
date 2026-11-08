@@ -251,16 +251,17 @@ describe('dashboard render', () => {
     expect(render(storeWith(), <DashboardContent stats={v7Stats()} failed />)).toMatch(/data-testid="perf-answer-value"><span[^>]*>9<\/span>/);
   });
 
-  it('title: large "Dashboard" with Back, the line under it (empty until the first stats arrive), then the banner', () => {
+  it('title: large "Dashboard" with Back, the line under it ("Updating…" until the first stats arrive), then the banner', () => {
     const live = render(storeWith(), <DashboardView />);
     expect(live).toMatch(/<h1[^>]*>Dashboard<\/h1>/);
     expect(live).toContain('aria-label="Back to requests"');
-    // The line follows the title inside the header; before the first stats it shows nothing (the row keeps its
-    // place). Under the header, the banner's slot holds only the silent live region while healthy. The old
-    // Offline / Retrying chip is gone.
+    // The line follows the title inside the header; before the first stats it reads "Updating…" with a turning arrow
+    // in the dot's place and no Refresh now (network fix 1d; it showed nothing before). Under the header, the banner's
+    // slot holds only the silent live region while healthy. The old Offline / Retrying chip is gone.
     expect(live).toMatch(
-      /<\/h1><div class="[^"]*live[^"]*" data-state="none" data-testid="live-indicator"><\/div><\/header><div class="[^"]*banner[^"]*"><span[^>]*role="status"[^>]*data-testid="live-announcement"[^>]*><\/span><\/div><main/,
+      /<\/h1><div class="[^"]*live[^"]*" data-state="healthy" data-updating="" data-testid="live-indicator"><svg[^>]*class="[^"]*liveSpin[^"]*"[^>]*>(?:<path[^>]*><\/path>)+<\/svg><span[^>]*data-testid="live-text">Updating…<\/span><span[^>]*>Updating the dashboard\.<\/span><\/div><\/header><div class="[^"]*banner[^"]*"><span[^>]*role="status"[^>]*data-testid="live-announcement"[^>]*><\/span><\/div><main/,
     );
+    expect(live).not.toContain('Refresh now');
     expect(live).not.toContain('dashboard-connection');
     expect(live).not.toContain('Retrying');
     expect(live).not.toContain('>Live<');

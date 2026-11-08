@@ -2,7 +2,7 @@
 // message / en route outbox (saved before sending, offline "Sending…", sent exactly once, failures "Not
 // delivered", 429, a reload, another staff's jobs), the thread, read cursors, the en route Undo, the message
 // alert, and sign-out with queued messages. Synthetic data only.
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RequestSummary, ThreadMessage } from '@/lib/api-types';
 import { K, openKv } from '@/lib/client/persist';
 import type { MessagingApi } from '@/lib/client/messages-core';
@@ -445,3 +445,135 @@ describe('the engine is never on the boot or sign-out path', () => {
     expect(await mjobKeys(fe.dbName)).toHaveLength(0);
   });
 });
+
+// (network fix 4, 2026-11-08) A phone unlocked on a request page: the thread is polled the moment the page is visible
+// again (in parallel with the resume sync), not at the next 6 s tick or after the sync's lastMessageAt refresh.
+describe('an open thread when the page comes back into view (fix 4)', () => {
+  const doc = new EventTarget();
+  beforeEach(() => {
+    vi.stubGlobal('document', doc);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+  const threadGets = (server: FakeServer) => server.requests('GET', `/api/requests/${ROW}/messages`).filter((r) => r.path.endsWith('/messages')).length;
+  /** Hidden (the thread poll pauses with the page), then back: the store and the engine hear visibilitychange. */
+  const away = (fe: ReturnType<typeof setup>['fe']) => {
+    fe.setVisible(false);
+    fe.fire('document', 'visibilitychange');
+    doc.dispatchEvent(new Event('visibilitychange'));
+  };
+  const back = (fe: ReturnType<typeof setup>['fe']) => {
+    fe.setVisible(true);
+    fe.fire('document', 'visibilitychange');
+    doc.dispatchEvent(new Event('visibilitychange'));
+  };
+
+  it('hidden → visible with an open thread: one GET of its messages at once, with the message sent meanwhile', async () => {
+    const { api, threads, fe, server } = setup();
+    await ready();
+    const close = api.open(ROW);
+    await advance(50);
+    away(fe);
+    await advance(60_000); // locked: the 6 s ticks skip a hidden page
+    threads.messages.push({ id: '00000000-0000-4000-8000-0000000000aa', requestId: ROW, staff: STAFF.rae.staff, by: 'Rae C.', team: 'Medical', body: 'Found her at Bed 3', createdAt: server.stamp(5000), mine: false, clientMutationId: '00000000-0000-4000-8000-0000000000ab' });
+    const before = threadGets(server);
+    back(fe);
+    await advance(20); // well before the next tick and the sync's own refresh
+    expect(threadGets(server)).toBe(before + 1);
+    expect(api.getSnapshot().threads.get(ROW)?.messages.map((m) => m.body)).toContain('Found her at Bed 3');
+    // The next tick skips a thread loaded under 5.5 s ago.
+    const after = threadGets(server);
+    await advance(5_000);
+    expect(threadGets(server)).toBe(after);
+    close();
+  });
+
+  it('no GET when the thread was loaded under 5.5 s ago, when offline, or after stop()', async () => {
+    const { api, fe, server, stop } = setup();
+    await ready();
+    const close = api.open(ROW);
+    await advance(50);
+    // A glance away and back within a second: loaded just now, not fetched again.
+    away(fe);
+    await advance(1_000);
+    let before = threadGets(server);
+    back(fe);
+    await advance(20);
+    expect(threadGets(server)).toBe(before);
+    // Offline: nothing.
+    away(fe);
+    await advance(60_000);
+    fe.setOnline(false);
+    fe.fire('window', 'offline');
+    before = threadGets(server);
+    back(fe);
+    await advance(20);
+    expect(threadGets(server)).toBe(before);
+    close();
+    // Stopped: the listener is gone.
+    stop();
+    await advance(60_000);
+    fe.setOnline(true);
+    before = threadGets(server);
+    doc.dispatchEvent(new Event('visibilitychange'));
+    await advance(20);
+    expect(threadGets(server)).toBe(before);
+  });
+
+  // (network fix 4 follow-up) The thread GET goes out at once, but its answer (the cookie's view: `mine`, receipt,
+  // unread) is applied only once the resume's session check confirmed the same staff.
+  it('another staff signed in meanwhile: their view of the thread never shows or is cached as the previous staff', async () => {
+    const { api, threads, fe, server, s } = setup();
+    await ready();
+    const close = api.open(ROW);
+    await advance(50);
+    away(fe);
+    await advance(60_000);
+    server.session = { ...STAFF.rae, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
+    // Rae's own message, as Rae's cookie sees it.
+    threads.messages.push({ id: '00000000-0000-4000-8000-0000000000ba', requestId: ROW, staff: STAFF.rae.staff, by: 'Rae C.', team: 'Medical', body: 'from rae', createdAt: server.stamp(5000), mine: true, clientMutationId: '00000000-0000-4000-8000-0000000000bb' });
+    const base = threads.handle;
+    server.override = async (req) => {
+      if (req.path === '/api/session') await new Promise((r) => setTimeout(r, 1_500)); // a congested link
+      return base(req);
+    };
+    const before = threadGets(server);
+    back(fe);
+    await advance(200);
+    // The GET went out at once; nothing of it is applied while the check is out.
+    expect(threadGets(server)).toBe(before + 1);
+    expect(s().session.staffName).toBe(STAFF.dana.staffName);
+    expect(api.getSnapshot().threads.get(ROW)?.messages.map((m) => m.body) ?? []).not.toContain('from rae');
+    await advance(2_000);
+    expect(s().session.staffName).toBe(STAFF.rae.staffName);
+    const danaThread = await openKv(fe.dbName)?.get<{ messages: ThreadMessage[] }>(`cache:edco26:${canonStaff(STAFF.dana.staff)}:thread:${ROW}`);
+    expect((danaThread?.messages ?? []).map((m) => m.body)).not.toContain('from rae');
+    expect(threads.reads).toEqual([]);
+    close();
+  });
+
+  it('the same staff: the thread lands as soon as both the GET and the check are back (no extra session GET)', async () => {
+    const { api, threads, fe, server } = setup();
+    await ready();
+    const close = api.open(ROW);
+    await advance(50);
+    away(fe);
+    await advance(60_000);
+    threads.messages.push({ id: '00000000-0000-4000-8000-0000000000ca', requestId: ROW, staff: STAFF.rae.staff, by: 'Rae C.', team: 'Medical', body: 'Found her at Bed 3', createdAt: server.stamp(5000), mine: false, clientMutationId: '00000000-0000-4000-8000-0000000000cb' });
+    const base = threads.handle;
+    server.override = async (req) => {
+      if (req.path === '/api/session') await new Promise((r) => setTimeout(r, 300));
+      return base(req);
+    };
+    const sessions = server.requests('GET', '/api/session').length;
+    back(fe);
+    await advance(200);
+    expect(api.getSnapshot().threads.get(ROW)?.messages.map((m) => m.body)).not.toContain('Found her at Bed 3');
+    await advance(200);
+    expect(api.getSnapshot().threads.get(ROW)?.messages.map((m) => m.body)).toContain('Found her at Bed 3');
+    expect(server.requests('GET', '/api/session').length).toBe(sessions + 1);
+    close();
+  });
+});
+

@@ -399,6 +399,7 @@ test.describe('brand row on a cold load', () => {
           logosLoaded: [...card.querySelectorAll('img')].map((img) => img.complete && img.naturalWidth > 0),
           skeleton: !!document.querySelector('[data-testid="list-skeleton"]'),
           live: document.querySelector('[data-testid="live-indicator"]')?.getAttribute('data-state') ?? null,
+          liveText: document.querySelector('[data-testid="live-text"]')?.textContent ?? null,
         };
         observer.disconnect();
       });
@@ -417,11 +418,14 @@ test.describe('brand row on a cold load', () => {
       logosLoaded: boolean[];
       skeleton: boolean;
       live: string | null;
+      liveText: string | null;
     };
-    // It was measured before the logos, the rows and the first sync were there…
+    // It was measured before the logos, the rows and the first sync were there (the line reads "Updating…" until
+    // that sync lands: network fix 1d; it was empty before)…
     expect(first.logosLoaded).toEqual([false, false]);
     expect(first.skeleton).toBe(true);
-    expect(first.live).toBe('none');
+    expect(first.live).toBe('healthy');
+    expect(first.liveText).toBe('Updating…');
     // …and nothing has moved since.
     const card = (await brand(page).boundingBox())!;
     const title = (await page.getByTestId('view-switcher').boundingBox())!;
