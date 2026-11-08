@@ -593,3 +593,8 @@ Brian: "HOW TO INDICATE THERES A MESSAGE ON A REQUEST... IN ALL REQUESTS VIEW I 
 - **Who sees `/health`.** Any signed-in session (the data has no personal details); its sidebar link shows only on a device that opened `/health` once. Open question for Brian: restrict it to particular teams?
 - **iPhone beacons.** A hidden page's `sendBeacon` from WebKit arrives with `Origin: null` (the app's `Referrer-Policy: no-referrer`), so the usual same-origin check refused every one (found by the WebKit e2e run). The ingest route accepts a missing or `null` Origin only with `Sec-Fetch-Site: same-origin`, a header no script can set; any other Origin must still match.
 - **Deviations from the design, on purpose:** Turbopack production class names carry no file name (`<hash>_<local>`), so a class token is the local name (`checkacts`); breadcrumb codes allow `> + ! ^` (the design's own `v>pending`, `s+sheet`, `w!:…`), still no space, capital or @; the collector's IndexedDB ring is raw IndexedDB (importing `idb-keyval` there grew the first load); its chunk is ~20 KB gzipped, not the estimated 9 KB (lazy, after idle, precached once); `/health` also redirects in the proxy, like `/`.
+
+## First-load budget raised (Brian 2026-11-08 morning)
+
+- **Route-only first-load JS of `/`: 42 → 43 KB; the 234 KB total stays.** Tonight's releases left 1 B of room; the network fixes need ~50–100 B. Brian: "sure we can raise it". About 1 KB more on a first open or after an update (cached otherwise). BUILD_SPEC A119.
+

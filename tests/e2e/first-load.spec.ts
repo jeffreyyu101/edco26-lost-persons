@@ -10,11 +10,13 @@ const KB = 1024;
 // §18 A59 (F3, 2026-11-06 evening): 230 → 234 KB and 40 → 42 KB. The F3 base already measured 230.2 KB
 // (route-only 38.8 KB); messages add 1.9 KB to the first load (the store's side of it), the engine itself
 // loading after start (lib/client/messages-lazy.ts).
+// A119 (Brian, 2026-11-08 morning: "sure we can raise it"): route-only 42 → 43 KB, the total stays 234 KB. Tonight's
+// releases left 1 B of route-only room (43,007 of 43,008 B); the network fixes (the "Updating…" line) need ~50–100 B.
 const BUDGET = {
   /** Everything `/` loads first: framework + Radix baseline (~192 KB at Phase 1a) + app code. */
   homeTotal: 234 * KB,
   /** Scripts `/` loads that /signin does not: the app's own first-load code (shell, store, nav). */
-  homeOnly: 42 * KB,
+  homeOnly: 43 * KB,
 };
 
 async function scriptSizes(request: APIRequestContext, path: string, cookie?: string): Promise<Map<string, number>> {
