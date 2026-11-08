@@ -61,7 +61,7 @@ import { createBodyFromLegacyQueueItem, hasAnyDetail, toCreateBody } from './for
 import { apiRequest, isDefinitive, isUncertain, type FetchLike, type HttpFailure, type HttpResult, type RequestOptions } from './http';
 import { diffMessageAlerts } from './messages-activity';
 import { createLazyMessaging, type CreateMessaging } from './messages-lazy';
-import { navigate } from './nav';
+import { navigate, signInNext } from './nav';
 import {
   CREATE_DEFINITIVE,
   PHOTO_DEFINITIVE,
@@ -182,20 +182,33 @@ export function browserEnv(): StoreEnv {
   };
 }
 
+/** After a failed import of system-notify (a dropped chunk on a festival network), it is tried again in these ms. */
+const NOTIFY_RETRY_MS: readonly number[] = [5_000, 20_000, 60_000];
+
 /**
  * System notifications (v2.5 A52), loaded with import() so they cost nothing on the first load (A25).
- * Until the module is in, every alert is a toast, as on a device without them.
+ * Until the module is in, every alert is a toast, as on a device without them. A failed load is tried
+ * again a few times (`retryMs`): the same module answers notification taps the page missed.
  */
-function lazyNotifier(): AlertNotifier {
+export function lazyNotifier(
+  load: () => Promise<{ startNotify(): AlertNotifier }> = () => import('./system-notify'),
+  retryMs: readonly number[] = NOTIFY_RETRY_MS,
+): AlertNotifier {
   let real: AlertNotifier | null = null;
   let active = false;
-  import('./system-notify').then(
-    (m) => {
-      real = m.startNotify();
-      if (active) real.setActive(true);
-    },
-    () => undefined,
-  );
+  const attempt = (tries: number) => {
+    load().then(
+      (m) => {
+        real = m.startNotify();
+        if (active) real.setActive(true);
+      },
+      () => {
+        const wait = retryMs[tries];
+        if (wait !== undefined) setTimeout(() => attempt(tries + 1), wait);
+      },
+    );
+  };
+  attempt(0);
   return {
     plan: (keys) => real?.plan(keys) ?? TOAST_PLAN,
     show: (alert, rowOf, sources) => real?.show(alert, rowOf, sources) ?? Promise.resolve(false),
@@ -1055,7 +1068,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     } catch {
       recent = false;
     }
-    const target = `/signin?next=${encodeURIComponent(e.location())}`;
+    // (R2) A request opened at its Messages (a notification, a Message button) comes back there after sign-in.
+    const target = `/signin?next=${encodeURIComponent(signInNext(e.location()))}`;
     if (recent) {
       // We were just sent back here with a cookie the API refuses: don't loop, offer the way out.
       sessionEndedToastId = showToast({ tone: 'amber', icon: 'alert', title: COPY.sessionEnded, action: { label: 'Sign in', run: () => e.redirect(target) }, durationMs: null });

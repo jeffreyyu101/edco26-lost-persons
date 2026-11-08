@@ -10,6 +10,7 @@ import { Eye, EyeOff } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { forgetBellForOtherStaff, writeRememberedIdentity } from '@/lib/client/prefs';
 import { announceSignIn } from '@/lib/client/session-signals';
+import { markSignedIn } from '@/lib/client/signed-in-at';
 import { avatarInitials, teamShort } from '@/lib/domain';
 import { safeNextPath } from '@/lib/safe-next';
 import { isEnterControl, isTextEntry, useStepKeys, useWide } from './desktop';
@@ -101,6 +102,8 @@ export function PasswordStep({ identity, onChange, next, autoFocus }: PasswordSt
       writeRememberedIdentity(outcome.session?.staffName ?? identity.name, outcome.session?.team ?? identity.team);
       // A sign-out left pending must not end this new session; open tabs re-check who is signed in.
       announceSignIn();
+      // The app page opens a notification tapped before this sign-in (lib/client/signed-in-at.ts).
+      markSignedIn();
       window.location.replace(safeNextPath(next) ?? '/');
       return; // Stay busy while the app loads.
     }

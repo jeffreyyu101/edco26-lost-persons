@@ -2,7 +2,8 @@
 // system notification and no toast or chime; in front it is the toast + chime as before; never both. The
 // (id, rowVersion) dedupe and the 3+ combine rule hold for notifications too, and a notification whose
 // alert is out of date is closed like its toast. Fake notifier; synthetic rows only.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { lazyNotifier } from '@/lib/client/store-core';
 import type { AlertEvent } from '@/lib/client/store-contract';
 import { createNotifySystem, systemNotice, type AlertNotifier, type AlertRoute, type SystemNotice } from '@/lib/client/system-notify';
 import { STATUS } from '@/lib/domain';
@@ -333,5 +334,46 @@ describe('alerts across tabs of one browser (the store’s side)', () => {
     expect(B.s().toasts).toEqual([]);
     expect(heardB).toEqual([]);
     expect(alertTitles(A.s)).toEqual(['New request · LP-1051']);
+  });
+});
+
+describe('lazyNotifier (system-notify loads after start)', () => {
+  it('a failed import is tried again a few times; once in, it is started with the active state', async () => {
+    let tries = 0;
+    const started: boolean[] = [];
+    const real: AlertNotifier = {
+      plan: () => ({ route: 'system', skip: new Set<string>() }),
+      show: async () => true,
+      close: () => undefined,
+      closeAll: () => undefined,
+      setActive: (on) => started.push(on),
+    };
+    const load = async () => {
+      tries += 1;
+      if (tries < 3) throw new Error('chunk failed');
+      return { startNotify: () => real };
+    };
+    const n = lazyNotifier(load, [100, 200, 400]);
+    n.setActive(true);
+    await advance(0);
+    expect(tries).toBe(1);
+    // A toast until it is in.
+    expect(n.plan(['k']).route).toBe('toast');
+    await advance(100);
+    expect(tries).toBe(2);
+    await advance(200);
+    expect(tries).toBe(3);
+    expect(started).toEqual([true]);
+    expect(n.plan(['k']).route).toBe('system');
+
+    // It gives up after the last retry.
+    let failures = 0;
+    lazyNotifier(async () => {
+      failures += 1;
+      throw new Error('chunk failed');
+    }, [100, 200]);
+    await advance(10_000);
+    expect(failures).toBe(3);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

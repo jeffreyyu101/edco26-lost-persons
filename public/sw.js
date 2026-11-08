@@ -39,8 +39,10 @@
  * Before that hand-off the click's target is kept in META (it outlives this worker): an iPhone Home Screen
  * app launched or resumed at its start URL `/`, a frozen page or one whose listener is not in yet misses
  * the hand-off, and navigate() / openWindow() may do nothing there. The page asks {type: 'lp-take-open'}
- * when it starts and whenever it comes back, and opens what it gets: taken once, fresh for 2 minutes, and
- * cleared when a page answers lp-open {ok: true}.
+ * when it starts and whenever it comes back (a few times, in case this click is still being kept), and
+ * opens what it gets only if it was tapped just then (lib/client/system-notify.ts watchPendingOpens): taken
+ * once, kept 10 minutes at most (the first app page after a sign-in), cleared when a page answers lp-open
+ * {ok: true}. A click a page took that way is not navigated to or opened in a window again.
  *
  * Web Push (F4, spec §18 A54): a push shows its notification (title, body, tag "lp-<id>", the app icon;
  * messages sound again when they replace one) and sets the app icon badge to the recipient's unread
@@ -75,8 +77,9 @@ const CAPS_MESSAGE = 'lp-caps';
 const TAKE_OPEN_MESSAGE = 'lp-take-open';
 // The click no page has opened yet ({url, at}), in META: it outlives this worker.
 const PENDING_OPEN_KEY = '/__lp/pending-open';
-// How long a click stays worth opening (lib/client/system-notify.ts PENDING_OPEN_MS).
-const PENDING_OPEN_MS = 2 * 60 * 1000;
+// The longest a click is kept for a page to take: the first app page after a sign-in (lib/client/system-notify.ts
+// PENDING_SIGNIN_MS). The page decides whether it is still worth opening.
+const PENDING_OPEN_MS = 10 * 60 * 1000;
 // The click's hand-off never waits longer than this for the target to be stored.
 const PENDING_SAVE_MS = 500;
 const CORE = [
@@ -593,9 +596,10 @@ function askToOpen(client, url) {
 /**
  * Focus an app window and have it open `url` in place; else navigate it there; else open a window. True
  * only once a page said it opened it (lp-open {ok: true}): navigate() and openWindow() may do nothing on an
- * iPhone Home Screen app, so they never count.
+ * iPhone Home Screen app, so they never count. `taken()`: a page took the click with lp-take-open meanwhile
+ * (it opened it in place), so nothing reloads that page or opens another window for it.
  */
-async function openFromNotification(url) {
+async function openFromNotification(url, taken = async () => false) {
   // Absolute: a Home Screen app may resolve a relative one against nothing and open its start URL.
   const href = new URL(url, self.location.origin).href;
   const windows = (await self.clients.matchAll({ type: 'window', includeUncontrolled: true })).filter((c) => windowPath(c) !== null);
@@ -609,12 +613,14 @@ async function openFromNotification(url) {
       // Focus needs the click's user activation; the window still opens the request.
     }
     if (windowPath(target) === '/' && (await askToOpen(target, url))) return true;
+    if (await taken()) return false;
     try {
       if (await target.navigate(href)) return false;
     } catch (e) {
       // navigate() only works on a window this worker controls: open a new one.
     }
   }
+  if (await taken()) return false;
   if (self.clients.openWindow) await self.clients.openWindow(href);
   return false;
 }
@@ -660,21 +666,42 @@ function clearPendingOpen(open) {
 function takePendingOpen() {
   return pendingStep(async () => {
     const meta = await caches.open(META);
+    // Pages ask several times each time they come back: nothing kept, nothing written.
+    if (!(await meta.match(PENDING_OPEN_KEY))) return null;
     const stored = await readPendingOpen(meta);
     await meta.delete(PENDING_OPEN_KEY);
     return stored && Math.abs(Date.now() - stored.at) <= PENDING_OPEN_MS ? stored : null;
   });
 }
 
+/**
+ * This click, once kept, is gone: a page took it (lp-take-open) and opened it, or a newer click replaced
+ * it (that click opens its own). Read in turn after the save. False when Cache Storage fails.
+ */
+function pendingTaken(open) {
+  return pendingStep(async () => {
+    const stored = await readPendingOpen(await caches.open(META));
+    return !(stored && stored.url === open.url && stored.at === open.at);
+  }).catch(() => false);
+}
+
 async function handleClick(url) {
   const open = { url, at: Date.now() };
   // Kept first, so a page that misses the hand-off below still finds it; never long enough to cost the
   // click its user activation (focus, openWindow).
-  const saved = savePendingOpen(open).catch(() => undefined);
+  let kept = false;
+  const saved = savePendingOpen(open).then(
+    () => {
+      kept = true;
+    },
+    () => undefined,
+  );
   let timer;
   await Promise.race([saved, new Promise((resolve) => (timer = setTimeout(resolve, PENDING_SAVE_MS)))]);
   clearTimeout(timer);
-  if (await openFromNotification(url).catch(() => false)) await clearPendingOpen(open).catch(() => undefined);
+  // Not kept (yet): no page can have taken it, so the window is still navigated or opened.
+  const taken = () => (kept ? pendingTaken(open) : Promise.resolve(false));
+  if (await openFromNotification(url, taken).catch(() => false)) await clearPendingOpen(open).catch(() => undefined);
   await saved;
 }
 

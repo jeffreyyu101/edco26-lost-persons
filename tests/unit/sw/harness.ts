@@ -269,6 +269,8 @@ export function loadWorker(options: {
   userAgent?: string;
   /** pushManager.subscribe for pushsubscriptionchange. */
   subscribe?: (options: { userVisibleOnly: boolean; applicationServerKey: unknown }) => Promise<unknown>;
+  /** Runs (and is awaited) each time the worker lists its window clients, before they are listed. */
+  onMatchAll?: () => Promise<void> | void;
 }): Worker {
   const listeners = new Map<string, Listener[]>();
   const pages = options.pages ?? [];
@@ -320,7 +322,10 @@ export function loadWorker(options: {
     location: new URL(scriptUrl(options.version)),
     registration,
     clients: {
-      matchAll: async () => pages.slice(),
+      matchAll: async () => {
+        await options.onMatchAll?.();
+        return pages.slice();
+      },
       get: async (id: string) => pages.find((p) => p.id === id),
       claim: async () => undefined,
       openWindow: async (url: string) => {

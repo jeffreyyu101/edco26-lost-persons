@@ -3,9 +3,12 @@
 // Anything else is ignored. A click no page opened (an iPhone Home Screen app the tap launched or resumed at
 // `/`) is asked for with {type: 'lp-take-open'} when the page starts and each time it comes back into view.
 // Stubbed window and service worker container; synthetic ids only.
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  PENDING_BACK_MS,
   PENDING_OPEN_MS,
+  PENDING_RETRY_MS,
+  PENDING_SIGNIN_MS,
   askPendingOpen,
   listenForNotificationOpens,
   openFromNotification,
@@ -13,7 +16,9 @@ import {
   type PendingOpen,
   type PendingOpenHost,
 } from '@/lib/client/system-notify';
-import { takeThreadJump, threadJumpWaiting } from '@/lib/client/thread-jump';
+import { signInNext } from '@/lib/client/nav';
+import { SIGNED_IN_AT_KEY, markSignedIn, takeSignedInAt } from '@/lib/client/signed-in-at';
+import { requestThreadJump, takeThreadJump, threadJumpWaiting, withThread } from '@/lib/client/thread-jump';
 
 const ID = '0f0f0f0f-0000-4000-8000-000000000012';
 
@@ -105,6 +110,7 @@ describe('openFromNotification', () => {
 const ORIGIN = 'https://lp.test';
 const THREAD = `/?r=${ID}&to=thread`;
 const MUTATION = '0f0f0f0f-0000-4000-8000-0000000000aa';
+const OTHER = '0f0f0f0f-0000-4000-8000-000000000034';
 
 /** Lets a MessageChannel round trip and the promise chains after it finish. */
 const settle = async () => {
@@ -132,22 +138,45 @@ function takingWorker(initial: PendingOpen | null, onAsk?: () => void) {
   };
 }
 
-function pendingHost(opts: { open?: PendingOpen | null; location?: string; visible?: boolean; loaded?: { url: string; at: number } | null; onAsk?: () => void } = {}) {
+function pendingHost(
+  opts: {
+    open?: PendingOpen | null;
+    location?: string;
+    visible?: boolean;
+    loaded?: { url: string; at: number } | null;
+    signedInAt?: number | null;
+    onAsk?: () => void;
+  } = {},
+) {
   const worker = takingWorker(opts.open ?? null, opts.onAsk);
   let visible = opts.visible ?? true;
+  let typing = false;
   const state = { location: opts.location ?? '/' };
   const back = new Set<() => void>();
   const opened: string[] = [];
+  // The page's clock and timers: `advance` moves them on.
+  const start = Date.now();
+  let clock = start;
+  const timers: Array<{ at: number; fn: () => void; done: boolean }> = [];
   const host: PendingOpenHost = {
     worker: () => Promise.resolve(worker),
     visible: () => visible,
     location: () => state.location,
+    typing: () => typing,
     // The tap launched the app at its start URL, a moment after the click.
-    loaded: () => (opts.loaded === undefined ? { url: `${ORIGIN}/`, at: Date.now() } : opts.loaded),
-    now: () => Date.now(),
+    loaded: () => (opts.loaded === undefined ? { url: `${ORIGIN}/`, at: start } : opts.loaded),
+    signedInAt: () => opts.signedInAt ?? null,
+    now: () => clock,
     onVisible: (fn) => {
       back.add(fn);
       return () => back.delete(fn);
+    },
+    later: (fn, ms) => {
+      const timer = { at: clock + ms, fn, done: false };
+      timers.push(timer);
+      return () => {
+        timer.done = true;
+      };
     },
     open: (url) => {
       opened.push(url);
@@ -159,14 +188,37 @@ function pendingHost(opts: { open?: PendingOpen | null; location?: string; visib
     worker,
     opened,
     state,
+    now: () => clock,
+    setTyping: (on: boolean) => {
+      typing = on;
+    },
+    /** Asks still to come. */
+    scheduled: () => timers.filter((t) => !t.done).length,
     hide: () => {
       visible = false;
     },
-    /** The page comes back into view (visibilitychange). */
+    /** In view again, before any event says so. */
+    reveal: () => {
+      visible = true;
+    },
+    /** The page comes back into view (visibilitychange, focus, pageshow). */
     show: async () => {
       visible = true;
       for (const fn of [...back]) fn();
       await settle();
+    },
+    /** Moves the page's clock on by `ms`, running the asks that come due. */
+    advance: async (ms: number) => {
+      const until = clock + ms;
+      for (;;) {
+        const due = timers.filter((t) => !t.done && t.at <= until).sort((a, b) => a.at - b.at)[0];
+        if (!due) break;
+        clock = due.at;
+        due.done = true;
+        due.fn();
+        await settle();
+      }
+      clock = until;
     },
   };
 }
@@ -274,21 +326,164 @@ describe('watchPendingOpens (a click the page missed)', () => {
     await p.show();
     expect(p.opened).toEqual([THREAD]);
   });
+  it('asks again over the next 8 s until something opens: a click kept only after the first ask still opens', async () => {
+    const p = pendingHost();
+    watchPendingOpens(p.host);
+    await settle();
+    expect(p.worker.asks()).toBe(1);
+    expect(p.scheduled()).toBe(PENDING_RETRY_MS.length - 1);
+    // The worker iOS started for the click keeps it a moment after the page first asked.
+    p.worker.set({ url: THREAD, at: p.now() + 300 });
+    await p.advance(1_000);
+    expect(p.worker.asks()).toBe(2);
+    expect(p.opened).toEqual([THREAD]);
+    // Opened: no more asks this time.
+    expect(p.scheduled()).toBe(0);
+    await p.advance(10_000);
+    expect(p.worker.asks()).toBe(2);
+  });
+
+  it('with nothing to open it asks at 0, 1, 2.5, 5 and 8 s, then stops until the page comes back', async () => {
+    const p = pendingHost();
+    watchPendingOpens(p.host);
+    await settle();
+    const asks: number[] = [p.worker.asks()];
+    for (const step of [1_000, 1_500, 2_500, 3_000, 30_000]) {
+      await p.advance(step);
+      asks.push(p.worker.asks());
+    }
+    expect(asks).toEqual([1, 2, 3, 4, 5, 5]);
+    await p.show();
+    expect(p.worker.asks()).toBe(6);
+    expect(p.scheduled()).toBe(PENDING_RETRY_MS.length - 1);
+  });
+
+  it('coming back while asks still run starts them over, never twice as many', async () => {
+    const p = pendingHost();
+    watchPendingOpens(p.host);
+    await settle();
+    await p.advance(500);
+    await p.show();
+    expect(p.worker.asks()).toBe(2);
+    expect(p.scheduled()).toBe(PENDING_RETRY_MS.length - 1);
+  });
+
+  it('out of view or in a form between two asks: that ask is skipped and the click stays with the worker', async () => {
+    const p = pendingHost();
+    watchPendingOpens(p.host);
+    await settle();
+    p.worker.set({ url: THREAD, at: p.now() });
+    p.hide();
+    await p.advance(1_000);
+    expect(p.worker.asks()).toBe(1);
+    // In view again (no event yet), now in the request form.
+    p.state.location = '/?new=1';
+    p.reveal();
+    await p.advance(1_500);
+    expect(p.worker.asks()).toBe(1);
+    expect(p.worker.pending()?.url).toBe(THREAD);
+  });
+
+  it('a click tapped while the page was away opens when it comes back, up to 15 s before', async () => {
+    const p = pendingHost();
+    watchPendingOpens(p.host);
+    await settle();
+    await p.advance(60_000);
+    p.hide();
+    p.worker.set({ url: THREAD, at: p.now() });
+    await p.advance(PENDING_BACK_MS - 1_000);
+    await p.show();
+    expect(p.opened).toEqual([THREAD]);
+  });
+
+  it('an older click is dropped when the page comes back: it never moves a page in use (a message being typed)', async () => {
+    const p = pendingHost({ location: `/?r=${OTHER}` });
+    watchPendingOpens(p.host);
+    await settle();
+    await p.advance(30_000);
+    // Tapped a minute before; the page that should have opened it never asked.
+    p.worker.set({ url: THREAD, at: p.now() - 60_000 });
+    p.hide();
+    await p.advance(5_000);
+    await p.show();
+    expect(p.worker.asks()).toBe(6);
+    expect(p.opened).toEqual([]);
+    // Taken and dropped: it does not open on a later return either.
+    expect(p.worker.pending()).toBeNull();
+    p.hide();
+    await p.show();
+    expect(p.opened).toEqual([]);
+  });
+
+  it('unsent text (the message composer, a sheet field): it does not ask, and asks again once it is gone', async () => {
+    const p = pendingHost({ location: `/?r=${OTHER}` });
+    p.setTyping(true);
+    watchPendingOpens(p.host);
+    await settle();
+    p.worker.set({ url: THREAD, at: p.now() });
+    await p.advance(2_500);
+    expect(p.worker.asks()).toBe(0);
+    expect(p.worker.pending()?.url).toBe(THREAD);
+    p.setTyping(false);
+    await p.advance(2_500);
+    expect(p.worker.asks()).toBe(1);
+    expect(p.opened).toEqual([THREAD]);
+  });
+
+  it('a page that starts opens a click up to 2 minutes old; the first page after a sign-in, up to 10 minutes', async () => {
+    const now = Date.now();
+    const loaded = { url: `${ORIGIN}/`, at: now };
+    const older = pendingHost({ open: { url: THREAD, at: now - PENDING_OPEN_MS - 30_000 }, loaded });
+    watchPendingOpens(older.host);
+    await settle();
+    expect(older.worker.asks()).toBe(1);
+    expect(older.opened).toEqual([]);
+
+    const signedIn = pendingHost({ open: { url: THREAD, at: now - PENDING_SIGNIN_MS + 30_000 }, loaded, signedInAt: now - 2_000 });
+    watchPendingOpens(signedIn.host);
+    await settle();
+    expect(signedIn.opened).toEqual([THREAD]);
+
+    // A sign-in long before this page started is not the one that opened it.
+    const later = pendingHost({ open: { url: THREAD, at: now - PENDING_OPEN_MS - 30_000 }, loaded, signedInAt: now - 5 * 60_000 });
+    watchPendingOpens(later.host);
+    await settle();
+    expect(later.opened).toEqual([]);
+    expect(PENDING_SIGNIN_MS).toBeGreaterThan(PENDING_OPEN_MS);
+  });
+
+  it('the remover stops every ask still to come', async () => {
+    const p = pendingHost();
+    const stop = watchPendingOpens(p.host);
+    await settle();
+    stop();
+    p.worker.set({ url: THREAD, at: p.now() });
+    await p.advance(10_000);
+    await p.show();
+    expect(p.worker.asks()).toBe(1);
+    expect(p.opened).toEqual([]);
+  });
 });
 
 describe('startNotify (the store loads it after start): the browser asks for a missed click', () => {
+  // The asks still to come (1 to 8 s) never outlive a test.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  });
   afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.resetModules();
   });
 
-  it('asks the controller on start and on visibilitychange, and opens the request at its thread', async () => {
+  /** An iPhone Home Screen app at `/` whose controller answers lp-take-open like `controller`. */
+  function iphoneApp(controller: ReturnType<typeof takingWorker>, sessionStorage?: Map<string, string>) {
     const handlers = new Map<string, Array<() => void>>();
     const target = (name: string) => ({
       addEventListener: (type: string, fn: () => void) => handlers.set(`${name}:${type}`, [...(handlers.get(`${name}:${type}`) ?? []), fn]),
       removeEventListener: () => undefined,
     });
-    const controller = takingWorker({ url: THREAD, at: Date.now() - 2_000 });
     const pushState = vi.fn();
     const doc = { ...target('document'), visibilityState: 'visible', hasFocus: () => true };
     vi.stubGlobal('document', doc);
@@ -297,6 +492,13 @@ describe('startNotify (the store loads it after start): the browser asks for a m
       location: { origin: ORIGIN, pathname: '/', search: '' },
       history: { state: null, pushState, replaceState: vi.fn() },
       matchMedia: () => ({ matches: false }),
+      sessionStorage: sessionStorage
+        ? {
+            getItem: (k: string) => sessionStorage.get(k) ?? null,
+            setItem: (k: string, v: string) => sessionStorage.set(k, v),
+            removeItem: (k: string) => sessionStorage.delete(k),
+          }
+        : undefined,
     });
     vi.stubGlobal('navigator', {
       userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1',
@@ -305,6 +507,15 @@ describe('startNotify (the store loads it after start): the browser asks for a m
       standalone: true,
       serviceWorker: { ...target('sw'), controller, ready: new Promise(() => undefined) },
     });
+    const fire = (key: string) => {
+      for (const fn of handlers.get(key) ?? []) fn();
+    };
+    return { handlers, doc, pushState, fire };
+  }
+
+  it('asks the controller on start, on visibilitychange, focus and pageshow, and opens the request at its thread', async () => {
+    const controller = takingWorker({ url: THREAD, at: Date.now() - 2_000 });
+    const { handlers, doc, pushState, fire } = iphoneApp(controller);
     vi.resetModules();
     const notify = await import('@/lib/client/system-notify');
     const jump = await import('@/lib/client/thread-jump');
@@ -318,19 +529,129 @@ describe('startNotify (the store loads it after start): the browser asks for a m
     // Back from the background with a click it missed meanwhile.
     controller.set({ url: THREAD, at: Date.now() });
     doc.visibilityState = 'hidden';
-    for (const fn of handlers.get('document:visibilitychange') ?? []) fn();
+    fire('document:visibilitychange');
     await settle();
     expect(controller.asks()).toBe(1);
     doc.visibilityState = 'visible';
-    for (const fn of handlers.get('document:visibilitychange') ?? []) fn();
+    fire('document:visibilitychange');
     await settle();
     expect(controller.asks()).toBe(2);
     expect(pushState).toHaveBeenCalledTimes(2);
     expect(jump.takeThreadJump(ID)).toBe(true);
+    // The focus, and a page shown again from the back-forward cache, ask too.
+    controller.set({ url: THREAD, at: Date.now() });
+    fire('window:focus');
+    await settle();
+    expect(controller.asks()).toBe(3);
+    expect(pushState).toHaveBeenCalledTimes(3);
+    expect(jump.takeThreadJump(ID)).toBe(true);
+    controller.set({ url: THREAD, at: Date.now() });
+    fire('window:pageshow');
+    await settle();
+    expect(controller.asks()).toBe(4);
+    expect(pushState).toHaveBeenCalledTimes(4);
     // Installed once for the page's lifetime.
     notify.startNotify();
     await settle();
     expect(handlers.get('sw:message')?.length).toBe(1);
-    expect(controller.asks()).toBe(2);
+    expect(controller.asks()).toBe(4);
+  });
+
+  it('the first page after a sign-in opens a click tapped minutes before; the sign-in time is read once', async () => {
+    const session = new Map([['lp-signed-in-at', String(Date.now() - 1_500)]]);
+    const controller = takingWorker({ url: THREAD, at: Date.now() - 6 * 60_000 });
+    const { pushState } = iphoneApp(controller, session);
+    vi.resetModules();
+    const notify = await import('@/lib/client/system-notify');
+    notify.startNotify();
+    await settle();
+    expect(controller.asks()).toBe(1);
+    expect(pushState).toHaveBeenCalledWith({ lpDepth: 1 }, '', `/?r=${ID}`);
+    expect(session.has('lp-signed-in-at')).toBe(false);
+  });
+
+  it('without a sign-in just before, a click that old is dropped', async () => {
+    const controller = takingWorker({ url: THREAD, at: Date.now() - 6 * 60_000 });
+    const { pushState } = iphoneApp(controller, new Map());
+    vi.resetModules();
+    const notify = await import('@/lib/client/system-notify');
+    notify.startNotify();
+    await settle();
+    expect(controller.asks()).toBe(1);
+    expect(pushState).not.toHaveBeenCalled();
+    expect(controller.pending()).toBeNull();
+    // It asks again a few times (a click being kept just then would still open), then stops.
+    for (let i = 0; i < 4; i += 1) {
+      await vi.advanceTimersByTimeAsync(3_000);
+      await settle();
+    }
+    expect(controller.asks()).toBe(5);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('withThread (R2: the address a sign-in after a 401 comes back to)', () => {
+  const X = '0f0f0f0f-0000-4000-8000-000000000056';
+  const Y = '0f0f0f0f-0000-4000-8000-000000000078';
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('adds to=thread while the jump to that request waits or has just landed, through nav signInNext', () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.parse('2026-11-07T22:00:00Z') });
+    expect(withThread(`/?r=${X}`)).toBe(`/?r=${X}`);
+    requestThreadJump(X);
+    expect(withThread(`/?r=${X}`)).toBe(`/?r=${X}&to=thread`);
+    expect(signInNext(`/?r=${X}`)).toBe(`/?r=${X}&to=thread`);
+    // Another request, an edit, a list, or an address that already asks for it: unchanged.
+    expect(signInNext(`/?r=${Y}`)).toBe(`/?r=${Y}`);
+    expect(signInNext(`/?r=${X}&edit=person`)).toBe(`/?r=${X}&edit=person`);
+    expect(signInNext('/?view=pending')).toBe('/?view=pending');
+    expect(signInNext(`/?r=${X}&to=thread`)).toBe(`/?r=${X}&to=thread`);
+    // Landed (its Messages came into view): a 401 just after still comes back to the thread…
+    expect(takeThreadJump(X)).toBe(true);
+    expect(signInNext(`/?r=${X}`)).toBe(`/?r=${X}&to=thread`);
+    // …for a minute.
+    vi.setSystemTime(Date.now() + 61_000);
+    expect(signInNext(`/?r=${X}`)).toBe(`/?r=${X}`);
+  });
+
+  it('a jump waits a minute for its Messages (a slow cold start), then lapses', () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.parse('2026-11-07T22:10:00Z') });
+    requestThreadJump(Y);
+    vi.setSystemTime(Date.now() + 45_000);
+    expect(threadJumpWaiting(Y)).toBe(true);
+    vi.setSystemTime(Date.now() + 20_000);
+    expect(threadJumpWaiting(Y)).toBe(false);
+    expect(takeThreadJump(Y)).toBe(false);
+  });
+});
+
+describe('signed-in-at (the sign-in screen tells the app page it opens when it signed in)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('written by the sign-in, read once by the app page; no sessionStorage is no time and no error', () => {
+    const store = new Map<string, string>();
+    const sessionStorage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    };
+    vi.stubGlobal('window', { sessionStorage });
+    const before = Date.now();
+    markSignedIn();
+    expect(Number(store.get(SIGNED_IN_AT_KEY))).toBeGreaterThanOrEqual(before);
+    expect(takeSignedInAt()).toBeGreaterThanOrEqual(before);
+    expect(takeSignedInAt()).toBeNull();
+    store.set(SIGNED_IN_AT_KEY, 'soon');
+    expect(takeSignedInAt()).toBeNull();
+    expect(store.has(SIGNED_IN_AT_KEY)).toBe(false);
+
+    vi.stubGlobal('window', {});
+    expect(() => markSignedIn()).not.toThrow();
+    expect(takeSignedInAt()).toBeNull();
   });
 });

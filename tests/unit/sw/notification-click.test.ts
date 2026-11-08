@@ -2,9 +2,11 @@
 // an open window of the app and has it open the request in place (`/?r=<id>`); a window that does not
 // answer is navigated there, and with no window one opens. Fake window clients; synthetic ids only.
 import { beforeEach, describe, expect, it } from 'vitest';
+import { watchPendingOpens, type PendingOpenHost } from '@/lib/client/system-notify';
 import { FakeCacheStorage, FakeNetwork, ORIGIN, loadWorker, type PageClient, type Worker } from './harness';
 
 const ID = '0f0f0f0f-0000-4000-8000-000000000012';
+const OTHER = '0f0f0f0f-0000-4000-8000-000000000034';
 
 interface FakeWindow extends PageClient {
   focusCalls: number;
@@ -249,15 +251,95 @@ describe('a click no page opened yet (lp-take-open: the iPhone Home Screen app l
     expect(await take()).toEqual({ open: null });
   });
 
-  it('expires after 2 minutes: an expired one answers null and is dropped', async () => {
+  it('kept 10 minutes at most (the first app page after a sign-in): an expired one answers null and is dropped', async () => {
     await w.notificationClick({ url: THREAD });
-    w.advanceClock(2 * 60_000 - 1_000);
+    w.advanceClock(10 * 60_000 - 1_000);
     expect(((await take()) as { open: { url: string } | null }).open?.url).toBe(THREAD);
 
     await w.notificationClick({ url: THREAD });
-    w.advanceClock(2 * 60_000 + 1_000);
+    w.advanceClock(10 * 60_000 + 1_000);
     expect(await take()).toEqual({ open: null });
     expect(await stored()).toBeNull();
+  });
+
+  it('asking with nothing kept writes nothing', async () => {
+    expect(await take()).toEqual({ open: null });
+    expect(caches.get(META)?.entries.size ?? 0).toBe(0);
+  });
+
+  it('a page took it (lp-take-open, another worker instance) while the window did not answer: that window is not reloaded', async () => {
+    // The page's controller is another instance of this worker (iOS started one for the click).
+    const controller = loadWorker({ version: 'n1', caches, network: new FakeNetwork(), active: 'n1' });
+    const frozen = win('tab-1', '/', { answers: null });
+    const post = frozen.postMessage!;
+    frozen.postMessage = (message, transfer) => {
+      post(message, transfer);
+      // It thaws a moment later, asks for the click and opens it in place, too late for lp-open.
+      void controller.message({ type: 'lp-take-open' });
+    };
+    tabs.push(frozen);
+    await w.notificationClick({ url: THREAD });
+    expect(frozen.asked).toEqual([THREAD]);
+    expect(frozen.navigated).toEqual([]);
+    expect(w.opened).toEqual([]);
+    expect(await stored()).toBeNull();
+  });
+
+  it('a page the worker cannot list took it: no window is opened for it (and none navigated)', async () => {
+    const controller = loadWorker({ version: 'n1', caches, network: new FakeNetwork(), active: 'n1' });
+    // iOS: a worker started for the click lists no window, while the app page in front asks its own.
+    const fresh = loadWorker({
+      version: 'n1',
+      caches,
+      network: new FakeNetwork(),
+      active: 'n1',
+      onMatchAll: async () => {
+        await controller.message({ type: 'lp-take-open' });
+      },
+    });
+    await fresh.notificationClick({ url: THREAD });
+    expect(fresh.opened).toEqual([]);
+
+    const signIn = win('tab-1', '/signin');
+    const focus = signIn.focus!;
+    signIn.focus = async () => {
+      await controller.message({ type: 'lp-take-open' });
+      return focus();
+    };
+    tabs.push(signIn);
+    await w.notificationClick({ url: THREAD });
+    expect(signIn.navigated).toEqual([]);
+    expect(w.opened).toEqual([]);
+  });
+
+  it('a newer click replaced it: the older one does not navigate over the newer', async () => {
+    const frozen = win('tab-1', '/', { answers: null });
+    const post = frozen.postMessage!;
+    let newer: Promise<unknown> | null = null;
+    frozen.postMessage = (message, transfer) => {
+      post(message, transfer);
+      // A second tap while the first one waits for an answer.
+      if (!newer) newer = w.notificationClick({ url: `/?r=${OTHER}&to=thread` });
+    };
+    tabs.push(frozen);
+    await w.notificationClick({ url: THREAD });
+    await newer;
+    expect(frozen.navigated).toEqual([`${ORIGIN}/?r=${OTHER}&to=thread`]);
+  });
+
+  it('nothing could be kept (Cache Storage refused): a window that does not answer is navigated as before', async () => {
+    const open = caches.open.bind(caches);
+    caches.open = async (name: string) => {
+      if (name === META) throw new Error('quota');
+      return open(name);
+    };
+    const frozen = win('tab-1', '/', { answers: null });
+    tabs.push(frozen);
+    await w.notificationClick({ url: THREAD });
+    expect(frozen.navigated).toEqual([`${ORIGIN}${THREAD}`]);
+    tabs.splice(0);
+    await w.notificationClick({ url: THREAD });
+    expect(w.opened).toEqual([`${ORIGIN}${THREAD}`]);
   });
 
   it('outlives the worker: a restarted worker still answers it', async () => {
@@ -274,5 +356,71 @@ describe('a click no page opened yet (lp-take-open: the iPhone Home Screen app l
     expect(meta.has(KEY)).toBe(false);
     await meta.put(KEY, new Response(JSON.stringify({ url: 42, at: 'soon' })));
     expect(await take()).toEqual({ open: null });
+  });
+});
+
+describe('the page asks again: a click kept only after its first ask still opens (two worker instances)', () => {
+  const THREAD = `/?r=${ID}&to=thread`;
+
+  /** MessageChannel round trips and Cache Storage steps in both instances. */
+  const settle = async () => {
+    for (let i = 0; i < 12; i += 1) await new Promise<void>((r) => setImmediate(r));
+  };
+
+  it("the page's controller answers before the worker iOS started for the click has kept it; the next ask opens it", async () => {
+    const caches = new FakeCacheStorage();
+    // The page's controller, and the hidden worker the tap went to (it lists no window).
+    const controller = loadWorker({ version: 'n1', caches, network: new FakeNetwork(), active: 'n1' });
+    const fresh = loadWorker({ version: 'n1', caches, network: new FakeNetwork(), active: 'n1' });
+    let asks = 0;
+    const port = {
+      postMessage: (message: unknown, transfer?: unknown[]) => {
+        asks += 1;
+        void controller.message(message).then((reply) => (transfer?.[0] as MessagePort).postMessage(reply));
+      },
+    };
+    const timers: Array<{ ms: number; fn: () => void; done: boolean }> = [];
+    const opened: string[] = [];
+    const host: PendingOpenHost = {
+      worker: () => Promise.resolve(port),
+      visible: () => true,
+      location: () => '/',
+      typing: () => false,
+      loaded: () => ({ url: `${ORIGIN}/`, at: Date.now() - 500 }),
+      signedInAt: () => null,
+      now: () => Date.now(),
+      onVisible: () => () => undefined,
+      later: (fn, ms) => {
+        const timer = { ms, fn, done: false };
+        timers.push(timer);
+        return () => {
+          timer.done = true;
+        };
+      },
+      open: (url) => {
+        opened.push(url);
+        return true;
+      },
+    };
+    const stop = watchPendingOpens(host);
+    await settle();
+    expect(asks).toBe(1);
+    expect(opened).toEqual([]);
+
+    // The tap reaches the other instance after that first answer: kept; openWindow does nothing on iOS.
+    await fresh.notificationClick({ url: THREAD });
+    expect(fresh.opened).toEqual([`${ORIGIN}${THREAD}`]);
+
+    // The ask at 1 s finds it, and the asks stop.
+    const next = timers.find((t) => !t.done && t.ms === 1_000);
+    expect(next).toBeDefined();
+    next!.done = true;
+    next!.fn();
+    await settle();
+    expect(asks).toBe(2);
+    expect(opened).toEqual([THREAD]);
+    expect(timers.filter((t) => !t.done)).toEqual([]);
+    expect(await controller.message({ type: 'lp-take-open' })).toEqual({ open: null });
+    stop();
   });
 });
