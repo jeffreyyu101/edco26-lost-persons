@@ -6,6 +6,7 @@
 // Age and gender are free text (Jeffrey, 2026-11-06 10:31; design/DECISIONS.md "New request: free text").
 import { z } from 'zod';
 import {
+  FRIEND_IN_MEDICAL,
   LIMITS,
   OTHER_LOCATION_MIN,
   OTHER_POST,
@@ -125,8 +126,8 @@ export const createRequestSchema = z
     reportingLocation: postField,
     ...fieldShape,
     // (Companion) "Is a friend already with them in medical?" Default 'unsure'; the name is kept only for 'yes'.
-    friendInMedical: z.enum(['yes', 'no', 'unsure']).optional(),
-    friendInMedicalName: optionalText(LIMITS.medicalLocation).optional(),
+    friendInMedical: z.enum(FRIEND_IN_MEDICAL).optional(),
+    friendInMedicalName: optionalText(LIMITS.friendInMedicalName).optional(),
   })
   .superRefine(otherNeedsLocation)
   .transform((v) => (v.reportingLocation === OTHER_POST ? v : { ...v, otherLocation: null }));

@@ -3,7 +3,7 @@
 //
 // Shape rule (A1): the database RPCs return snake_case JSON. The server maps it to these camelCase
 // types through an EXPLICIT allowlist (legacy columns never leak through) and adds the derived fields.
-import type { EditableField, PhotoTiming, PhotoTimingAny, StatusKind, StatusValue } from './domain';
+import type { EditableField, FriendInMedical, PhotoTiming, PhotoTimingAny, StatusKind, StatusValue, SwapPlace } from './domain';
 import type { CreateRequestBody, RequestPatch } from './validation';
 
 /**
@@ -122,13 +122,6 @@ export interface RequestSummary {
   swapPlace?: SwapPlace | null;
 }
 
-/** (Companion) patients.friend_in_medical. */
-export type FriendInMedical = 'yes' | 'no' | 'unsure';
-/** (Companion) patients.swap_place. */
-export type SwapPlace = 'fa' | 'mm';
-/** (Companion) POST /api/requests/:id/swap body (plus expectedVersion, like the status route). Returns ChangeResponse. */
-export type SwapAction = { action: 'request' } | { action: 'approve'; place: SwapPlace } | { action: 'decline' };
-export type SwapBody = SwapAction & { expectedVersion: number };
 
 /** RequestSummary.lastMessage (F3). */
 export interface LastMessage {
@@ -418,7 +411,7 @@ export interface AttentionItem {
   id: string;
   caseNumber: number;
   tent: string;
-  kind: 'wait' | 'recheck' | 'located';
+  kind: 'wait' | 'recheck' | 'located' | 'swap';
   /** Logged (wait), the re-check due time (recheck) or the Located answer (located). */
   since: IsoDateTime;
   enroute: boolean;

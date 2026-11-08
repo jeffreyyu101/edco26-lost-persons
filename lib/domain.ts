@@ -152,6 +152,14 @@ export function isInMedical(status: string): boolean {
   return status === STATUS.inMedical || status === STATUS.legacyBringFriend;
 }
 
+/** (Companion) Where a friend swap happens: the request's own tent / post, or Main Med. */
+export type SwapPlace = 'fa' | 'mm';
+export const SWAP_PLACES = ['fa', 'mm'] as const;
+
+/** (Companion) The intake answer "Is a friend already with them in medical?". */
+export const FRIEND_IN_MEDICAL = ['no', 'yes', 'unsure'] as const;
+export type FriendInMedical = (typeof FRIEND_IN_MEDICAL)[number];
+
 /** CSS colour for a glyph or bar in a given tone (Radix step 9). */
 export function toneColorVar(tone: StatusTone): string {
   return `var(--${tone}-9)`;
@@ -162,7 +170,7 @@ export function toneColorVar(tone: StatusTone): string {
 // ---------------------------------------------------------------------------------------------------
 
 /** Labels for audit entries: answer, change, reunite, discharge, undo, reopen. */
-export const STATUS_KINDS = ['answer', 'change', 'reunite', 'discharge', 'undo', 'reopen'] as const;
+export const STATUS_KINDS = ['answer', 'change', 'reunite', 'discharge', 'undo', 'reopen', 'inform'] as const;
 export type StatusKind = (typeof STATUS_KINDS)[number];
 
 /** Allowed status → status moves through lp_set_status. MUST match the SQL CASE (unit-tested). */
@@ -171,14 +179,14 @@ export const TRANSITIONS: Readonly<Record<Status, readonly Status[]>> = {
   [STATUS.notInMedical]: [STATUS.inMedical, STATUS.waiting, STATUS.accompanied],
   [STATUS.inMedical]: [STATUS.reunited, STATUS.notInMedical, STATUS.discharged, STATUS.waiting, STATUS.accompanied],
   [STATUS.reunited]: [STATUS.inMedical],
-  [STATUS.discharged]: [STATUS.inMedical],
+  [STATUS.discharged]: [STATUS.inMedical, STATUS.accompanied],
   [STATUS.cancelled]: [STATUS.waiting],
   [STATUS.legacyBringFriend]: [STATUS.reunited, STATUS.discharged, STATUS.notInMedical],
   // (F6) Reopen only (kind 'reopen', any staff).
   [STATUS.inactive]: [STATUS.inMedical],
   // (Companion) Change answer (Located friend coming / Not located / Waiting), Friend informed, Discharged. A swap
   // approval moves Accompanied → In medical through POST /api/requests/:id/swap.
-  [STATUS.accompanied]: [STATUS.inMedical, STATUS.notInMedical, STATUS.waiting, STATUS.friendInformed, STATUS.discharged],
+  [STATUS.accompanied]: [STATUS.friendInformed, STATUS.inMedical, STATUS.notInMedical, STATUS.discharged, STATUS.waiting],
   // (Companion) Reopen / Undo.
   [STATUS.friendInformed]: [STATUS.accompanied],
 };
@@ -497,6 +505,8 @@ export const LIMITS = {
   gender: 40,
   /** Where medical has the patient ("Chair 14"), free text (Dani + Brian, 2026-11-06 afternoon). */
   medicalLocation: 60,
+  /** (Companion) The name of the friend already with them in medical. */
+  friendInMedicalName: 60,
 } as const;
 
 /** The old numeric age range. The server no longer enforces it: age is free text (LIMITS.age). */
