@@ -27,7 +27,10 @@
 //   * Click: public/sw.js focuses an app window and posts {type: 'lp-open', url}; this page opens that view
 //     in place (no reload, so an open form or sheet is not lost) and answers {ok}. A message's opens the
 //     request at its thread ("/?r=<id>&to=thread", R2 2026-11-07; lib/client/thread-jump.ts). A page that does not
-//     answer (a sign-in page, an older build) is navigated by the worker instead.
+//     answer (a sign-in page, an older build) is navigated by the worker instead. The worker also keeps the
+//     click until a page opens it: this page asks for it ({type: 'lp-take-open'}, a few times) when it starts
+//     and when it comes back into view, for the iPhone Home Screen app the tap launched or resumed at `/`
+//     without lp-open (watchPendingOpens).
 //
 // Off the first load (A25): the store loads this module with import() after start (store-core.ts
 // browserEnv), and the avatar menu and the sheets import it from their own view chunks.
@@ -35,8 +38,9 @@ import { useSyncExternalStore } from 'react';
 import type { RequestSummary } from '../api-types';
 import { alertName, isHeld, statusMeta } from '../domain';
 import { LOCATED_SUBTITLE, alertKey } from './alerts';
-import { hrefFor, navigate, parseView, viewToParams } from './nav';
+import { hrefFor, navigate, parseView, viewToParams, type ViewName } from './nav';
 import type { AlertEvent } from './store-contract';
+import { takeSignedInAt } from './signed-in-at';
 import { requestThreadJump } from './thread-jump';
 import { uuid } from './uuid';
 import { threadPath, wantsThread } from '../thread-link';
@@ -769,11 +773,234 @@ export function listenForNotificationOpens(
   return () => container.removeEventListener('message', onMessage);
 }
 
+// ---------------------------------------------------------------------------------------------------
+// A click no page opened (public/sw.js lp-take-open)
+// ---------------------------------------------------------------------------------------------------
+//
+// The worker keeps each click's target until a page answers its lp-open. An iPhone Home Screen app the tap
+// launched or resumed at its start URL `/` (a frozen page, this module not loaded yet, a navigate() or
+// openWindow() that did nothing) never hears lp-open: it asks for the target when it starts and each time
+// it comes back into view, gets the focus or is shown again, and opens it as the click would have. Each
+// time it asks a few times over 8 s (PENDING_RETRY_MS) until something opens: iOS may hand the click to a
+// worker it starts for it, which keeps it only after this page first asked. Only a click tapped just then
+// opens (PENDING_BACK_MS before the page came back, or since; for a page that starts, PENDING_OPEN_MS before
+// it started, PENDING_SIGNIN_MS after a sign-in): an older one would move a page in use and lose what is on
+// it. A page in a form or with unsent text (the message composer) does not ask.
+
+/** The message public/sw.js answers with {open: {url, at} | null}, taking the click once. */
+export const TAKE_OPEN_MESSAGE = 'lp-take-open';
+/** A page that starts opens a click tapped up to this long before it started. */
+export const PENDING_OPEN_MS = 2 * 60_000;
+/** The first app page after a sign-in: up to this long before (public/sw.js PENDING_OPEN_MS keeps it this long). */
+export const PENDING_SIGNIN_MS = 10 * 60_000;
+/** A page that comes back into view opens a click tapped up to this long before (while it was away), or since. */
+export const PENDING_BACK_MS = 15_000;
+/** When a page asks after it starts or comes back (ms), until something opens. */
+export const PENDING_RETRY_MS: readonly number[] = [0, 1_000, 2_500, 5_000, 8_000];
+/** A sign-in up to this long before the page started is the one that opened it. */
+const SIGNED_IN_OPEN_MS = 60_000;
+
+/** A notification click no page has opened yet: the address it opens and when it was tapped (epoch ms). */
+export interface PendingOpen {
+  url: string;
+  at: number;
+}
+
+/** Takes the worker's pending open; null when there is none, or no worker answers in time (an older build). */
+export function askPendingOpen(worker: WorkerLike | null | undefined, timeoutMs = CAPS_REPLY_MS): Promise<PendingOpen | null> {
+  if (!worker || typeof MessageChannel === 'undefined') return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    const done = (open: PendingOpen | null) => {
+      clearTimeout(timer);
+      channel.port1.onmessage = null;
+      channel.port1.close();
+      resolve(open);
+    };
+    const timer = setTimeout(() => done(null), timeoutMs);
+    channel.port1.onmessage = (event: MessageEvent<{ open?: { url?: unknown; at?: unknown } | null } | null>) => {
+      const open = event.data?.open;
+      done(open && typeof open.url === 'string' && typeof open.at === 'number' ? { url: open.url, at: open.at } : null);
+    };
+    try {
+      worker.postMessage({ type: TAKE_OPEN_MESSAGE }, [channel.port2]);
+    } catch {
+      done(null);
+    }
+  });
+}
+
+/** What watchPendingOpens reads from the browser (tests pass a fake). */
+export interface PendingOpenHost {
+  /** The worker to ask: the page's controller, else the active one; null without service workers. */
+  worker(): Promise<WorkerLike | null | undefined> | null;
+  visible(): boolean;
+  /** The path + query the page shows now. */
+  location(): string;
+  /** A text field holds text not sent yet: the message composer, a sheet's field. */
+  typing(): boolean;
+  /** The address this document was loaded at, and when (epoch ms); null when unknown. */
+  loaded(): { url: string; at: number } | null;
+  /** When this tab signed in (lib/client/signed-in-at.ts), read once; null when unknown. */
+  signedInAt(): number | null;
+  now(): number;
+  /** Calls `fn` each time the page comes back into view, gets the focus or is shown again. Returns the remover. */
+  onVisible(fn: () => void): () => void;
+  /** Calls `fn` in `ms` (setTimeout). Returns the canceller. */
+  later(fn: () => void, ms: number): () => void;
+  /** Opens a notification's address (openFromNotification). */
+  open(url: string): boolean;
+}
+
+const pathAndQuery = (url: string): string | null => {
+  try {
+    const u = new URL(url, 'https://lp.invalid');
+    return `${u.pathname}${u.search}`;
+  } catch {
+    return null;
+  }
+};
+
+/** The request form (new or edit) or the needs-attention editor: a pending open never replaces them. */
+function editing(location: string): boolean {
+  let name: ViewName;
+  try {
+    name = parseView(new URL(location, 'https://lp.invalid').searchParams).name;
+  } catch {
+    return false;
+  }
+  return name === 'new' || name === 'edit' || name === 'outbox';
+}
+
+/**
+ * Asks the worker for a click no page opened when the page starts and each time it comes back, a few times
+ * (`retryMs`) until something opens, and opens it: only while the page is in view, not in a form and holds
+ * no unsent text, only a click tapped just then (see the section header), and not when this document was
+ * itself loaded at that address by the click (it opens it from the address). Returns the remover.
+ */
+export function watchPendingOpens(host: PendingOpenHost, retryMs: readonly number[] = PENDING_RETRY_MS): () => void {
+  // Asking takes the click: leave it with the worker while the page is out of view, in a form or typing.
+  const holding = () => !host.visible() || editing(host.location()) || host.typing();
+  /** The oldest tap the current asks open (epoch ms), and until when they run. */
+  let earliest = 0;
+  let asksUntil = -Infinity;
+  const cancels: Array<() => void> = [];
+  let stopped = false;
+
+  const stopAsking = () => {
+    for (const cancel of cancels.splice(0)) cancel();
+    asksUntil = -Infinity;
+  };
+
+  /** True once the click is open, or this document already shows it: no more asks this time. */
+  const check = async (): Promise<boolean> => {
+    if (holding()) return false;
+    const open = await askPendingOpen(await host.worker());
+    if (!open) return false;
+    // Taken either way: a click from before is dropped, so it never moves this page later.
+    if (open.at < earliest || open.at > host.now() + PENDING_BACK_MS || holding()) return false;
+    const loaded = host.loaded();
+    if (loaded && open.at <= loaded.at && pathAndQuery(loaded.url) === pathAndQuery(open.url)) return true;
+    try {
+      return host.open(open.url);
+    } catch {
+      return false;
+    }
+  };
+
+  const ask = () => {
+    if (stopped) return;
+    void check().then(
+      (opened) => {
+        if (opened) stopAsking();
+      },
+      () => undefined,
+    );
+  };
+
+  /** Ask now and again over the next seconds, opening clicks tapped from `oldest` on. */
+  const askFor = (oldest: number) => {
+    if (stopped) return;
+    const now = host.now();
+    // Asks still running keep their own window too (the first page after a sign-in has the widest).
+    const from = now <= asksUntil ? Math.min(earliest, oldest) : oldest;
+    stopAsking();
+    earliest = from;
+    asksUntil = now + Math.max(0, ...retryMs);
+    for (const ms of retryMs) if (ms > 0) cancels.push(host.later(ask, ms));
+    if (retryMs.some((ms) => ms <= 0)) ask();
+  };
+
+  const started = host.loaded()?.at ?? host.now();
+  const signedIn = host.signedInAt();
+  const afterSignIn = signedIn !== null && Math.abs(started - signedIn) <= SIGNED_IN_OPEN_MS;
+  askFor(started - (afterSignIn ? PENDING_SIGNIN_MS : PENDING_OPEN_MS));
+  const off = host.onVisible(() => askFor(host.now() - PENDING_BACK_MS));
+  return () => {
+    stopped = true;
+    stopAsking();
+    off();
+  };
+}
+
+/** Fields whose text is lost when the page moves: the message composer, a sheet's text field. */
+const UNSENT_FIELDS = 'textarea, input[type="text"], input:not([type])';
+
+function unsentText(): boolean {
+  try {
+    for (const field of Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(UNSENT_FIELDS))) {
+      if (typeof field.value === 'string' && field.value.trim() !== '') return true;
+    }
+  } catch {
+    // No document to read: nothing typed.
+  }
+  return false;
+}
+
+/** The real browser. Only called on the client. */
+export function browserPendingOpenHost(): PendingOpenHost {
+  return {
+    worker: () => {
+      if (!('serviceWorker' in navigator)) return null;
+      const container = navigator.serviceWorker;
+      if (container.controller) return Promise.resolve(container.controller);
+      return container.ready.then((r) => r.active);
+    },
+    visible: () => document.visibilityState !== 'hidden',
+    location: () => `${window.location.pathname}${window.location.search}`,
+    typing: unsentText,
+    loaded: () => {
+      const entry = typeof performance !== 'undefined' ? performance.getEntriesByType?.('navigation')[0] : undefined;
+      return entry && typeof performance.timeOrigin === 'number' ? { url: entry.name, at: performance.timeOrigin } : null;
+    },
+    signedInAt: takeSignedInAt,
+    now: () => Date.now(),
+    onVisible(fn) {
+      const handler = () => {
+        if (document.visibilityState !== 'hidden') fn();
+      };
+      document.addEventListener('visibilitychange', handler);
+      window.addEventListener('focus', handler);
+      window.addEventListener('pageshow', handler);
+      return () => {
+        document.removeEventListener('visibilitychange', handler);
+        window.removeEventListener('focus', handler);
+        window.removeEventListener('pageshow', handler);
+      };
+    },
+    later: (fn, ms) => {
+      const timer = setTimeout(fn, ms);
+      return () => clearTimeout(timer);
+    },
+    open: (url) => openFromNotification(url),
+  };
+}
+
 let opensInstalled = false;
 
 /**
  * The store's entry point (loaded with import() after start): the page's notifier, started, and the
- * notification-click listener, installed once for the page's lifetime.
+ * notification-click listener and the pending-open check, installed once for the page's lifetime.
  */
 export function startNotify(): NotifySystem {
   const system = notifySystem();
@@ -781,6 +1008,7 @@ export function startNotify(): NotifySystem {
   if (!opensInstalled && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     opensInstalled = true;
     listenForNotificationOpens(navigator.serviceWorker);
+    watchPendingOpens(browserPendingOpenHost());
   }
   return system;
 }

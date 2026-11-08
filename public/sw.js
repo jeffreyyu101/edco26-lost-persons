@@ -36,6 +36,13 @@
  * request (`/?r=<id>`, `/` for a combined one) in place; a window that does not answer is navigated there;
  * with no window, one opens. A page asks {type: 'lp-caps'} first and notifies only once the active worker
  * answers {notificationClick: true}: the worker of an older build has no click handler and never answers.
+ * Before that hand-off the click's target is kept in META (it outlives this worker): an iPhone Home Screen
+ * app launched or resumed at its start URL `/`, a frozen page or one whose listener is not in yet misses
+ * the hand-off, and navigate() / openWindow() may do nothing there. The page asks {type: 'lp-take-open'}
+ * when it starts and whenever it comes back (a few times, in case this click is still being kept), and
+ * opens what it gets only if it was tapped just then (lib/client/system-notify.ts watchPendingOpens): taken
+ * once, kept 10 minutes at most (the first app page after a sign-in), cleared when a page answers lp-open
+ * {ok: true}. A click a page took that way is not navigated to or opened in a window again.
  *
  * Web Push (F4, spec §18 A54): a push shows its notification (title, body, tag "lp-<id>", the app icon;
  * messages sound again when they replace one) and sets the app icon badge to the recipient's unread
@@ -66,6 +73,15 @@ const MAX_PRECACHE = 400;
 const OPEN_REPLY_MS = 1500;
 const OPEN_MESSAGE = 'lp-open';
 const CAPS_MESSAGE = 'lp-caps';
+// The page asks for the notification click no page has opened yet (lib/client/system-notify.ts).
+const TAKE_OPEN_MESSAGE = 'lp-take-open';
+// The click no page has opened yet ({url, at}), in META: it outlives this worker.
+const PENDING_OPEN_KEY = '/__lp/pending-open';
+// The longest a click is kept for a page to take: the first app page after a sign-in (lib/client/system-notify.ts
+// PENDING_SIGNIN_MS). The page decides whether it is still worth opening.
+const PENDING_OPEN_MS = 10 * 60 * 1000;
+// The click's hand-off never waits longer than this for the target to be stored.
+const PENDING_SAVE_MS = 500;
 const CORE = [
   '/manifest.webmanifest',
   '/icons/icon-192.png',
@@ -408,6 +424,15 @@ self.addEventListener('message', (event) => {
     if (port) port.postMessage({ notificationClick: true, push: true });
     return;
   }
+  if (data.type === TAKE_OPEN_MESSAGE) {
+    // A page that started or came back: the click it should open, once ({open: {url, at}}), or {open: null}.
+    const port = event.ports && event.ports[0];
+    const reply = (open) => {
+      if (port) port.postMessage({ open });
+    };
+    event.waitUntil(takePendingOpen().then(reply, () => reply(null)));
+    return;
+  }
   if (data.type === 'precache' && Array.isArray(data.urls)) {
     const port = event.ports && event.ports[0];
     event.waitUntil(
@@ -568,7 +593,15 @@ function askToOpen(client, url) {
   });
 }
 
-async function openFromNotification(url) {
+/**
+ * Focus an app window and have it open `url` in place; else navigate it there; else open a window. True
+ * only once a page said it opened it (lp-open {ok: true}): navigate() and openWindow() may do nothing on an
+ * iPhone Home Screen app, so they never count. `taken()`: a page took the click with lp-take-open meanwhile
+ * (it opened it in place), so nothing reloads that page or opens another window for it.
+ */
+async function openFromNotification(url, taken = async () => false) {
+  // Absolute: a Home Screen app may resolve a relative one against nothing and open its start URL.
+  const href = new URL(url, self.location.origin).href;
   const windows = (await self.clients.matchAll({ type: 'window', includeUncontrolled: true })).filter((c) => windowPath(c) !== null);
   // The app page `/` beats /signin; matchAll lists the most recently focused window first.
   const client = windows.find((c) => c.focused && windowPath(c) === '/') || windows.find((c) => windowPath(c) === '/') || windows[0];
@@ -579,19 +612,102 @@ async function openFromNotification(url) {
     } catch (e) {
       // Focus needs the click's user activation; the window still opens the request.
     }
-    if (windowPath(target) === '/' && (await askToOpen(target, url))) return;
+    if (windowPath(target) === '/' && (await askToOpen(target, url))) return true;
+    if (await taken()) return false;
     try {
-      if (await target.navigate(url)) return;
+      if (await target.navigate(href)) return false;
     } catch (e) {
       // navigate() only works on a window this worker controls: open a new one.
     }
   }
-  if (self.clients.openWindow) await self.clients.openWindow(url);
+  if (await taken()) return false;
+  if (self.clients.openWindow) await self.clients.openWindow(href);
+  return false;
+}
+
+// ---- The click no page opened yet (lp-take-open) -------------------------------------------------------
+
+let pendingQueue = Promise.resolve();
+
+/** Run `step` on the pending open after every earlier one (a click's save always lands before its clear). */
+function pendingStep(step) {
+  const run = pendingQueue.then(step);
+  pendingQueue = run.catch(() => undefined);
+  return run;
+}
+
+async function readPendingOpen(meta) {
+  try {
+    const res = await meta.match(PENDING_OPEN_KEY);
+    const data = res ? await res.json() : null;
+    return data && typeof data.url === 'string' && typeof data.at === 'number' ? { url: data.url, at: data.at } : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function savePendingOpen(open) {
+  return pendingStep(async () => {
+    const meta = await caches.open(META);
+    await meta.put(PENDING_OPEN_KEY, new Response(JSON.stringify(open), { headers: { 'Content-Type': 'application/json' } }));
+  });
+}
+
+/** A page opened this click: forget it (unless a newer click replaced it meanwhile). */
+function clearPendingOpen(open) {
+  return pendingStep(async () => {
+    const meta = await caches.open(META);
+    const stored = await readPendingOpen(meta);
+    if (stored && stored.url === open.url && stored.at === open.at) await meta.delete(PENDING_OPEN_KEY);
+  });
+}
+
+/** The pending open, taken once: {url, at} while fresh, else null (an expired one is dropped too). */
+function takePendingOpen() {
+  return pendingStep(async () => {
+    const meta = await caches.open(META);
+    // Pages ask several times each time they come back: nothing kept, nothing written.
+    if (!(await meta.match(PENDING_OPEN_KEY))) return null;
+    const stored = await readPendingOpen(meta);
+    await meta.delete(PENDING_OPEN_KEY);
+    return stored && Math.abs(Date.now() - stored.at) <= PENDING_OPEN_MS ? stored : null;
+  });
+}
+
+/**
+ * This click, once kept, is gone: a page took it (lp-take-open) and opened it, or a newer click replaced
+ * it (that click opens its own). Read in turn after the save. False when Cache Storage fails.
+ */
+function pendingTaken(open) {
+  return pendingStep(async () => {
+    const stored = await readPendingOpen(await caches.open(META));
+    return !(stored && stored.url === open.url && stored.at === open.at);
+  }).catch(() => false);
+}
+
+async function handleClick(url) {
+  const open = { url, at: Date.now() };
+  // Kept first, so a page that misses the hand-off below still finds it; never long enough to cost the
+  // click its user activation (focus, openWindow).
+  let kept = false;
+  const saved = savePendingOpen(open).then(
+    () => {
+      kept = true;
+    },
+    () => undefined,
+  );
+  let timer;
+  await Promise.race([saved, new Promise((resolve) => (timer = setTimeout(resolve, PENDING_SAVE_MS)))]);
+  clearTimeout(timer);
+  // Not kept (yet): no page can have taken it, so the window is still navigated or opened.
+  const taken = () => (kept ? pendingTaken(open) : Promise.resolve(false));
+  if (await openFromNotification(url, taken).catch(() => false)) await clearPendingOpen(open).catch(() => undefined);
+  await saved;
 }
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  event.waitUntil(openFromNotification(notificationTarget(event.notification.data)).catch(() => undefined));
+  event.waitUntil(handleClick(notificationTarget(event.notification.data)).catch(() => undefined));
 });
 
 // ---- Web Push (F4) ------------------------------------------------------------------------------------

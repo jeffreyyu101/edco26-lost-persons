@@ -177,6 +177,25 @@ export function goBack(fallback: NavParams = {}): void {
   else navigate(fallback, { replace: true });
 }
 
+let signInNextHook: ((location: string) => string) | null = null;
+
+/**
+ * (R2) Set by lib/client/thread-jump.ts, which loads after the first load: what signInNext adds to the address.
+ * A jump to a request's Messages lives in memory only, and the address shows the request without `to=thread`.
+ */
+export function setSignInNext(hook: (location: string) => string): void {
+  signInNextHook = hook;
+}
+
+/** The address a sign-in after a 401 comes back to (`next=`): `location`, at the thread of a request opened for it. */
+export function signInNext(location: string): string {
+  try {
+    return signInNextHook?.(location) ?? location;
+  } catch {
+    return location;
+  }
+}
+
 /** The current view, re-rendered on pushState / replaceState / back / forward. */
 export function useView(): View {
   const params = useSearchParams();

@@ -53,6 +53,10 @@ export class FakeCache {
     this.entries.set(keyOf(input), { body, status: res.status, headers: [...res.headers] });
   }
 
+  async delete(input: Input): Promise<boolean> {
+    return this.entries.delete(keyOf(input));
+  }
+
   has(path: string): boolean {
     return this.entries.has(path);
   }
@@ -237,6 +241,8 @@ export interface Worker {
   shownLog: ShownNotification[];
   /** The app icon badge (navigator.setAppBadge / clearAppBadge), or null when never set. */
   badge(): number | null;
+  /** Moves the worker's clock (Date.now()) forward by `ms`. */
+  advanceClock(ms: number): void;
 }
 
 export interface ShownNotification {
@@ -263,6 +269,8 @@ export function loadWorker(options: {
   userAgent?: string;
   /** pushManager.subscribe for pushsubscriptionchange. */
   subscribe?: (options: { userVisibleOnly: boolean; applicationServerKey: unknown }) => Promise<unknown>;
+  /** Runs (and is awaited) each time the worker lists its window clients, before they are listed. */
+  onMatchAll?: () => Promise<void> | void;
 }): Worker {
   const listeners = new Map<string, Listener[]>();
   const pages = options.pages ?? [];
@@ -304,11 +312,20 @@ export function loadWorker(options: {
   };
   let skipped = 0;
   const opened: string[] = [];
+  let clockOffset = 0;
+  class WorkerDate extends Date {
+    static override now(): number {
+      return Date.now() + clockOffset;
+    }
+  }
   const self = {
     location: new URL(scriptUrl(options.version)),
     registration,
     clients: {
-      matchAll: async () => pages.slice(),
+      matchAll: async () => {
+        await options.onMatchAll?.();
+        return pages.slice();
+      },
       get: async (id: string) => pages.find((p) => p.id === id),
       claim: async () => undefined,
       openWindow: async (url: string) => {
@@ -334,6 +351,7 @@ export function loadWorker(options: {
     setTimeout,
     clearTimeout,
     MessageChannel,
+    Date: WorkerDate,
     console,
   });
 
@@ -401,6 +419,9 @@ export function loadWorker(options: {
     notifications,
     shownLog,
     badge: () => badge,
+    advanceClock: (ms) => {
+      clockOffset += ms;
+    },
   };
 }
 
