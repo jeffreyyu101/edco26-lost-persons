@@ -2671,7 +2671,7 @@ $f4drop$;
 -- arguments change a switch (and every device of theirs follows); a New requests set this way is the staff
 -- member's own choice (new_requests_set) and stays. p_default_new_requests is a device's old "Alerts" bell:
 -- until that choice is made, a device whose bell was on turns New requests on (OR), whichever device came
--- first; without it, New requests starts off. Returns {newRequests, myUpdates}.
+-- first; without it, New requests starts on by the team default (every team since 2026-11-08). Returns {newRequests, myUpdates}.
 -- (F6, Brian 2026-11-07 02:15: Main Med gets distracted; the lock-screen push is the chosen alert.) Staff of the
 -- Medical team (the canonical staff string's team is 'medical') start with New requests ON, and so does a Medical
 -- staff member's row that never had the switch set in the Alerts sheet (new_requests_set false). (2026-11-08, Brian:

@@ -544,3 +544,7 @@ Approved 2026-11-07 morning. Identifying the person comes first and the conversa
 - **Every alert names the request by its full name as entered**, not its initials (v2.1 A4 reversed): the Web Push title and a new request's body, the page's own system notification, the in-app toasts, the Activity rows, the Not located Undo bar. Brian: "the notification should just show the full value of whats in the name ... not trying to abbreviate initials or anything". `lib/domain.ts alertName`.
 - **Still never in a notification:** an LP number, a phone number (a name is scrubbed like a detail), contact details. Staff in message lines stay short ("Rae C.").
 - **The page's own notification reads like the push:** the name is the title, the status leads the body, so a long name never hides it. The Undo bar wraps to two lines.
+
+## New requests on by default for every team (Brian 2026-11-08 ~00:40)
+
+- **"New requests" alerts start ON for everyone, still switchable in Alerts.** Brian: "new requests should be on for everyone by default n configurable". Tonight nobody signed in as Medical, so the Medical-only default (F6 7b) never applied and only 4 of 10 alert devices had it on. `lp_push_prefs_sync`'s team default now covers every team; a one-time update turned it on for every row never set in the sheet (prod: 12 staff rows, 4 devices; all 10 alert devices on after). A switch set in the sheet stays as set; on by the default it is the push only (no Activity row), as F6 7b.
