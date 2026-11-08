@@ -159,6 +159,21 @@ export function startServiceWorker(hooks: SwHooks): SwController | null {
     );
   void register(buildId);
 
+  // (network fix 2 follow-up) A page served from the stored `/` runs the stored build. When the worker's background
+  // refresh finds another one, it says so (lp-build with its scripts; asked once here in case that came first): register
+  // it now, which ends in "Update ready", instead of waiting minutes for the deploy check.
+  const onMessage = (event: MessageEvent<{ type?: unknown; scripts?: unknown }>) => {
+    const scripts = event.data?.type === 'lp-build' ? event.data.scripts : null;
+    const next = Array.isArray(scripts) ? buildIdFrom(scripts.filter((s): s is string => typeof s === 'string')) : '';
+    if (next && next !== buildId && !stopped) void register(next);
+  };
+  sw.addEventListener('message', onMessage);
+  try {
+    sw.controller?.postMessage({ type: 'lp-build' });
+  } catch {
+    // no worker yet
+  }
+
   // A tab open across a deploy: compare the live `/` script set with ours.
   const deployCheck = async () => {
     if (stopped || checking || document.visibilityState !== 'visible') return;
@@ -196,6 +211,7 @@ export function startServiceWorker(hooks: SwHooks): SwController | null {
       clearTimeout(later);
       document.removeEventListener('visibilitychange', onVisible);
       sw.removeEventListener('controllerchange', onControllerChange);
+      sw.removeEventListener('message', onMessage);
     },
     activateWaiting() {
       const waiting = (reg as ServiceWorkerRegistration | null)?.waiting;

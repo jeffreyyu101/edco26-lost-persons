@@ -21,7 +21,8 @@
  *
  * Strategies:
  *   /api/*                                   never cached, never touched (passthrough)
- *   navigations (/ and /signin)              network first, 4 s timeout, then the cached page
+ *   navigations (/ and /signin)              network first, 4 s timeout, then the cached page; `/` with a stored copy:
+ *                                            that copy, refreshed in the background (same build only, refreshStored)
  *   /_next/static/*                          cache first: this worker's cache, then older caches
  *   /icons, /logos, /fonts                   cache first: this worker's cache, then network, then older caches
  *   /manifest.webmanifest                    network first, cached fallback
@@ -100,6 +101,9 @@ const CORE = [
 ];
 const STATIC_PREFIXES = [HASHED_PREFIX, '/icons/', '/logos/', '/fonts/'];
 const PAGES = ['/', '/signin'];
+// (network fix 2 follow-up) The live `/` names another build than the stored one: its scripts, for the open pages.
+const BUILD_MESSAGE = 'lp-build';
+let newBuild = null;
 
 function isStatic(pathname) {
   return STATIC_PREFIXES.some((p) => pathname.startsWith(p));
@@ -431,6 +435,12 @@ self.addEventListener('message', (event) => {
     if (port) port.postMessage({ notificationClick: true, push: true });
     return;
   }
+  if (data.type === BUILD_MESSAGE) {
+    // A page that started: the other build a background refresh of `/` found, if any (refreshStored).
+    const to = (event.ports && event.ports[0]) || event.source;
+    if (newBuild && to) to.postMessage({ type: BUILD_MESSAGE, scripts: newBuild });
+    return;
+  }
   if (data.type === TEL_TAKE_MESSAGE) {
     // Telemetry: the push and click log, once ({entries}); an older worker never answers this.
     const port = event.ports && event.ports[0];
@@ -511,40 +521,72 @@ async function networkFirst(request) {
   }
 }
 
+/**
+ * (network fix 2 follow-up) The network's copy of a page the stored copy was served instead of (fix 2, lie-fi). Nothing
+ * runs it, so nothing loads its files: it replaces the stored copy only when this cache already holds every
+ * /_next/static file it names (a cache never holds a page whose files it lacks). Another build (a deploy, a rollback)
+ * is left to its own worker, which caches all of it before "Update ready"; for `/` the open pages are told now
+ * (lp-build with its scripts), so they register that worker without waiting for their deploy check
+ * (lib/client/sw-client.ts). A page that starts after this asks with lp-build and gets the same answer.
+ */
+async function refreshStored(key, response) {
+  try {
+    const res = await response;
+    if (!cacheable(res)) return;
+    const cache = await caches.open(CACHE);
+    const html = await res.clone().text();
+    let complete = true;
+    for (const u of assetUrls(html)) if (!(await matchIn(cache, u, isHashed(u)))) complete = false;
+    if (complete) {
+      await cache.put(key, res);
+      if (key === '/') newBuild = null;
+      return;
+    }
+    if (key !== '/') return;
+    newBuild = [...html.matchAll(/<script\b[^>]*\ssrc="([^"]+)"/g)].map((m) => m[1].replace(/&amp;/g, '&'));
+    for (const c of await self.clients.matchAll({ type: 'window' })) {
+      try {
+        c.postMessage({ type: BUILD_MESSAGE, scripts: newBuild });
+      } catch (e) {
+        // that window is going away
+      }
+    }
+  } catch (e) {
+    // offline, or out of space: the stored copy stays
+  }
+}
+
 async function navigation(event) {
   const url = new URL(event.request.url);
   const key = PAGES.includes(url.pathname) ? url.pathname : null;
-  const network = fetch(event.request).then(async (res) => {
-    if (key && cacheable(res)) {
-      const cache = await caches.open(CACHE);
-      await cache.put(key, res.clone());
-    }
-    return res;
-  });
+  const network = fetch(event.request);
   if (!key) return network;
+  /** The network's page goes to the page, which runs it (and caches its files as it loads them): store it too. */
+  const served = async (res) => {
+    if (cacheable(res)) await (await caches.open(CACHE)).put(key, res.clone()).catch(() => undefined);
+    return res;
+  };
   // (network fix 2, 2026-11-08) The app page `/` with a stored copy: that copy at once (no data in it, the same
-  // response the offline and lie-fi path serves), the network refreshing it for the next open. An open no longer
-  // waits for the page's own round trip (up to NAV_TIMEOUT_MS on a stalled link) before any script runs. A deploy
-  // reaches the phone one open later, or through "Update ready". /signin stays network-first: its redirect for a
-  // signed-in phone matters.
+  // response the offline and lie-fi path serves), the network refreshing it for the next open (same build only, see
+  // refreshStored). An open no longer waits for the page's own round trip (up to NAV_TIMEOUT_MS on a stalled link)
+  // before any script runs. /signin stays network-first: its redirect for a signed-in phone matters.
   if (key === '/') {
     const stored = await (await caches.open(CACHE)).match(key);
     if (stored) {
-      event.waitUntil(network.catch(() => undefined));
+      event.waitUntil(refreshStored(key, network));
       return stored;
     }
   }
   const timeout = new Promise((resolve) => setTimeout(() => resolve(null), NAV_TIMEOUT_MS));
   const first = await Promise.race([network.catch(() => null), timeout]);
-  if (first) return first;
-  const cache = await caches.open(CACHE);
-  const hit = await cache.match(key);
+  if (first) return served(first);
+  const hit = await (await caches.open(CACHE)).match(key);
   if (hit) {
-    // Lie-fi: serve the shell now, let the network finish in the background to refresh it.
-    event.waitUntil(network.catch(() => undefined));
+    // Lie-fi: serve the shell now, let the network finish in the background to refresh it (same build only).
+    event.waitUntil(refreshStored(key, network));
     return hit;
   }
-  return network;
+  return network.then(served);
 }
 
 self.addEventListener('fetch', (event) => {
