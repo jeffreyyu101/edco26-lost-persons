@@ -703,3 +703,87 @@ describe('drafts (A20)', () => {
     expect(await finish(a.applyUpdate())).toBe(false); // no service worker in tests: nothing to activate
   });
 });
+
+// (network fix 1b, 2026-11-08) One session check per resume: the overdue poll timer runs before visibilitychange and
+// starts a check; the event then re-asked while that check was in flight, and confirmSession looped into a second
+// serial GET /api/session (a third of warm resumes in the field). A check sent under 2 s ago is not asked again;
+// a sign-in in another tab, a bfcache return and a check sent before the hide still re-check.
+describe('one session check per resume (fix 1b)', () => {
+  const sessionGets = (server: FakeServer) => server.requests('GET', '/api/session').length;
+  /** GET /api/session answers after `ms` of fake time. */
+  const slowSession = (server: FakeServer, ms: number) => {
+    server.override = async (req) => {
+      if (req.path === '/api/session') await new Promise((r) => setTimeout(r, ms));
+      return undefined;
+    };
+  };
+
+  it('timer-first resume (poll timer far overdue, then visibilitychange): exactly one GET /api/session', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    const { fe } = boot(server);
+    await ready();
+    fe.setVisible(false);
+    fe.fire('document', 'visibilitychange');
+    vi.setSystemTime(Date.now() + 10 * 60_000); // locked for 10 minutes: no timer ran
+    slowSession(server, 800);
+    const before = sessionGets(server);
+    await advance(6_000); // the overdue poll timer fires first and starts the check
+    expect(sessionGets(server)).toBe(before + 1);
+    fe.setVisible(true);
+    fe.fire('document', 'visibilitychange'); // the page hears it is visible while that check is in flight
+    await advance(3_000);
+    expect(sessionGets(server)).toBe(before + 1);
+  });
+
+  it('a cold load hearing visibilitychange during its check: one GET /api/session', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    slowSession(server, 800);
+    const { fe, s } = boot(server);
+    await settle();
+    await advance(100);
+    fe.fire('document', 'visibilitychange');
+    await advance(3_000);
+    expect(sessionGets(server)).toBe(1);
+    expect(s().session.status).toBe('active');
+  });
+
+  it('a sign-in announced by another tab during an in-flight check still re-checks', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    const { fe } = boot(server);
+    await ready();
+    fe.setVisible(false);
+    fe.fire('document', 'visibilitychange');
+    slowSession(server, 800);
+    const before = sessionGets(server);
+    fe.setVisible(true);
+    fe.fire('document', 'visibilitychange');
+    await advance(100);
+    expect(sessionGets(server)).toBe(before + 1);
+    const other = new BroadcastChannel(`${fe.dbName}-channel:lp`);
+    other.postMessage({ type: 'signin' });
+    other.close();
+    await settle(20);
+    await advance(3_000);
+    expect(sessionGets(server)).toBe(before + 2);
+  });
+
+  it('a check sent before the hide (over 2 s old at resume) still re-checks', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    const { fe } = boot(server);
+    await ready();
+    fe.setVisible(false);
+    fe.fire('document', 'visibilitychange');
+    slowSession(server, 4_000);
+    const before = sessionGets(server);
+    fe.setVisible(true);
+    fe.fire('document', 'visibilitychange'); // check 1 goes out
+    await advance(500);
+    fe.setVisible(false);
+    fe.fire('document', 'visibilitychange');
+    await advance(2_500);
+    fe.setVisible(true);
+    fe.fire('document', 'visibilitychange'); // check 1 is 3 s old: who is signed in may have changed since
+    await advance(10_000);
+    expect(sessionGets(server)).toBe(before + 2);
+  });
+});

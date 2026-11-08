@@ -461,6 +461,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   /** Bumped by every reason to re-check; a check only clears sessionCheckDue for the reasons it saw. */
   let sessionCheckSeq = 0;
   let sessionCheck: Promise<PollOutcome> | null = null;
+  /** Local time the check in flight was sent. */
+  let sessionCheckSentAt = 0;
   /** Local time of the last GET /api/session that confirmed the session. */
   let sessionCheckedAt = 0;
   /** When the scheduled poll is due: a timer that fires far later means the tab was frozen meanwhile. */
@@ -988,6 +990,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   /** One GET /api/session at a time; the sync loop and writes share it. */
   const verifySession = (): Promise<PollOutcome> => {
     if (!sessionCheck) {
+      sessionCheckSentAt = now();
       sessionCheck = checkSession().finally(() => {
         sessionCheck = null;
       });
@@ -2757,8 +2760,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       e.on('document', 'visibilitychange', () => {
         markHidden(!e.visible());
         if (e.visible()) {
-          // A resumed tab confirms who is signed in before it syncs on, writes or sends queued requests.
-          sessionMayHaveChanged();
+          // A resumed tab confirms who is signed in before it syncs on, writes or sends queued requests. A check sent
+          // under 2 s ago (the overdue poll timer runs before this event) already answers who is signed in now.
+          if (!sessionCheck || now() - sessionCheckSentAt > 2e3) sessionMayHaveChanged();
           triggerSync();
         } else {
           // iOS may kill a hidden page without a pagehide: save now.
