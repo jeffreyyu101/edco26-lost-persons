@@ -13,7 +13,9 @@
 //                Waiting; while In medical only "Rae Chen · 11:10 AM" (who answered, when), then where medical
 //                has them: a pin, "Chair 14" and a pencil, or "+ Location" (Pending v8, 2026-11-06 afternoon;
 //                the location editor is a sheet on the phone, a popover in the desk pane); who and when for
-//                the other answers
+//                the other answers. (2026-11-08) On hold: "Pending · not located yet" / "Recheck due · not located
+//                yet", "First check · Rae C. · 12:52", and "Medical rechecks 1:12 AM · in 14 min" over a bar
+//                that fills over the 20 minutes ("Medical recheck was due 1:12 AM · 3 min ago" once due)
 //   preview      (R1, Brian 2026-11-07) the latest message, only while the request needs info or has unread
 //                messages for me; a tap brings the thread into view (CardActivity ThreadPreview). (2026-11-08) Two
 //                lines and its time; no second Needs info chip on it (the status block says Needs info)
@@ -60,8 +62,8 @@ import {
   type StoreState,
 } from '@/lib/client/store-contract';
 import { FIELD_LABELS, MAX_PHOTOS, PHOTO_TIMING_LABEL, STATUS, canCancel, isHeld, isInMedical, isStatus, menuActions, parseStaff, postFull, primaryActions, sameStaff, statusMeta, telHref, waitTone, type PhotoTiming, type SettableStatus, type StatusAction, type StatusKind } from '@/lib/domain';
-import { displayStage, holdAnsweredAt, isMedicalTeam, notFoundAnswer } from '@/lib/stages';
-import { formatCaseNumber, formatDuration, formatListTime, minutesSince } from '@/lib/format';
+import { displayStage, holdAnsweredAt, isMedicalTeam, notFoundAnswer, recheckCountdown, shortStaffName } from '@/lib/stages';
+import { formatCaseNumber, formatCreatedTime, formatDuration, formatListTime, minutesSince } from '@/lib/format';
 import { threadPreviewShown, unreadOf } from '@/lib/messaging';
 import { AddPhotosSheet, type PhotoPick } from './AddPhotos';
 import { AuditTrail, AuditTrailSkeleton } from './AuditTrail';
@@ -699,16 +701,24 @@ function StatusBlock({
   const stage = shown.key === 'enroute' || shown.key === 'arrived' ? displayStage({ ...row, enroute: null }, { now, timeZone }) : shown;
   const waiting = stage.key === 'waiting';
   const inMedical = isInMedical(row.status);
+  // (2026-11-08, Pending clarity) A hold's block says it in full: "Pending · not located yet", "First check · Rae C. ·
+  // 12:52", and its row "Medical rechecks 1:12 AM · in 14 min" over a bar that fills over the 20 minutes. Screen
+  // readers hear sentences ("Pending, not located yet.") instead of the dots.
+  const hold = stage.key === 'notFoundYet' || stage.key === 'recheckDue';
+  const countdown = stage.recheckAt ? recheckCountdown(stage.recheckAt, now, timeZone) : null;
   let sub: ReactNode = null;
+  let subSaid: string | null = null;
   let badge: ReactNode = null;
   if (stage.key === 'needsInfo' && stage.sub) {
     sub = stage.sub;
-  } else if (stage.key === 'notFoundYet' || stage.key === 'recheckDue') {
+  } else if (hold) {
     // Who gave the first Not found, and when; before the trail loads, the row's own last change when it is that.
     const o = origin ?? holdFallbackOrigin(row);
-    const parts = o ? [o.staffName, formatListTime(o.at, now, timeZone)].filter(Boolean) : [];
-    if (parts.length > 0) sub = parts.join(' · ');
-    else if (originLoading) sub = <Skeleton height="12px" width="45%" style={{ marginTop: 2 }} />;
+    if (o) {
+      const who = shortStaffName(o.staffName);
+      sub = ['First check', who, formatListTime(o.at, now, timeZone)].filter(Boolean).join(' · ');
+      subSaid = `First check${who ? ` by ${who}` : ''} at ${formatCreatedTime(o.at, now, timeZone)}.`;
+    } else if (originLoading) sub = <Skeleton height="12px" width="45%" style={{ marginTop: 2 }} />;
   } else if (row.status === STATUS.waiting) {
     sub = `Logged ${formatListTime(row.createdAt, now, timeZone)}`;
     const minutes = minutesSince(row.createdAt, now);
@@ -734,24 +744,38 @@ function StatusBlock({
         <StageGlyph glyph={stage.glyph} size={18} />
         <div className={s.sx}>
           {/* Step 12 of the status colour on its step-3 tint: step 11 is ~4.3:1 there (spec §7). */}
-          <Text size="3" weight="medium" color={stage.tone} highContrast={stage.tone !== 'gray'} data-testid="status-label">
+          <Text size="3" weight="medium" color={stage.tone} highContrast={stage.tone !== 'gray'} aria-hidden={hold || undefined} data-testid="status-label">
             {stage.fullLabel}
           </Text>
+          {hold ? <VisuallyHidden>{`${stage.fullLabel.replace(/\s*·\s*/g, ', ')}.`}</VisuallyHidden> : null}
           {sub ? (
-            <Text as="div" size="1" color="gray">
+            <Text as="div" size="1" color="gray" aria-hidden={subSaid ? true : undefined} data-testid="status-sub">
               {sub}
             </Text>
           ) : null}
+          {subSaid ? <VisuallyHidden>{subSaid}</VisuallyHidden> : null}
         </div>
         {waiting ? badge : null}
       </div>
       {/* (F5) While on hold, Needs info included: the hold goes on while medical asks. Not on a card or a row
-          (Pending v9.1): the request's own status block keeps when the recheck is due. */}
-      {stage.recheck ? (
-        <div className={s.recheckRow} data-due={stage.due ? '' : undefined} data-testid="recheck-row">
+          (Pending v9.1): the request's own status block keeps when the recheck is due. (2026-11-08) With the minutes
+          left at its right and a bar that fills over the hold; once due, how long ago, and no bar. */}
+      {countdown ? (
+        <div className={s.recheckRow} data-due={countdown.due ? '' : undefined} data-testid="recheck-row">
           {/* (Pending v9.1 GLYPHS) lucide history is Recheck everywhere; refresh-cw is the live line's Refresh only. */}
           <History size={16} strokeWidth={2} aria-hidden className={s.recheckGlyph} />
-          <span>{stage.recheck}</span>
+          <span className={s.recheckText} aria-hidden data-testid="recheck-text">
+            {countdown.lead} <b>{countdown.time}</b>
+          </span>
+          <span className={s.recheckWhen} aria-hidden data-testid="recheck-when">
+            {countdown.when}
+          </span>
+          <VisuallyHidden>{countdown.said}</VisuallyHidden>
+          {countdown.due ? null : (
+            <span className={s.recheckBar} aria-hidden data-testid="recheck-bar" data-progress={countdown.progress.toFixed(3)}>
+              <span style={{ transform: `scaleX(${countdown.progress})` }} />
+            </span>
+          )}
         </div>
       ) : null}
       {inMedical ? <LocationRow row={row} offline={offline} panel={panel} onNeedsConnection={onNeedsConnection} /> : null}

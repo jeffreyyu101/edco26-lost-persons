@@ -978,7 +978,8 @@ test.describe('real flow', () => {
     const answer = page.getByTestId('block-answers').getByTestId('not-found-answer');
     await expect(answer).toHaveText(NOT_FOUND_YET_LABEL, { timeout: 20_000 });
     await answer.click();
-    await expect(page.getByTestId('status-label')).toHaveText(NOT_FOUND_YET_LABEL);
+    // (2026-11-08, Pending clarity) The request's block says what the hold means; the answer keeps the short label.
+    await expect(page.getByTestId('status-label')).toHaveText(`${NOT_FOUND_YET_LABEL} · not located yet`);
     await expect(answer).toHaveText(NOT_FOUND_FINAL_LABEL);
     await expect(answer).toHaveAccessibleName(`Not located. Closes this request as ${CLOSED_WORDS}`);
   });
