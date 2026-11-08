@@ -470,6 +470,13 @@
   height: 32px;
   padding: 0;
 }
+/* Collapsed, the avatar is the whole row: its own 44 px hit area (account.module.css .trigger) is back. */
+.sidebar[data-state='collapsed'] .person [data-testid='account-trigger'] {
+  position: relative;
+}
+.sidebar[data-state='collapsed'] .person [data-testid='account-trigger']::after {
+  inset: -6px;
+}
 
 /* Tooltips (Tip): beside each item of the collapsed sidebar, or under a pane button. */
 .tip {
@@ -700,10 +707,6 @@
   width: 16px;
   height: 16px;
   color: var(--gray-12);
-}
-.topbar .bellBox [data-testid='activity-badge'] {
-  top: -3px;
-  right: -5px;
 }
 
 .newb {

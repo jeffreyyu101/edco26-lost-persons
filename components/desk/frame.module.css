@@ -94,7 +94,9 @@
   }
 
   /* The inset card: the main column and the docked pane. overflow: clip (not hidden) rounds its corners without
-     making it a scroller, so the top bar and the pane stay sticky to the page. */
+     making it a scroller, so the top bar and the pane stay sticky to the page. Its colour is the page's background
+     (shadcn's SidebarInset bg-background): gray-1 in dark mode; white in light, where the table's selected row on
+     gray-1 left its blue status under 4.5:1. */
   .inset {
     grid-column: 2;
     display: grid;
@@ -106,7 +108,7 @@
     margin: var(--desk-gap-top) var(--desk-gap-right) var(--desk-gap-bottom) 0;
     border-radius: 12px;
     overflow: clip;
-    background: var(--gray-1);
+    background: var(--color-background);
     box-shadow:
       0 1px 2px rgb(0 0 0 / 0.08),
       0 0 0 1px rgb(0 0 0 / 0.04);
@@ -141,7 +143,7 @@
     z-index: 5;
     height: 48px;
     box-sizing: border-box;
-    background: var(--gray-1);
+    background: var(--color-background);
     border-bottom: 1px solid var(--gray-a4);
   }
 

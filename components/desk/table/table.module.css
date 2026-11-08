@@ -55,6 +55,14 @@
   display: none;
 }
 
+/* The narrowest tables (768–~790 px, nothing docked: the inset card is 696 px at 768, 12 px under the old rail's
+   column): 8 px gaps, so the Friend column still keeps more than 100 px beside Post. */
+@container (max-width: 719.98px) {
+  .table {
+    --tbl-gap: 8px;
+  }
+}
+
 /* A wide table: Logged by too (desktop-log.html .tbl). */
 @container (min-width: 1040px) {
   .table {
@@ -103,8 +111,8 @@
 
 /* Docked at 1024–1279, the main column is 544–799 px: the same five, tighter. The status column still takes
    "Not found in medical" on one line, uncut (the longest status, F2); what follows it takes its short form
-   (F5 .stxWide / .stxNarrow) before the Friend column goes under 96 px. 31 + 109 + 176 + 96 + 56 + 4 × 10 gaps
-   + 36 padding = 544 px, the main column at 1024. */
+   (F5 .stxWide / .stxNarrow) before the Friend column goes under 96 px. 31 + 97 + 176 + 96 + 56 + 4 × 10 gaps
+   + 36 padding = 532 px, the main column in the inset card at 1024 (64 px sidebar, 8 px right gap). */
 @media (min-width: 1024px) and (max-width: 1279.98px) {
   [data-pane] .table {
     --tbl-cols: 31px minmax(96px, 1fr) minmax(176px, 232px) 96px 56px;
