@@ -182,6 +182,26 @@ describe('sync loop', () => {
     expect(s().confirmed.size).toBe(1);
   });
 
+  it('a cursor from before the 2026-11-06 12:30 PM log wipe still gets one full fetch (the 6 h rule covers it)', async () => {
+    // The temporary log-reset clause (SYNC.logResetResyncAt, 17:32 UTC that day) was removed on 2026-11-08: any such
+    // cursor is now more than 6 h old, so fullFetchAfterMs forces the same full fetch.
+    vi.setSystemTime(Date.parse('2026-11-06T16:00:00Z'));
+    const server = new FakeServer([makeRow(1)]);
+    const first = boot(server);
+    await ready();
+    expect(syncs(server).at(-1)?.query.get('since')).toBeNull();
+    await advance(6_100);
+    expect(syncs(server).at(-1)?.query.get('since')).not.toBeNull(); // a delta: the cursor is saved
+    first.stop();
+    await settle();
+    vi.setSystemTime(Date.parse('2026-11-08T05:00:00Z'));
+    const before = syncs(server).length;
+    const again = boot(server, { dbName: first.fe.dbName });
+    await ready();
+    expect(syncs(server)[before]?.query.get('since')).toBeNull();
+    expect(again.s().confirmed.size).toBe(1);
+  });
+
   it('polls every 60 s when hidden and at once (coalesced) on focus / pageshow / visible', async () => {
     const server = new FakeServer([makeRow(1)]);
     const { fe } = boot(server);

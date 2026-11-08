@@ -1193,10 +1193,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     // confirmed a new session), nothing more of this sync is applied, and the cursor is not written.
     const epoch = staffEpoch;
     const stale = () => gen !== state.generation || !running || epoch !== staffEpoch;
-    const full =
-      cursor === null ||
-      now() - cursorAt > SYNC.fullFetchAfterMs ||
-      (cursorAt < SYNC.logResetResyncAt && now() >= SYNC.logResetResyncAt);
+    const full = cursor === null || now() - cursorAt > SYNC.fullFetchAfterMs;
     const reconcile = !full && reconcileDue;
     const since = full ? null : cursor;
     touchedDuringPoll.clear();
