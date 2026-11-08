@@ -249,9 +249,21 @@ export function createMessaging(host: MessagingHost): MessagingEngine {
         if (t && t.status === 'loading' && t.messages.length === 0) patchThread(id, { status: 'error' });
         return;
       }
+      const sentFor = host.cacheStaff();
       const res = await host.call<ThreadPage>(threadPath(id), { timeoutMs: SYNC.requestTimeoutMs });
       if (gen !== host.generation()) return;
       if (res.ok && Array.isArray(res.data.messages)) {
+        // (network fix 4 follow-up) The page answers for whoever the cookie belongs to (`mine`, receipt, unread). Sent at
+        // once (a resume's thread poll, fix 4), it is applied only once the session check due then has confirmed the
+        // same staff, as the resume sync is (fix 1a): another staff's view never shows, is cached, or gets marked read
+        // here. ensureSession joins the store's check in flight, and answers at once when none is due.
+        const confirmed = await host.ensureSession();
+        if (gen !== host.generation() || (sentFor !== null && host.cacheStaff() !== sentFor)) return;
+        if (!confirmed) {
+          const t = snapshot.threads.get(id);
+          if (t && t.messages.length === 0 && t.loadedAt === 0) patchThread(id, { status: 'error' });
+          return;
+        }
         const page = res.data;
         const before = snapshot.threads.get(id) ?? EMPTY_THREAD;
         const messages = mergeLatestPage(before.loadedAt > 0 ? before.messages : [], page.messages, page.hasEarlier);

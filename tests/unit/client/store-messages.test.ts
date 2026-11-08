@@ -520,4 +520,60 @@ describe('an open thread when the page comes back into view (fix 4)', () => {
     await advance(20);
     expect(threadGets(server)).toBe(before);
   });
+
+  // (network fix 4 follow-up) The thread GET goes out at once, but its answer (the cookie's view: `mine`, receipt,
+  // unread) is applied only once the resume's session check confirmed the same staff.
+  it('another staff signed in meanwhile: their view of the thread never shows or is cached as the previous staff', async () => {
+    const { api, threads, fe, server, s } = setup();
+    await ready();
+    const close = api.open(ROW);
+    await advance(50);
+    away(fe);
+    await advance(60_000);
+    server.session = { ...STAFF.rae, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
+    // Rae's own message, as Rae's cookie sees it.
+    threads.messages.push({ id: '00000000-0000-4000-8000-0000000000ba', requestId: ROW, staff: STAFF.rae.staff, by: 'Rae C.', team: 'Medical', body: 'from rae', createdAt: server.stamp(5000), mine: true, clientMutationId: '00000000-0000-4000-8000-0000000000bb' });
+    const base = threads.handle;
+    server.override = async (req) => {
+      if (req.path === '/api/session') await new Promise((r) => setTimeout(r, 1_500)); // a congested link
+      return base(req);
+    };
+    const before = threadGets(server);
+    back(fe);
+    await advance(200);
+    // The GET went out at once; nothing of it is applied while the check is out.
+    expect(threadGets(server)).toBe(before + 1);
+    expect(s().session.staffName).toBe(STAFF.dana.staffName);
+    expect(api.getSnapshot().threads.get(ROW)?.messages.map((m) => m.body) ?? []).not.toContain('from rae');
+    await advance(2_000);
+    expect(s().session.staffName).toBe(STAFF.rae.staffName);
+    const danaThread = await openKv(fe.dbName)?.get<{ messages: ThreadMessage[] }>(`cache:edco26:${canonStaff(STAFF.dana.staff)}:thread:${ROW}`);
+    expect((danaThread?.messages ?? []).map((m) => m.body)).not.toContain('from rae');
+    expect(threads.reads).toEqual([]);
+    close();
+  });
+
+  it('the same staff: the thread lands as soon as both the GET and the check are back (no extra session GET)', async () => {
+    const { api, threads, fe, server } = setup();
+    await ready();
+    const close = api.open(ROW);
+    await advance(50);
+    away(fe);
+    await advance(60_000);
+    threads.messages.push({ id: '00000000-0000-4000-8000-0000000000ca', requestId: ROW, staff: STAFF.rae.staff, by: 'Rae C.', team: 'Medical', body: 'Found her at Bed 3', createdAt: server.stamp(5000), mine: false, clientMutationId: '00000000-0000-4000-8000-0000000000cb' });
+    const base = threads.handle;
+    server.override = async (req) => {
+      if (req.path === '/api/session') await new Promise((r) => setTimeout(r, 300));
+      return base(req);
+    };
+    const sessions = server.requests('GET', '/api/session').length;
+    back(fe);
+    await advance(200);
+    expect(api.getSnapshot().threads.get(ROW)?.messages.map((m) => m.body)).not.toContain('Found her at Bed 3');
+    await advance(200);
+    expect(api.getSnapshot().threads.get(ROW)?.messages.map((m) => m.body)).toContain('Found her at Bed 3');
+    expect(server.requests('GET', '/api/session').length).toBe(sessions + 1);
+    close();
+  });
 });
+
