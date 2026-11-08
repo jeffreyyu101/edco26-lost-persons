@@ -8,7 +8,10 @@
 // Nothing for a message either (F3 + F4 release): the page's own message alert (messages-activity.ts
 // diffMessageAlerts) owns it, and stays silent while that request's thread is on screen (the bubble is the
 // alert), which a toast from the push would break.
+// (network fix 5, 2026-11-08) A message push while in front, for the thread on screen: the thread loads at once,
+// alongside the sync (it waited for the sync, then the lastMessageAt refresh, or for the 6 s tick).
 // Loaded with the Activity host (never on the first load). Never logs anything.
+import type { MessagingApi } from './messages-core';
 import type { StoreActions, StoreState } from './store-contract';
 import { navigate } from './nav';
 
@@ -30,7 +33,7 @@ export interface PushMessage {
 export interface PushToastStore {
   getState(): Pick<StoreState, 'syncing' | 'confirmed'>;
   subscribe(listener: () => void): () => void;
-  actions: Pick<StoreActions, 'syncNow' | 'showToast' | 'subscribeAlerts'>;
+  actions: Pick<StoreActions, 'syncNow' | 'showToast' | 'subscribeAlerts'> & { messages?: Pick<MessagingApi, 'isOpen' | 'refresh'> };
 }
 
 export interface PushToasts {
@@ -70,6 +73,8 @@ export function createPushToasts(store: PushToastStore, now: () => number = Date
       if (stopped) return;
       store.actions.syncNow();
       const id = text(message.requestId, 64);
+      const messages = store.actions.messages;
+      if (front && id && message.kind === 'message' && messages?.isOpen(id)) messages.refresh(id);
       const title = text(message.title, 80);
       if (!front || !id || !title || message.kind === 'test' || message.kind === 'message') return;
       const body = text(message.body, 240);

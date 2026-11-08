@@ -11,8 +11,9 @@ import type { AlertEvent, ToastItem } from '@/lib/client/store-contract';
 const ID = '0f0f0f0f-0000-4000-8000-0000000000d4';
 const OTHER = '0f0f0f0f-0000-4000-8000-0000000000e5';
 
-function fakeStore(held: string[] = [ID]) {
+function fakeStore(held: string[] = [ID], open: string[] = []) {
   let syncing = false;
+  const refreshed: string[] = [];
   const listeners = new Set<() => void>();
   const alertListeners = new Set<(a: AlertEvent) => void>();
   const toasts: Array<Omit<ToastItem, 'id'>> = [];
@@ -36,6 +37,12 @@ function fakeStore(held: string[] = [ID]) {
         alertListeners.add(l);
         return () => alertListeners.delete(l);
       },
+      messages: {
+        isOpen: (id) => open.includes(id),
+        refresh: (id) => {
+          refreshed.push(id);
+        },
+      },
     },
   };
   const setSyncing = (v: boolean) => {
@@ -45,6 +52,7 @@ function fakeStore(held: string[] = [ID]) {
   return {
     store,
     toasts,
+    refreshed,
     syncs: () => syncs,
     /** One poll: syncing, the alerts it raised, done. */
     poll(alerts: AlertEvent[] = []) {
@@ -161,5 +169,32 @@ describe('a push while the app is in front', () => {
     toasts.stop();
     await vi.advanceTimersByTimeAsync(PUSH_SYNC_WAIT_MS + 10);
     expect(f.toasts).toHaveLength(0);
+  });
+});
+
+// (network fix 5) A message push while in front, for the thread on screen: it loads at once, with the sync.
+describe('a message push for the open thread (fix 5)', () => {
+  const message = (over: Record<string, unknown> = {}) => push({ kind: 'message', title: 'Rae C. · Medical', body: 'Found her', ...over });
+
+  it('in front, thread open: one refresh of that thread, and the sync, at once', () => {
+    const f = fakeStore([ID], [ID]);
+    const toasts = createPushToasts(f.store);
+    toasts.handle(message(), true);
+    expect(f.refreshed).toEqual([ID]);
+    expect(f.syncs()).toBe(1);
+    expect(f.toasts).toHaveLength(0); // still no toast for a message (the page's own alert owns it)
+  });
+
+  it('nothing for a closed thread, a page not in front, or another kind', () => {
+    const closed = fakeStore([ID], [OTHER]);
+    createPushToasts(closed.store).handle(message(), true);
+    expect(closed.refreshed).toEqual([]);
+    const behind = fakeStore([ID], [ID]);
+    createPushToasts(behind.store).handle(message(), false);
+    expect(behind.refreshed).toEqual([]);
+    expect(behind.syncs()).toBe(1);
+    const moved = fakeStore([ID], [ID]);
+    createPushToasts(moved.store).handle(push(), true);
+    expect(moved.refreshed).toEqual([]);
   });
 });
