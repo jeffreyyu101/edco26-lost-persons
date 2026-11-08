@@ -27,7 +27,9 @@
 //   * Click: public/sw.js focuses an app window and posts {type: 'lp-open', url}; this page opens that view
 //     in place (no reload, so an open form or sheet is not lost) and answers {ok}. A message's opens the
 //     request at its thread ("/?r=<id>&to=thread", R2 2026-11-07; lib/client/thread-jump.ts). A page that does not
-//     answer (a sign-in page, an older build) is navigated by the worker instead.
+//     answer (a sign-in page, an older build) is navigated by the worker instead. The worker also keeps the
+//     click until a page opens it: this page asks for it ({type: 'lp-take-open'}) when it starts and when it
+//     comes back into view, for the iPhone Home Screen app the tap launched or resumed at `/` without lp-open.
 //
 // Off the first load (A25): the store loads this module with import() after start (store-core.ts
 // browserEnv), and the avatar menu and the sheets import it from their own view chunks.
@@ -35,7 +37,7 @@ import { useSyncExternalStore } from 'react';
 import type { RequestSummary } from '../api-types';
 import { initials, isHeld, statusMeta } from '../domain';
 import { LOCATED_SUBTITLE, alertKey } from './alerts';
-import { hrefFor, navigate, parseView, viewToParams } from './nav';
+import { hrefFor, navigate, parseView, viewToParams, type ViewName } from './nav';
 import type { AlertEvent } from './store-contract';
 import { requestThreadJump } from './thread-jump';
 import { uuid } from './uuid';
@@ -767,11 +769,143 @@ export function listenForNotificationOpens(
   return () => container.removeEventListener('message', onMessage);
 }
 
+// ---------------------------------------------------------------------------------------------------
+// A click no page opened (public/sw.js lp-take-open)
+// ---------------------------------------------------------------------------------------------------
+//
+// The worker keeps each click's target until a page answers its lp-open. An iPhone Home Screen app the tap
+// launched or resumed at its start URL `/` (a frozen page, this module not loaded yet, a navigate() or
+// openWindow() that did nothing) never hears lp-open: it asks for the target when it starts and each time
+// it comes back into view, and opens it as the click would have.
+
+/** The message public/sw.js answers with {open: {url, at} | null}, taking the click once. */
+export const TAKE_OPEN_MESSAGE = 'lp-take-open';
+/** How long a click stays worth opening (public/sw.js PENDING_OPEN_MS). */
+export const PENDING_OPEN_MS = 2 * 60_000;
+
+/** A notification click no page has opened yet: the address it opens and when it was tapped (epoch ms). */
+export interface PendingOpen {
+  url: string;
+  at: number;
+}
+
+/** Takes the worker's pending open; null when there is none, or no worker answers in time (an older build). */
+export function askPendingOpen(worker: WorkerLike | null | undefined, timeoutMs = CAPS_REPLY_MS): Promise<PendingOpen | null> {
+  if (!worker || typeof MessageChannel === 'undefined') return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    const done = (open: PendingOpen | null) => {
+      clearTimeout(timer);
+      channel.port1.onmessage = null;
+      channel.port1.close();
+      resolve(open);
+    };
+    const timer = setTimeout(() => done(null), timeoutMs);
+    channel.port1.onmessage = (event: MessageEvent<{ open?: { url?: unknown; at?: unknown } | null } | null>) => {
+      const open = event.data?.open;
+      done(open && typeof open.url === 'string' && typeof open.at === 'number' ? { url: open.url, at: open.at } : null);
+    };
+    try {
+      worker.postMessage({ type: TAKE_OPEN_MESSAGE }, [channel.port2]);
+    } catch {
+      done(null);
+    }
+  });
+}
+
+/** What watchPendingOpens reads from the browser (tests pass a fake). */
+export interface PendingOpenHost {
+  /** The worker to ask: the page's controller, else the active one; null without service workers. */
+  worker(): Promise<WorkerLike | null | undefined> | null;
+  visible(): boolean;
+  /** The path + query the page shows now. */
+  location(): string;
+  /** The address this document was loaded at, and when (epoch ms); null when unknown. */
+  loaded(): { url: string; at: number } | null;
+  now(): number;
+  /** Calls `fn` each time the page comes back into view. Returns the remover. */
+  onVisible(fn: () => void): () => void;
+  /** Opens a notification's address (openFromNotification). */
+  open(url: string): boolean;
+}
+
+const pathAndQuery = (url: string): string | null => {
+  try {
+    const u = new URL(url, 'https://lp.invalid');
+    return `${u.pathname}${u.search}`;
+  } catch {
+    return null;
+  }
+};
+
+/** The request form (new or edit) or the needs-attention editor: a pending open never replaces them. */
+function editing(location: string): boolean {
+  let name: ViewName;
+  try {
+    name = parseView(new URL(location, 'https://lp.invalid').searchParams).name;
+  } catch {
+    return false;
+  }
+  return name === 'new' || name === 'edit' || name === 'outbox';
+}
+
+/**
+ * Asks the worker for a click no page opened, now and each time the page comes back into view, and opens
+ * it: only while the page is in view and not in a form, only while fresh, and not when this document was
+ * itself loaded at that address by the click (it opens it from the address). Returns the remover.
+ */
+export function watchPendingOpens(host: PendingOpenHost): () => void {
+  const check = async () => {
+    // Asking takes the click: leave it with the worker while the page is out of view or in a form.
+    if (!host.visible() || editing(host.location())) return;
+    const worker = await host.worker();
+    const open = await askPendingOpen(worker);
+    if (!open || Math.abs(host.now() - open.at) > PENDING_OPEN_MS || editing(host.location())) return;
+    const loaded = host.loaded();
+    if (loaded && open.at <= loaded.at && pathAndQuery(loaded.url) === pathAndQuery(open.url)) return;
+    try {
+      host.open(open.url);
+    } catch {
+      // Nothing to open in this page.
+    }
+  };
+  const run = () => void check().catch(() => undefined);
+  run();
+  return host.onVisible(run);
+}
+
+/** The real browser. Only called on the client. */
+export function browserPendingOpenHost(): PendingOpenHost {
+  return {
+    worker: () => {
+      if (!('serviceWorker' in navigator)) return null;
+      const container = navigator.serviceWorker;
+      if (container.controller) return Promise.resolve(container.controller);
+      return container.ready.then((r) => r.active);
+    },
+    visible: () => document.visibilityState !== 'hidden',
+    location: () => `${window.location.pathname}${window.location.search}`,
+    loaded: () => {
+      const entry = typeof performance !== 'undefined' ? performance.getEntriesByType?.('navigation')[0] : undefined;
+      return entry && typeof performance.timeOrigin === 'number' ? { url: entry.name, at: performance.timeOrigin } : null;
+    },
+    now: () => Date.now(),
+    onVisible(fn) {
+      const handler = () => {
+        if (document.visibilityState !== 'hidden') fn();
+      };
+      document.addEventListener('visibilitychange', handler);
+      return () => document.removeEventListener('visibilitychange', handler);
+    },
+    open: (url) => openFromNotification(url),
+  };
+}
+
 let opensInstalled = false;
 
 /**
  * The store's entry point (loaded with import() after start): the page's notifier, started, and the
- * notification-click listener, installed once for the page's lifetime.
+ * notification-click listener and the pending-open check, installed once for the page's lifetime.
  */
 export function startNotify(): NotifySystem {
   const system = notifySystem();
@@ -779,6 +913,7 @@ export function startNotify(): NotifySystem {
   if (!opensInstalled && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     opensInstalled = true;
     listenForNotificationOpens(navigator.serviceWorker);
+    watchPendingOpens(browserPendingOpenHost());
   }
   return system;
 }

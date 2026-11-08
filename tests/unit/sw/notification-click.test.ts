@@ -91,10 +91,10 @@ describe('notificationclick', () => {
     const signIn = win('tab-2', '/signin', { answers: null });
     pages.splice(0, pages.length, signIn);
     await worker.notificationClick({ url: thread });
-    expect(signIn.navigated).toEqual([thread]);
+    expect(signIn.navigated).toEqual([`${ORIGIN}${thread}`]);
     pages.splice(0, pages.length);
     await worker.notificationClick({ url: thread });
-    expect(worker.opened).toEqual([thread]);
+    expect(worker.opened).toEqual([`${ORIGIN}${thread}`]);
   });
 
   it('prefers the focused app window, then any app window, over a sign-in page', async () => {
@@ -119,7 +119,7 @@ describe('notificationclick', () => {
     await worker.notificationClick({ url: `/?r=${ID}` });
     expect(signIn.focusCalls).toBe(1);
     expect(signIn.asked).toEqual([]);
-    expect(signIn.navigated).toEqual([`/?r=${ID}`]);
+    expect(signIn.navigated).toEqual([`${ORIGIN}/?r=${ID}`]);
     expect(worker.opened).toEqual([]);
   });
 
@@ -128,26 +128,26 @@ describe('notificationclick', () => {
     pages.push(refuses);
     await worker.notificationClick({ url: `/?r=${ID}` });
     expect(refuses.asked).toEqual([`/?r=${ID}`]);
-    expect(refuses.navigated).toEqual([`/?r=${ID}`]);
+    expect(refuses.navigated).toEqual([`${ORIGIN}/?r=${ID}`]);
 
     const silent = win('tab-2', '/', { answers: null });
     pages.splice(0, pages.length, silent);
     const started = Date.now();
     await worker.notificationClick({ url: `/?r=${ID}` });
     expect(Date.now() - started).toBeGreaterThanOrEqual(1_000);
-    expect(silent.navigated).toEqual([`/?r=${ID}`]);
+    expect(silent.navigated).toEqual([`${ORIGIN}/?r=${ID}`]);
     expect(worker.opened).toEqual([]);
   });
 
-  it('opens a new window when none is open, or when the open one cannot be navigated', async () => {
+  it('opens a new window when none is open, or when the open one cannot be navigated, at an absolute URL', async () => {
     await worker.notificationClick({ url: `/?r=${ID}` });
-    expect(worker.opened).toEqual([`/?r=${ID}`]);
+    expect(worker.opened).toEqual([`${ORIGIN}/?r=${ID}`]);
 
     const stuck = win('tab-1', '/signin', { navigable: false });
     pages.push(stuck);
     await worker.notificationClick({ url: `/?r=${ID}` });
     expect(stuck.focusCalls).toBe(1);
-    expect(worker.opened).toEqual([`/?r=${ID}`, `/?r=${ID}`]);
+    expect(worker.opened).toEqual([`${ORIGIN}/?r=${ID}`, `${ORIGIN}/?r=${ID}`]);
   });
 
   it('opens `/` for a combined notification, and never leaves the app origin', async () => {
@@ -155,12 +155,124 @@ describe('notificationclick', () => {
     await worker.notificationClick(null);
     await worker.notificationClick({ url: 'https://evil.example/?r=1' });
     await worker.notificationClick({ url: 42 });
-    expect(worker.opened).toEqual(['/', '/', '/', '/']);
+    expect(worker.opened).toEqual([`${ORIGIN}/`, `${ORIGIN}/`, `${ORIGIN}/`, `${ORIGIN}/`]);
   });
 
   it('ignores windows of other origins and clients with no URL (the precache tabs)', async () => {
     pages.push({ id: 'worker-tab' }, { id: 'x', url: 'https://other.example/' });
     await worker.notificationClick({ url: `/?r=${ID}` });
-    expect(worker.opened).toEqual([`/?r=${ID}`]);
+    expect(worker.opened).toEqual([`${ORIGIN}/?r=${ID}`]);
+  });
+});
+
+describe('a click no page opened yet (lp-take-open: the iPhone Home Screen app launched or resumed at `/`)', () => {
+  const THREAD = `/?r=${ID}&to=thread`;
+  const META = 'lp:meta';
+  const KEY = '/__lp/pending-open';
+  let caches: FakeCacheStorage;
+  let tabs: PageClient[];
+  let w: Worker;
+
+  beforeEach(() => {
+    caches = new FakeCacheStorage();
+    tabs = [];
+    w = loadWorker({ version: 'n1', caches, network: new FakeNetwork(), active: 'n1', pages: tabs });
+  });
+
+  const stored = async (): Promise<{ url: string; at: number } | null> => {
+    const text = (await caches.get(META)?.text(KEY)) ?? null;
+    return text ? (JSON.parse(text) as { url: string; at: number }) : null;
+  };
+  const take = () => w.message({ type: 'lp-take-open' });
+
+  it('a click keeps its target before the hand-off, outside the version caches', async () => {
+    const app = win('tab-1', '/');
+    const post = app.postMessage!;
+    let keptAtHandOff = false;
+    app.postMessage = (message, transfer) => {
+      keptAtHandOff = caches.get(META)?.has(KEY) === true;
+      post(message, transfer);
+    };
+    tabs.push(app);
+    await w.notificationClick({ url: THREAD });
+    expect(app.asked).toEqual([THREAD]);
+    expect(keptAtHandOff).toBe(true);
+    // Not an `lp-` version cache: an update's activation never retires it.
+    expect(caches.versions()).toEqual([]);
+  });
+
+  it('a page that opens it (lp-open {ok: true}) clears it: nothing is left to take', async () => {
+    tabs.push(win('tab-1', '/?view=pending'));
+    await w.notificationClick({ url: THREAD });
+    expect(await stored()).toBeNull();
+    expect(await take()).toEqual({ open: null });
+  });
+
+  it('no window (openWindow), a refusing page or one that never answers: it stays to be taken', async () => {
+    const before = Date.now();
+    await w.notificationClick({ url: THREAD });
+    expect(w.opened).toEqual([`${ORIGIN}${THREAD}`]);
+    const kept = await stored();
+    expect(kept?.url).toBe(THREAD);
+    expect(kept?.at).toBeGreaterThanOrEqual(before);
+    expect(kept?.at).toBeLessThanOrEqual(Date.now());
+
+    const refuses = win('tab-1', '/', { answers: false });
+    tabs.push(refuses);
+    await w.notificationClick({ url: `/?r=${ID}` });
+    expect(refuses.navigated).toEqual([`${ORIGIN}/?r=${ID}`]);
+    expect((await stored())?.url).toBe(`/?r=${ID}`);
+
+    // A frozen page (or one whose listener is not in yet): asked, no answer, navigated, and still kept.
+    const frozen = win('tab-2', '/', { answers: null });
+    tabs.splice(0, tabs.length, frozen);
+    await w.notificationClick({ url: THREAD });
+    expect(frozen.asked).toEqual([THREAD]);
+    expect(frozen.navigated).toEqual([`${ORIGIN}${THREAD}`]);
+    expect((await stored())?.url).toBe(THREAD);
+  });
+
+  it('lp-take-open answers it once, then null', async () => {
+    expect(await take()).toEqual({ open: null });
+    await w.notificationClick({ url: THREAD });
+    const first = (await take()) as { open: { url: string; at: number } | null };
+    expect(first.open?.url).toBe(THREAD);
+    expect(typeof first.open?.at).toBe('number');
+    expect(await take()).toEqual({ open: null });
+    expect(await stored()).toBeNull();
+  });
+
+  it('a newer click replaces it', async () => {
+    await w.notificationClick({ url: `/?r=${ID}` });
+    await w.notificationClick({ url: THREAD });
+    expect(((await take()) as { open: { url: string } | null }).open?.url).toBe(THREAD);
+    expect(await take()).toEqual({ open: null });
+  });
+
+  it('expires after 2 minutes: an expired one answers null and is dropped', async () => {
+    await w.notificationClick({ url: THREAD });
+    w.advanceClock(2 * 60_000 - 1_000);
+    expect(((await take()) as { open: { url: string } | null }).open?.url).toBe(THREAD);
+
+    await w.notificationClick({ url: THREAD });
+    w.advanceClock(2 * 60_000 + 1_000);
+    expect(await take()).toEqual({ open: null });
+    expect(await stored()).toBeNull();
+  });
+
+  it('outlives the worker: a restarted worker still answers it', async () => {
+    await w.notificationClick({ url: THREAD });
+    const restarted = loadWorker({ version: 'n1', caches, network: new FakeNetwork(), active: 'n1' });
+    expect(((await restarted.message({ type: 'lp-take-open' })) as { open: { url: string } | null }).open?.url).toBe(THREAD);
+    expect(await take()).toEqual({ open: null });
+  });
+
+  it('something unreadable stored there answers null and is dropped', async () => {
+    const meta = await caches.open(META);
+    await meta.put(KEY, new Response('not json'));
+    expect(await take()).toEqual({ open: null });
+    expect(meta.has(KEY)).toBe(false);
+    await meta.put(KEY, new Response(JSON.stringify({ url: 42, at: 'soon' })));
+    expect(await take()).toEqual({ open: null });
   });
 });

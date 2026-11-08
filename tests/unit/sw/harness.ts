@@ -53,6 +53,10 @@ export class FakeCache {
     this.entries.set(keyOf(input), { body, status: res.status, headers: [...res.headers] });
   }
 
+  async delete(input: Input): Promise<boolean> {
+    return this.entries.delete(keyOf(input));
+  }
+
   has(path: string): boolean {
     return this.entries.has(path);
   }
@@ -237,6 +241,8 @@ export interface Worker {
   shownLog: ShownNotification[];
   /** The app icon badge (navigator.setAppBadge / clearAppBadge), or null when never set. */
   badge(): number | null;
+  /** Moves the worker's clock (Date.now()) forward by `ms`. */
+  advanceClock(ms: number): void;
 }
 
 export interface ShownNotification {
@@ -304,6 +310,12 @@ export function loadWorker(options: {
   };
   let skipped = 0;
   const opened: string[] = [];
+  let clockOffset = 0;
+  class WorkerDate extends Date {
+    static override now(): number {
+      return Date.now() + clockOffset;
+    }
+  }
   const self = {
     location: new URL(scriptUrl(options.version)),
     registration,
@@ -334,6 +346,7 @@ export function loadWorker(options: {
     setTimeout,
     clearTimeout,
     MessageChannel,
+    Date: WorkerDate,
     console,
   });
 
@@ -401,6 +414,9 @@ export function loadWorker(options: {
     notifications,
     shownLog,
     badge: () => badge,
+    advanceClock: (ms) => {
+      clockOffset += ms;
+    },
   };
 }
 
