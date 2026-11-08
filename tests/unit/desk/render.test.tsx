@@ -4,7 +4,6 @@ import { Theme } from '@radix-ui/themes';
 import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { setDashboardLive } from '@/components/dashboard/connection-signal';
 import { DeskFrame } from '@/components/desk/DeskFrame';
 import { BrandCard } from '@/components/list/BrandCard';
 import { DeskNav, DeskPane, DeskTop } from '@/components/desk/DeskChrome';
@@ -234,29 +233,11 @@ describe('DeskTop', () => {
       /<\/h1><div class="[^"]*live[^"]*" data-state="healthy" data-updating="" data-testid="live-indicator"><svg[^>]*class="[^"]*liveSpin[^"]*"[^>]*>(?:<path[^>]*><\/path>)+<\/svg><span[^>]*data-testid="live-text">Updating…<\/span><span[^>]*>Updating the list\.<\/span><\/div>/,
     );
 
-    // The dashboard: from its own last stats fetch, which the open dashboard publishes ("Updating…" before it does).
+    // Dashboard v4: no line, search, New or bell; an empty box after the title that the dashboard fills (who's on,
+    // the range control).
     const dash = () => render(<DeskTop main={main('dashboard=1')} />, synced);
-    expect(dash()).toMatch(/<h1[^>]*>Dashboard<\/h1><div class="[^"]*live[^"]*" data-state="healthy" data-updating="" data-testid="live-indicator"><svg[^>]*class="[^"]*liveSpin[^"]*"[^>]*>(?:<path[^>]*><\/path>)+<\/svg><span[^>]*data-testid="live-text">Updating…<\/span><span[^>]*>Updating the dashboard\.<\/span><\/div>/);
-    const refresh = () => Promise.resolve();
-    try {
-      setDashboardLive({ syncedAt: Date.now() - 20_000, failing: false, refresh });
-      expect(dash()).toMatch(/data-state="healthy" data-testid="live-indicator">.*data-testid="live-text">Updated just now<\/span>/);
-      expect(dash()).toContain('>Dashboard updated just now.</span>');
-      // Stats older than 30 s while the lists still sync: the lists' syncs count as landing for the 30 s rule
-      // (the dashboard thresholds review fix), so the line stays healthy and its words come from the stats.
-      setDashboardLive({ syncedAt: Date.now() - 90_000, failing: false, refresh });
-      expect(dash()).toMatch(/data-state="healthy" data-testid="live-indicator">.*data-testid="live-text">Updated 1 min ago<\/span>/);
-      // Nothing landed for more than 30 s (stats and lists), or fetches failing past the thresholds:
-      // Reconnecting, with the clock time.
-      const stale = storeWith((s) => ({ ...s, lastSyncLocalAt: Date.now() - 90_000 }));
-      expect(render(<DeskTop main={main('dashboard=1')} />, stale)).toMatch(
-        /data-state="reconnecting" data-testid="live-indicator">.*data-testid="live-text">Last updated /,
-      );
-      setDashboardLive({ syncedAt: Date.now() - 20_000, failing: true, refresh });
-      expect(dash()).toMatch(/data-state="reconnecting" data-testid="live-indicator">.*data-testid="live-text">Last updated /);
-    } finally {
-      setDashboardLive(null);
-    }
+    expect(dash()).toMatch(/<h1[^>]*>Dashboard<\/h1><div class="[^"]*dashSlot[^"]*" data-testid="desk-dashboard-slot"><\/div>/);
+    for (const gone of ['data-testid="live-indicator"', 'data-testid="desk-new"', 'aria-label="Search"']) expect(dash()).not.toContain(gone);
     // The old Offline / Retrying chip is gone (F1.1: the line replaces it).
     expect(dash()).not.toContain('dashboard-connection');
     expect(render(<DeskTop main={ALL_VIEW} />, synced)).not.toContain('dashboard-connection');

@@ -245,4 +245,35 @@ describe('the dashboard stats poller', () => {
       h.poller.stop();
     }
   });
+
+  it('(v4) hidden: no poll goes out; shown again: one fetch at once, then every 15 s', async () => {
+    const api = scriptedFetch([]);
+    let hidden = false;
+    const listeners = new Set<() => void>();
+    const flip = (h: boolean) => {
+      hidden = h;
+      for (const l of [...listeners]) l();
+    };
+    const p = startStatsPoller({
+      fetchStats: api.fetchStats,
+      onChange: () => {},
+      pollMs: STATS_POLL_MS,
+      visibility: { hidden: () => hidden, subscribe: (l) => (listeners.add(l), () => listeners.delete(l)) },
+    });
+    await settle();
+    expect(api.calls).toBe(1);
+    flip(true);
+    await vi.advanceTimersByTimeAsync(STATS_POLL_MS * 4);
+    expect(api.calls).toBe(1);
+    flip(false);
+    await settle();
+    expect(api.calls).toBe(2);
+    await vi.advanceTimersByTimeAsync(STATS_POLL_MS + 100);
+    expect(api.calls).toBe(3);
+    p.stop();
+    flip(true);
+    flip(false);
+    await vi.advanceTimersByTimeAsync(STATS_POLL_MS * 2);
+    expect(api.calls).toBe(3);
+  });
 });

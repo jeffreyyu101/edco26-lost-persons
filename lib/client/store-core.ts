@@ -24,6 +24,7 @@ import type {
   RequestSummary,
   SessionInfo,
   Stats,
+  StatsRange,
   SyncResponse,
 } from '../api-types';
 import {
@@ -2543,11 +2544,11 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       throw new FetchError(res.kind === 'http' ? 'failed' : e.online() ? 'failed' : 'offline');
     },
 
-    async fetchStats(): Promise<Stats> {
+    async fetchStats(range?: StatsRange): Promise<Stats> {
       requireEnv();
       if (networkHeld()) throw new FetchError('failed');
       const gen = ownerGen();
-      const res = await call<Stats>('/api/stats', { timeoutMs: SYNC.requestTimeoutMs });
+      const res = await call<Stats>(range ? `/api/stats?range=${range}` : '/api/stats', { timeoutMs: SYNC.requestTimeoutMs });
       if (gen !== state.generation) throw new FetchError('failed');
       if (res.ok) {
         markLive();

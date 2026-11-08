@@ -4,9 +4,9 @@
 // (a field with the "/" cap when the column has room, else an icon that opens search), New request with the "N"
 // cap ("New" when the column is narrow, desktop-new-tablet.html iPad landscape), and the Activity bell. The live line
 // (v2.2 afternoon, F1.2: "Updated just now", or "Last updated 3:42 PM" while a banner shows, and Refresh now)
-// sits next to the title on every view (design/screens/live-indicator.html, the Desktop frame): the store's
-// last sync on the lists, the last stats fetch on the dashboard (published by the dashboard, which has no
-// title row of its own here). The banner under the bar comes from the same derivation (useLiveStatus).
+// sits next to the title on the lists (design/screens/live-indicator.html, the Desktop frame): the store's last
+// sync. The banner under the bar comes from the same derivation (useLiveStatus). The dashboard (v4) has its own
+// controls here instead: who's on and the range, portalled into an empty box (components/dashboard/connection-signal).
 //
 // Search drives the existing Search view through ?q= (lib/client/nav): the first character opens it (one
 // history entry), later ones replace it, Esc clears and then leaves.
@@ -14,7 +14,7 @@ import { IconButton } from '@radix-ui/themes';
 import { PanelLeft, Plus, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { ActivityBellSlot } from '@/components/activity/slots';
-import { useDashboardLive } from '@/components/dashboard/connection-signal';
+import { setDashboardSlot } from '@/components/dashboard/connection-signal';
 import { LiveIndicator } from '@/components/ui/LiveIndicator';
 import { goBack, navigate } from '@/lib/client/nav';
 import { refreshSync } from '@/lib/client/refresh-now';
@@ -64,32 +64,39 @@ export function DeskTop({ main, pane = false }: DeskTopProps) {
           </>
         )}
       </h1>
-      {main.name === 'dashboard' ? <DashboardLive /> : <ListLive />}
-      <span className={d.sp} />
-      <SearchField main={main} />
-      <IconButton
-        variant="ghost"
-        color="gray"
-        className={`${d.searchIcon} lp-hit`}
-        aria-label="Search"
-        aria-keyshortcuts="/"
-        onClick={() => navigate({ q: '' })}
-      >
-        <Search size={16} strokeWidth={1.75} aria-hidden />
-      </IconButton>
-      {/* Named by its visible text: "New request", or "New" when the column is narrow (an aria-label would
-          not match the visible text, axe label-content-name-mismatch). */}
-      <button type="button" className={`${d.newb} lp-hit`} aria-keyshortcuts="N" onClick={() => navigate({ new: true })} data-testid="desk-new">
-        <Plus size={16} strokeWidth={2} aria-hidden />
-        <span className={d.newLong}>New request</span>
-        <span className={d.newShort}>New</span>
-        <Kbd className={d.newKbd}>N</Kbd>
-      </button>
-      {/* F4: the Activity bell, its popover anchored here (the sidebar's Activity item opens the same one). Its box
-          keeps the bell's 28 px while the chunk loads. */}
-      <span className={d.bellBox}>
-        <ActivityBellSlot place="desk" />
-      </span>
+      {main.name === 'dashboard' ? (
+        // Dashboard v4: who's on and the range control, portalled in by the dashboard (no search, New or bell here).
+        <div ref={setDashboardSlot} className={d.dashSlot} data-testid="desk-dashboard-slot" />
+      ) : (
+        <>
+          <ListLive />
+          <span className={d.sp} />
+          <SearchField main={main} />
+          <IconButton
+            variant="ghost"
+            color="gray"
+            className={`${d.searchIcon} lp-hit`}
+            aria-label="Search"
+            aria-keyshortcuts="/"
+            onClick={() => navigate({ q: '' })}
+          >
+            <Search size={16} strokeWidth={1.75} aria-hidden />
+          </IconButton>
+          {/* Named by its visible text: "New request", or "New" when the column is narrow (an aria-label would
+              not match the visible text, axe label-content-name-mismatch). */}
+          <button type="button" className={`${d.newb} lp-hit`} aria-keyshortcuts="N" onClick={() => navigate({ new: true })} data-testid="desk-new">
+            <Plus size={16} strokeWidth={2} aria-hidden />
+            <span className={d.newLong}>New request</span>
+            <span className={d.newShort}>New</span>
+            <Kbd className={d.newKbd}>N</Kbd>
+          </button>
+          {/* F4: the Activity bell, its popover anchored here (the sidebar's Activity item opens the same one). Its box
+              keeps the bell's 28 px while the chunk loads. */}
+          <span className={d.bellBox}>
+            <ActivityBellSlot place="desk" />
+          </span>
+        </>
+      )}
     </div>
   );
 }
@@ -102,14 +109,7 @@ function ListLive() {
   return <LiveIndicator className={d.liveLine} line={live} onRefresh={refresh} />;
 }
 
-const noRefresh = () => Promise.resolve();
 
-/** The dashboard's line: its last stats fetch; Refresh now fetches the stats at once. */
-function DashboardLive() {
-  const dash = useDashboardLive();
-  const live = useLiveStatus({ syncedAt: dash?.syncedAt ?? null, failing: dash?.failing ?? false, subject: 'Dashboard' });
-  return <LiveIndicator className={d.liveLine} line={live} onRefresh={dash?.refresh ?? noRefresh} />;
-}
 
 function SearchField({ main }: DeskTopProps) {
   const searching = main.name === 'search';

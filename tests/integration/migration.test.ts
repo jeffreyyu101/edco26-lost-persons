@@ -189,7 +189,8 @@ describe('20261106000000_rework.sql: medical_location on production as it is bef
     const releasedSql = execFileSync('git', ['show', `${RELEASED}:${REWORK}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
     expect(releasedSql).not.toContain('medical_location');
     writeFileSync(released, releasedSql);
-    for (const file of readdirSync(join(ROOT, 'supabase/migrations')).filter((f) => f.endsWith('.sql')).sort()) {
+    // The chain up to the rework, as production had it then (later files, e.g. Dashboard v4, come after this paste).
+    for (const file of readdirSync(join(ROOT, 'supabase/migrations')).filter((f) => f.endsWith('.sql') && f <= '20261106000000_rework.sql').sort()) {
       applyPath(file.startsWith('20261106000000') ? released : join(ROOT, 'supabase/migrations', file));
     }
     // Rows the live build wrote through the released functions.
@@ -270,7 +271,8 @@ describe('20261106000000_rework.sql: the "Pending" hold on production as the F2 
     expect(releasedSql).toContain('medical_location');
     expect(releasedSql).not.toContain('recheck_at');
     writeFileSync(released, releasedSql);
-    for (const file of readdirSync(join(ROOT, 'supabase/migrations')).filter((f) => f.endsWith('.sql')).sort()) {
+    // The chain up to the rework, as production had it then (later files, e.g. Dashboard v4, come after this paste).
+    for (const file of readdirSync(join(ROOT, 'supabase/migrations')).filter((f) => f.endsWith('.sql') && f <= '20261106000000_rework.sql').sort()) {
       applyPath(file.startsWith('20261106000000') ? released : join(ROOT, 'supabase/migrations', file));
     }
     // Rows the F2 build wrote: two waiting, one with a medical location after In medical.

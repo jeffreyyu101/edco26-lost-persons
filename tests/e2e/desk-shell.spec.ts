@@ -366,8 +366,8 @@ test.describe('desktop 1440 × 900', () => {
   test('the dashboard: a request opened over another still closes in one Esc', async ({ page }) => {
     await createRequests(page, 2);
     await page.goto('/?dashboard=1');
-    // F1's dashboard: the Recently updated region's rows (its heading is a "Show all requests" button).
-    const recent = page.locator('[data-desk-main]').getByRole('region', { name: 'Recently updated' }).locator('button[data-request-id]');
+    // Dashboard v4: the Needs attention rows open their request in the pane.
+    const recent = page.locator('[data-desk-main]').getByTestId('attention-row');
     await expect(recent.nth(1)).toBeVisible({ timeout: 15_000 });
     await recent.nth(0).click();
     await expect.poll(() => paramOf(page, 'r')).not.toBeNull();

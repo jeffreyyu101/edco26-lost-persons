@@ -9,7 +9,6 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { StageGlyph } from '@/components/ui/StageGlyph';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
-import { closedTotal, inactiveCount } from '@/components/dashboard/dashboard-model';
 import { narrowStatusLabel, stepperModel } from '@/components/list/list-helpers';
 import { changeAnswerChoices } from '@/components/profile/change-answer';
 import {
@@ -24,7 +23,7 @@ import {
   pushUrgency,
   statusChangeEvent,
 } from '@/lib/activity';
-import type { RequestSummary, Stats } from '@/lib/api-types';
+import type { RequestSummary } from '@/lib/api-types';
 import { alertStillCurrent, diffAlerts, statusAlert, type AlertContext } from '@/lib/client/alerts';
 import { byNewestClosed, friendComingOrder, statusGroups, waitingOrder } from '@/lib/client/status-order';
 import {
@@ -258,35 +257,6 @@ describe('Activity and alerts', () => {
     const legacy: RequestSummary = { ...fresh, id: '00000000-0000-4000-8000-0000000000ff' };
     delete legacy.quietClose;
     expect(diffAlerts(new Map([[legacy.id, inMedical(legacy)]]), [legacy], ctx())).toHaveLength(1);
-  });
-});
-
-describe('the dashboard', () => {
-  const stats = (over: Partial<Stats>): Stats => ({
-    open: { waiting: 1, inMedical: 1 },
-    notInMedical: 1,
-    reunited: 2,
-    discharged: 1,
-    cancelled: 1,
-    total: 9,
-    longestWait: null,
-    avgAnswerMinutes: null,
-    avgReuniteMinutes: null,
-    loggedLastHour: 0,
-    byPost: [],
-    recent: [],
-    serverTime: iso(0),
-    ...over,
-  });
-
-  it('Closed counts it; Reunited never does; a server before F6 sends nothing (0)', () => {
-    expect(closedTotal(stats({ inactive: 2 }))).toBe(7);
-    expect(closedTotal(stats({}))).toBe(5);
-    expect(inactiveCount(stats({}))).toBe(0);
-    expect(inactiveCount(stats({ inactive: 3 }))).toBe(3);
-    expect(inactiveCount(stats({ inactive: Number.NaN }))).toBe(0);
-    const s = stats({ inactive: 2 });
-    expect(s.open.waiting + s.open.inMedical + closedTotal(s)).toBe(s.total);
   });
 });
 

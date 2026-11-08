@@ -17,6 +17,7 @@ import type {
   RequestPatch,
   RequestSummary,
   Stats,
+  StatsRange,
 } from '../api-types';
 import type { PhotoTiming, SettableStatus, StatusKind } from '../domain';
 import type { MessagingApi } from './messages-core';
@@ -283,8 +284,8 @@ export interface StoreActions {
 
   /** GET /api/requests/:id (use the useDetail hook in components). */
   fetchDetail(id: string): Promise<RequestDetail>;
-  /** GET /api/stats (use the useStats hook in components). */
-  fetchStats(): Promise<Stats>;
+  /** GET /api/stats (use the useStats hook in components); Dashboard v4 passes its range (?range=…). */
+  fetchStats(range?: StatsRange): Promise<Stats>;
 
   outbox: {
     /** Retry now (resets backoff). */

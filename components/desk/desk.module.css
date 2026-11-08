@@ -16,6 +16,14 @@
 .sp {
   flex: 1;
 }
+/* Dashboard v4: the dashboard's own controls (who's on, the range), portalled in (components/dashboard). */
+.dashSlot {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
 
 /* ---- The sidebar (from 768 px) -----------------------------------------------------------------------------
    shadcn/ui's Sidebar (collapsible="icon", variant="inset") in Radix Themes tokens, design/screens/

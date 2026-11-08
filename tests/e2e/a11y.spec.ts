@@ -75,10 +75,17 @@ test.afterEach(async () => {
   }
 });
 
-/** No toast or sheet animation mid-flight when axe samples colours. */
+/** No toast or sheet animation mid-flight when axe samples colours. Loops (the dashboard's live pulse) never finish. */
 async function settle(page: Page) {
   await page.waitForTimeout(400);
-  await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((a) => a.finished.catch(() => undefined)),
+    ),
+  );
 }
 
 /** Cards open the profile through a transparent button stretched over them (components/list/cards.tsx). */
