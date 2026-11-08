@@ -19,7 +19,7 @@ import { WalkIcon } from '@/components/messages/WalkIcon';
 import { useInDesk } from '@/components/desk/desk-context';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { StatusGlyph } from '@/components/ui/StatusGlyph';
+import { StatusGlyph, SwapGlyph } from '@/components/ui/StatusGlyph';
 import type { SpeedStat, Stats, StatsRange } from '@/lib/api-types';
 import { goBack, navigate } from '@/lib/client/nav';
 import { useLiveStatus } from '@/lib/client/use-live-status';
@@ -328,7 +328,7 @@ function Attention({ stats, skew }: { stats: Stats; skew: number }) {
             <li key={r.id}>
               <button type="button" className={s.ar} onClick={() => navigate({ r: r.id })} data-testid="attention-row" data-kind={r.kind} data-sev={r.sev}>
                 <VisuallyHidden>{attentionPhrase(r)}</VisuallyHidden>
-                <PartGlyph k={r.kind === 'wait' ? 'waiting' : r.kind === 'recheck' ? 'recheck' : 'located'} size={16} />
+                {r.kind === 'swap' ? <SwapGlyph tone="blue" size={15} /> : <PartGlyph k={r.kind === 'wait' ? 'waiting' : r.kind === 'recheck' ? 'recheck' : 'located'} size={16} />}
                 <span className={s.case} aria-hidden>
                   {r.caseNumber}
                 </span>
