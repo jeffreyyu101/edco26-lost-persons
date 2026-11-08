@@ -72,7 +72,7 @@ import { Bust } from './Bust';
 import { primeKeyboard } from '@/components/list/hooks';
 import { changeAnswerChoices } from './change-answer';
 import { LocationEditor } from './LocationEditor';
-import { CompanionComingRow, FriendMayBeRow, LocatedSheet, SwapSheet } from './CompanionSheets';
+import { CompanionComingRow, CompanionMenuItems, FriendMayBeRow, LocatedSheet, SwapSheet } from './CompanionSheets';
 import { FRIEND_INFORMED_LABEL, REQUEST_SWAP_LABEL, SWAP_DONE_LABEL, SWAP_REQUESTED_LABEL, isSwapApproved, isSwapRequested } from '@/lib/client/swap';
 import { PhotoViewer, photoUrl } from './PhotoViewer';
 import s from './profile.module.css';
@@ -478,26 +478,7 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
               <Pencil size={15} aria-hidden />
               Edit details
             </DropdownMenu.Item>
-            {row.status === STATUS.accompanied ? (
-              <>
-                {changeAnswerChoices(row.status).map((c) => (
-                  <DropdownMenu.Item key={c.to} disabled={offline} onSelect={() => send(c.to, c.kind)} data-to={c.to}>
-                    <StatusGlyph status={c.to} size={15} />
-                    {c.label}
-                  </DropdownMenu.Item>
-                ))}
-                <DropdownMenu.Item disabled={offline} onSelect={() => send(STATUS.discharged, 'discharge')}>
-                  <Check size={15} aria-hidden />
-                  Mark discharged
-                </DropdownMenu.Item>
-              </>
-            ) : null}
-            {row.status === STATUS.friendInformed ? (
-              <DropdownMenu.Item disabled={offline} onSelect={() => send(STATUS.accompanied, 'reopen')}>
-                <RotateCcw size={15} aria-hidden />
-                Reopen
-              </DropdownMenu.Item>
-            ) : null}
+            <CompanionMenuItems status={row.status} offline={offline} onSend={send} />
             {menu.map((a) => (
               <DropdownMenu.Item key={a.id} disabled={offline} onSelect={() => setStatus(a)}>
                 {a.id === 'discharge' ? <Check size={15} aria-hidden /> : <RotateCcw size={15} aria-hidden />}

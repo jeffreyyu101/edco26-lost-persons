@@ -57,7 +57,7 @@ export function holdRules(d: HoldDomain) {
       if (holdsOnNotFound(row, kind)) return { recheckAt: new Date(now + RECHECK_MINUTES * 60_000).toISOString(), notFoundChecks: 1 };
       return { status: to, recheckAt: null };
     }
-    if (to === STATUS.inMedical) return { status: to, recheckAt: null };
+    if (to === STATUS.inMedical || to === STATUS.accompanied) return { status: to, recheckAt: null };
     if (to === STATUS.waiting && kind !== 'undo') return { status: to, recheckAt: null, notFoundChecks: 0 };
     return { status: to };
   }

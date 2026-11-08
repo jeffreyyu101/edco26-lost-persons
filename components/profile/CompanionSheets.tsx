@@ -5,10 +5,12 @@
 //                  saves until one is tapped.
 //   SwapSheet      Friend swap requested → Swap at FA 4 (green tent) · Swap at Main Med (green cross) · Decline (grey ×).
 // Also the quiet intake row (FriendMayBeRow) and the swap's "Companion coming · FA 4" row.
-import { ChevronRight, Cross, Tent, Users, X } from 'lucide-react';
+import { DropdownMenu } from '@radix-ui/themes';
+import { Check, ChevronRight, Cross, RotateCcw, Tent, Users, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { RequestSummary, SwapPlace } from '@/lib/api-types';
-import { STATUS, type SettableStatus } from '@/lib/domain';
+import { STATUS, type SettableStatus, type StatusKind } from '@/lib/domain';
+import { changeAnswerChoices } from './change-answer';
 import { formatCaseNumber } from '@/lib/format';
 import { COMPANION_COMING_LABEL, friendMayBeWith, swapApprovedLabel, swapPlaceLabel } from '@/lib/client/swap';
 import { Sheet, SheetTitle } from '@/components/ui/Sheet';
@@ -237,4 +239,37 @@ export function CompanionComingRow({ row }: { row: RequestSummary }) {
       </span>
     </div>
   );
+}
+
+/**
+ * (Companion) The ⋯ menu's status items for the two new statuses (the profile's and the desk pane's): Accompanied →
+ * Change answer (Located · friend coming, Not located, Back to Waiting for check) and Mark discharged; Friend
+ * informed → Reopen (back to Accompanied). Nothing for any other status (menuActions covers those).
+ */
+export function CompanionMenuItems({ status, offline, onSend }: { status: string; offline: boolean; onSend: (to: SettableStatus, kind: StatusKind) => void }) {
+  if (status === STATUS.accompanied) {
+    return (
+      <>
+        {changeAnswerChoices(status).map((c) => (
+          <DropdownMenu.Item key={c.to} disabled={offline} onSelect={() => onSend(c.to, c.kind)} data-to={c.to}>
+            <StatusGlyph status={c.to} size={15} />
+            {c.label}
+          </DropdownMenu.Item>
+        ))}
+        <DropdownMenu.Item disabled={offline} onSelect={() => onSend(STATUS.discharged, 'discharge')}>
+          <Check size={15} aria-hidden />
+          Mark discharged
+        </DropdownMenu.Item>
+      </>
+    );
+  }
+  if (status === STATUS.friendInformed) {
+    return (
+      <DropdownMenu.Item disabled={offline} onSelect={() => onSend(STATUS.accompanied, 'reopen')}>
+        <RotateCcw size={15} aria-hidden />
+        Reopen
+      </DropdownMenu.Item>
+    );
+  }
+  return null;
 }

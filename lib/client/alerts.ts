@@ -101,7 +101,8 @@ export function holdAlert(row: RequestSummary, timeZone?: string): AlertEvent {
 
 export function newRequestAlert(row: RequestSummary): AlertEvent {
   const who = [alertName(row.name), ageGender(row.age, row.gender)].filter(Boolean).join(' ');
-  const subtitle = [who, row.postShort].filter(Boolean).join(' · ');
+  // (Companion) The intake said a friend may already be with them (the push body says the same).
+  const subtitle = [who, row.postShort, row.friendInMedical === 'yes' ? 'friend may be with them' : ''].filter(Boolean).join(' · ');
   return { kind: 'new_request', requestId: row.id, title: `New request · ${formatCaseNumber(row.caseNumber)}`, ...(subtitle ? { subtitle } : {}), count: 1 };
 }
 
