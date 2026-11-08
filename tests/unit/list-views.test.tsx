@@ -21,6 +21,9 @@ import {
   logNumber,
   logNumberRanges,
   logRowLabel,
+  markCount,
+  messageMark,
+  messagesSentence,
   mineFreshTone,
   narrowStatusLabel,
   minutesPhrase,
@@ -34,6 +37,7 @@ import {
   statusPhrase,
   statusSince,
   stepperModel,
+  unreadTotal,
   updatedSince,
 } from '@/components/list/list-helpers';
 import { formatCreatedTime } from '@/lib/format';
@@ -316,6 +320,68 @@ describe('search, filter and sort', () => {
   });
 });
 
+describe('the message lane (msg-indicator.html, Brian 2026-11-07, with his override: no involved gate)', () => {
+  it('the mark: the blue bubble whenever unread > 0, else the grey outline while there are messages, else nothing', () => {
+    // Unread for me (the server's count never includes my own messages): blue, the unread count, for everyone.
+    expect(messageMark({ messageCount: 3, unread: 2 })).toEqual({ kind: 'unread', count: 2, text: '2' });
+    expect(messageMark({ messageCount: 3, unread: 1, involved: false } as Parameters<typeof messageMark>[0])).toEqual({ kind: 'unread', count: 1, text: '1' });
+    // A dispatcher who never opened the thread still sees it blue (Brian: "even a dispatcher thats fine").
+    expect(messageMark({ messageCount: 4, unread: 4 })?.kind).toBe('unread');
+    // Read (my reply is the latest, or I read them all): the outline, no number.
+    expect(messageMark({ messageCount: 5, unread: 0 })).toEqual({ kind: 'read', count: 5 });
+    // No messages, and rows cached before F3 (no activity fields): nothing.
+    expect(messageMark({ messageCount: 0, unread: 0 })).toBeNull();
+    expect(messageMark({})).toBeNull();
+    // A bad count never draws a mark.
+    expect(messageMark({ messageCount: -1, unread: -2 })).toBeNull();
+    // Unread wins even when the total is missing.
+    expect(messageMark({ unread: 3 })).toEqual({ kind: 'unread', count: 3, text: '3' });
+  });
+
+  it('the count caps at "99+" from 100 (the 31 px lane fits "99+" and nothing wider)', () => {
+    expect([1, 9, 12, 99, 100, 101, 1234].map(markCount)).toEqual(['1', '9', '12', '99', '99+', '99+', '99+']);
+    expect(messageMark({ messageCount: 140, unread: 120 })).toEqual({ kind: 'unread', count: 120, text: '99+' });
+  });
+
+  it('the sentences: " N unread message(s)." / " N message(s)." / nothing; the row keeps its LP number', () => {
+    expect(messagesSentence({ messageCount: 3, unread: 1 })).toBe(' 1 unread message.');
+    expect(messagesSentence({ messageCount: 3, unread: 2 })).toBe(' 2 unread messages.');
+    expect(messagesSentence({ messageCount: 1, unread: 0 })).toBe(' 1 message.');
+    expect(messagesSentence({ messageCount: 4, unread: 0 })).toBe(' 4 messages.');
+    expect(messagesSentence({ messageCount: 0, unread: 0 })).toBe('');
+    expect(messagesSentence({})).toBe('');
+    // The spoken count is the real one, never the visual cap.
+    expect(messagesSentence({ messageCount: 150, unread: 120 })).toBe(' 120 unread messages.');
+
+    const tr = byCase(1013);
+    expect(logRowLabel({ ...tr, messageCount: 3, unread: 2 }, '11:02 PM', 'updated 2 minutes ago')).toBe(
+      'LP-1013, T.R., Waiting for check, created 11:02 PM, updated 2 minutes ago. 2 unread messages.',
+    );
+    expect(logRowLabel({ ...tr, messageCount: 4, unread: 0 }, '11:02 PM', 'updated 2 minutes ago')).toBe(
+      'LP-1013, T.R., Waiting for check, created 11:02 PM, updated 2 minutes ago. 4 messages.',
+    );
+    expect(logRowLabel({ ...tr, messageCount: 0, unread: 0 }, '11:02 PM', 'updated 2 minutes ago')).toBe('LP-1013, T.R., Waiting for check, created 11:02 PM, updated 2 minutes ago');
+    // Search: the matched text gets its full stop when the lane's sentence follows it.
+    const kayla = byCase(1012);
+    expect(searchLogLabel({ ...kayla, messageCount: 2, unread: 1 }, '10:58 PM', 'not updated yet', '…pink braids')).toBe(
+      'LP-1012, Kayla Martinez, Waiting for check, created 10:58 PM, not updated yet. …pink braids. 1 unread message.',
+    );
+    expect(searchLogLabel({ ...kayla, messageCount: 2, unread: 0 }, '10:58 PM', 'not updated yet', '')).toBe(
+      'LP-1012, Kayla Martinez, Waiting for check, created 10:58 PM, not updated yet. 2 messages.',
+    );
+    expect(searchLogLabel({ ...kayla, messageCount: 2, unread: 0 }, '10:58 PM', 'not updated yet', 'Any tattoos?')).toBe(
+      'LP-1012, Kayla Martinez, Waiting for check, created 10:58 PM, not updated yet. Any tattoos? 2 messages.',
+    );
+  });
+
+  it('the folded Archived row: the hidden rows\' unread total, in its lane and its name', () => {
+    expect(unreadTotal([{ unread: 1 }, { unread: 2 }, {}, { unread: 0 }])).toBe(3);
+    expect(archivedFoldLabel(6, 'Archived', 3)).toBe('Archived 6 requests. 3 unread messages.');
+    expect(archivedFoldLabel(1, 'Archived', 1)).toBe('Archived 1 request. 1 unread message.');
+    expect(archivedFoldLabel(6, 'Archived', 0)).toBe('Archived 6 requests');
+  });
+});
+
 // ---------------------------------------------------------------------------------------------------
 // Server renders of the views (structure, order, states)
 // ---------------------------------------------------------------------------------------------------
@@ -377,6 +443,22 @@ describe('list views render', () => {
       .replace(/\s+/g, ' ')
       .trim();
   };
+  /** LP-n's message lane: '' (empty), 'read', or 'unread:<text>'; null without a lane. */
+  const laneOf = (html: string, n: number) => {
+    const at = html.indexOf(`data-request-id="${idOf(n)}"`);
+    const button = html.slice(at, html.indexOf('</button>', at));
+    const m = /<span class="([^"]*)" data-lane=""([^>]*)>([^]*?)<span [^>]*data-col="name"/.exec(button);
+    if (!m) return null;
+    const attrs = m[2]!;
+    expect(attrs).toContain('aria-hidden="true"');
+    if (!attrs.includes('data-mark=')) return '';
+    expect(attrs).toContain('data-thread-badge=""');
+    if (attrs.includes('data-mark="read"')) {
+      expect(m[3]).toContain('lucide-message-square');
+      return 'read';
+    }
+    return `unread:${/>([^<]*)<\/span><\/span>$/.exec(m[3]!.trim())?.[1] ?? '?'}`;
+  };
   /** LP-n's cell in one column, as HTML (cells hold no nested data-col). */
   const cellHtml = (html: string, n: number, col: string) => {
     const at = html.indexOf(`data-request-id="${idOf(n)}"`);
@@ -427,9 +509,11 @@ describe('list views render', () => {
     expect(html).not.toContain('live-dot');
     expect(html).not.toContain('connection-indicator');
     // One quiet column header. "Created" and "Updated" are one pair over both time columns, so the wider
-    // "Updated" never sizes its column on its own (review fix: it took the names' room).
+    // "Updated" never sizes its column on its own (review fix: it took the names' room). (Message lane) No # and
+    // nothing over the lane: an empty first cell.
     const cols = html.slice(html.indexOf('data-testid="log-columns"'));
-    expect(cols).toMatch(/^[^]*?>#<[^]*?>Friend<[^]*?>Status<[^]*?>Created<[^]*?>Updated</);
+    expect(cols).toMatch(/^[^>]*><span class="[^"]*c1[^"]*"><\/span><span class="[^"]*c2[^"]*">Friend<[^]*?>Status<[^]*?>Created<[^]*?>Updated</);
+    expect(cols.slice(0, cols.indexOf('Updated'))).not.toContain('>#<');
     expect(cols).toMatch(/^[^]*?<span class="[^"]*c45[^"]*"><span>Created<\/span><span>Updated<\/span><\/span>/);
 
     const queued = html.indexOf('Waiting to send');
@@ -446,10 +530,12 @@ describe('list views render', () => {
     const closed = all.filter((r) => statusMeta(r.status).bucket === 'closed');
     expect(closed.map((r) => r.caseNumber)).toEqual(expect.arrayContaining([1009, 1008, 1006, 1003, 1002, 1001]));
     for (const r of closed) expect(html).not.toContain(`data-request-id="${r.id}"`);
-    const fold = html.slice(html.indexOf('data-testid="closed-fold"') - 300, html.indexOf('data-testid="closed-fold"') + 600);
+    const fold = html.slice(html.indexOf('data-testid="closed-fold"') - 300, html.indexOf('</button>', html.indexOf('data-testid="closed-fold"')));
     expect(fold).toContain('aria-expanded="false"');
-    expect(fold).toContain(`aria-label="Archived ${closed.length} requests"`);
-    expect(fold).toMatch(new RegExp(`>Archived</span> <span[^>]*>${closed.length}</span>`));
+    // (Message lane) Named by its content: the visible "Archived N" is hidden from screen readers, one sentence says it.
+    expect(fold).not.toContain('aria-label=');
+    expect(fold).toMatch(new RegExp(`class="[^"]*vh[^"]*">Archived ${closed.length} requests</span>`));
+    expect(fold).toMatch(new RegExp(`aria-hidden="true">Archived</span><span[^>]*aria-hidden="true">${closed.length}</span>`));
     expect(fold).not.toContain('>Closed<');
     expect(html.indexOf('data-testid="closed-fold"')).toBeGreaterThan(at.at(-1)!);
   });
@@ -627,7 +713,7 @@ describe('list views render', () => {
     expect(mine).toContain(`data-request-id="${idOf(1003)}"`);
   });
 
-  it('All rows: number, name, status, created with AM/PM, updated as "—" or a compact age; full-sentence names', () => {
+  it('All rows: lane, name, status, created with AM/PM, updated as "—" or a compact age; full-sentence names', () => {
     const now = Date.now();
     const store = storeWith((s) => s);
     const html = render(store, <AllView status={null} post={null} />);
@@ -640,8 +726,10 @@ describe('list views render', () => {
     expect(rowTag(html, 1013)).not.toContain('aria-label');
     expect(spoken(html, 1013)).toBe(logRowLabel(tr, created, 'not updated yet'));
     expect(spoken(html, 1013)).toBe(`LP-1013, T.R., Waiting for check, created ${created}, not updated yet`);
-    // What it shows: the bare number, the name, the blue status, the created time, "—".
-    expect(shown(html, 1013, 'number')).toBe('1013');
+    // What it shows: an empty message lane (no messages), the name, the blue status, the created time, "—". No
+    // number column (message lane): the LP number is in the sentence.
+    expect(shown(html, 1013, 'number')).toBeNull();
+    expect(laneOf(html, 1013)).toBe('');
     expect(shown(html, 1013, 'name')).toBe('T.R.');
     expect(shown(html, 1013, 'status')).toBe('Waiting for check');
     // Under 430 px it reads "Waiting" (the name keeps its room); the sentence above still says it in full.
@@ -667,6 +755,99 @@ describe('list views render', () => {
     const created = formatCreatedTime(df.createdAt, now, 'America/New_York');
     expect(shown(html, 1011, 'match')).toBe('Ferris wheel line');
     expect(spoken(html, 1011)).toBe(searchLogLabel(df, created, 'not updated yet', 'Ferris wheel line'));
+  });
+
+  it('the message lane: blue bubble with the unread count, grey outline once read, nothing without; the sentence says it', () => {
+    const now = Date.now();
+    // LP-1013: 2 unread from another staff member · LP-1012: a read conversation · LP-1011: none · LP-1010: 120 unread ·
+    // closed LP-1009 (open fold): 1 unread · closed LP-1006: read.
+    const activity: Record<number, Partial<RequestSummary>> = {
+      1013: { messageCount: 3, unread: 2, involved: false },
+      1012: { messageCount: 4, unread: 0, involved: true },
+      1011: { messageCount: 0, unread: 0 },
+      1010: { messageCount: 130, unread: 120, involved: true },
+      1009: { messageCount: 2, unread: 1, involved: true },
+      1006: { messageCount: 6, unread: 0, involved: true },
+    };
+    const withActivity = (s: StoreState): StoreState => {
+      const confirmed = new Map(s.confirmed);
+      for (const [n, a] of Object.entries(activity)) {
+        const r = confirmed.get(idOf(Number(n)))!;
+        confirmed.set(r.id, { ...r, ...a });
+      }
+      return { ...s, confirmed };
+    };
+    const store = storeWith((s) => ({ ...withActivity(s), prefs: { ...s.prefs, closedExpanded: true } }));
+    const html = render(store, <AllView status={null} post={null} />);
+    expect(laneOf(html, 1013)).toBe('unread:2');
+    expect(laneOf(html, 1012)).toBe('read');
+    expect(laneOf(html, 1011)).toBe('');
+    expect(laneOf(html, 1010)).toBe('unread:99+');
+    expect(html).toMatch(/data-wide="">99\+<\/span>/);
+    // Closed rows keep the mark: unread stays the blue bubble, read stays the outline (greyed by CSS, not faded).
+    expect(laneOf(html, 1009)).toBe('unread:1');
+    expect(laneOf(html, 1006)).toBe('read');
+    // One button per row: the mark is aria-hidden inside it, and the sentence says it in full.
+    const tr = store.getState().confirmed.get(idOf(1013))!;
+    const created = formatCreatedTime(tr.createdAt, now, 'America/New_York');
+    expect(spoken(html, 1013)).toBe(`LP-1013, T.R., Waiting for check, created ${created}, not updated yet. 2 unread messages.`);
+    expect(spoken(html, 1012)).toMatch(/, updated \d+ minutes? ago\. 4 messages\.$/);
+    expect(spoken(html, 1011)).toMatch(/not updated yet$/);
+    expect(spoken(html, 1010)).toMatch(/\. 120 unread messages\.$/);
+    // No count pill after the name, no dot: the lane is the only unread signal in the row.
+    expect(html).not.toContain('row-unread');
+    expect(html).not.toContain('unread-dot');
+    // Folded, the Archived row carries the closed rows' unread total in its lane, and says it.
+    const folded = render(storeWith((s) => ({ ...withActivity(s), prefs: { ...s.prefs, closedExpanded: false } })), <AllView status={null} post={null} />);
+    const fold = folded.slice(folded.lastIndexOf('<button', folded.indexOf('data-testid="closed-fold"')), folded.indexOf('</button>', folded.indexOf('data-testid="closed-fold"')));
+    expect(fold).toMatch(/class="[^"]*vh[^"]*">Archived \d+ requests\. 1 unread message\.<\/span>/);
+    expect(fold).toMatch(/data-lane="" aria-hidden="true"><span class="[^"]*bubble[^"]*">1<\/span><\/span>/);
+    // Open, the rows show their own marks: the fold's lane is empty and its name is the plain count.
+    const open = html.slice(html.lastIndexOf('<button', html.indexOf('data-testid="closed-fold"')), html.indexOf('</button>', html.indexOf('data-testid="closed-fold"')));
+    expect(open).toMatch(/class="[^"]*vh[^"]*">Archived \d+ requests<\/span>/);
+    expect(open).toMatch(/data-lane="" aria-hidden="true"><\/span>/);
+  });
+
+  it("Pending's Friend coming header: the filled message bubble (not a dot) while one of its requests has unread messages", () => {
+    const quiet = render(storeWith((s) => s), <PendingView />);
+    expect(quiet).not.toContain('data-testid="unread-mark"');
+    const store = storeWith((s) => {
+      const confirmed = new Map(s.confirmed);
+      const r = confirmed.get(idOf(1004))!;
+      confirmed.set(r.id, { ...r, messageCount: 2, unread: 1 });
+      return { ...s, confirmed };
+    });
+    const html = render(store, <PendingView />);
+    const header = html.slice(html.indexOf('data-testid="queue-header-coming"'), html.indexOf('</h2>', html.indexOf('data-testid="queue-header-coming"')));
+    const mark = /<svg[^>]*data-testid="unread-mark"[^>]*>/.exec(header)?.[0] ?? '';
+    expect(mark).toContain('lucide-message-square');
+    expect(mark).toContain('fill="currentColor"');
+    expect(mark).toContain('stroke-width="0"');
+    expect(mark).toContain('width="14"');
+    expect(mark).toContain('role="img"');
+    expect(mark).toContain('aria-label="Unread messages"');
+    expect(header).not.toContain('unread-dot');
+  });
+
+  it('search: the same row; a number match shows the LP number, highlighted, on the second line', () => {
+    const store = storeWith((s) => {
+      const confirmed = new Map(s.confirmed);
+      const r = confirmed.get(idOf(1013))!;
+      confirmed.set(r.id, { ...r, messageCount: 2, unread: 1 });
+      return { ...s, confirmed };
+    });
+    const html = render(store, <SearchView q="1013" />);
+    expect(laneOf(html, 1013)).toBe('unread:1');
+    expect(shown(html, 1013, 'number')).toBeNull();
+    const match = cellHtml(html, 1013, 'match') ?? '';
+    expect(text(match)).toBe('LP-1013');
+    expect(match).toMatch(/<mark[^>]*>1013<\/mark>/);
+    expect(rowTag(html, 1013)).toMatch(/class="[^"]*lr2/);
+    // The sentence already starts with the number: it is not said twice.
+    expect(spoken(html, 1013)).toMatch(/^LP-1013, T\.R\., Waiting for check, created [^.]+, not updated yet\. 1 unread message\.$/);
+    // A name match: no second line.
+    const byName = render(store, <SearchView q="T.R." />);
+    expect(cellHtml(byName, 1013, 'match')).toBeNull();
   });
 
   it('All filtered (status, post, open): one list, closed rows greyed in place, no fold, no queued rows', () => {

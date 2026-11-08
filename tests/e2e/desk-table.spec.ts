@@ -9,9 +9,10 @@ import { signedInAs } from './helpers/session';
 import { syncRows } from './helpers/sync';
 
 // The desk request table (components/desk/table; design/screens/desktop-log.html): from 768 px, All
-// requests, My requests and Search are a table in the shell's main column. Columns # · Friend · Status ·
+// requests, My requests and Search are a table in the shell's main column. Columns (message lane) · # · Friend · Status ·
 // Created · Updated, plus Post whenever no request is docked beside the table and Logged by too on a table
-// 1040 px or wider (the table's own width decides, not the window's); open rows first and the
+// 1040 px or wider (the table's own width decides, not the window's), and no # while a request is docked (the
+// pane's top bar carries the LP number; design/screens/msg-indicator.html); open rows first and the
 // Archived fold as on F1's phone log; unsent rows on top; the dashboard's filters and their chips; search
 // highlighting; the selected row; the skeleton, offline, error and empty states. Under 768 px the phone list
 // is unchanged. Synthetic rows only (TEST-table-e2e-…), closed afterwards.
@@ -23,7 +24,8 @@ const STAFF_SHORT = 'TEST-table D. · Dispatch';
 const TAG = `TEST-table-e2e-${Date.now().toString(36)}`;
 const ALL_COLUMNS = ['#', 'Friend', 'Status', 'Post', 'Created', 'Updated', 'Logged by'];
 const SIX_COLUMNS = ['#', 'Friend', 'Status', 'Post', 'Created', 'Updated'];
-const FIVE_COLUMNS = ['#', 'Friend', 'Status', 'Created', 'Updated'];
+/** A request docked beside the table: the message lane (unlabeled), Friend, Status, Created, Updated; no # (the pane's top bar carries the LP number). */
+const FIVE_COLUMNS = ['Friend', 'Status', 'Created', 'Updated'];
 const NOT_IN_MEDICAL = 'Checked – Not Found';
 const TZ = (loadTestEnv() as Record<string, string | undefined>)['EVENT_TIMEZONE'] || 'America/New_York';
 
@@ -176,7 +178,8 @@ test.describe('desktop 1440 × 900', () => {
     expect(await order()).toMatchObject({ openFirst: true, closedAfter: true });
     expect((await order()).at).toBeGreaterThan(0);
     await expect(fold(page)).toHaveAttribute('aria-expanded', 'false');
-    await expect(fold(page)).toHaveAccessibleName(/^Archived \d+ requests$/);
+    // (Message lane) Folded, it also says the unread messages on the rows it hides (other runs leave some on this stack).
+    await expect(fold(page)).toHaveAccessibleName(/^Archived \d+ requests(\. \d+ unread messages?\.)?$/);
     await expect(row(page, closed.id)).toHaveCount(0);
 
     // The fold opens in place, greyed rows below; it stays open for the session (F1's preference).
@@ -437,7 +440,8 @@ test.describe('iPad landscape 1180 × 820 (touch)', () => {
     await expect(page.getByTestId('desk-pane')).toBeVisible();
     expect(await shownColumns(page)).toEqual(FIVE_COLUMNS);
     await columnsLineUp(page, one!.id);
-    for (const col of ['number', 'status', 'created', 'updated']) expect(await notCut(page, one!.id, col), col).toBe(true);
+    for (const col of ['status', 'created', 'updated']) expect(await notCut(page, one!.id, col), col).toBe(true);
+    await expect(cell(page, one!.id, 'number')).toBeHidden();
     await expect(row(page, one!.id)).toHaveAttribute('aria-current', 'true');
 
     const coarse = await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
@@ -462,7 +466,7 @@ test.describe('1024 × 768 with a request open', () => {
     await expect(row(page, one!.id)).toBeVisible({ timeout: 15_000 });
     expect(await shownColumns(page)).toEqual(FIVE_COLUMNS);
     await columnsLineUp(page, one!.id);
-    for (const col of ['number', 'status', 'created', 'updated']) expect(await notCut(page, one!.id, col), col).toBe(true);
+    for (const col of ['status', 'created', 'updated']) expect(await notCut(page, one!.id, col), col).toBe(true);
 
     // The longest status (F2): "Not located" on one line, uncut, in the same narrow column.
     const nf = await notInMedical(page, (await createRequests(page, 1, tag))[0]!);
@@ -537,7 +541,7 @@ test.describe('an earlier day\'s time in the narrow layouts', () => {
       await expect(cell(page, one!.id, 'created'), `${step.width}`).toHaveText(shown, { timeout: 15_000 });
       expect(await shownColumns(page), `${step.width}`).toEqual(step.columns);
       await columnsLineUp(page, one!.id);
-      for (const col of ['number', 'status', 'created', 'updated']) {
+      for (const col of step.columns === FIVE_COLUMNS ? ['status', 'created', 'updated'] : ['number', 'status', 'created', 'updated']) {
         expect(await textCut(cell(page, one!.id, col)), `${step.width} ${col}`).toBe(false);
       }
     }

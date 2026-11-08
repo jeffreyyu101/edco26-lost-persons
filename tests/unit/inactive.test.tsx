@@ -154,7 +154,8 @@ describe('the status', () => {
 
 describe('the stage map', () => {
   it('a status stage of its own: grey, closed, the inactive glyph, the status label', () => {
-    expect(STAGE_META.inactive).toEqual({ label: 'Closed · inactive', tone: 'gray', glyph: 'inactive', bucket: 'closed' });
+    // (Message lane) Its narrow label, "Inactive", is the status's (STATUS_META narrowLabel).
+    expect(STAGE_META.inactive).toEqual({ label: 'Closed · inactive', narrow: 'Inactive', tone: 'gray', glyph: 'inactive', bucket: 'closed' });
     const stage = displayStage(row(), { now: NOW });
     expect(stage).toMatchObject({ key: 'inactive', label: 'Closed · inactive', fullLabel: 'Closed · inactive', tone: 'gray', glyph: 'inactive', bucket: 'closed' });
     expect(stage.said).toBe('Closed, inactive');

@@ -10,7 +10,7 @@ import { newSignedInContext, signedInAs } from './helpers/session';
 // real store, API and database, phone (iPhone 14) and desk (1440 × 900), Chromium and WebKit:
 //   R1  header → status block → the latest-message line → Details → Photos → Messages → Audit trail; the line
 //       shows for Needs info and for unread messages, and not otherwise (no messages, read, my reply latest)
-//   R2  the Message button, a desk row's unread badge, an Activity row whose latest event is a message, a
+//   R2  the Message button, a desk row's message lane, an Activity row whose latest event is a message, a
 //       message's notification (in place and as a new page) and the line itself land at the thread; the phone
 //       never focuses the composer (its keyboard stays down), the desk does; a row, a Pending card and an old
 //       "/?r=<id>" open at the top
@@ -482,7 +482,7 @@ test.describe('desk', () => {
     await expect(composer(page)).toBeFocused();
   });
 
-  test("a row's unread badge lands at the thread with the composer focused; the rest of a row at the top", async ({ page, browser }) => {
+  test("a row's message lane lands at the thread with the composer focused; the rest of a row at the top", async ({ page, browser }) => {
     test.slow();
     const a = await createRequest(page.request);
     const b = await createRequest(page.request);
@@ -493,8 +493,10 @@ test.describe('desk', () => {
 
     await page.goto('/');
     const rowA = page.locator(`[data-request-id="${a.id}"]`).first();
-    await expect(rowA.getByTestId('row-unread')).toHaveText('1', SYNC);
-    await rowA.getByTestId('row-unread').click();
+    // (Message lane) The blue bubble leads the row, before #; a click on it lands at the thread.
+    await expect(rowA.getByTestId('message-mark')).toHaveText('1', SYNC);
+    await expect(rowA.getByTestId('message-mark')).toHaveAttribute('data-mark', 'unread');
+    await rowA.getByTestId('message-mark').click();
     await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(a.id);
     await expectAtThread(page);
     await expect(composer(page)).toBeFocused();
@@ -502,7 +504,7 @@ test.describe('desk', () => {
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
 
     const rowB = page.locator(`[data-request-id="${b.id}"]`).first();
-    await expect(rowB.getByTestId('row-unread')).toHaveText('1', SYNC);
+    await expect(rowB.getByTestId('message-mark')).toHaveText('1', SYNC);
     await rowB.locator('[data-col="status"]').click();
     await expect.poll(() => new URL(page.url()).searchParams.get('r')).toBe(b.id);
     await expectAtTop(page);

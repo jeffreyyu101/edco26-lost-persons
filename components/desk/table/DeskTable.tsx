@@ -15,10 +15,15 @@
 // sorted by status (aria-sort; the arrow only on the active header; Status again goes back). Sorted by status,
 // group header rows (glyph, label, count) sit over Waiting for check and Friend coming, and the closed ones fold
 // last. The header is then a one-row table of its own, so its column headers can carry aria-sort.
+//
+// (Message lane, design/screens/msg-indicator.html, Brian 2026-11-07) The phone log's message lane leads every row,
+// before #: the blue bubble with the unread count, the grey outline once read, nothing without messages. It
+// replaces the count pill after the name. A click in the lane lands at the thread (openRowAt). With a request
+// docked beside the table the # column goes: the pane's top bar carries the LP number.
 import { Skeleton } from '@radix-ui/themes';
 import { ArrowDown, ArrowUpDown, ChevronDown, ChevronRight, CircleAlert } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
-import { UnreadBadge, openRowAt, unreadSentence } from '@/components/messages/CardActivity';
+import { MessageMark, UnreadBubble, openRowAt } from '@/components/messages/CardActivity';
 import { StageGlyph } from '@/components/ui/StageGlyph';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
@@ -29,7 +34,7 @@ import type { SortOrder } from '@/lib/client/view-prefs';
 import { waitTone } from '@/lib/domain';
 import { stageLook, type DisplayStage } from '@/lib/stages';
 import { NOT_UPDATED } from '@/lib/format';
-import { archivedFoldLabel, highlightParts, isClosed, logNumber, logNumberRanges, type Ranges } from '@/components/list/list-helpers';
+import { archivedFoldLabel, highlightParts, isClosed, logNumber, logNumberRanges, messagesSentence, type Ranges } from '@/components/list/list-helpers';
 import {
   TABLE_COLUMNS,
   friendCell,
@@ -87,14 +92,15 @@ export function sortHeaderLabel(column: 'status' | TableSort['defaultColumn'], l
 }
 
 /**
- * "#  Friend  Status  Post  Created  Updated  Logged by", sticky under the top bar. Every row's sentence says
- * what each value is, so without a sort the header is hidden from screen readers. With one (All and My
+ * "#  Friend  Status  Post  Created  Updated  Logged by" (nothing over the message lane), sticky under the top bar.
+ * Every row's sentence says what each value is, so without a sort the header is hidden from screen readers. With one (All and My
  * requests), Status and Created / Updated are buttons that set the order, the active one gray-12 with ↓.
  */
 export function ColumnHeader({ sort }: { sort?: TableSort }) {
   if (!sort) {
     return (
       <div className={cx(t.grid, t.th, t.thSticky)} aria-hidden data-testid="desk-table-columns">
+        <span className={t.lane} />
         {TABLE_COLUMNS.map((c) => (
           <span key={c.key} className={COLUMN_CLASS[c.key]} data-col={c.key}>
             {c.label}
@@ -107,6 +113,8 @@ export function ColumnHeader({ sort }: { sort?: TableSort }) {
   return (
     <div className={t.thSticky} role="table" aria-label="Sort requests" data-testid="desk-table-columns">
       <div className={cx(t.grid, t.th)} role="row">
+        {/* The message lane has no header: its mark says what it is. */}
+        <span className={t.lane} aria-hidden />
         {TABLE_COLUMNS.map((c) => {
           const sortable = c.key === 'status' || c.key === sort.defaultColumn;
           const on = sortable && c.key === active;
@@ -181,10 +189,10 @@ export function Highlight({ text, ranges }: { text: string; ranges: Ranges }) {
 }
 
 interface CellsProps {
+  /** (Message lane) The row's mark (MessageMark); an empty lane when absent. */
+  lane?: ReactNode;
   number: ReactNode;
   name: ReactNode;
-  /** (F3) The unread count after the name. */
-  badge?: ReactNode;
   ageGender: string;
   /** The matched text of a search result, on a second line under the name. */
   line?: ReactNode;
@@ -210,13 +218,13 @@ interface CellsProps {
 function Cells(p: CellsProps) {
   return (
     <>
+      {p.lane ?? <span className={t.lane} aria-hidden />}
       <span className={cx(t.cNum, t.num)} data-col="number" aria-hidden>
         {p.number}
       </span>
       <span className={cx(t.cFriend, t.friend)} data-col="friend" aria-hidden>
         <span className={t.who}>
           <span className={t.nm}>{p.name}</span>
-          {p.badge}
           {p.ageGender ? <span className={t.ag}>{p.ageGender}</span> : null}
         </span>
         {p.line ? <span className={t.match}>{p.line}</span> : null}
@@ -304,14 +312,11 @@ export const TableRow = memo(function TableRow({ row, times, selected, stage, ti
       aria-current={selected ? 'true' : undefined}
       onClick={(e) => openRowAt(row.id, e.target)}
     >
-      <Vh>
-        {tableRowLabel(row, times, timeZone, now)}
-        {unreadSentence(row)}
-      </Vh>
+      <Vh>{withMessages(tableRowLabel(row, times, timeZone, now), row)}</Vh>
       <Cells
+        lane={<MessageMark row={row} className={t.lane} />}
         number={logNumber(row.caseNumber)}
         name={friend.name}
-        badge={<UnreadBadge row={row} />}
         ageGender={friend.ageGender}
         glyph={<StageGlyph glyph={look.glyph} className={t.glyph} />}
         tone={look.tone}
@@ -330,6 +335,16 @@ export const TableRow = memo(function TableRow({ row, times, selected, stage, ti
     </button>
   );
 });
+
+/**
+ * A row's sentence, then what its message lane shows: "…, logged by Lee Park, GCHX Base. 2 unread messages." /
+ * "…. 4 messages." (a matched text ending in a stop keeps it) / unchanged without messages.
+ */
+function withMessages(label: string, row: RequestSummary): string {
+  const said = messagesSentence(row);
+  if (!said) return label;
+  return /[.?!…]$/.test(label) ? `${label}${said}` : `${label}.${said}`;
+}
 
 /** The heat of a waiting row's extra: its wait's tone (gray under 10 minutes). */
 function extraTone(stage: DisplayStage | undefined): string | undefined {
@@ -361,14 +376,11 @@ export const SearchRow = memo(function SearchRow({ hit, times, selected, stage, 
       aria-current={selected ? 'true' : undefined}
       onClick={(e) => openRowAt(row.id, e.target)}
     >
-      <Vh>
-        {searchRowLabel(row, times, line, timeZone, now)}
-        {unreadSentence(row)}
-      </Vh>
+      <Vh>{withMessages(searchRowLabel(row, times, line, timeZone, now), row)}</Vh>
       <Cells
+        lane={<MessageMark row={row} className={t.lane} />}
         number={<Highlight text={logNumber(row.caseNumber)} ranges={logNumberRanges(row.caseNumber, caseRanges)} />}
         name={<Highlight text={friend.name} ranges={row.name ? nameRanges : []} />}
-        badge={<UnreadBadge row={row} />}
         ageGender={friend.ageGender}
         line={line ? <Highlight text={line} ranges={lineRanges} /> : null}
         glyph={<StageGlyph glyph={look.glyph} className={t.glyph} />}
@@ -433,7 +445,8 @@ export function OutboxRow({ item, created }: { item: OutboxItem; created: string
 /**
  * "Archived  6  ›": every closed request folded into one row under the open ones, exactly as F1's phone
  * log (the same test ids, name and remembered open state, prefs.closedExpanded). › while folded, ⌄ while open
- * (Pending v9.1, pending-v9.html .arch).
+ * (Pending v9.1, pending-v9.html .arch). (Message lane) The label lines up with #; while folded the lane carries
+ * the folded rows' unread total.
  */
 export function ArchivedFold({
   count,
@@ -441,6 +454,7 @@ export function ArchivedFold({
   controls,
   onToggle,
   label = 'Archived',
+  unread = 0,
 }: {
   count: number;
   open: boolean;
@@ -448,7 +462,11 @@ export function ArchivedFold({
   onToggle: () => void;
   /** (Pending v9.1) "Closed" on My requests sorted by status. */
   label?: string;
+  /** (Message lane) The unread messages on the folded rows: the lane's bubble while folded. */
+  unread?: number;
 }) {
+  const sum = open ? 0 : unread;
+  // Named by its content (no aria-label), as the phone's fold: the lane's "99+" could never match a spoken "120".
   return (
     <button
       type="button"
@@ -456,13 +474,23 @@ export function ArchivedFold({
       aria-expanded={open}
       // Only while the closed rows are on the page (folded, they are not rendered).
       aria-controls={open ? controls : undefined}
-      aria-label={archivedFoldLabel(count, label)}
       onClick={onToggle}
       data-testid="closed-fold"
     >
-      <span className={t.foldLabel}>{label}</span> <span className={t.cap}>{count}</span>
+      <span className={t.foldLane} data-lane="" aria-hidden>
+        {sum > 0 ? <UnreadBubble count={sum} /> : null}
+      </span>
+      <span className={t.foldLabel} aria-hidden>
+        {label}
+      </span>
+      <span className={t.cap} aria-hidden>
+        {count}
+      </span>
       <span className={t.sp} />
-      <span className={t.chev}>{open ? <ChevronDown size={16} strokeWidth={2} aria-hidden /> : <ChevronRight size={16} strokeWidth={2} aria-hidden />}</span>
+      <span className={t.chev} aria-hidden>
+        {open ? <ChevronDown size={16} strokeWidth={2} /> : <ChevronRight size={16} strokeWidth={2} />}
+      </span>
+      <Vh>{archivedFoldLabel(count, label, sum)}</Vh>
     </button>
   );
 }
@@ -517,6 +545,7 @@ export function TableSkeleton() {
       <ColumnHeader />
       {SK_ROWS.map(([name, status, other], i) => (
         <div key={i} className={cx(t.grid, t.row, t.skRow)} aria-hidden>
+          <span className={t.lane} />
           <SkCell col="number">
             <Sk w="34px" h={11} />
           </SkCell>

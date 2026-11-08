@@ -1,31 +1,34 @@
 'use client';
 // The All requests log (log option B, design/screens/polish-v7.html ColH / Row / fold, v7-log.png): one
 // grid for the whole list, so every column lines up and sizes to its content, and each request is one
-// 48 px line:  #  ·  Friend  ·  Status  ·  Created  ·  Updated. The name takes the room that is left, with
-// an 80 px floor: on a narrow phone the status label gets shorter ("Waiting"), and only past the floor is it
-// cut. The number and the times never shrink.
+// 48 px line:  message lane  ·  Friend  ·  Status  ·  Created  ·  Updated. The name takes the room that is left,
+// with an 80 px floor: on a narrow phone the status label gets shorter ("Waiting", "En route"), and only past the
+// floor is it cut. The lane and the times never shrink.
+// (Message lane, design/screens/msg-indicator.html, Brian 2026-11-07) The # column made way for a fixed 31 px lane
+// with no header: the blue bubble with the unread count, the grey outline once read, nothing without messages
+// (MessageMark). The row stays one button: a tap in the lane (a 52 px wide, full-height hit area) opens the
+// request at its Messages, anywhere else at the top (openRowAt). The LP number is in the row's sentence, and on a
+// search result's second line when the number matched.
 // Queued requests (states.html Offline) and search results (states.html SRow) use the same grid. Sorted by
 // status (Pending v9.1, design/screens/pending-v9.html frame 6), thin pinned dividers name each group: glyph,
 // label, count.
 import { CircleAlert, ChevronDown, ChevronRight } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
+import { MessageMark, UnreadBubble, openRowAt } from '@/components/messages/CardActivity';
 import { StageGlyph } from '@/components/ui/StageGlyph';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { navigate } from '@/lib/client/nav';
 import type { SearchHit } from '@/lib/client/selectors';
 import { STATUS_GROUP_META, type StatusGroupName } from '@/lib/client/status-order';
-import { stageLook, type StageKey } from '@/lib/stages';
-import { NOT_UPDATED } from '@/lib/format';
+import { STAGE_META, stageLook, type StageKey } from '@/lib/stages';
+import { NOT_UPDATED, formatCaseNumber } from '@/lib/format';
 import {
   archivedFoldLabel,
   displayName,
   highlightParts,
   isClosed,
-  logNumber,
-  logNumberRanges,
   logRowLabel,
-  narrowStatusLabel,
   outboxDisplay,
   outboxRowLabel,
   searchLogLabel,
@@ -63,7 +66,8 @@ export function LogGrid({ children, testId = 'request-list' }: { children: React
 export function ColumnHeader() {
   return (
     <div className={`${s.lrow} ${s.colh}`} aria-hidden data-testid="log-columns">
-      <span className={s.c1}>#</span>
+      {/* The message lane has no header: its mark says what it is. */}
+      <span className={s.c1} />
       <span className={s.c2}>Friend</span>
       <span className={s.c3}>Status</span>
       {/* One right-aligned pair over both time columns: "Updated" is wider than anything under it ("—", "2m",
@@ -87,8 +91,8 @@ function Vh({ children }: { children: ReactNode }) {
 }
 
 interface LogCellsProps {
-  /** The number column's content (the bare LP number, maybe highlighted), or nothing for an unsent request. */
-  number: ReactNode;
+  /** The message lane (MessageMark), or an empty lane for an unsent request. */
+  lane: ReactNode;
   name: ReactNode;
   /** The status glyph. */
   glyph: ReactNode;
@@ -101,12 +105,10 @@ interface LogCellsProps {
 }
 
 /** The visible cells of a row (hidden from screen readers: the row's sentence says it all). */
-function LogCells({ number, name, glyph, tone, statusLabel, statusNarrow, created, updated }: LogCellsProps) {
+function LogCells({ lane, name, glyph, tone, statusLabel, statusNarrow, created, updated }: LogCellsProps) {
   return (
     <>
-      <span className={`${s.c1} ${s.num}`} data-col="number" aria-hidden>
-        {number}
-      </span>
+      {lane}
       <span className={`${s.c2} ${s.nm}`} data-col="name" aria-hidden>
         {name}
       </span>
@@ -136,11 +138,14 @@ function LogCells({ number, name, glyph, tone, statusLabel, statusNarrow, create
 }
 
 /**
- * (F5) The narrow label of a status stage (Waiting for check, Not found in medical, F6's Closed · inactive); the other
- * stages are short already.
+ * The label a stage shows under 430 px (lib/stages STAGE_META narrow): Waiting for check → "Waiting", Friend en
+ * route → "En route", Friend arrived → "Arrived", Recheck due → "Recheck", Closed · inactive → "Inactive". The
+ * other stages are short already (null).
  */
-const narrowStageLabel = (key: StageKey, status: string) =>
-  key === 'waiting' || key === 'notInMedical' || key === 'inactive' ? narrowStatusLabel(status) : null;
+export const narrowStageLabel = (key: StageKey): string | null => (key === 'legacy' ? null : (STAGE_META[key].narrow ?? null));
+
+/** A row's message lane: the mark, with the lane's hit area (list.module.css .lane). */
+const lane = (row: RequestSummary) => <MessageMark row={row} className={`${s.c1} ${s.lane}`} />;
 
 export interface LogRowProps {
   row: RequestSummary;
@@ -160,7 +165,10 @@ export interface LogRowProps {
   now?: number;
 }
 
-/** One request: number, name, status, created, updated. Closed rows are greyed. Tap opens the profile. */
+/**
+ * One request: message lane, name, status, created, updated. Closed rows are greyed (the lane's read mark gray-10, an
+ * unread bubble stays blue). A tap opens the request, at its Messages when it landed in the lane.
+ */
 export const LogRow = memo(function LogRow({ row, created, updated, updatedSaid, timeZone, now = 0 }: LogRowProps) {
   const closed = isClosed(row.status);
   // (F5) The stage: Needs info, Not found yet, Recheck due, Friend en route… over the stored status.
@@ -171,16 +179,16 @@ export const LogRow = memo(function LogRow({ row, created, updated, updatedSaid,
       className={`${s.lrow} ${s.lr} ${closed ? s.closed : ''}`}
       data-request-id={row.id}
       data-closed={closed ? '' : undefined}
-      onClick={() => navigate({ r: row.id })}
+      onClick={(e) => openRowAt(row.id, e.target)}
     >
       <Vh>{logRowLabel(row, created, updatedSaid, timeZone, now)}</Vh>
       <LogCells
-        number={logNumber(row.caseNumber)}
+        lane={lane(row)}
         name={displayName(row.name)}
         glyph={<StageGlyph glyph={look.glyph} className={s.lg} />}
         tone={look.tone}
         statusLabel={look.label}
-        statusNarrow={narrowStageLabel(look.key, row.status)}
+        statusNarrow={narrowStageLabel(look.key)}
         created={created}
         updated={updated}
       />
@@ -198,33 +206,38 @@ export interface SearchLogRowProps extends Omit<LogRowProps, 'row'> {
   lineRanges: Ranges;
 }
 
-/** A search result: the log row with the match highlighted, and the matched text under the name. */
+/**
+ * A search result: the log row with the match highlighted, and the matched text under the name. With the # column
+ * gone, a number match shows the LP number there, highlighted ("LP-1013"; the row's sentence starts with it).
+ */
 export const SearchLogRow = memo(function SearchLogRow({ hit, created, updated, updatedSaid, timeZone, now = 0, nameRanges, caseRanges, line, lineRanges }: SearchLogRowProps) {
   const { row } = hit;
   const closed = isClosed(row.status);
   const look = stageLook(row, now);
+  // The matched text, else the LP number when it is what matched (caseRanges are in formatCaseNumber's text).
+  const shown = line ? { text: line, ranges: lineRanges } : caseRanges.length > 0 ? { text: formatCaseNumber(row.caseNumber), ranges: caseRanges } : null;
   return (
     <button
       type="button"
-      className={`${s.lrow} ${s.lr} ${line ? s.lr2 : ''} ${closed ? s.closed : ''}`}
+      className={`${s.lrow} ${s.lr} ${shown ? s.lr2 : ''} ${closed ? s.closed : ''}`}
       data-request-id={row.id}
       data-closed={closed ? '' : undefined}
-      onClick={() => navigate({ r: row.id })}
+      onClick={(e) => openRowAt(row.id, e.target)}
     >
       <Vh>{searchLogLabel(row, created, updatedSaid, line, timeZone, now)}</Vh>
       <LogCells
-        number={<Highlight text={logNumber(row.caseNumber)} ranges={logNumberRanges(row.caseNumber, caseRanges)} />}
+        lane={lane(row)}
         name={<Highlight text={displayName(row.name)} ranges={row.name ? nameRanges : []} />}
         glyph={<StageGlyph glyph={look.glyph} className={s.lg} />}
         tone={look.tone}
         statusLabel={look.label}
-        statusNarrow={narrowStageLabel(look.key, row.status)}
+        statusNarrow={narrowStageLabel(look.key)}
         created={created}
         updated={updated}
       />
-      {line ? (
+      {shown ? (
         <span className={s.match} data-col="match" aria-hidden>
-          <Highlight text={line} ranges={lineRanges} />
+          <Highlight text={shown.text} ranges={shown.ranges} />
         </span>
       ) : null}
     </button>
@@ -241,7 +254,7 @@ export function OutboxLogRow({ item, created }: { item: OutboxItem; created: str
   const label = outboxRowLabel(d, created);
   const cells = (
     <LogCells
-      number={item.caseNumber ? logNumber(item.caseNumber) : null}
+      lane={<span className={`${s.c1} ${s.lane}`} aria-hidden />}
       name={d.name}
       glyph={
         d.needsAttention ? (
@@ -276,6 +289,9 @@ export function OutboxLogRow({ item, created }: { item: OutboxItem; created: str
  * "Archived  6  ›": every closed request (Not in medical, Reunited, Discharged, Cancelled) folded into one
  * row under the open ones (log option B; named Archived by Brian, 2026-11-06). Tap to show them below, greyed.
  * (Pending v9.1, pending-v9.html .arch) › while folded, ⌄ while open, gray-11: Pending's section headers' fold.
+ * (Message lane) In the log (`lane`), "Archived" lines up with the names, and while folded the lane carries the
+ * unread messages of the rows it hides: the blue bubble with their total, and its name says it ("Archived 6
+ * requests. 3 unread messages.").
  */
 export function ArchivedFold({
   count,
@@ -284,6 +300,8 @@ export function ArchivedFold({
   onToggle,
   label = 'Archived',
   className,
+  lane = false,
+  unread = 0,
 }: {
   count: number;
   open: boolean;
@@ -292,7 +310,14 @@ export function ArchivedFold({
   /** (Pending v9.1) "Closed" on My requests sorted by status. */
   label?: string;
   className?: string;
+  /** In the log grid: the message lane leads the row. */
+  lane?: boolean;
+  /** The unread messages on the folded rows (list-helpers.unreadTotal). */
+  unread?: number;
 }) {
+  const sum = open ? 0 : unread;
+  // Named by its content, as the rows are (no aria-label): one screen-reader-only sentence, the visible parts hidden
+  // from screen readers. The lane's "99+" could never match a spoken "120", so an aria-label would fail label-in-name.
   return (
     <button
       type="button"
@@ -300,15 +325,26 @@ export function ArchivedFold({
       aria-expanded={open}
       // Only while the closed rows are on the page (folded, they are not rendered).
       aria-controls={open ? controls : undefined}
-      aria-label={archivedFoldLabel(count, label)}
       onClick={onToggle}
       // The test ids keep their log option B names (closed-fold, closed-rows), which other specs use.
       data-testid="closed-fold"
     >
-      <span className={s.foldLabel}>{label}</span>{' '}
-      <span className={s.cap}>{count}</span>
+      {lane ? (
+        <span className={s.foldLane} data-lane="" aria-hidden>
+          {sum > 0 ? <UnreadBubble count={sum} /> : null}
+        </span>
+      ) : null}
+      <span className={s.foldLabel} aria-hidden>
+        {label}
+      </span>
+      <span className={s.cap} aria-hidden>
+        {count}
+      </span>
       <span className={s.sp} />
-      <span className={s.foldChev}>{open ? <ChevronDown size={16} strokeWidth={2} aria-hidden /> : <ChevronRight size={16} strokeWidth={2} aria-hidden />}</span>
+      <span className={s.foldChev} aria-hidden>
+        {open ? <ChevronDown size={16} strokeWidth={2} /> : <ChevronRight size={16} strokeWidth={2} />}
+      </span>
+      <Vh>{archivedFoldLabel(count, label, sum)}</Vh>
     </button>
   );
 }
