@@ -229,6 +229,73 @@ describe('GET /api/stats', () => {
 
   it('requires a session', async () => {
     expect((await api('/api/stats')).status).toBe(401);
+    expect((await api('/api/stats?range=tonight')).status).toBe(401);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Dashboard v4 (?range=, lp_stats(p_range), 20261108000000_dashboard_v4.sql): every range answers every old field plus
+// the v4 ones, with no name or free text anywhere; a bad range is a 400; an unchanged poll is a 304.
+// ---------------------------------------------------------------------------------------------------
+
+const V4_KEYS = ['range', 'live', 'attention', 'speed', 'calls', 'heat', 'recap', 'team'] as const;
+
+describe('GET /api/stats?range= (Dashboard v4)', () => {
+  it('every range: the old fields still there, the v4 ones added, and no names, descriptions or locations of anyone', async () => {
+    const name = pii(`TEST-v4-${uniq()}`);
+    const created = await api('/api/requests', {
+      json: createBody({ name, clothing: `${name} jacket`, lastSeen: `${name} stage` }),
+      cookie: await cookieFor(newStaff()),
+    });
+    expect(created.status).toBe(201);
+    const cookie = await cookieFor(newStaff());
+    const plain = await api<Stats>('/api/stats', { cookie });
+    expect(plain.status).toBe(200);
+    for (const k of V4_KEYS) expect(plain.body, k).not.toHaveProperty(k);
+    for (const range of ['1h', '2h', '6h', 'tonight', 'event'] as const) {
+      const res = await api<Stats>(`/api/stats?range=${range}`, { cookie });
+      expect(res.status, range).toBe(200);
+      expect(res.headers.get('cache-control')).toBe('no-store');
+      expect(res.headers.get('etag'), range).toMatch(/^W\/"[\w-]{27}"$/);
+      for (const k of Object.keys(plain.body)) expect(res.body, `${range} keeps ${k}`).toHaveProperty(k);
+      for (const k of V4_KEYS) expect(res.body, `${range} adds ${k}`).toHaveProperty(k);
+      expect(res.body.range?.key).toBe(range);
+      expect(res.text, range).not.toContain(name);
+      expect(res.body.recent.every((r) => r.name === null), range).toBe(true);
+      const a = res.body.attention!;
+      expect(a.items.length).toBeLessThanOrEqual(5);
+      for (const it of a.items) expect(Object.keys(it).sort()).toEqual(['caseNumber', 'enroute', 'etaAt', 'id', 'kind', 'since', 'tent']);
+      expect(res.body.live!.waiting + res.body.live!.pending + res.body.live!.located).toBe(res.body.open.waiting + res.body.open.inMedical);
+    }
+  });
+
+  it('a range the server does not know is a 400; no range is the old answer', async () => {
+    const cookie = await cookieFor(newStaff());
+    expect((await api('/api/stats?range=3d', { cookie })).status).toBe(400);
+    expect((await api('/api/stats?range=', { cookie })).status).toBe(400);
+  });
+
+  it('ETag: an unchanged poll gets a 304 with no body; a different range or a change gets a 200', async () => {
+    const cookie = await cookieFor(newStaff());
+    let got304 = false;
+    for (let attempt = 0; attempt < 4 && !got304; attempt += 1) {
+      const first = await api<Stats>('/api/stats?range=6h', { cookie });
+      const etag = first.headers.get('etag')!;
+      const again = await api('/api/stats?range=6h', { cookie, headers: { 'if-none-match': etag } });
+      if (again.status === 304) {
+        got304 = true;
+        expect(again.text).toBe('');
+        expect(again.headers.get('etag')).toBe(etag);
+        expect(again.headers.get('cache-control')).toBe('no-store');
+        const other = await api('/api/stats?range=1h', { cookie, headers: { 'if-none-match': etag } });
+        expect(other.status).toBe(200);
+      }
+    }
+    expect(got304).toBe(true);
+    const before = await api<Stats>('/api/stats?range=event', { cookie });
+    await createRequest(newStaff());
+    const after = await api('/api/stats?range=event', { cookie, headers: { 'if-none-match': before.headers.get('etag')! } });
+    expect(after.status).toBe(200);
   });
 });
 
@@ -296,7 +363,7 @@ describe('lp_stats avgReuniteMinutes and loggedLastHour: exact values on a scrat
     psql(`create database ${SCRATCH}`);
     scratchCreated = true;
     const chain = readdirSync(join(ROOT, 'supabase', 'migrations')).filter((f) => f.endsWith('.sql')).sort();
-    expect(chain.at(-1)).toBe('20261106000000_rework.sql');
+    expect(chain.at(-1)).toBe('20261108000000_dashboard_v4.sql');
     for (const file of chain) scratch(['-f', join(ROOT, 'supabase', 'migrations', file)]);
     expect(scratchStats()).toMatchObject({ total: 0, avgReuniteMinutes: null, loggedLastHour: 0, avgAnswerMinutes: null });
   }, 60_000);
@@ -373,5 +440,126 @@ describe('lp_stats avgReuniteMinutes and loggedLastHour: exact values on a scrat
        join public.patients p on p.first_name = 'TEST-core-12';`,
     ]);
     expect(scratchStats()).toMatchObject({ total: 12, avgReuniteMinutes: 13.9, loggedLastHour: 6 });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Dashboard v4 exact values on the scratch database: rows and audit events at fixed offsets from now, so every range
+// window, the previous night's same clock window, the urgency order, the medians and who's on are known exactly.
+// ---------------------------------------------------------------------------------------------------
+
+const SCRATCH4 = `${SCRATCH}_v4`;
+let scratch4Created = false;
+
+/** psql against the v4 scratch database (its own: the one above is dropped when its suite ends). */
+function scratch4(args: string[]): string {
+  const url = new URL(dbUrl());
+  url.pathname = `/${SCRATCH4}`;
+  return execFileSync('psql', [url.toString(), '-v', 'ON_ERROR_STOP=1', '-q', '-At', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+}
+
+function scratchRanged(range: string): Stats {
+  return JSON.parse(scratch4(['-c', `set role service_role; select public.lp_stats('${range}')::text;`])) as Stats;
+}
+
+describe('lp_stats(p_range): exact values on a scratch database (Dashboard v4)', () => {
+  const S = STATUS;
+  const KEY = 'ZZv4name';
+  const m = (min: number) => `now() - interval '${min} minutes'`;
+
+  afterAll(() => {
+    if (scratch4Created) psql(`drop database if exists ${SCRATCH4} with (force)`);
+  });
+
+  it('loads one synthetic night (and one row from the night before)', () => {
+    psql(`create database ${SCRATCH4}`);
+    scratch4Created = true;
+    const chain = readdirSync(join(ROOT, 'supabase', 'migrations')).filter((f) => f.endsWith('.sql')).sort();
+    for (const file of chain) scratch4(['-f', join(ROOT, 'supabase', 'migrations', file)]);
+    const staff = "'TEST-core Staff · Medical'";
+    const rows: Array<[string, string, string, string, string]> = [
+      // key, location, status, created_at, recheck_at
+      ['w1', 'FA 4 – Oasis', S.waiting, m(40), 'null'],
+      ['h1', 'FA 3 – Kinetic', S.waiting, m(44), m(15)],
+      ['h2', 'FA 3 – Kinetic', S.waiting, m(30), "now() + interval '5 minutes'"],
+      ['r1', 'FA 3 – Kinetic', S.reunited, m(40), 'null'],
+      ['r2', 'FA 4 – Oasis', S.reunited, m(35), 'null'],
+      ['l1', 'Other', S.inMedical, m(30), 'null'],
+      ['n1', 'FA 4 – Oasis', S.notInMedical, m(90), 'null'],
+      ['y1', 'FA 3 – Kinetic', S.reunited, m(24 * 60 + 30), 'null'],
+      ['y2', 'FA 4 – Oasis', S.cancelled, m(24 * 60 - 10), 'null'],
+    ];
+    const ev: Array<[string, string, string, number]> = [
+      ['r1', S.waiting, S.inMedical, 35],
+      ['r1', S.inMedical, S.reunited, 25],
+      ['r2', S.waiting, S.inMedical, 25],
+      ['r2', S.inMedical, S.reunited, 12],
+      ['l1', S.waiting, S.inMedical, 8],
+      ['n1', S.waiting, S.notInMedical, 80],
+      ['y1', S.waiting, S.inMedical, 24 * 60 + 20],
+      ['y1', S.inMedical, S.reunited, 24 * 60 + 10],
+    ];
+    scratch4([
+      '-c',
+      `insert into public.patients (first_name, reporting_location, other_location, status, created_by, updated_by, created_at, recheck_at) values ${rows
+        .map(([k, loc, st, at, re]) => `('${KEY}-${k}', '${loc}', ${loc === 'Other' ? "'Gate v4'" : 'null'}, '${st}', ${staff}, ${staff}, ${at}, ${re})`)
+        .join(', ')};
+       insert into public.audit_events (patient_id, staff_name, action_type, previous_value, new_value, occurred_at)
+       select p.id, ${staff}, 'status_changed', jsonb_build_object('status', e.prev), jsonb_build_object('status', e.next), now() - make_interval(mins => e.ago)
+       from (values ${ev.map(([k, a, b, ago]) => `('${KEY}-${k}', '${a}', '${b}', ${ago})`).join(', ')}) as e(k, prev, next, ago)
+       join public.patients p on p.first_name = e.k;`,
+    ]);
+  });
+
+  it('1h: live split, urgency order, calls and the night before, medians, recap, who is on; no names', () => {
+    const s = scratchRanged('1h');
+    expect(JSON.stringify(s)).not.toContain(KEY);
+    expect(s.range).toMatchObject({ key: '1h', step: 15, compare: true });
+    expect(new Date(s.range!.from).getUTCMinutes() % 15).toBe(0);
+    expect(s.live).toEqual({ waiting: 1, pending: 2, located: 1 });
+    expect(s.attention!.total).toBe(3);
+    expect(s.attention!.items.map((i) => [i.kind, i.tent])).toEqual([
+      ['wait', 'FA 4'],
+      ['recheck', 'FA 3'],
+      ['located', 'Other'],
+    ]);
+    expect(s.calls!.total).toBe(6);
+    expect(s.calls!.prevTotal).toBe(1);
+    expect(s.calls!.buckets.reduce((a, b) => a + b.fa4 + b.fa3 + b.other, 0)).toBe(6);
+    expect(s.calls!.buckets.reduce((a, b) => a + (b.prev ?? 0), 0)).toBe(1);
+    const sp = Object.fromEntries(s.speed!.map((x) => [x.key, x]));
+    expect(sp.firstCheck).toMatchObject({ n: 3, median: 10, p90: 19.6, target: 10 });
+    expect(sp.firstCheck!.byTent).toEqual({ 'FA 4': 10, 'FA 3': 5, Other: 22 });
+    expect(sp.located).toMatchObject({ n: 3, median: 10, target: 15 });
+    expect(sp.reunited).toMatchObject({ n: 2, median: 19, target: 30, prevMedian: 20 });
+    expect(s.recap).toMatchObject({ reunited: 2, notLocated: 0, fastest: 15, prevReunited: 1, prevFastest: 20 });
+    expect(s.team).toEqual([
+      { team: 'medical', on: 1 },
+      { team: 'dispatch', on: 0 },
+      { team: 'base', on: 0 },
+      { team: 'transpo', on: 0 },
+    ]);
+  });
+
+  it('2h and event widen the window; event has no night before; tonight starts at noon ET', () => {
+    const two = scratchRanged('2h');
+    expect([two.calls!.total, two.calls!.prevTotal, two.recap!.notLocated]).toEqual([7, 1, 1]);
+    expect(two.speed!.find((x) => x.key === 'firstCheck')).toMatchObject({ n: 4, median: 10 });
+    const ev = scratchRanged('event');
+    expect(ev.range).toMatchObject({ key: 'event', step: 60, compare: false });
+    expect(ev.calls!.total).toBe(9);
+    expect(ev.calls!.prevTotal).toBeNull();
+    expect(ev.calls!.buckets.every((b) => b.prev === null && b.night !== null)).toBe(true);
+    expect(new Set(ev.calls!.buckets.map((b) => b.night)).size).toBeGreaterThanOrEqual(2);
+    expect(ev.heat!.cols.reduce((a, c) => a + c.fa4 + c.fa3 + c.other, 0)).toBe(9);
+    const t = scratchRanged('tonight');
+    const from = new Date(t.range!.from);
+    const et = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' }).format(from);
+    expect(et).toBe('12:00');
+    expect(Date.now() - from.getTime()).toBeLessThan(24 * 3_600_000);
+  });
+
+  it('a bad range is refused', () => {
+    expect(() => scratchRanged('3d')).toThrow(/bad_range/);
   });
 });

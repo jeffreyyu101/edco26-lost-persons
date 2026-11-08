@@ -42,3 +42,28 @@ const read = () => current;
 export function useDashboardLive(): DashboardLive | null {
   return useSyncExternalStore(subscribe, read, read);
 }
+
+// ---- Dashboard v4: the desk top bar's slot (design/screens/dashboard-v4.html .top: who's on, then the range control
+// at the far right). The top bar renders an empty box on the dashboard and publishes it here; the dashboard portals
+// its controls into it, so they stay in the dashboard's chunk and share its state.
+let slot: HTMLElement | null = null;
+const slotListeners = new Set<() => void>();
+
+export function setDashboardSlot(el: HTMLElement | null): void {
+  if (el === slot) return;
+  slot = el;
+  for (const listener of slotListeners) listener();
+}
+
+function subscribeSlot(listener: () => void): () => void {
+  slotListeners.add(listener);
+  return () => slotListeners.delete(listener);
+}
+
+const readSlot = () => slot;
+const noSlot = () => null;
+
+/** The desk top bar's dashboard box, or null (phone, or before the top bar has drawn). */
+export function useDashboardSlot(): HTMLElement | null {
+  return useSyncExternalStore(subscribeSlot, readSlot, noSlot);
+}

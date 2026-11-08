@@ -371,6 +371,61 @@ export interface Stats {
    * Never a reunion (not in `reunited`, not in avgReuniteMinutes). Absent from a database before F6.
    */
   inactive?: number;
+  // ---- Dashboard v4 (GET /api/stats?range=…, lp_stats(p_range), 20261108000000_dashboard_v4.sql). Absent without a
+  // range or on a database before that migration (the dashboard then falls back to the fields above).
+  range?: { key: StatsRange; from: IsoDateTime; step: number; compare: boolean };
+  /** Open, split: no first check yet / on a re-check hold / Located, friend not here yet. */
+  live?: { waiting: number; pending: number; located: number };
+  attention?: { total: number; items: AttentionItem[] };
+  speed?: SpeedStat[];
+  calls?: { total: number; prevTotal: number | null; buckets: CallsBucket[] };
+  heat?: { step: number; cols: HeatCol[] };
+  recap?: {
+    reunited: number;
+    notLocated: number;
+    fastest: number | null;
+    prevReunited: number | null;
+    prevNotLocated: number | null;
+    prevFastest: number | null;
+    lastReunionAt: IsoDateTime | null;
+  };
+  /** People with activity in the last 10 minutes, per team (counts only). */
+  team?: Array<{ team: string; on: number }>;
+}
+
+export type StatsRange = '1h' | '2h' | '6h' | 'tonight' | 'event';
+export type TentCounts = { fa4: number; fa3: number; other: number };
+export interface AttentionItem {
+  id: string;
+  caseNumber: number;
+  tent: string;
+  kind: 'wait' | 'recheck' | 'located';
+  /** Logged (wait), the re-check due time (recheck) or the Located answer (located). */
+  since: IsoDateTime;
+  enroute: boolean;
+  etaAt: IsoDateTime | null;
+}
+export interface SpeedStat {
+  key: 'firstCheck' | 'located' | 'reunited';
+  target: number;
+  n: number;
+  median: number | null;
+  p90: number | null;
+  prevMedian: number | null;
+  byTent: Record<'FA 4' | 'FA 3' | 'Other', number | null>;
+  spark: Array<{ at: IsoDateTime; night: string | null; n: number; median: number | null; p90: number | null }>;
+}
+export interface CallsBucket extends TentCounts {
+  at: IsoDateTime;
+  /** 'event' only: the night (ET date of its noon). */
+  night: string | null;
+  /** The same clock bucket the night before (null for 'event'). */
+  prev: number | null;
+}
+export interface HeatCol extends TentCounts {
+  /** A bucket start; for 'event' an ET clock hour (0–23) summed over every night instead. */
+  at?: IsoDateTime;
+  hour?: number;
 }
 
 // ---------------------------------------------------------------------------------------------------

@@ -1,107 +1,154 @@
+// Dashboard v4 pure helpers (components/dashboard/dashboard-model.ts): urgency order and colours, the status bar,
+// buckets and axis labels in ET, speed badges, recap deltas.
 import { describe, expect, it } from 'vitest';
 import {
-  NO_VALUE,
-  agoPhrase,
-  barPercent,
-  closedSubline,
-  closedSublinePhrase,
-  closedTotal,
-  countParts,
-  durationParts,
-  durationPhrase,
-  formatAgo,
-  postsBusiestFirst,
+  ageSev,
+  attentionPhrase,
+  attentionRows,
+  axisLabel,
+  boundaries,
+  bucketHead,
+  delta,
+  etClock,
+  fmtM,
+  gaugeSev,
+  heatBin,
+  heatLabel,
+  isCurrent,
+  mmss,
+  nightName,
+  overSev,
+  peakIndex,
+  prevNightName,
+  sparseStep,
+  speedBadge,
+  statusParts,
+  teamTotal,
+  timerText,
 } from '@/components/dashboard/dashboard-model';
+import type { AttentionItem, CallsBucket } from '@/lib/api-types';
 
-describe('dashboard model', () => {
-  it('splits durations into big digits and a small unit, and null when unknown', () => {
-    expect(durationParts(null)).toBeNull();
-    expect(durationParts(undefined)).toBeNull();
-    expect(durationParts(Number.NaN)).toBeNull();
-    expect(durationParts(-3)).toBeNull();
-    expect(durationParts(0)).toEqual([{ value: '<1', unit: 'm' }]);
-    expect(durationParts(0.4)).toEqual([{ value: '<1', unit: 'm' }]);
-    expect(durationParts(9.4)).toEqual([{ value: '9', unit: 'm' }]);
-    expect(durationParts(24)).toEqual([{ value: '24', unit: 'm' }]);
-    expect(durationParts(60)).toEqual([{ value: '1', unit: 'h' }]);
-    expect(durationParts(95)).toEqual([
-      { value: '1', unit: 'h' },
-      { value: '35', unit: 'm' },
-    ]);
-    expect(NO_VALUE).toBe('—');
+const NOW = Date.parse('2026-11-09T03:40:00Z'); // Sun 22:40 ET
+const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
+const item = (caseNumber: number, kind: AttentionItem['kind'], minutes: number, extra: Partial<AttentionItem> = {}): AttentionItem => ({
+  id: `id-${caseNumber}`,
+  caseNumber,
+  tent: 'FA 3',
+  kind,
+  since: ago(minutes),
+  enroute: false,
+  etaAt: null,
+  ...extra,
+});
+const bucket = (at: string, fa4 = 0, fa3 = 0, other = 0, extra: Partial<CallsBucket> = {}): CallsBucket => ({ at, night: null, fa4, fa3, other, prev: null, ...extra });
+
+describe('severity: colour always comes with a glyph, and these decide which', () => {
+  it('waiting / located age: ok < 10 ≤ warn < 30 ≤ crit; a re-check is late at once, red 10 min past due', () => {
+    expect([0, 9.9, 10, 29.9, 30].map(ageSev)).toEqual(['ok', 'ok', 'warn', 'warn', 'crit']);
+    expect([0, 9.9, 10].map(overSev)).toEqual(['warn', 'warn', 'crit']);
   });
-
-  it('says durations in words for screen readers', () => {
-    expect(durationPhrase(null)).toBeNull();
-    expect(durationPhrase(0.2)).toBe('under a minute');
-    expect(durationPhrase(1)).toBe('1 minute');
-    expect(durationPhrase(24)).toBe('24 minutes');
-    expect(durationPhrase(60)).toBe('1 hour');
-    expect(durationPhrase(95)).toBe('1 hour 35 minutes');
-    expect(durationPhrase(121)).toBe('2 hours 1 minute');
+  it('a median against its target: ok ≤ target, warn ≤ 1.5 ×, crit above; null without data', () => {
+    expect(gaugeSev(10, 10)).toBe('ok');
+    expect(gaugeSev(15, 10)).toBe('warn');
+    expect(gaugeSev(15.1, 10)).toBe('crit');
+    expect(gaugeSev(null, 10)).toBeNull();
+    expect(speedBadge({ median: 10.5, target: 10 })).toEqual({ sev: 'warn', delta: '+0.5' });
+    expect(speedBadge({ median: 11.2, target: 15 })).toEqual({ sev: 'ok', delta: '−3.8' });
+    expect(speedBadge({ median: null, target: 30 })).toBeNull();
   });
+});
 
-  it('counts: digits only, null when missing (the v2.2 server half may not be deployed yet)', () => {
-    expect(countParts(6)).toEqual([{ value: '6', unit: '' }]);
-    expect(countParts(0)).toEqual([{ value: '0', unit: '' }]);
-    expect(countParts(undefined)).toBeNull();
-    expect(countParts(null)).toBeNull();
+describe('needs attention', () => {
+  it('one urgency order for the three kinds: minutes past the point each turns red', () => {
+    const rows = attentionRows(
+      [
+        item(1142, 'wait', 33.8 + 0.5 / 60), // 3.8 past red
+        item(1136, 'recheck', 15), // 5 past red
+        item(1137, 'located', 38, { enroute: true, etaAt: new Date(NOW + 90_000).toISOString() }), // 8 past red
+        item(1138, 'recheck', 6), // 4 before red
+        item(1139, 'located', 25.5), // 4.5 before red
+      ],
+      NOW,
+    );
+    expect(rows.map((r) => r.caseNumber)).toEqual([1137, 1136, 1142, 1138, 1139]);
+    expect(rows.map((r) => r.sev)).toEqual(['crit', 'crit', 'crit', 'warn', 'warn']);
+    expect(rows.map(timerText)).toEqual(['38:00', '+15:00', '33:48', '+6:00', '25:30']);
+    expect(rows[0]!.eta).toBe(2);
+    expect(rows[4]!.eta).toBeNull();
   });
-
-  it('Closed = Not located + Reunited + Discharged + Cancelled', () => {
-    expect(closedTotal({ notInMedical: 2, reunited: 2, discharged: 1, cancelled: 1 })).toBe(6);
-    expect(closedTotal({ notInMedical: 0, reunited: 0, discharged: 0, cancelled: 0 })).toBe(0);
+  it('ties keep the lower case number first; the spoken row says everything', () => {
+    const rows = attentionRows([item(1002, 'wait', 12), item(1001, 'wait', 12)], NOW);
+    expect(rows.map((r) => r.caseNumber)).toEqual([1001, 1002]);
+    expect(attentionPhrase(rows[0]!)).toBe('Request 1001 at FA 3, waiting 12 minutes for a first check');
+    const loc = attentionRows([item(1003, 'located', 4, { enroute: true, etaAt: new Date(NOW + 4 * 60_000).toISOString() })], NOW)[0]!;
+    expect(attentionPhrase(loc)).toBe('Request 1003 at FA 3, located 4 minutes ago, friend not here yet, on the way, about 4 minutes out');
   });
-
-  it('builds the Reunited tile subline only when discharged or cancelled is non-zero', () => {
-    expect(closedSubline({ discharged: 1, cancelled: 1 })).toBe('+1 discharged · 1 cancelled');
-    expect(closedSubline({ discharged: 0, cancelled: 2 })).toBe('+2 cancelled');
-    expect(closedSubline({ discharged: 3, cancelled: 0 })).toBe('+3 discharged');
-    expect(closedSubline({ discharged: 0, cancelled: 0 })).toBeNull();
-    expect(closedSublinePhrase({ discharged: 1, cancelled: 1 })).toBe('plus 1 discharged and 1 cancelled');
-    expect(closedSublinePhrase({ discharged: 0, cancelled: 0 })).toBeNull();
+  it('timers: m:ss, h:mm:ss from an hour, never negative', () => {
+    expect(mmss(0)).toBe('0:00');
+    expect(mmss(3 + 11 / 60)).toBe('3:11');
+    expect(mmss(75.5)).toBe('1:15:30');
+    expect(mmss(-2)).toBe('0:00');
   });
+});
 
-  it('formats last-updated times like the log: now, 2m, 1h, 3d', () => {
-    const now = Date.parse('2026-11-07T04:10:00Z');
-    const ago = (min: number) => new Date(now - min * 60_000).toISOString();
-    expect(formatAgo(ago(0), now)).toBe('now');
-    expect(formatAgo(ago(0.9), now)).toBe('now');
-    expect(formatAgo(ago(2), now)).toBe('2m');
-    expect(formatAgo(ago(59), now)).toBe('59m');
-    expect(formatAgo(ago(60), now)).toBe('1h');
-    expect(formatAgo(ago(125), now)).toBe('2h');
-    expect(formatAgo(ago(23 * 60 + 59), now)).toBe('23h');
-    expect(formatAgo(ago(24 * 60), now)).toBe('1d');
-    expect(formatAgo(ago(3 * 24 * 60 + 5), now)).toBe('3d');
-    // A clock a little ahead of the server never shows a negative time.
-    expect(formatAgo(new Date(now + 30_000).toISOString(), now)).toBe('now');
-    expect(agoPhrase(ago(0), now)).toBe('just now');
-    expect(agoPhrase(ago(1), now)).toBe('1 minute ago');
-    expect(agoPhrase(ago(2), now)).toBe('2 minutes ago');
-    expect(agoPhrase(ago(60), now)).toBe('1 hour ago');
-    expect(agoPhrase(ago(3 * 24 * 60), now)).toBe('3 days ago');
+describe('status bar', () => {
+  it('Waiting / Pending / Located from v4 live counts, or Waiting + In medical from an older server', () => {
+    expect(statusParts({ open: { waiting: 10, inMedical: 5 }, live: { waiting: 6, pending: 4, located: 5 } }).map((p) => p.n)).toEqual([6, 4, 5]);
+    expect(statusParts({ open: { waiting: 10, inMedical: 5 } }).map((p) => p.n)).toEqual([10, 0, 5]);
   });
-
-  it('sizes bars against the busiest post on a full-width track', () => {
-    expect(barPercent(4, 4)).toBe(100);
-    expect(barPercent(2, 4)).toBe(50);
-    expect(barPercent(1, 3)).toBe(33.3);
-    expect(barPercent(0, 4)).toBe(0);
-    expect(barPercent(1, 0)).toBe(0);
-    expect(barPercent(5, 4)).toBe(100);
+  it('boundary values: 0, each running total, the whole; one too close to the last is dropped', () => {
+    expect(boundaries(statusParts({ open: { waiting: 0, inMedical: 0 }, live: { waiting: 6, pending: 4, located: 5 } }))).toEqual([0, 6, 10, 15]);
+    expect(boundaries(statusParts({ open: { waiting: 0, inMedical: 0 }, live: { waiting: 30, pending: 1, located: 0 } }))).toEqual([0, 31]);
+    expect(boundaries(statusParts({ open: { waiting: 0, inMedical: 0 }, live: { waiting: 0, pending: 0, located: 0 } }))).toEqual([0]);
   });
+});
 
-  it('sorts posts busiest first, keeping the server order for ties', () => {
-    const posts = [
-      { id: 'FA 3', count: 3 },
-      { id: 'FA 4', count: 3 },
-      { id: 'Command', count: 1 },
-      { id: 'Base', count: 0 },
-      { id: 'Other · Gate 9', count: 4 },
-    ];
-    expect(postsBusiestFirst(posts).map((p) => p.id)).toEqual(['Other · Gate 9', 'FA 3', 'FA 4', 'Command', 'Base']);
-    // The input is left alone.
-    expect(posts[0]?.id).toBe('FA 3');
+describe('calls buckets and labels (ET)', () => {
+  it('the peak is the first busiest bucket; empty ranges have none', () => {
+    expect(peakIndex([bucket('a', 1), bucket('b', 2, 1), bucket('c', 3)])).toBe(1);
+    expect(peakIndex([bucket('a'), bucket('b')])).toBe(-1);
+  });
+  it('at most two gridlines; heat bins 0–5 against the busiest cell', () => {
+    expect([1, 2, 3, 4, 6, 8, 9, 40].map(sparseStep)).toEqual([1, 1, 2, 2, 4, 4, 5, 20]);
+    expect([0, 1, 5, 6, 10].map((v) => heatBin(v, 10))).toEqual([0, 1, 3, 3, 5]);
+  });
+  it('the bucket still filling is the one that ends after now', () => {
+    expect(isCurrent({ at: ago(10) }, 15, NOW)).toBe(true);
+    expect(isCurrent({ at: ago(15) }, 15, NOW)).toBe(false);
+  });
+  it('clock and labels in America/New_York, whatever the device zone', () => {
+    expect(etClock('2026-11-09T03:15:00Z')).toEqual({ h: 22, m: 15, wd: 'Sun' });
+    const b = bucket('2026-11-09T03:00:00Z');
+    expect(axisLabel('tonight', b, 0, [b], false)).toBe('10p');
+    expect(axisLabel('tonight', b, 0, [b], true)).toBeNull(); // every 3rd hour on a phone
+    expect(axisLabel('2h', b, 0, [b], false)).toBe('10:00');
+    expect(axisLabel('1h', bucket('2026-11-09T03:30:00Z'), 0, [b], false)).toBe('10:30');
+    expect(axisLabel('6h', bucket('2026-11-09T02:00:00Z'), 0, [b], false)).toBeNull();
+    expect(bucketHead('tonight', bucket('2026-11-09T03:15:00Z'), 15)).toBe('10:15–10:30 PM');
+    expect(heatLabel({ fa4: 0, fa3: 0, other: 0, hour: 0 }, 60)).toBe('12a');
+    expect(heatLabel({ fa4: 0, fa3: 0, other: 0, at: '2026-11-09T03:15:00Z' }, 15)).toBe('10:15');
+  });
+  it('event: a label at the first bucket of each night, named by its weekday; the night before a range', () => {
+    const bs = [bucket('2026-11-07T18:00:00Z', 0, 0, 0, { night: '2026-11-07' }), bucket('2026-11-07T19:00:00Z', 0, 0, 0, { night: '2026-11-07' }), bucket('2026-11-08T18:00:00Z', 0, 0, 0, { night: '2026-11-08' })];
+    expect(bs.map((b, i) => axisLabel('event', b, i, bs, false))).toEqual(['Sat', null, 'Sun']);
+    expect(nightName('2026-11-06')).toBe('Fri');
+    expect(prevNightName('2026-11-08T17:00:00Z')).toBe('Sat'); // Tonight (Sun from noon) → Saturday
+    expect(prevNightName('2026-11-09T05:30:00Z')).toBe('Sat'); // 00:30 Mon is still Sunday night
+  });
+});
+
+describe('recap and team', () => {
+  it('↑ / ↓ against the night before; nothing when level or unknown', () => {
+    expect(delta(32, 21)).toEqual({ glyph: '↑', text: '11', d: 11 });
+    expect(delta(6.5, 4.9, 1)?.text).toBe('1.6');
+    expect(delta(4, 4)).toBeNull();
+    expect(delta(4, null)).toBeNull();
+    expect(fmtM(10.46)).toBe('10.5');
+    expect(fmtM(123.4)).toBe('123');
+    expect(fmtM(null)).toBe('—');
+  });
+  it('who is on: the sum over teams', () => {
+    expect(teamTotal([{ on: 6 }, { on: 2 }, { on: 1 }, { on: 0 }])).toBe(9);
+    expect(teamTotal(undefined)).toBe(0);
   });
 });

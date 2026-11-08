@@ -5,6 +5,7 @@
 //   - When the connection comes back (the phone's 'online' event, or the store's connection back to 'live') and
 //     the last fetch failed, it fetches at once, so the dashboard recovers with the lists instead of at the next
 //     poll up to 15 s later. Like the store, 'online' forgets the network failures counted while offline.
+//   - (Dashboard v4) While the page is hidden no poll goes out; it fetches at once when the page shows again.
 // A plain module, not a hook, so the unit tests drive it with fake timers.
 import type { Stats } from '../api-types';
 import { CONNECTION_FAILURES } from './constants';
@@ -29,6 +30,8 @@ export interface StatsPollerOptions {
   /** Calls back when the connection comes back (subscribeReconnect below). */
   subscribeReconnect?: (onReconnect: () => void) => () => void;
   pollMs: number;
+  /** (v4) The page's visibility (lib/client/live-status.ts readVisibility / subscribeVisibility). */
+  visibility?: { hidden(): boolean; subscribe(onChange: () => void): () => void };
 }
 
 export interface StatsPoller {
@@ -45,7 +48,7 @@ function failureKind(error: unknown): 'network' | 'http' | null {
 }
 
 /** Starts polling at once. */
-export function startStatsPoller({ fetchStats, onChange, subscribeReconnect, pollMs }: StatsPollerOptions): StatsPoller {
+export function startStatsPoller({ fetchStats, onChange, subscribeReconnect, pollMs, visibility }: StatsPollerOptions): StatsPoller {
   let live = true;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let inFlight: Promise<void> | null = null;
@@ -93,7 +96,7 @@ export function startStatsPoller({ fetchStats, onChange, subscribeReconnect, pol
   };
   const tick = async () => {
     await fetchOnce();
-    if (live && !timer) timer = setTimeout(next, pollMs);
+    if (live && !timer && !visibility?.hidden()) timer = setTimeout(next, pollMs);
   };
   function next() {
     timer = undefined;
@@ -116,12 +119,22 @@ export function startStatsPoller({ fetchStats, onChange, subscribeReconnect, pol
   };
 
   const offReconnect = subscribeReconnect?.(() => void reconnect()) ?? (() => {});
+  // Hidden: the pending poll is dropped; shown again: one fetch at once, then the usual rhythm.
+  const offVisibility =
+    visibility?.subscribe(() => {
+      if (!live) return;
+      if (visibility.hidden()) {
+        if (timer) clearTimeout(timer);
+        timer = undefined;
+      } else if (!timer && !inFlight) void tick();
+    }) ?? (() => {});
   void tick();
   return {
     refresh: now,
     stop() {
       live = false;
       offReconnect();
+      offVisibility();
       if (timer) clearTimeout(timer);
       timer = undefined;
     },

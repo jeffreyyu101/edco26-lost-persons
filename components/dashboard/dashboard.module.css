@@ -1,6 +1,5 @@
-/* Dashboard, ported from design/screens/polish-v7.html (Dash, Tiles, Posts, Recent, Perf, Laptop). Secondary
-   text is gray-11 where the mockup has gray-9 / gray-10, for 4.5:1 in both themes (DECISIONS.md, accessibility
-   pass); the hierarchy comes from size and weight instead. */
+/* Dashboard v4, ported from design/screens/dashboard-v4.html (desk inside the inset shell, phone page). Radix gray /
+   colour tokens; the few of its own are --dv-*, stepped for dark mode below. */
 
 .app,
 .app *,
@@ -10,26 +9,72 @@
 }
 
 .app {
+  --dv-card: var(--color-panel-solid);
+  --dv-card-ring: var(--gray-a4);
+  --dv-grid: var(--gray-a3);
+  --dv-bar: #8d8d8d;
+  --dv-seg-on: #ffffff;
+  --dv-tip-bg: #ffffff;
+  --dv-tip-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+  --dv-warn-ink: var(--amber-12);
+  /* Tents (categorical, all pairs checked in both modes): Radix indigo 9, orange 10, cyan 10. */
+  --dv-tent-fa4: #3e63dd;
+  --dv-tent-fa3: #ef5f00;
+  --dv-tent-other: #0797b9;
+  /* Hour × tent: one hue as an opacity ramp; empty cells stay gray. */
+  --dv-heat: #c2298a;
+  --dv-heat-0: var(--gray-a3);
+  --dv-heat-1: color-mix(in srgb, var(--dv-heat) 18%, transparent);
+  --dv-heat-2: color-mix(in srgb, var(--dv-heat) 34%, transparent);
+  --dv-heat-3: color-mix(in srgb, var(--dv-heat) 56%, transparent);
+  --dv-heat-4: color-mix(in srgb, var(--dv-heat) 78%, transparent);
+  --dv-heat-5: var(--dv-heat);
+  --dv-heat-ink-0: var(--gray-12);
+  --dv-heat-ink-1: var(--gray-12);
+  --dv-heat-ink-2: var(--gray-12);
+  --dv-heat-ink-3: var(--gray-12);
+  --dv-heat-ink-4: #ffffff;
+  --dv-heat-ink-5: #ffffff;
   min-height: 100vh;
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
   background: var(--color-background);
+  color: var(--gray-12);
+}
+:global(.dark) .app {
+  --dv-card-ring: var(--gray-a3);
+  --dv-bar: #959595;
+  --dv-seg-on: var(--gray-5);
+  --dv-tip-bg: #222222;
+  --dv-tip-shadow: 0 8px 24px rgb(0 0 0 / 0.5);
+  --dv-warn-ink: var(--amber-11);
+  --dv-heat: #d6409f;
+  --dv-heat-ink-3: #ffffff;
+}
+.app[data-desk] {
+  min-height: 0;
+  flex: 1;
 }
 
-/* ---- large title ------------------------------------------------------------------------------------ */
+.sp {
+  flex: 1;
+}
+.sg {
+  flex: none;
+}
+.num {
+  font-variant-numeric: tabular-nums;
+}
 
+/* ---- phone title ------------------------------------------------------------------------------------- */
 .nav {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 0 6px;
-  width: 100%;
-  max-width: 1156px;
-  margin-inline: auto;
-  padding: 22px 16px 14px;
-  padding-top: max(22px, calc(env(safe-area-inset-top) + 8px));
-  padding-left: max(16px, env(safe-area-inset-left));
+  gap: 6px;
+  padding: 6px 16px 10px 8px;
+  padding-top: max(10px, calc(env(safe-area-inset-top) + 6px));
+  padding-left: max(8px, env(safe-area-inset-left));
   padding-right: max(16px, env(safe-area-inset-right));
 }
 .back {
@@ -37,7 +82,7 @@
   flex: none;
   display: grid;
   place-items: center;
-  width: 24px;
+  width: 30px;
   height: 34px;
   padding: 0;
   border: 0;
@@ -47,11 +92,10 @@
   border-radius: var(--radius-2);
   -webkit-tap-highlight-color: transparent;
 }
-/* 44 × 44 tap target without moving the chevron. */
 .back::before {
   content: '';
   position: absolute;
-  inset: -5px -10px;
+  inset: -5px -7px;
 }
 .back:focus-visible {
   outline: 2px solid var(--focus-8);
@@ -59,588 +103,985 @@
 }
 .title {
   margin: 0;
-  min-width: 0;
   font-size: 28px;
   line-height: 34px;
   font-weight: 700;
   letter-spacing: -0.022em;
-  color: var(--gray-12);
 }
-/* The line under the title (components/ui/LiveIndicator.tsx) on its own 32 px row, lined up with the title's
-   first letter (the Back chevron and the gap before the title are 30 px). */
-.live {
-  flex-basis: 100%;
-  margin: -2px 0 -4px;
-  padding-left: 30px;
-}
-
-/* The Reconnecting / Offline banner (ConnectionBanner) under the header, its text in line with the tiles. */
-.banner {
-  width: 100%;
-  max-width: 1156px;
-  margin-inline: auto;
-  padding-left: max(4px, calc(env(safe-area-inset-left) - 12px));
-  padding-right: max(4px, calc(env(safe-area-inset-right) - 12px));
-}
-
-.body {
-  flex: 1;
+.pctl {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   display: flex;
-  flex-direction: column;
-  width: 100%;
-  max-width: 1156px;
-  margin-inline: auto;
-  padding: 2px 16px 28px;
-  padding-left: max(16px, env(safe-area-inset-left));
-  padding-right: max(16px, env(safe-area-inset-right));
-  padding-bottom: max(28px, calc(env(safe-area-inset-bottom) + 16px));
+  padding: 8px 16px;
+  background: var(--color-background);
 }
-
-/* Reset for every tappable tile and row (before the classes that give them a background). */
-.tap {
-  border: 0;
-  background: none;
-  padding: 0;
-  margin: 0;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  width: 100%;
-  -webkit-tap-highlight-color: transparent;
-}
-.tap:focus-visible {
-  outline: 2px solid var(--focus-8);
-  outline-offset: 2px;
-  border-radius: var(--radius-2);
-}
-
-.sp {
+.pctl .seg {
   flex: 1;
 }
-
-/* ---- tiles: filled, borderless, 12 radius, 8 gutter ----------------------------------------------------- */
-
-.tiles {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-.tile {
-  min-width: 0;
-  border-radius: 12px;
-  background: var(--gray-a3);
-  padding: 12px 12px 13px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 10px;
-}
-button.tile:active {
-  background: var(--gray-a4);
-}
-.tile.tap:focus-visible {
-  border-radius: 12px;
-}
-.lb {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  min-width: 0;
-  font-size: 13px;
-  line-height: 18px;
-  font-weight: 500;
-  color: var(--gray-11);
-}
-/* The glyph sits on the first line's centre; a long label wraps instead of overflowing. */
-.lb > svg {
-  margin-top: 2px;
-}
-.lb > span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  text-wrap: balance;
-}
-.vw {
-  display: block;
-}
-.v {
-  display: block;
-  font-size: 22px;
-  line-height: 26px;
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  color: var(--gray-12);
-  font-variant-numeric: tabular-nums;
-}
-.big {
-  min-height: 104px;
-}
-.big .v {
-  font-size: 34px;
-  line-height: 38px;
-  letter-spacing: -0.025em;
-}
-.cl .v {
-  color: var(--gray-11);
-}
-.sub {
-  display: block;
-  margin-top: 4px;
-  font-size: 12px;
-  line-height: 16px;
-  color: var(--gray-11);
-  overflow-wrap: break-word;
-}
-.split {
-  display: flex;
-  gap: 2px;
-  height: 4px;
-  margin-top: 10px;
-}
-.split > span {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
-}
-.split > .splitEmpty {
+.pctl .seg :global(.rt-SegmentedControlItem) {
   flex: 1;
-  background: var(--gray-a4);
 }
-/* Invisible twins that keep neighbouring tiles' numbers on one line. */
-.ghost {
-  visibility: hidden;
+.banner:empty {
+  display: none;
 }
 
-/* (F3) Friends en route: one slim tile across the grid, label left, count right. */
-.tile.tileWide {
-  grid-column: 1 / -1;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 48px;
-  padding: 10px 14px 10px 12px;
-}
-.tileWide .lb {
-  align-items: center;
-}
-.tileWide .lb > svg {
-  margin-top: 0;
-}
-/* A slim tile's label is one line, never cut: the tile is the column's full width (or half of six columns). */
-.tileWide .lb > span {
-  white-space: nowrap;
-}
-.enrGlyph {
+/* ---- the desk top bar's slot (portalled) --------------------------------------------------------------- */
+.vsep {
+  width: 1px;
+  height: 16px;
+  background: var(--gray-a5);
+  margin: 0 6px 0 12px;
   flex: none;
-  color: var(--teal-11);
 }
 
-/* ---- section headers ------------------------------------------------------------------------------------ */
-
-.sh {
-  display: flex;
-  align-items: center;
-  margin: 30px 0 10px;
-  font-size: 17px;
-  line-height: 22px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+/* ---- segmented controls: Radix SegmentedControl size 1, radius full ------------------------------------- */
+.seg {
+  --segmented-control-indicator-background-color: var(--dv-seg-on, var(--color-panel-solid));
+  height: 28px;
+  background: var(--gray-a3);
+}
+.seg :global(.rt-SegmentedControlItem) {
+  font-weight: 500;
+  font-size: 12px;
+  padding: 0;
+}
+.seg :global(.rt-SegmentedControlItemLabel) {
+  padding: 0 10px;
+  color: var(--gray-11);
+}
+.seg :global(.rt-SegmentedControlItemSeparator) {
+  display: none;
+}
+.seg :global(.rt-SegmentedControlItem[data-state='on'] .rt-SegmentedControlItemLabel) {
   color: var(--gray-12);
 }
-/* The header is the link (Mercury): 44 px tall without moving the layout. */
-.shLink {
+.segSm {
+  height: 26px;
+}
+.segSm :global(.rt-SegmentedControlItemLabel) {
+  padding: 0 8px;
+}
+.phone .segSm :global(.rt-SegmentedControlItemLabel) {
+  padding: 0 6px;
+}
+
+/* ---- who's on ---------------------------------------------------------------------------------------- */
+.who {
+  all: unset;
+  cursor: pointer;
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  min-height: 44px;
-  margin: -11px 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  letter-spacing: inherit;
-  color: inherit;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.shLink svg {
-  color: var(--gray-11);
-}
-.shLink:focus-visible {
-  outline: 2px solid var(--focus-8);
-  outline-offset: 2px;
-  border-radius: var(--radius-2);
-}
-.recent .sh {
-  margin-bottom: 11px;
-}
-
-/* ---- open by post ---------------------------------------------------------------------------------------- */
-
-/* Each row is a 44 px button; the 7 px paddings make the mockup's 14 px between posts. */
-.posts {
-  display: flex;
-  flex-direction: column;
-  margin-top: -7px;
-}
-.post {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 28px;
-  column-gap: 10px;
-  row-gap: 6px;
-  align-items: center;
-  min-height: 44px;
-  padding: 7px 0;
-}
-.pl {
-  grid-column: 1 / -1;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px 0 6px;
+  border-radius: 999px;
   font-size: 13px;
-  line-height: 18px;
-  color: var(--gray-11);
-  overflow-wrap: anywhere;
-}
-.trk {
-  display: block;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--gray-a3);
-  overflow: hidden;
-}
-.trk > span {
-  display: block;
-  height: 100%;
-  border-radius: 3px;
-  background: var(--gray-12);
-}
-.pc {
-  font-size: 13px;
-  line-height: 18px;
   font-weight: 500;
-  text-align: right;
+  color: var(--gray-11);
+  white-space: nowrap;
+}
+.who:hover,
+.who[aria-expanded='true'] {
+  background: var(--gray-3);
   color: var(--gray-12);
+}
+.who:focus-visible,
+.sp3:focus-visible,
+.more:focus-visible,
+.ar:focus-visible,
+.open:focus-visible,
+.slg button:focus-visible,
+.tbl:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 1px;
+}
+.who b {
+  color: var(--gray-12);
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.post[data-zero] .pc {
+.ld {
+  position: relative;
+  width: 7px;
+  height: 7px;
+  margin: 0 1px 0 2px;
+  border-radius: 50%;
+  background: var(--green-9);
+  flex: none;
+}
+.ld::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1.5px solid var(--green-9);
+  opacity: 0;
+  animation: pulse 2s ease-out infinite;
+}
+@keyframes pulse {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ld::after {
+    animation: none;
+  }
+}
+.dots {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+}
+.tdot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--green-9);
+  flex: none;
+  box-shadow: 0 0 0 2px var(--color-background);
+}
+.dots .tdot + .tdot {
+  margin-left: -4px;
+}
+.off {
+  background: var(--color-background);
+  box-shadow:
+    inset 0 0 0 1.5px var(--gray-9),
+    0 0 0 2px var(--color-background);
+}
+.who:hover .tdot,
+.who[aria-expanded='true'] .tdot {
+  box-shadow: 0 0 0 2px var(--gray-3);
+}
+.who:hover .off,
+.who[aria-expanded='true'] .off {
+  background: var(--gray-3);
+  box-shadow:
+    inset 0 0 0 1.5px var(--gray-9),
+    0 0 0 2px var(--gray-3);
+}
+
+/* ---- hover cards (team, speed details): Radix HoverCard + DataList ------------------------------------------- */
+.pop {
+  min-width: 200px;
+  font-size: 12.5px;
+}
+.tl {
+  display: grid;
+  row-gap: 5px;
+}
+.tlr {
+  display: grid;
+  grid-template-columns: 8px auto 1fr;
+  column-gap: 8px;
+  align-items: center;
+  white-space: nowrap;
+}
+.tl .tdot {
+  width: 8px;
+  height: 8px;
+  box-shadow: none;
+}
+.tl .off {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--gray-9);
+}
+.tlr b {
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  min-width: 14px;
+}
+.tlr span {
+  color: var(--gray-11);
+}
+.offv {
+  color: var(--gray-9);
+}
+.ph {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ph span {
   font-weight: 400;
   color: var(--gray-11);
 }
-
-/* ---- recently updated: the log's row (number, name, status, updated) ---------------------------------- */
-
-.rlist {
-  margin: 0 -16px;
+.dl {
+  --data-list-label-width: auto;
+  column-gap: 28px;
+  row-gap: 6px;
 }
-.rrow {
-  position: relative;
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto 34px;
-  column-gap: 5px;
-  align-items: center;
-  min-height: 48px;
-  padding: 0 16px;
-}
-/* Hairline inset to the name column (Linear). */
-.rrow::after {
-  content: '';
-  position: absolute;
-  left: 57px;
-  right: 0;
-  bottom: 0;
-  border-bottom: 1px solid var(--gray-a3);
-  pointer-events: none;
-}
-.rrow:active {
-  background: var(--gray-a2);
-}
-.num {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--gray-11);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-.nm {
-  min-width: 0;
-  font-size: 15px;
-  color: var(--gray-12);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.nm[data-empty] {
-  color: var(--gray-11);
-}
-.st {
+.dl :global(.rt-DataListLabel) {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+}
+.dl :global(.rt-DataListValue) {
+  justify-content: flex-end;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.spk {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--gray-a3);
+}
+.spk svg {
+  display: block;
+  overflow: visible;
+}
+.tw {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex: none;
+}
+
+/* ---- cards ------------------------------------------------------------------------------------------- */
+.dash {
+  color: var(--gray-12);
+}
+.card {
+  background: var(--dv-card);
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px var(--dv-card-ring);
+  padding: 18px 20px 20px;
+  min-width: 0;
+  position: relative;
+}
+.zh {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 28px;
+  margin-bottom: 10px;
+}
+.zt {
+  margin: 0;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
   white-space: nowrap;
+}
+
+/* status: Open N · Tremor CategoryBar · glyph legend */
+.status {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 14px 22px;
+}
+.open {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  white-space: nowrap;
+  border-radius: 6px;
+}
+.open span {
+  font-size: 14px;
+  font-weight: 500;
   color: var(--gray-11);
 }
-.st[data-tone='blue'] {
-  color: var(--blue-11);
+.open b {
+  font-size: 30px;
+  line-height: 34px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
 }
-.st[data-tone='green'] {
-  color: var(--green-11);
+.cbar {
+  flex: 1;
+  min-width: 60px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: -14px;
 }
-/* (F5) The stages: amber Needs info, violet Not found yet, teal Friend en route. */
-.st[data-tone='amber'] {
-  color: var(--amber-11);
-}
-.st[data-tone='violet'] {
-  color: var(--violet-11);
-}
-.st[data-tone='teal'] {
-  color: var(--teal-11);
-}
-.up {
-  font-size: 13px;
-  text-align: right;
-  white-space: nowrap;
+.cbl {
+  position: relative;
+  height: 14px;
+  font-size: 11.5px;
+  line-height: 14px;
+  font-weight: 500;
   color: var(--gray-11);
   font-variant-numeric: tabular-nums;
 }
-.rrow[data-closed] .nm {
+.cbl span {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+}
+.cbl span:first-child {
+  transform: none;
+}
+.cbl span:last-child {
+  transform: translateX(-100%);
+}
+.sbar {
+  display: flex;
+  width: 100%;
+  height: 8px;
+  gap: 2px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--gray-a3);
+  animation: cb-in 0.3s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+.sbar i {
+  display: block;
+  height: 100%;
+  cursor: pointer;
+  transition: filter 0.12s;
+}
+.sbar i:hover {
+  filter: brightness(1.15);
+}
+@keyframes cb-in {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sbar {
+    animation: none;
+  }
+}
+.slg {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  white-space: nowrap;
+}
+.slg button {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
   color: var(--gray-11);
+  border-radius: 6px;
+}
+.slg button:hover {
+  color: var(--gray-12);
+}
+.slg b {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--gray-12);
+  font-variant-numeric: tabular-nums;
+  margin-left: 1px;
 }
 
-/* ---- performance: rows, big digits and a small unit (Jobber, Mercury) ---------------------------------- */
-
-.pr {
-  position: relative;
+/* needs attention: BarList rows · kind glyph · case · tent · walk + ETA · timer pill */
+.att {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 -10px;
+}
+.ar {
+  all: unset;
+  cursor: pointer;
+  box-sizing: border-box;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 16px auto auto minmax(0, 1fr) auto minmax(104px, auto);
+  align-items: center;
+  column-gap: 12px;
+  height: 64px;
+  padding: 0 10px;
+  border-radius: 8px;
+  transition: background-color 0.12s;
+}
+.ar:hover {
+  background: var(--gray-a2);
+}
+.case {
+  font-size: 16px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.tchip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: var(--gray-a3);
+  color: var(--gray-11);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.eta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tmr {
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px 0 9px;
+  border-radius: 999px;
+  font-size: 15.5px;
+  line-height: 1;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  background: var(--gray-a2);
+  box-shadow: inset 0 0 0 1px var(--gray-a6);
+  color: var(--gray-12);
+}
+.tmr[data-sev='warn'] {
+  background: var(--amber-2);
+  box-shadow: inset 0 0 0 1px var(--amber-7);
+  color: var(--dv-warn-ink);
+}
+.tmr[data-sev='crit'] {
+  background: var(--red-2);
+  box-shadow: inset 0 0 0 1px var(--red-7);
+  color: var(--red-11);
+}
+.more {
+  all: unset;
+  cursor: pointer;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 26px;
+  margin: 10px 0 0 -8px;
+  padding: 0 6px 0 8px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--gray-11);
+}
+.more:hover {
+  background: var(--gray-a3);
+  color: var(--gray-12);
+}
+.clear {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 48px;
-  padding: 0;
+  height: 60px;
 }
-.pr + .pr::before {
+
+/* speed: shadcn SectionCards — gradient card, big medians, outline trend badge */
+.zSpd {
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--gray-12) 5%, var(--dv-card)), var(--dv-card));
+}
+.spd {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0 -8px;
+}
+.sp3 {
+  all: unset;
+  cursor: pointer;
+  box-sizing: border-box;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: 'l b' 'n n';
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 6px;
+  padding: 10px 12px 12px;
+  border-radius: 10px;
+  min-width: 0;
+}
+.sp3 + .sp3::before {
   content: '';
   position: absolute;
   left: 0;
-  right: 0;
-  top: 0;
-  border-top: 1px solid var(--gray-a3);
-  pointer-events: none;
+  top: 10px;
+  bottom: 10px;
+  width: 1px;
+  background: var(--gray-a3);
 }
-button.pr:active {
+.sp3:hover,
+.sp3[aria-expanded='true'] {
   background: var(--gray-a2);
 }
-.ki {
-  flex: none;
-  color: var(--gray-9);
-}
-.kv {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-}
-/* Label and value never move or shrink; only the context gives way. Longest wait's context ends in the post,
-   which for Other is free text up to 80 characters, so it ellipsizes after the request number. */
-.k {
-  flex: none;
-  font-size: 15px;
-  line-height: 20px;
-  color: var(--gray-11);
-  white-space: nowrap;
-}
-.m {
-  flex: 0 1 auto;
-  min-width: 0;
-  margin-left: 14px;
-  font-size: 12px;
+.l {
+  grid-area: l;
+  font-size: 13px;
   color: var(--gray-11);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.pv {
-  flex: none;
-  margin-left: 8px;
-  white-space: nowrap;
-}
-.val {
-  font-size: 17px;
-  line-height: 22px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--gray-12);
-  font-variant-numeric: tabular-nums;
-}
-.val.none {
-  font-weight: 500;
-  color: var(--gray-11);
-}
-.u {
-  margin-left: 1px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--gray-11);
-}
-
-/* ---- loading --------------------------------------------------------------------------------------------- */
-
-.loading {
+.v {
+  grid-area: n;
   display: flex;
-  flex-direction: column;
-  gap: 30px;
-}
-.loadingRows {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-.loadingPost {
-  display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 8px;
 }
-
-/* ---- the desk (from 768 px): inside the shell's main column (design/screens/v7-laptop.png) ----------------
-   The shell's top bar is the title here. The layout follows the main column (the dashboard is an inline-size
-   container), so it narrows when a request docks beside it:
-     tiles        3 × 2 (Open, Waiting, In medical over Closed, Not in medical, Reunited); six in one row from
-                  1024 px when the column has 900 px. Each tile is a three-row subgrid (label, value, foot:
-                  Open's split bar, Reunited's "+n discharged"), so the values share one line across a row
-                  whatever wraps above them or sits below them.
-     posts/recent side by side from a 680 px column, else stacked.
-     performance  two columns from a 680 px column, else one. */
-
-@media (min-width: 768px) {
-  .app {
-    container-type: inline-size;
-  }
-  .body {
-    max-width: 1440px;
-    margin-inline: 0;
-    padding: 20px max(24px, env(safe-area-inset-right)) max(32px, calc(env(safe-area-inset-bottom) + 16px)) 24px;
-  }
-
-  .tiles {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    row-gap: 0;
-    column-gap: 8px;
-  }
-  .tile {
-    display: grid;
-    grid-row: span 3;
-    grid-template-rows: subgrid;
-    /* Explicit: a <button> grid would size an auto column to its content (the split bar's 0). */
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0;
-    padding: 12px 14px 14px;
-  }
-  .vw {
-    display: contents;
-  }
-  .lb {
-    align-self: start;
-    margin-bottom: 14px;
-  }
-  .v {
-    align-self: end;
-  }
-  .split,
-  .sub {
-    align-self: start;
-  }
-  .big {
-    min-height: 0;
-  }
-
-  /* Open, Waiting, In medical, then the closed ones (the second row of the 3 × 2). */
-  .tileClosed {
-    order: 1;
-  }
-  .tileLate {
-    order: 2;
-  }
-  .tileClosed,
-  .tileLate {
-    margin-top: 8px;
-  }
-  .tileClosed .v {
-    font-size: 22px;
-    line-height: 26px;
-    letter-spacing: -0.015em;
-  }
-  .ghost {
-    display: none;
-  }
-  /* (F3) After the closed tiles, across every column, its own single row. */
-  .tile.tileWide {
-    display: flex;
-    grid-row: auto;
-    order: 3;
-    margin-top: 8px;
-  }
-  .tileWide .lb {
-    margin-bottom: 0;
-    align-self: center;
-  }
-  .tileWide .v {
-    align-self: center;
-  }
-
-  .loading .tiles {
-    row-gap: 8px;
-  }
-
-  /* A pointer shows what opens something. */
-  @media (hover: hover) {
-    button.tile:hover {
-      background: var(--gray-a4);
-    }
-    .rrow:hover,
-    button.pr:hover {
-      background: var(--gray-a2);
-    }
-    .post:hover .trk {
-      background: var(--gray-a4);
-    }
-  }
-
-  @container (min-width: 680px) {
-    .grid2 {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
-      column-gap: 40px;
-      align-items: start;
-    }
-    .prows {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      column-gap: 40px;
-    }
-    /* Both columns open with a hairline (polish-v7.html .lap .perf .pr). */
-    .pr::before,
-    .pr + .pr::before {
-      content: '';
-      position: absolute;
-      left: 0;
-      right: 0;
-      top: 0;
-      border-top: 1px solid var(--gray-a3);
-      pointer-events: none;
-    }
-  }
+.n {
+  font-size: 36px;
+  line-height: 42px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.n small {
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--gray-11);
+  margin-left: 2px;
+  letter-spacing: 0;
+}
+.tb {
+  grid-area: b;
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 6px 0 5px;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--gray-a6);
+  font-size: 11.5px;
+  line-height: 1;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--gray-12);
+  white-space: nowrap;
+}
+.tb[data-sev='ok'] svg {
+  color: var(--green-11);
+}
+.tb[data-sev='warn'] svg {
+  color: var(--amber-11);
+}
+.tb[data-sev='crit'] svg {
+  color: var(--red-11);
 }
 
-@media (min-width: 1024px) {
-  @container (min-width: 900px) {
-    .tiles {
-      grid-template-columns: 1.3fr repeat(5, minmax(0, 1fr));
-    }
-    .tileClosed,
-    .tileLate {
-      margin-top: 0;
-    }
-    /* (F6) Friends en route and Closed · inactive share one row: three columns each. */
-    .tile.tileWide.tileHalf {
-      grid-column: span 3;
-    }
+/* calls */
+.calls {
+  display: flex;
+  flex-direction: column;
+}
+.calls .zh {
+  margin-bottom: 14px;
+}
+.ctot {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+.ctot b {
+  font-size: 30px;
+  line-height: 34px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
+}
+.ctot span {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--gray-11);
+}
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--gray-11);
+  white-space: nowrap;
+}
+.legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.lk {
+  display: inline-block;
+  width: 14px;
+  height: 0;
+  border-top: 1.5px dashed var(--gray-12);
+  opacity: 0.45;
+}
+.hlegend {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 8px;
+  font-size: 11.5px;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
+}
+.hlegend i {
+  display: block;
+  width: 12px;
+  height: 10px;
+  border-radius: 2px;
+}
+.hlegend b {
+  font-weight: 400;
+  margin: 0 4px;
+}
+.tbl {
+  all: unset;
+  cursor: pointer;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  color: var(--gray-11);
+  margin: -4px -6px -4px 0;
+}
+.tbl:hover {
+  background: var(--gray-a3);
+  color: var(--gray-12);
+}
+.tbl[aria-pressed='true'] {
+  background: var(--gray-a4);
+  color: var(--gray-12);
+}
+.chart {
+  position: relative;
+  flex: 1;
+  min-height: 220px;
+}
+.chart svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: visible;
+}
+.heat {
+  display: flex;
+  align-items: center;
+}
+.heat svg {
+  position: static;
+}
+.ttable {
+  flex: 1;
+  min-height: 0;
+  max-height: 420px;
+  overflow: auto;
+  font-size: 12.5px;
+}
+.ttable table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.ttable th {
+  position: sticky;
+  top: 0;
+  background: var(--dv-card);
+  text-align: right;
+  font-weight: 500;
+  color: var(--gray-11);
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--gray-a4);
+}
+.ttable td {
+  text-align: right;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--gray-a3);
+}
+.ttable th:first-child,
+.ttable td:first-child {
+  text-align: left;
+}
+
+/* chart tooltip: shadcn ChartTooltip card */
+.tip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 5;
+  pointer-events: none;
+  min-width: 132px;
+  padding: 7px 10px 8px;
+  border-radius: 8px;
+  background: var(--dv-tip-bg);
+  box-shadow:
+    0 0 0 1px var(--gray-a5),
+    var(--dv-tip-shadow);
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--gray-12);
+}
+.th {
+  font-weight: 500;
+  margin-bottom: 6px;
+  white-space: nowrap;
+}
+.tr {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  padding: 2px 0;
+  white-space: nowrap;
+}
+.tr span {
+  color: var(--gray-11);
+}
+.tr b {
+  font-weight: 600;
+  text-align: right;
+  padding-left: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.k {
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+}
+.kdash {
+  width: 0;
+  height: 12px;
+  border-left: 1.5px dashed var(--gray-12);
+  opacity: 0.55;
+  margin: 0 0.75px;
+}
+.tot {
+  margin-top: 4px;
+  padding-top: 5px;
+  border-top: 1px solid var(--gray-a4);
+}
+
+/* recap */
+.recap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  row-gap: 6px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--gray-a3);
+  font-size: 13px;
+  color: var(--gray-11);
+}
+.rg {
+  display: inline-flex;
+  align-items: center;
+}
+.rg > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.rg + .rg::before,
+.rg > span + span::before {
+  content: '';
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--gray-8);
+  margin: 0 10px;
+}
+.recap b {
+  color: var(--gray-12);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.recap .sg {
+  margin-right: 1px;
+}
+.dt {
+  margin-left: 3px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- desk: status across, Needs attention + Speed (left) beside Calls (right) ------------------------------ */
+.desk {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 472px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 20px;
+  padding: 24px 28px 28px;
+  min-height: calc(100vh - 64px);
+  min-height: calc(100dvh - var(--desk-gap-top, 8px) - var(--desk-gap-bottom, 8px) - 48px);
+}
+.desk .zStatus {
+  grid-column: 1 / 3;
+}
+.desk .zAtt {
+  grid-column: 1;
+  grid-row: 2;
+}
+.desk .zSpd {
+  grid-column: 1;
+  grid-row: 3;
+}
+.desk .zCalls {
+  grid-column: 2;
+  grid-row: 2 / 4;
+}
+/* A narrow column (a request docked beside it, or a tablet): one column. */
+@container dash (max-width: 900px) {
+  .desk {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
   }
+  .desk .zStatus,
+  .desk .zAtt,
+  .desk .zSpd,
+  .desk .zCalls {
+    grid-column: 1;
+    grid-row: auto;
+  }
+  .desk .zCalls .chart {
+    min-height: 260px;
+  }
+  .desk .status {
+    flex-wrap: wrap;
+  }
+}
+.app[data-desk] {
+  container: dash / inline-size;
+}
+
+/* ---- phone: one column (status → attention → speed → calls → recap) ----------------------------------------- */
+.phone {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 6px 16px 14px;
+  padding-bottom: max(14px, calc(env(safe-area-inset-bottom) + 8px));
+}
+.phone .card {
+  padding: 16px;
+}
+.phone .status {
+  flex-wrap: wrap;
+  row-gap: 12px;
+  column-gap: 18px;
+  padding: 14px 16px 16px;
+}
+.phone .open b {
+  font-size: 26px;
+  line-height: 30px;
+}
+.phone .slg {
+  flex-basis: 100%;
+  justify-content: space-between;
+  gap: 8px;
+}
+.phone .ar {
+  height: 52px;
+  column-gap: 10px;
+  grid-template-columns: 16px auto auto minmax(0, 1fr) auto minmax(86px, auto);
+}
+.phone .tmr {
+  height: 28px;
+  font-size: 14px;
+  padding: 0 10px 0 8px;
+  gap: 5px;
+}
+.phone .att {
+  gap: 3px;
+}
+.phone .more {
+  margin-top: 8px;
+}
+.phone .spd {
+  margin: 0 -10px;
+}
+.phone .sp3 {
+  grid-template-areas: 'l l' 'n b';
+  padding: 6px 10px;
+  row-gap: 4px;
+  column-gap: 4px;
+}
+.phone .l {
+  font-size: 12.5px;
+}
+.phone .n {
+  font-size: 25px;
+  line-height: 30px;
+}
+.phone .n small {
+  font-size: 13px;
+  margin-left: 1px;
+}
+.phone .tb {
+  padding: 0 4px;
+  height: 19px;
+}
+.phone .d {
+  display: none;
+}
+.phone .calls .zh {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.phone .legend,
+.phone .hlegend {
+  order: 5;
+  flex-basis: 100%;
+  margin-left: 0;
+}
+.phone .ctot b {
+  font-size: 26px;
+  line-height: 30px;
+}
+.phone .chart {
+  flex: none;
+  height: 200px;
+  min-height: 0;
+}
+.phone .heat {
+  height: auto;
+}
+.phone .recap {
+  row-gap: 8px;
+  font-size: 13.5px;
+}
+.phone .rg {
+  flex-basis: 100%;
+}
+.phone .rg + .rg::before {
+  display: none;
 }

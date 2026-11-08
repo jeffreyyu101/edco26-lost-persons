@@ -257,6 +257,20 @@ screenshots.
 
 ## The production migration
 
+### Dashboard v4 in production
+
+`supabase/migrations/20261108000000_dashboard_v4.sql` adds `lp_stats(p_range text)` beside `lp_stats()` (unchanged); production
+gets that file **alone**, one transaction, no table or index touched. **Order: migration first, then deploy** (the build
+also works without it: `/api/stats?range=` falls back to `lp_stats()` with names removed, and the dashboard shows what it
+can). `node scripts/dashboard-v4-sql.mjs` writes `/tmp/dashboard-v4/migration.sql` (ending in `commit;`) and
+`/tmp/dashboard-v4/dry-run.sql` (ending in `rollback;`).
+
+1. **Dry run.** Paste `dry-run.sql` and run it. It must finish without an error. Nothing is kept.
+2. **Commit.** Paste `migration.sql` and run it.
+3. **Check:** `select jsonb_typeof(public.lp_stats('tonight') -> 'calls');` gives `object`;
+   `select public.lp_stats('tonight') -> 'live';` gives the open split.
+4. **Deploy** (merge to `main`; no new environment variable).
+
 ### Telemetry in production
 
 The telemetry tables are section 10 of `20261106000000_rework.sql`; production gets that section **alone**, as its own
