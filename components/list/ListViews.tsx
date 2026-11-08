@@ -514,7 +514,17 @@ export function PendingView({ selected = null }: PendingViewProps = {}) {
   const onReunited = useCallback((row: RequestSummary) => void tap(row.id, STATUS.reunited, 'reunite'), [tap]);
   // (Companion) Located asks "Someone already with them?" first (LocatedSheet); nothing saves until it is answered.
   const [asking, setAsking] = useState<{ row: RequestSummary; card: HTMLElement | null } | null>(null);
-  const onInMedical = useCallback((row: RequestSummary, card: HTMLElement | null) => setAsking({ row, card }), []);
+  const onInMedical = useCallback(
+    (row: RequestSummary, card: HTMLElement | null) => {
+      // Offline: the answer is refused with "Needs a connection" before the follow-up opens (as every answer).
+      if (offline) {
+        refuseOffline(actions);
+        return;
+      }
+      setAsking({ row, card });
+    },
+    [offline, actions],
+  );
   const onLocated = useCallback(
     (row: RequestSummary, card: HTMLElement | null, to: SettableStatus) => {
       const result = tap(row.id, to, 'answer');

@@ -98,6 +98,7 @@ test('Pending: ⧗ Pending, then × Not located; ✓ Located opens "<name> locat
 
   // ✓ Located: saved at once, then the location sheet names the request "… located".
   await checkCard(page, located.id).getByRole('button', { name: 'Located', exact: true }).click();
+  await page.getByTestId('located-no').click(); // (Companion) "Someone already with them?" No
   const sheet = page.getByRole('dialog', { name: `${located.name} located` });
   await expect(sheet).toBeVisible();
   await expect(sheet).not.toContainText(SAYS_MEDICAL);

@@ -143,6 +143,7 @@ test('renders from the request, answers, changes the answer, reunites, reopens a
 
   // Waiting → In medical.
   await page.getByRole('button', { name: 'Located', exact: true }).click();
+  await page.getByTestId('located-no').click(); // (Companion) "Someone already with them?" No
   await expect(profileStatus(page, 'Found – Awaiting Reunion')).toBeVisible();
   await expect(statusBlock(page)).toContainText('Located · friend coming');
   // Who answered and when, then where medical has them (Pending v8): no "heading to Main Med" line.
@@ -249,6 +250,7 @@ test('Change answer opens a menu: the other answer or Back to Waiting for check,
 
   // Waiting → In medical from the profile button: Undo is offered.
   await page.getByRole('button', { name: 'Located', exact: true }).click();
+  await page.getByTestId('located-no').click(); // (Companion) "Someone already with them?" No
   await expect(profileStatus(page, 'Found – Awaiting Reunion')).toBeVisible();
   await expect(page.getByText(`${lp} · Located`)).toBeVisible();
   await expect(undoButton(page)).toBeVisible();

@@ -862,6 +862,7 @@ test('Pending: In medical → Friend coming, Undo, then Reunited closes it (grey
 
   // In medical saves at once, then asks where they are (Skip saves nothing more).
   await checkCard(page, r.id).getByRole('button', { name: 'Located', exact: true }).click();
+  await page.getByTestId('located-no').click(); // (Companion) "Someone already with them?" No
   await expect(checkCard(page, r.id)).toHaveCount(0);
   const sheet = page.getByRole('dialog', { name: `${TAG} P${seq} located` });
   await expect(sheet).toBeVisible();
@@ -878,6 +879,8 @@ test('Pending: In medical → Friend coming, Undo, then Reunited closes it (grey
   await expect(checkCard(page, r.id)).toBeVisible();
 
   await checkCard(page, r.id).getByRole('button', { name: 'Located', exact: true }).click();
+
+  await page.getByTestId('located-no').click(); // (Companion) "Someone already with them?" No
   await sheet.getByRole('button', { name: 'Skip' }).click();
   await expect(comingCard(page, r.id)).toBeVisible();
   await comingCard(page, r.id).getByRole('button', { name: 'Reunited' }).click();
@@ -999,6 +1002,7 @@ test('front of house logs a request with a photo; the liaison sees it in Pending
     await expect(checkCard(page, id!)).toBeVisible({ timeout: Math.max(1_000, 8_000 - (Date.now() - savedAt)) });
     await expect(checkCard(page, id!)).toContainText(`FA 4 · ${lpText}`);
     await checkCard(page, id!).getByRole('button', { name: 'Located', exact: true }).click();
+    await page.getByTestId('located-no').click(); // (Companion) "Someone already with them?" No
     // Where medical has them: saved from the sheet, shown on the Friend coming card.
     const locationForm = page.getByTestId('location-form');
     await expect(locationForm).toBeVisible();

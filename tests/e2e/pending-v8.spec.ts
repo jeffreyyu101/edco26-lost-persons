@@ -116,6 +116,7 @@ test.describe('phone', () => {
     await page.goto('/?view=pending');
     await expect(checkCard(page, r.id)).toBeVisible({ timeout: 15_000 });
     await checkCard(page, r.id).getByRole('button', { name: 'Located', exact: true }).click();
+    await page.getByTestId('located-no').click(); // (Companion) "Someone already with them?" No
 
     const sheet = page.getByRole('dialog', { name: `${nameOf(r)} located` });
     await expect(sheet).toBeVisible();
@@ -146,6 +147,7 @@ test.describe('phone', () => {
     await page.goto('/?view=pending');
     await expect(checkCard(page, r.id)).toBeVisible({ timeout: 15_000 });
     await checkCard(page, r.id).getByRole('button', { name: 'Located', exact: true }).click();
+    await page.getByTestId('located-no').click(); // (Companion) "Someone already with them?" No
     const sheet = page.getByRole('dialog', { name: `${nameOf(r)} located` });
     await expect(sheet).toBeVisible();
     await expect.poll(async () => (await detail(page, r.id)).status).toBe('Found – Awaiting Reunion');
@@ -170,6 +172,7 @@ test.describe('phone', () => {
     await expect(checkCard(page, rows[2]!.id)).toBeVisible({ timeout: 15_000 });
     const answer = async (r: RequestSummary) => {
       await checkCard(page, r.id).getByRole('button', { name: 'Located', exact: true }).click();
+      await page.getByTestId('located-no').click(); // (Companion) "Someone already with them?" No
       const sheet = page.getByRole('dialog', { name: `${nameOf(r)} located` });
       await expect(sheet).toBeVisible();
       await sheet.getByRole('textbox', { name: 'Location' }).fill('Not saved');
@@ -290,6 +293,8 @@ test.describe('phone', () => {
     const refTop = async () => (await ref.boundingBox())!.y;
 
     await card.getByRole('button', { name: 'Located', exact: true }).click();
+
+    await page.getByTestId('located-no').click(); // (Companion) "Someone already with them?" No
     const sheet = page.getByRole('dialog', { name: `${nameOf(r)} located` });
     const field = sheet.getByRole('textbox', { name: 'Location' });
     await expect(field).toBeFocused();
@@ -398,6 +403,7 @@ test.describe('desk 1440 × 900', () => {
     await checkCard(page, waiting.id).evaluate((el) => el.scrollIntoView({ block: 'center' }));
     const tapped = (await checkCard(page, waiting.id).boundingBox())!;
     await checkCard(page, waiting.id).getByRole('button', { name: 'Located', exact: true }).click();
+    await page.getByTestId('located-no').click(); // (Companion) "Someone already with them?" No
     const pop = page.getByRole('dialog', { name: `${nameOf(waiting)} located` });
     await expect(pop).toBeVisible();
     await expect(comingCard(page, waiting.id)).toHaveCount(1);

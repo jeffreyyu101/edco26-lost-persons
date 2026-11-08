@@ -147,8 +147,8 @@ export const STAGE_META: Readonly<Record<Exclude<StageKey, 'legacy'>, StageMeta>
   cancelled: fromStatus(STATUS.cancelled),
   inactive: fromStatus(STATUS.inactive),
   accompanied: fromStatus(STATUS.accompanied),
-  swapRequested: { label: 'Friend swap requested', tone: 'blue', glyph: 'swapBlue', bucket: 'open' },
-  swapApproved: { label: 'Swap at Main Med', tone: 'green', glyph: 'swapGreen', bucket: 'open' },
+  swapRequested: { label: 'Friend swap requested', narrow: 'Swap asked', tone: 'blue', glyph: 'swapBlue', bucket: 'open' },
+  swapApproved: { label: 'Swap at Main Med', narrow: 'Swapping', tone: 'green', glyph: 'swapGreen', bucket: 'open' },
   friendInformed: fromStatus(STATUS.friendInformed),
 };
 
