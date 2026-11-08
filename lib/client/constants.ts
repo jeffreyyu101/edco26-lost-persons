@@ -4,7 +4,8 @@ export const SYNC = {
   jitterMs: 1_000,
   hiddenIntervalMs: 60_000,
   requestTimeoutMs: 12_000,
-  backoffMs: [6_000, 12_000, 24_000, 60_000],
+  /** After failed polls (visible): 6 s, then 12 s (a hidden page still waits 60 s, outbox-logic nextPollDelay). */
+  backoffMs: [6_000, 12_000],
   reconcileEvery: 10,
   fullFetchAfterMs: 6 * 60 * 60 * 1000,
   pageLimit: 500,

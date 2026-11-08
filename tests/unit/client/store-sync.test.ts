@@ -264,6 +264,23 @@ describe('connection state', () => {
     expect(s().connection).toBe('live');
   });
 
+  it('a dead zone longer than 12 s (onLine stays true): retries every 12 s, so the link back shows within 12 s (fix 6)', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    const { s } = boot(server);
+    await ready();
+    server.override = (req) => (req.path === '/api/sync' ? 'network' : undefined);
+    await advance(7_000); // failure 1 → 6 s
+    await advance(6_000); // failure 2 → 12 s, offline
+    await advance(12_000); // failure 3 → 12 s (was 24 s)
+    expect(s().connection).toBe('offline');
+    const n = syncs(server).length;
+    await advance(12_000); // failure 4: the 4th retry comes 12 s later (was 60 s)
+    expect(syncs(server)).toHaveLength(n + 1);
+    server.override = null; // the link is back
+    await advance(12_000);
+    expect(s().connection).toBe('live');
+  });
+
   it('a 12 s timeout counts as a network failure', async () => {
     const server = new FakeServer([makeRow(1)]);
     const { s } = boot(server);
@@ -284,13 +301,13 @@ describe('connection state', () => {
     await advance(12_000);
     expect(s().connection).toBe('live');
     server.override = (req) => (req.path === '/api/sync' ? apiError(503, 'unavailable', 'Try again') : undefined);
-    await advance(24_000);
-    await advance(60_000);
+    await advance(12_000);
+    await advance(12_000);
     expect(s().connection).toBe('live');
-    await advance(60_000);
+    await advance(12_000);
     expect(s().connection).toBe('error');
     server.override = null;
-    await advance(60_000);
+    await advance(12_000);
     expect(s().connection).toBe('live');
   });
 

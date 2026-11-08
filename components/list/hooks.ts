@@ -1,7 +1,8 @@
 'use client';
 // Small client hooks for the list views.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { useActions, useConnection, type MutationResult } from '@/lib/client/store-contract';
+import { readDeviceOnline } from '@/lib/client/live-status';
+import { useActions, useConnection, type MutationResult, type StoreActions } from '@/lib/client/store-contract';
 import type { SettableStatus, StatusKind } from '@/lib/domain';
 
 /** `flag`, but only once it has stayed true for `delayMs` (no flicker for fast background polls). */
@@ -116,6 +117,16 @@ export function primeKeyboard(): void {
 }
 
 /**
+ * A tap refused while the connection reads as offline: "Needs a connection". When the phone itself reports a
+ * connection (a dead zone it never noticed, a link just back) the tap also asks for a sync now: the buttons come
+ * back as soon as that one lands instead of at the next backed-off poll.
+ */
+export function refuseOffline(actions: Pick<StoreActions, 'showToast' | 'syncNow'>, online: boolean = readDeviceOnline()): void {
+  actions.showToast({ tone: 'amber', icon: 'cloud-off', title: 'Needs a connection', durationMs: 3_000 });
+  if (online) actions.syncNow();
+}
+
+/**
  * A status tap from a list card (Not in medical / In medical / Reunited). The store owns the overlay, the
  * Undo snackbar and every failure toast. Offline (status changes are not queued in v1) the buttons look
  * disabled and a tap explains why instead (and returns null). Otherwise the store's result, for a screen
@@ -131,7 +142,7 @@ export function useStatusTap(): {
   const tap = useCallback(
     (id: string, to: SettableStatus, kind: StatusKind) => {
       if (offline) {
-        actions.showToast({ tone: 'amber', icon: 'cloud-off', title: 'Needs a connection', durationMs: 3_000 });
+        refuseOffline(actions);
         return null;
       }
       return actions.setStatus(id, to, kind);

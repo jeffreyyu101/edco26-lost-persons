@@ -339,7 +339,7 @@ A React 19 context provider in the `/` page that uses `useSyncExternalStore`, so
   - The next poll is scheduled after the previous one completes.
   - Each request has a 12 s timeout.
   - Never two polls at once.
-  - Backoff on errors: 6, 12, 24 and 60 s.
+  - Backoff on errors: 6 s, then every 12 s while visible (2026-11-08 network fix 6: was 6, 12, 24 and 60 s). Hidden pages still poll at most once a minute.
 - **Cursor.** `serverTime` from the response, which is the database clock. The client never uses its own clock.
 - **Merge.** Rows replace `confirmed` when their `rowVersion` is greater than or equal to the stored one.
 - **Reconcile.** Every 10th poll sends `reconcile=1`. The client compares `versions` and fetches any ids that differ or are missing through `?ids=`.
