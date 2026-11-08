@@ -92,7 +92,7 @@ describe('Web Push covers the page notification', () => {
     server.change(mine.id, { status: STATUS.inMedical });
     await advance(6_000);
     expect(shown).toEqual([]);
-    expect(s().toasts.map((t) => t.title)).toEqual(['LP-1004 · T.R. located']);
+    expect(s().toasts.map((t) => t.title)).toEqual(['LP-1004 · T. R4 located']);
   });
 
   it('not subscribed: the page notification as before (v2.5 A52)', async () => {
@@ -102,7 +102,7 @@ describe('Web Push covers the page notification', () => {
     await ready();
     server.change(mine.id, { status: STATUS.inMedical });
     await advance(6_000);
-    expect(shown.map((n) => n.title)).toEqual(['T.R. · Located']);
+    expect(shown.map((n) => n.title)).toEqual(['T. R4']);
   });
 });
 
@@ -170,7 +170,7 @@ describe('regression: a hidden, suspended page (an iPhone) never toasts what its
     server.change(mine.id, { status: STATUS.inMedical });
     server.rows.get(mine.id)!.row.updatedAt = new Date(Date.now() + 10_000).toISOString();
     await advance(6_000);
-    expect(s().toasts.map((t) => t.title)).toEqual(['LP-1004 · T.R. located']);
+    expect(s().toasts.map((t) => t.title)).toEqual(['LP-1004 · T. R4 located']);
   });
 
   it('not subscribed: the change made while locked toasts when the app is opened (nothing else showed it)', async () => {
@@ -182,7 +182,7 @@ describe('regression: a hidden, suspended page (an iPhone) never toasts what its
     server.change(mine.id, { status: STATUS.inMedical });
     server.rows.get(mine.id)!.row.updatedAt = new Date(Date.now() + 60_000).toISOString();
     await unlock();
-    expect(s().toasts.map((t) => t.title)).toEqual(['LP-1004 · T.R. located']);
+    expect(s().toasts.map((t) => t.title)).toEqual(['LP-1004 · T. R4 located']);
   });
 
   it('subscribed: a message sent while locked shows no toast when the app is opened; one after it does', async () => {

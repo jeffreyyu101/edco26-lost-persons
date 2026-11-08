@@ -83,6 +83,13 @@
 .snackText {
   flex: 1;
   min-width: 0;
+  /* Two lines, then an ellipsis (a long full name keeps "closed · not located" in view). */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .undo {

@@ -456,8 +456,8 @@ describe('alerts through the store', () => {
     expect(s().toasts).toEqual([]);
     server.change(mine.id, { status: STATUS.inMedical });
     await advance(6_000);
-    expect(heard.map((e) => e.title)).toEqual(['LP-1004 · S.L. located']);
-    const toast = s().toasts.find((t) => t.title === 'LP-1004 · S.L. located');
+    expect(heard.map((e) => e.title)).toEqual(['LP-1004 · Sofia Lopez located']);
+    const toast = s().toasts.find((t) => t.title === 'LP-1004 · Sofia Lopez located');
     expect(toast).toMatchObject({ subtitle: 'Friend can head over', tone: 'green', durationMs: null, action: { label: 'View' } });
     await advance(6_000); // the overlap re-delivers the row: no second alert
     expect(heard).toHaveLength(1);
@@ -522,8 +522,8 @@ describe('alerts of a sync that fails half-way (regression)', () => {
     expect(s().confirmed.get(mine.id)?.status).toBe(STATUS.inMedical); // page 1 is applied at once
     await advance(12_000); // page 2 times out
     expect(hung).toBe(true);
-    expect(heard.map((e) => e.title)).toEqual(['LP-1004 · S.L. located']);
-    expect(s().toasts.filter((t) => t.title === 'LP-1004 · S.L. located')).toHaveLength(1);
+    expect(heard.map((e) => e.title)).toEqual(['LP-1004 · Sofia Lopez located']);
+    expect(s().toasts.filter((t) => t.title === 'LP-1004 · Sofia Lopez located')).toHaveLength(1);
     await advance(6_000); // the retry completes the sync: no second alert
     await advance(6_000);
     expect(s().confirmed.get(makeRow(5).id)?.clothing).toBe('Blue');
@@ -546,7 +546,7 @@ describe('alerts of a sync that fails half-way (regression)', () => {
     server.override = (req) => (req.path === '/api/sync' && req.query.get('ids') ? apiError(503, 'unavailable', 'Try again') : undefined);
     await advance(6_000);
     expect(server.requests('GET', '/api/sync').some((r) => r.query.get('ids'))).toBe(true);
-    expect(heard.map((e) => e.title)).toEqual(['LP-1004 · S.L. — not located']);
+    expect(heard.map((e) => e.title)).toEqual(['LP-1004 · Sofia Lopez — not located']);
   });
 
   it('an out-of-date alert held back by a page that then times out never closes the newer toast', async () => {
@@ -571,7 +571,7 @@ describe('alerts of a sync that fails half-way (regression)', () => {
     expect(s().confirmed.get(mine.id)?.status).toBe(STATUS.notInMedical); // applied; its alert held back
     server.change(mine.id, { status: STATUS.inMedical }); // the answer is corrected
     await finish(a.fetchDetail(mine.id)); // the open profile refetches: shown at once
-    const IN_MED = 'LP-1004 · S.L. located';
+    const IN_MED = 'LP-1004 · Sofia Lopez located';
     expect(s().toasts.map((t) => t.title)).toEqual([IN_MED]);
     await advance(12_000); // page 2 times out: the held "not located" is out of date
     expect(s().toasts.map((t) => t.title)).toEqual([IN_MED]);
@@ -604,7 +604,7 @@ describe('alerts of a sync that fails half-way (regression)', () => {
 });
 
 describe('alert toasts follow the request (regression: stale "is in medical")', () => {
-  const IN_MED = 'LP-1004 · S.L. located';
+  const IN_MED = 'LP-1004 · Sofia Lopez located';
   const titles = (s: () => { toasts: readonly { title: string }[] }) => s().toasts.map((t) => t.title);
 
   it('a changed answer replaces the sticky In medical toast, and nothing stale is left after it closes', async () => {
@@ -619,7 +619,7 @@ describe('alert toasts follow the request (regression: stale "is in medical")', 
     expect(titles(s)).toEqual([IN_MED]);
     server.change(mine.id, { status: STATUS.notInMedical }); // Change answer
     await advance(6_000);
-    expect(titles(s)).toEqual(['LP-1004 · S.L. — not located']);
+    expect(titles(s)).toEqual(['LP-1004 · Sofia Lopez — not located']);
     await advance(14_000);
     expect(titles(s)).toEqual([]);
     expect(s().confirmed.get(mine.id)?.status).toBe(STATUS.notInMedical);
@@ -635,7 +635,7 @@ describe('alert toasts follow the request (regression: stale "is in medical")', 
     expect(titles(s)).toEqual([IN_MED]);
     server.change(mine.id, { status: STATUS.waiting }); // the liaison's Undo
     await advance(6_000);
-    expect(titles(s)).toEqual(['LP-1004 · S.L. — waiting for check']);
+    expect(titles(s)).toEqual(['LP-1004 · Sofia Lopez — waiting for check']);
   });
 
   it('closes when the row leaves In medical without an alert (my own tap, or me on another phone)', async () => {
@@ -647,10 +647,10 @@ describe('alert toasts follow the request (regression: stale "is in medical")', 
     server.change(mine.id, { status: STATUS.inMedical });
     server.change(other.id, { status: STATUS.inMedical });
     await advance(6_000);
-    expect(titles(s)).toEqual([IN_MED, 'LP-1005 · A.D. located']);
+    expect(titles(s)).toEqual([IN_MED, 'LP-1005 · Ana Diaz located']);
     // This phone taps Reunited: the alert for that request closes, the other one stays.
     await finish(a.setStatus(mine.id, STATUS.reunited, 'reunite'));
-    expect(titles(s)).toEqual(['LP-1005 · A.D. located']);
+    expect(titles(s)).toEqual(['LP-1005 · Ana Diaz located']);
     // The same staff changes the other on another phone: no alert (not "someone else"), the toast closes.
     server.change(other.id, { status: STATUS.notInMedical }, STAFF.dana.staff);
     await advance(6_000);

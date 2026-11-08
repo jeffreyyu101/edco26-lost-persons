@@ -91,7 +91,7 @@ test('Pending: ⧗ Pending, then × Not located; ✓ Located opens "<name> locat
   await expect(answer).toHaveAccessibleName('Not located. Closes this request as not located');
   expect(await cardWords(card)).not.toMatch(SAYS_MEDICAL);
 
-  // The final one closes it: "<initials> closed · not located".
+  // The final one closes it: "<full name> closed · not located".
   await answer.click();
   await expect(page.getByRole('status').filter({ hasText: /closed · not located/ })).toBeVisible();
   await expect.poll(async () => (await detail(page.request, held.id)).status).toBe(STATUS.notInMedical);

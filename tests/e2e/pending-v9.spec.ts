@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type APIRequestContext, type Browser, type BrowserContextOptions, type Locator, type Page } from '@playwright/test';
 import type { AuditEvent, RequestDetail, RequestSummary } from '../../lib/api-types';
-import { NOT_FOUND_YET_LABEL, STATUS, STATUS_META, initials } from '../../lib/domain';
+import { NOT_FOUND_YET_LABEL, STATUS, STATUS_META, alertName } from '../../lib/domain';
 import { NOT_FOUND_FINAL_LABEL, RECHECK_DUE_LABEL } from '../../lib/stages';
 import { ROOT, testBaseUrl } from '../../scripts/test-env.mjs';
 import { axeViolations, overlappingTargets, smallTargets } from './helpers/a11y';
@@ -951,7 +951,7 @@ test.describe('real flow', () => {
     await expect(leaving).toHaveAttribute('aria-hidden', 'true');
     await page.clock.resume();
     const snack = page.locator('.lp-snack');
-    const who = initials(r.name);
+    const who = alertName(r.name);
     await expect(snack).toContainText(`${who} closed · ${CLOSED_WORDS}`);
     await expect(snack.getByText(`${who} closed, ${CLOSED_WORDS}.`)).toBeAttached();
     await expect.poll(async () => (await detail()).status).toBe(STATUS.notInMedical);

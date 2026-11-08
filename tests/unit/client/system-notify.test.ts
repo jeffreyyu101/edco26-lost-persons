@@ -124,11 +124,11 @@ describe('what a notification shows', () => {
   const rows = new Map<string, RequestSummary>([[sofia.id, sofia]]);
   const rowOf = (id: string) => rows.get(id);
 
-  it('In medical: initials and status (no LP number, F4), the post, the next step; sticky until dismissed', () => {
+  it('In medical: the full name as the title, the status and post (no LP number, F4), the next step; sticky until dismissed', () => {
     const n = systemNotice(statusAlert(sofia), rowOf);
     expect(n).toEqual({
-      title: 'S.L. · Located',
-      body: 'FA 3\nFriend can head over',
+      title: 'Sofia Lopez',
+      body: 'Located · FA 3\nFriend can head over',
       tag: `lp-${sofia.id}`,
       url: `/?r=${sofia.id}`,
       key: `${sofia.id}:3`,
@@ -136,41 +136,51 @@ describe('what a notification shows', () => {
     });
   });
 
-  it('the other answers and changes read "<initials> · <status>" (the label from STATUS_META), never an LP number', () => {
+  it('the other answers and changes read "<full name>" / "<status> · <post>" (the label from STATUS_META), never an LP number', () => {
     for (const status of [STATUS.notInMedical, STATUS.reunited, STATUS.waiting, STATUS.cancelled] as const) {
       const row = { ...sofia, status };
       const n = systemNotice(statusAlert(row), () => row);
-      expect(n.title).toBe(`S.L. · ${STATUS_META[status].shortLabel}`);
+      expect(n.title).toBe('Sofia Lopez');
       expect(n.title).not.toMatch(/LP-?\d/);
-      expect(n.body).toBe('FA 3');
+      expect(n.body).toBe(`${STATUS_META[status].shortLabel} · FA 3`);
+      expect(n.body).not.toMatch(/LP-?\d/);
       expect(n.requireInteraction).toBe(false);
     }
   });
 
-  it('a new request: "New request" (no LP number, F4), initials and post (no age or gender either)', () => {
+  it('a new request: "New request" (no LP number, F4), the full name and post (no age or gender either)', () => {
     const row = makeRow(13, { firstName: 'Tara', lastName: 'Reyes', age: '24', gender: 'Female', caseNumber: 1013, contactPhone: '4075550123' });
     const n = systemNotice(newRequestAlert(row), () => row);
-    expect(n).toMatchObject({ title: 'New request', body: 'T.R. · FA 4', tag: `lp-${row.id}`, url: `/?r=${row.id}` });
+    expect(n).toMatchObject({ title: 'New request', body: 'Tara Reyes · FA 4', tag: `lp-${row.id}`, url: `/?r=${row.id}` });
     // Not synced yet: the alert's own title would carry the LP number; the notification never does.
     expect(systemNotice(newRequestAlert(row), () => undefined).title).toBe('New request');
   });
 
-  it('never carries a phone number, a contact or a full name, in the text or the data', () => {
-    const shown = JSON.stringify([systemNotice(statusAlert(sofia), rowOf), noticeOptions(systemNotice(statusAlert(sofia), rowOf))]);
-    for (const secret of ['555', '0100', '0199', 'Maya', 'Sister', 'Call', 'Sofia', 'Lopez', 'Red hoodie']) expect(shown).not.toContain(secret);
+  it('a status alert whose row is gone: "Request update", never the alert\'s own title (it carries the LP number)', () => {
+    const alert = statusAlert(sofia);
+    expect(alert.title).toMatch(/LP-\d/);
+    const n = systemNotice(alert, () => undefined);
+    expect(n.title).toBe('Request update');
+    expect(JSON.stringify(n)).not.toMatch(/LP-?\d/);
   });
 
-  // Ann R20, Ben R21, … → "A.R.", "B.R.", …
+  it('shows the full name but never a phone number or a contact, in the text or the data', () => {
+    const shown = JSON.stringify([systemNotice(statusAlert(sofia), rowOf), noticeOptions(systemNotice(statusAlert(sofia), rowOf))]);
+    expect(shown).toContain('Sofia Lopez');
+    for (const secret of ['555', '0100', '0199', 'Maya', 'Sister', 'Call', 'Red hoodie']) expect(shown).not.toContain(secret);
+  });
+
+  // Ann R20, Bnn R21, … (shown as entered)
   const named = (n: number) => makeRow(n, { caseNumber: 1000 + n, firstName: `${String.fromCharCode(45 + n)}nn`, lastName: `R${n}` });
 
-  it('3 or more at once: one notification, "3 new requests" (or "3 updates" when mixed), opening the log; initials, no LP numbers', () => {
+  it('3 or more at once: one notification, "3 new requests" (or "3 updates" when mixed), opening the log; the names, no LP numbers', () => {
     const fresh = [20, 21, 22].map(named);
     const lookup = (id: string) => [...fresh, sofia].find((r) => r.id === id);
     const news = fresh.map(newRequestAlert);
     const [combined] = coalesceAlerts(news);
     expect(systemNotice(combined!, lookup, news)).toEqual({
       title: '3 new requests',
-      body: 'A.R., B.R., C.R.',
+      body: 'Ann R20, Bnn R21, Cnn R22',
       tag: COMBINED_TAG,
       url: '/',
       key: null,
@@ -181,7 +191,7 @@ describe('what a notification shows', () => {
     const many = [20, 21, 22, 23, 24, 25].map(named);
     const manyAlerts = many.map(newRequestAlert);
     expect(systemNotice(coalesceAlerts(manyAlerts)[0]!, (id) => many.find((r) => r.id === id), manyAlerts).body).toBe(
-      'A.R., B.R., C.R., D.R., +2',
+      'Ann R20, Bnn R21, Cnn R22, Dnn R23, +2',
     );
   });
 
@@ -347,7 +357,7 @@ describe('the notifier', () => {
     const shown = system.show(alert, () => row, [alert]);
     row = undefined; // the store moves on; the notification was already built
     expect(await shown).toBe(true);
-    expect(f.shows[0]).toMatchObject({ title: 'S.L. · Located', options: { body: 'FA 4\nFriend can head over', data: { key: `${alert.requestId}:2` } } });
+    expect(f.shows[0]).toMatchObject({ title: 'Sofia Lopez', options: { body: 'Located · FA 4\nFriend can head over', data: { key: `${alert.requestId}:2` } } });
   });
 
   it('reports failure so the store can toast instead: no permission, no worker, or showNotification throws', async () => {

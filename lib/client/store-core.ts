@@ -32,8 +32,8 @@ import {
   SETTABLE_STATUSES,
   STATUS,
   STATUS_META,
+  alertName,
   canonStaff,
-  initials,
   isHeld,
   isUuid,
   notFoundHolds,
@@ -221,7 +221,7 @@ const TOAST_PLAN: AlertPlan = { route: 'toast', skip: new Set<string>() };
 let holdModule: Promise<HoldRules> | null = null;
 function loadHold(): Promise<HoldRules> {
   holdModule ??= import('./hold-rules').then(
-    (m) => m.holdRules({ STATUS, STATUS_META, NOT_FOUND_YET_LABEL, RECHECK_MINUTES, initials, isHeld, notFoundHolds, formatCaseNumber }),
+    (m) => m.holdRules({ STATUS, STATUS_META, NOT_FOUND_YET_LABEL, RECHECK_MINUTES, alertName, isHeld, notFoundHolds, formatCaseNumber }),
     (error: unknown) => {
       holdModule = null;
       throw error;

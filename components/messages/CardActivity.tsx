@@ -19,7 +19,7 @@ import { useMessaging } from '@/lib/client/messages-hooks';
 import { navigate } from '@/lib/client/nav';
 import { usePending, useSession } from '@/lib/client/store-contract';
 import { openThread, requestThreadJump } from '@/lib/client/thread-jump';
-import { initials, isInMedical } from '@/lib/domain';
+import { alertName, isInMedical } from '@/lib/domain';
 import { previewText, sideOfTeam, unreadOf } from '@/lib/messaging';
 import type { DisplayStage } from '@/lib/stages';
 import { StageChip } from '@/components/list/StageChips';
@@ -27,7 +27,7 @@ import { EnrouteFailed, EnrouteRow, useEnrouteControl } from './Enroute';
 import s from './messages.module.css';
 
 function who(row: RequestSummary): string {
-  return initials(row.name) || 'this request';
+  return alertName(row.name) || 'this request';
 }
 
 /**

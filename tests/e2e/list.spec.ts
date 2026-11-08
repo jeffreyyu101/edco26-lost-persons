@@ -993,7 +993,7 @@ test('front of house logs a request with a photo; the liaison sees it in Pending
     await expect(comingCard(page, id!).getByTestId('location-chip')).toHaveAccessibleName('Chair 7, edit location');
 
     // A, back on the list, is alerted on its next poll: their own request moved to In medical.
-    // "<initials> located", never "<initials> — not located" (the later toast, which also ends in "located").
+    // "<name> located", never "<name> — not located" (the later toast, which also ends in "located").
     const toast = a.locator('.lp-toast').filter({ hasText: new RegExp(`${lpText} · [^—]+ located`) });
     await expect(toast).toBeVisible({ timeout: 15_000 });
     await expect(toast).toContainText(/LP-\d+ · .+ located/);

@@ -9,7 +9,7 @@
 //     after(), which Vercel keeps alive with waitUntil). Where after() is not available (a test calling it
 //     directly), the caller waits at most NOTIFY_WAIT_MS and the rest finishes in the background.
 //   * Logs only a code and counts (no staff, names, endpoints or text).
-//   * The push title is the request's initials ("New request" for a new one); the body is the detail
+//   * The push title is the request's full name (lib/domain.ts alertName; "New request" for a new one); the body is the detail
 //     (contract B), scrubbed of request ids and phone numbers once more.
 import 'server-only';
 import { after } from 'next/server';

@@ -1,4 +1,4 @@
-// lib/activity.ts (F4, spec §18 A53–A59): contract B copy, the push payload (initials title, no ids or contact
+// lib/activity.ts (F4, spec §18 A53–A59): contract B copy, the push payload (full-name title, no ids or contact
 // details, under 4 KB, one tag per request), urgency and TTL, the glyph map, the bell's badge, row times, day
 // labels, the screen-reader sentence, and which events F4 raises (never Not in medical).
 import { describe, expect, it } from 'vitest';
@@ -51,7 +51,7 @@ describe('contract B: detail copy', () => {
   it('en route, new request, in medical, back to waiting, moved, closed, edited', () => {
     expect(enrouteDetail(4)).toBe('Friend en route · ~4 min');
     expect(enrouteDetail(null)).toBe('Friend en route');
-    expect(newRequestDetail({ name: 'Tara Ruiz', age: '24', gender: 'Male', postShort: 'FA 4' })).toBe('T.R. · 24 M · FA 4');
+    expect(newRequestDetail({ name: 'Tara Ruiz', age: '24', gender: 'Male', postShort: 'FA 4' })).toBe('Tara Ruiz · 24 M · FA 4');
     expect(newRequestDetail({ name: null, age: null, gender: null, postShort: 'FA 3' })).toBe('FA 3');
     expect(inMedicalDetail('Chair 9')).toBe('Located · Chair 9');
     expect(inMedicalDetail(null)).toBe('Located');
@@ -78,8 +78,10 @@ describe('contract B: detail copy', () => {
     expect(Array.from(scrubDetail('y'.repeat(500)))).toHaveLength(200);
   });
 
-  it('line 1 and the push title are initials, never the full name', () => {
-    expect(requestTitle('Jordan', 'Diaz')).toBe('J.D.');
+  it('line 1 and the push title are the full name (whitespace collapsed)', () => {
+    expect(requestTitle('Jordan', 'Diaz')).toBe('Jordan Diaz');
+    expect(requestTitle('  Mary  Ann ', ' de la  Cruz ')).toBe('Mary Ann de la Cruz');
+    expect(requestTitle('Jordan', null)).toBe('Jordan');
     expect(requestTitle(null, null)).toBe(NO_NAME);
   });
 });
@@ -105,16 +107,16 @@ describe('which events F4 raises (contract D)', () => {
 });
 
 describe('push payload', () => {
-  it('title = initials (New request for a new one), body = the scrubbed detail, one tag per request', () => {
-    const p = pushPayload({ requestId: ID, kind: 'in_medical', detail: 'LP-1013 Located · Chair 9' }, 'J.D.', 2);
-    expect(p).toMatchObject({ title: 'J.D.', body: 'Located · Chair 9', tag: `lp-${ID}`, url: `/?r=${ID}`, renotify: true, requireInteraction: true, badge: 2 });
-    expect(pushPayload({ requestId: ID, kind: 'new_request', detail: 'T.R. · 24 M · FA 4' }, 'T.R.', null).title).toBe('New request');
-    expect(pushPayload({ requestId: ID, kind: 'message', detail: 'Rae C.: hi' }, 'A.L.', null).renotify).toBe(true);
+  it('title = the full name (New request for a new one), body = the scrubbed detail, one tag per request', () => {
+    const p = pushPayload({ requestId: ID, kind: 'in_medical', detail: 'LP-1013 Located · Chair 9' }, 'Jordan Diaz', 2);
+    expect(p).toMatchObject({ title: 'Jordan Diaz', body: 'Located · Chair 9', tag: `lp-${ID}`, url: `/?r=${ID}`, renotify: true, requireInteraction: true, badge: 2 });
+    expect(pushPayload({ requestId: ID, kind: 'new_request', detail: 'Tara Ruiz · 24 M · FA 4' }, 'Tara Ruiz', null).title).toBe('New request');
+    expect(pushPayload({ requestId: ID, kind: 'message', detail: 'Rae C.: hi' }, 'Ana Lima', null).renotify).toBe(true);
   });
 
   it('regression: every event sounds when it replaces the request\'s earlier notification; only In medical stays until dismissed', () => {
     for (const kind of ACTIVITY_KINDS) {
-      const p = pushPayload({ requestId: ID, kind, detail: 'Friend arrived' }, 'J.D.', null);
+      const p = pushPayload({ requestId: ID, kind, detail: 'Friend arrived' }, 'Jordan Diaz', null);
       expect(p.renotify, kind).toBe(true);
       expect(p.requireInteraction, kind).toBe(kind === 'in_medical');
     }
@@ -122,7 +124,7 @@ describe('push payload', () => {
 
   it('never carries an LP number, a phone number or more than the limit', () => {
     for (const kind of ACTIVITY_KINDS) {
-      const p = pushPayload({ requestId: ID, kind, detail: `LP-0012 call 407-555-0142 ${'z'.repeat(400)}` }, 'J.D.', 9);
+      const p = pushPayload({ requestId: ID, kind, detail: `LP-0012 call 407-555-0142 ${'z'.repeat(400)}` }, 'Jordan Diaz', 9);
       const json = JSON.stringify(p);
       expect(json).not.toMatch(/LP-?\d/);
       expect(json).not.toContain('555');
@@ -195,28 +197,39 @@ describe('the inbox', () => {
 
   it('every row has a full sentence for screen readers', () => {
     const at = new Date(NOW - 5 * 60_000).toISOString();
-    expect(activityAriaLabel({ kind: 'in_medical', title: 'J.D.', detail: 'Located · Chair 9', at, read: false }, NOW)).toBe(
-      'Request J D, answer: Located, Chair 9. 5 minutes ago. Unread.',
+    expect(activityAriaLabel({ kind: 'in_medical', title: 'Jordan Diaz', detail: 'Located · Chair 9', at, read: false }, NOW)).toBe(
+      'Request Jordan Diaz, answer: Located, Chair 9. 5 minutes ago. Unread.',
     );
-    expect(activityAriaLabel({ kind: 'moved', title: 'R.P.', detail: 'Chair 9 → Bed 3', at, read: true }, NOW)).toBe(
-      'Request R P, location changed: Chair 9 to Bed 3. 5 minutes ago.',
+    expect(activityAriaLabel({ kind: 'moved', title: 'Rory Park', detail: 'Chair 9 → Bed 3', at, read: true }, NOW)).toBe(
+      'Request Rory Park, location changed: Chair 9 to Bed 3. 5 minutes ago.',
     );
-    expect(activityAriaLabel({ kind: 'new_request', title: 'T.R.', detail: 'T.R. · 24 M · FA 4', at, read: false }, NOW)).toBe(
-      'Request T R, new request: 24 M, FA 4. 5 minutes ago. Unread.',
+    expect(activityAriaLabel({ kind: 'new_request', title: 'Tara Ruiz', detail: 'Tara Ruiz · 24 M · FA 4', at, read: false }, NOW)).toBe(
+      'Request Tara Ruiz, new request: 24 M, FA 4. 5 minutes ago. Unread.',
+    );
+    expect(activityAriaLabel({ kind: 'moved', title: NO_NAME, detail: 'Bed 3', at, read: true }, NOW)).toBe(
+      'A request with no name, location changed: Bed 3. 5 minutes ago.',
     );
   });
 
-  it("a new request's line 2 does not repeat line 1's initials (f34-v2-2); every other kind shows the detail", () => {
-    expect(activityLine2({ kind: 'new_request', title: 'T.R.', detail: 'T.R. · 24 M · FA 4' })).toBe('New request · 24 M · FA 4');
+  it("a new request's line 2 does not repeat line 1's name (f34-v2-2); every other kind shows the detail", () => {
+    expect(activityLine2({ kind: 'new_request', title: 'Tara Ruiz', detail: 'Tara Ruiz · 24 M · FA 4' })).toBe('New request · 24 M · FA 4');
     expect(activityLine2({ kind: 'new_request', title: NO_NAME, detail: '24 M · FA 4' })).toBe('New request · 24 M · FA 4');
-    expect(activityLine2({ kind: 'new_request', title: 'T.R.', detail: 'T.R.' })).toBe('New request');
-    expect(activityLine2({ kind: 'in_medical', title: 'J.D.', detail: 'Located · Chair 9' })).toBe('Located · Chair 9');
+    expect(activityLine2({ kind: 'new_request', title: 'Tara Ruiz', detail: 'Tara Ruiz' })).toBe('New request');
+    // A row stored before names replaced initials (2026-11-07) keeps its initials detail: they do not repeat either.
+    expect(activityLine2({ kind: 'new_request', title: 'Tara Ruiz', detail: 'T.R. · 24 M · FA 4' })).toBe('New request · 24 M · FA 4');
+    expect(activityLine2({ kind: 'new_request', title: 'Tara Ruiz', detail: 'T.R.' })).toBe('New request');
+    expect(activityAriaLabel({ kind: 'new_request', title: 'Tara Ruiz', detail: 'T.R. · 24 M · FA 4', at: new Date(NOW - 5 * 60_000).toISOString(), read: false }, NOW)).not.toContain('T.R.');
+    // A name typed with a phone number: the title and the stored detail are scrubbed alike, so line 2 still drops it.
+    const title = requestTitle('Jane', '4075550142');
+    expect(title).toBe('Jane •••');
+    expect(activityLine2({ kind: 'new_request', title, detail: scrubDetail(newRequestDetail({ name: 'Jane 4075550142', age: '24', gender: 'Male', postShort: 'FA 4' })) })).toBe('New request · 24 M · FA 4');
+    expect(activityLine2({ kind: 'in_medical', title: 'Jordan Diaz', detail: 'Located · Chair 9' })).toBe('Located · Chair 9');
   });
 
   it('maps lp_activity_list rows (unknown kinds dropped, detail scrubbed)', () => {
     expect(
       mapActivityRow({ request_id: ID, kind: 'moved', detail: 'LP-0001 Chair 9 → Bed 3', at: '2026-11-06T21:00:00Z', read_at: null, first_name: 'Rory', last_name: 'Park' }),
-    ).toEqual({ requestId: ID, kind: 'moved', title: 'R.P.', detail: 'Chair 9 → Bed 3', at: '2026-11-06T21:00:00Z', read: false });
+    ).toEqual({ requestId: ID, kind: 'moved', title: 'Rory Park', detail: 'Chair 9 → Bed 3', at: '2026-11-06T21:00:00Z', read: false });
     expect(mapActivityRow({ request_id: ID, kind: 'nope', at: 'x' })).toBeNull();
     expect(isActivityKind('edited')).toBe(true);
     expect(isActivityKind('status')).toBe(false);
