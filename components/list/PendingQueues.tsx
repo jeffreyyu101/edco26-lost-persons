@@ -15,13 +15,14 @@
 import { ChevronDown, ChevronRight, Clock } from 'lucide-react';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { UnreadDot } from '@/components/messages/CardActivity';
-import { StatusGlyph } from '@/components/ui/StatusGlyph';
+import { StatusGlyph, SwapGlyph } from '@/components/ui/StatusGlyph';
+import { SWAP_REQUESTED_LABEL } from '@/lib/client/swap';
 import type { RequestSummary } from '@/lib/api-types';
 import { STATUS_GROUP_META, oldestWaitMinutes } from '@/lib/client/status-order';
 import { useComingFold, useWaitingFold } from '@/lib/client/view-prefs';
 import { waitTone } from '@/lib/domain';
 import { formatDuration } from '@/lib/format';
-import { CheckCard, ComingCard, type CheckCardProps, type ComingCardProps } from './cards';
+import { CheckCard, ComingCard, MineCard, type CheckCardProps, type ComingCardProps } from './cards';
 import { minutesPhrase } from './list-helpers';
 import s from './list.module.css';
 
@@ -204,6 +205,8 @@ export interface PendingQueuesProps extends Pick<CheckCardProps, 'now' | 'offlin
   waiting: readonly RequestSummary[];
   /** Friend coming in rule 4's order (status-order.ts friendComingOrder). */
   coming: readonly RequestSummary[];
+  /** (Companion) Friend swap requested, oldest first: on top, the answerer must decide. */
+  swapRequested?: readonly RequestSummary[];
   /** A Not found tap (the hold, or the final answer that closes the request). */
   onNotFound: CheckCardProps['onNotInMedical'];
   /** `useLeaving(waiting)` of the view: the closed card's exit. */
@@ -215,12 +218,34 @@ export interface PendingQueuesProps extends Pick<CheckCardProps, 'now' | 'offlin
 }
 
 /** Waiting for check, then Friend coming. */
-export function PendingQueues({ waiting, coming, now, offline, onNotFound, onInMedical, onReunited, onLocate, leaving, variant = 'phone', boardClasses }: PendingQueuesProps) {
+export function PendingQueues({ waiting, coming, swapRequested = [], now, offline, onNotFound, onInMedical, onReunited, onLocate, leaving, variant = 'phone', boardClasses }: PendingQueuesProps) {
   const [waitFolded, setWaitFolded] = useWaitingFold(waiting.length);
   const [comingFolded, setComingFolded] = useComingFold();
   const oldest = useMemo(() => oldestWaitMinutes(waiting, now), [waiting, now]);
+  const swaps =
+    swapRequested.length > 0 ? (
+      <section className={variant === 'board' ? undefined : s.qsec} aria-label={`${SWAP_REQUESTED_LABEL}, ${swapRequested.length}`} data-testid="pending-section-swap">
+        <div className={s.qhead}>
+          <div className={s.qheadBtn}>
+            <span className={s.qheadGlyph}>
+              <SwapGlyph tone="blue" size={15} />
+            </span>
+            <span className={s.qheadLabel}>{SWAP_REQUESTED_LABEL}</span>
+            <span className={s.qheadCount} aria-hidden>
+              {swapRequested.length}
+            </span>
+          </div>
+        </div>
+        <div className={variant === 'board' ? undefined : s.qcards}>
+          {swapRequested.map((row) => (
+            <MineCard key={row.id} row={row} now={now} freshTone={null} />
+          ))}
+        </div>
+      </section>
+    ) : null;
   return (
     <>
+      {variant === 'board' ? null : swaps}
       <Queue
         queue="check"
         count={waiting.length}
@@ -231,6 +256,7 @@ export function PendingQueues({ waiting, coming, now, offline, onNotFound, onInM
         variant={variant}
         boardClasses={boardClasses}
       >
+        {variant === 'board' ? swaps : null}
         {leaving.items.map(({ row, leaving: out, height }) =>
           out ? (
             <div key={`leaving-${row.id}`} className={s.leaveWrap} style={{ ['--leave-h' as string]: `${height ?? 0}px` }}>

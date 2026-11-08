@@ -454,7 +454,7 @@ function useRecheckNow(rows: readonly RequestSummary[]): number {
 }
 
 export function PendingView({ selected = null }: PendingViewProps = {}) {
-  const { friendComing, waiting } = usePending();
+  const { friendComing, waiting, swapRequested } = usePending();
   const loading = useIsLoading();
   const now = useRecheckNow(waiting);
   // Rule 2: pendingGroups already gives Waiting for check longest wait first. Rule 4 for Friend coming.
@@ -564,6 +564,7 @@ export function PendingView({ selected = null }: PendingViewProps = {}) {
   const queues = {
     waiting,
     coming,
+    swapRequested,
     now,
     offline,
     leaving,

@@ -519,7 +519,7 @@ function selectMerged(state: StoreState): RequestSummary[] {
 }
 
 const pendingEqual = (a: PendingGroups, b: PendingGroups) =>
-  shallowEqual(a.friendComing, b.friendComing) && shallowEqual(a.waiting, b.waiting);
+  shallowEqual(a.friendComing, b.friendComing) && shallowEqual(a.waiting, b.waiting) && shallowEqual(a.swapRequested, b.swapRequested);
 const selectPending = (s: StoreState) => pendingGroups(selectMerged(s));
 const selectMine = (s: StoreState) => mineRows(selectMerged(s), s.myIds, s.session.staff);
 const selectOutbox = (s: StoreState) => visibleOutbox(s.outbox, s.confirmed);
