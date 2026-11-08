@@ -191,7 +191,8 @@ describe('"<name> located" says "Friend can head over", never Main Med (HIPAA, B
     const alert = statusAlert(row, TZ);
     expect(alert).toMatchObject({ kind: 'in_medical', title: 'LP-1033 · T. R33 located', subtitle: 'Friend can head over' });
     const notice = systemNotice(alert, (id) => (id === row.id ? row : undefined));
-    expect(notice.title).toBe('T. R33 · Located');
+    expect(notice.title).toBe('T. R33');
+    expect(notice.body.split('\n')[0]).toMatch(/^Located\b/);
     expect(notice.body.split('\n').at(-1)).toBe('Friend can head over');
   });
 

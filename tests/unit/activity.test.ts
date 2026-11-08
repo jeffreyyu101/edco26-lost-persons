@@ -215,6 +215,14 @@ describe('the inbox', () => {
     expect(activityLine2({ kind: 'new_request', title: 'Tara Ruiz', detail: 'Tara Ruiz · 24 M · FA 4' })).toBe('New request · 24 M · FA 4');
     expect(activityLine2({ kind: 'new_request', title: NO_NAME, detail: '24 M · FA 4' })).toBe('New request · 24 M · FA 4');
     expect(activityLine2({ kind: 'new_request', title: 'Tara Ruiz', detail: 'Tara Ruiz' })).toBe('New request');
+    // A row stored before names replaced initials (2026-11-07) keeps its initials detail: they do not repeat either.
+    expect(activityLine2({ kind: 'new_request', title: 'Tara Ruiz', detail: 'T.R. · 24 M · FA 4' })).toBe('New request · 24 M · FA 4');
+    expect(activityLine2({ kind: 'new_request', title: 'Tara Ruiz', detail: 'T.R.' })).toBe('New request');
+    expect(activityAriaLabel({ kind: 'new_request', title: 'Tara Ruiz', detail: 'T.R. · 24 M · FA 4', at: new Date(NOW - 5 * 60_000).toISOString(), read: false }, NOW)).not.toContain('T.R.');
+    // A name typed with a phone number: the title and the stored detail are scrubbed alike, so line 2 still drops it.
+    const title = requestTitle('Jane', '4075550142');
+    expect(title).toBe('Jane •••');
+    expect(activityLine2({ kind: 'new_request', title, detail: scrubDetail(newRequestDetail({ name: 'Jane 4075550142', age: '24', gender: 'Male', postShort: 'FA 4' })) })).toBe('New request · 24 M · FA 4');
     expect(activityLine2({ kind: 'in_medical', title: 'Jordan Diaz', detail: 'Located · Chair 9' })).toBe('Located · Chair 9');
   });
 

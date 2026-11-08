@@ -279,6 +279,16 @@ describe('names', () => {
     expect(alertName(undefined)).toBe('');
   });
 
+  it('alertName: a request id or phone number typed into a name never reaches a notification (scrubbed like a detail)', () => {
+    expect(alertName('Jane 4075550142')).toBe('Jane •••');
+    expect(alertName('Jane (407) 555-0142 Doe')).toBe('Jane ••• Doe');
+    expect(alertName('LP-1013 Jane Doe')).toBe('Jane Doe');
+    expect(alertName('Jane Doe lp 7')).toBe('Jane Doe');
+    // Short numbers in a real name stay.
+    expect(alertName('Jane Doe 3rd')).toBe('Jane Doe 3rd');
+    expect(alertName('Louis XIV')).toBe('Louis XIV');
+  });
+
   it('initials (A4)', () => {
     expect(initials('Kayla Martinez')).toBe('K.M.');
     expect(initials('T.R.')).toBe('T.R.');

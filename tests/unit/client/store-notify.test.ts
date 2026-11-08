@@ -120,8 +120,8 @@ describe('alerts in the background are system notifications', () => {
     await advance(6_000);
     expect(n.shown).toEqual([
       {
-        title: 'Sofia Lopez · Located',
-        body: 'FA 3\nFriend can head over',
+        title: 'Sofia Lopez',
+        body: 'Located · FA 3\nFriend can head over',
         tag: `lp-${mine.id}`,
         url: `/?r=${mine.id}`,
         key: `${mine.id}:2`,
@@ -204,9 +204,10 @@ describe('alerts in the background are system notifications', () => {
     server.change(mine.id, { status: STATUS.waiting }); // the liaison's Undo, seen on the next poll
     await advance(6_000);
     expect(n.shown.map((x) => [x.title, x.tag, x.key])).toEqual([
-      ['T. R4 · Located', `lp-${mine.id}`, `${mine.id}:2`],
-      ['T. R4 · Waiting for check', `lp-${mine.id}`, `${mine.id}:3`],
+      ['T. R4', `lp-${mine.id}`, `${mine.id}:2`],
+      ['T. R4', `lp-${mine.id}`, `${mine.id}:3`],
     ]);
+    expect(n.shown.map((x) => x.body.split('\n')[0]?.split(' · ')[0])).toEqual(['Located', 'Waiting for check']);
     // The out-of-date "Located" may be closed by its own key; the new one never is.
     expect(n.closed.every((c) => c.tag === mine.id && c.key === `${mine.id}:2`)).toBe(true);
   });

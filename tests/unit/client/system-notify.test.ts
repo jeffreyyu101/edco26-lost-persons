@@ -124,11 +124,11 @@ describe('what a notification shows', () => {
   const rows = new Map<string, RequestSummary>([[sofia.id, sofia]]);
   const rowOf = (id: string) => rows.get(id);
 
-  it('In medical: the full name and status (no LP number, F4), the post, the next step; sticky until dismissed', () => {
+  it('In medical: the full name as the title, the status and post (no LP number, F4), the next step; sticky until dismissed', () => {
     const n = systemNotice(statusAlert(sofia), rowOf);
     expect(n).toEqual({
-      title: 'Sofia Lopez · Located',
-      body: 'FA 3\nFriend can head over',
+      title: 'Sofia Lopez',
+      body: 'Located · FA 3\nFriend can head over',
       tag: `lp-${sofia.id}`,
       url: `/?r=${sofia.id}`,
       key: `${sofia.id}:3`,
@@ -136,13 +136,14 @@ describe('what a notification shows', () => {
     });
   });
 
-  it('the other answers and changes read "<full name> · <status>" (the label from STATUS_META), never an LP number', () => {
+  it('the other answers and changes read "<full name>" / "<status> · <post>" (the label from STATUS_META), never an LP number', () => {
     for (const status of [STATUS.notInMedical, STATUS.reunited, STATUS.waiting, STATUS.cancelled] as const) {
       const row = { ...sofia, status };
       const n = systemNotice(statusAlert(row), () => row);
-      expect(n.title).toBe(`Sofia Lopez · ${STATUS_META[status].shortLabel}`);
+      expect(n.title).toBe('Sofia Lopez');
       expect(n.title).not.toMatch(/LP-?\d/);
-      expect(n.body).toBe('FA 3');
+      expect(n.body).toBe(`${STATUS_META[status].shortLabel} · FA 3`);
+      expect(n.body).not.toMatch(/LP-?\d/);
       expect(n.requireInteraction).toBe(false);
     }
   });
@@ -153,6 +154,14 @@ describe('what a notification shows', () => {
     expect(n).toMatchObject({ title: 'New request', body: 'Tara Reyes · FA 4', tag: `lp-${row.id}`, url: `/?r=${row.id}` });
     // Not synced yet: the alert's own title would carry the LP number; the notification never does.
     expect(systemNotice(newRequestAlert(row), () => undefined).title).toBe('New request');
+  });
+
+  it('a status alert whose row is gone: "Request update", never the alert\'s own title (it carries the LP number)', () => {
+    const alert = statusAlert(sofia);
+    expect(alert.title).toMatch(/LP-\d/);
+    const n = systemNotice(alert, () => undefined);
+    expect(n.title).toBe('Request update');
+    expect(JSON.stringify(n)).not.toMatch(/LP-?\d/);
   });
 
   it('shows the full name but never a phone number or a contact, in the text or the data', () => {
@@ -348,7 +357,7 @@ describe('the notifier', () => {
     const shown = system.show(alert, () => row, [alert]);
     row = undefined; // the store moves on; the notification was already built
     expect(await shown).toBe(true);
-    expect(f.shows[0]).toMatchObject({ title: 'Sofia Lopez · Located', options: { body: 'FA 4\nFriend can head over', data: { key: `${alert.requestId}:2` } } });
+    expect(f.shows[0]).toMatchObject({ title: 'Sofia Lopez', options: { body: 'Located · FA 4\nFriend can head over', data: { key: `${alert.requestId}:2` } } });
   });
 
   it('reports failure so the store can toast instead: no permission, no worker, or showNotification throws', async () => {
