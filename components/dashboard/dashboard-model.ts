@@ -64,7 +64,11 @@ export function boundaries(parts: readonly StatusPart[]): number[] {
 
 // ---- needs attention --------------------------------------------------------------------------------------
 
-export interface AttentionRow extends AttentionItem {
+/** (Companion) lp_stats adds kind 'swap' (Friend swap requested, since the request) to Needs attention. */
+export type AttentionKind = AttentionItem['kind'] | 'swap';
+export type AttentionInput = Omit<AttentionItem, 'kind'> & { kind: AttentionKind };
+
+export interface AttentionRow extends AttentionInput {
   /** Minutes since `since`. */
   t: number;
   sev: Sev;
@@ -75,7 +79,7 @@ export interface AttentionRow extends AttentionItem {
 }
 
 /** Most urgent first; waiting and located turn red 30 minutes in, an overdue re-check 10 minutes past due. */
-export function attentionRows(items: readonly AttentionItem[], now: number): AttentionRow[] {
+export function attentionRows(items: readonly AttentionInput[], now: number): AttentionRow[] {
   return items
     .map((it) => {
       const t = (now - Date.parse(it.since)) / 60_000;
@@ -94,6 +98,8 @@ export function attentionPhrase(row: AttentionRow): string {
   const what =
     row.kind === 'wait'
       ? `waiting ${mins} minutes for a first check`
+      : row.kind === 'swap'
+        ? `friend swap requested ${mins} minutes ago`
       : row.kind === 'recheck'
         ? `re-check overdue by ${mins} minutes`
         : `located ${mins} minutes ago, friend not here yet${row.enroute ? `, on the way${row.eta !== null ? `, about ${row.eta} minutes out` : ''}` : ''}`;

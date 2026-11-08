@@ -18,6 +18,7 @@ import {
   type StatusKind,
 } from '../domain';
 import { formatCaseNumber, minutesSince } from '../format';
+import { swapOverlayFields } from './swap';
 import { toCreateBody } from './form-values';
 import {
   createServerState,
@@ -138,7 +139,7 @@ export function createStubStore(options: StubOptions): AppStore {
       rowVersion: row.rowVersion + 1,
     };
     putRow(next);
-    if (kind !== 'undo' && ['answer', 'change', 'reunite'].includes(kind)) {
+    if (kind !== 'undo' && ['answer', 'change', 'reunite', 'inform'].includes(kind)) {
       const back = undoTarget(row.status);
       if (back) {
         const snackId = nextId('undo');
@@ -264,6 +265,20 @@ export function createStubStore(options: StubOptions): AppStore {
       const value = location === null ? null : location.trim() || null;
       if ((row.medicalLocation ?? null) === value) return { ok: true, changed: false, request: row };
       const next: RequestSummary = { ...row, medicalLocation: value, updatedBy: staff(), updatedAt: stamp(), rowVersion: row.rowVersion + 1 };
+      putRow(next);
+      return { ok: true, changed: true, request: next };
+    },
+    async swap(id, swapAction) {
+      const row = state.confirmed.get(id);
+      if (!row) return fail('not_found', 'Request not found');
+      const t = stamp();
+      const next: RequestSummary = {
+        ...row,
+        ...swapOverlayFields(swapAction, staff(), t),
+        updatedBy: staff(),
+        updatedAt: t,
+        rowVersion: row.rowVersion + 1,
+      };
       putRow(next);
       return { ok: true, changed: true, request: next };
     },

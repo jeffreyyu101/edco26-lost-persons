@@ -97,6 +97,14 @@ export type StageKey =
   | 'cancelled'
   /** (F6) Closed by the server after an hour In medical with no activity: grey, closed, lucide timer-off. */
   | 'inactive'
+  /** (Companion) Located · already accompanied: amber, lucide users. */
+  | 'accompanied'
+  /** (Companion) Accompanied with an open friend swap request: blue, swap glyph (the answerer must act). */
+  | 'swapRequested'
+  /** (Companion) In medical after an approved swap ("Swap at Main Med" / "Swap at FA 4"): green, swap glyph. */
+  | 'swapApproved'
+  /** (Companion) Closed · Friend informed: grey, lucide users. */
+  | 'friendInformed'
   /** A legacy status this app does not know (shown verbatim, grey, closed). */
   | 'legacy';
 
@@ -104,7 +112,7 @@ export type StageKey =
 export type StageTone = 'blue' | 'amber' | 'violet' | 'green' | 'teal' | 'gray';
 
 /** Which glyph a stage draws (components/ui/StageGlyph.tsx). The status glyphs are StatusGlyph's. */
-export type StageGlyphKind = GlyphKind | 'needsInfo' | 'hourglass' | 'history' | 'walk' | 'arrived';
+export type StageGlyphKind = GlyphKind | 'needsInfo' | 'hourglass' | 'history' | 'walk' | 'arrived' | 'swapBlue' | 'swapGreen';
 
 export interface StageMeta {
   label: string;
@@ -138,6 +146,10 @@ export const STAGE_META: Readonly<Record<Exclude<StageKey, 'legacy'>, StageMeta>
   discharged: fromStatus(STATUS.discharged),
   cancelled: fromStatus(STATUS.cancelled),
   inactive: fromStatus(STATUS.inactive),
+  accompanied: fromStatus(STATUS.accompanied),
+  swapRequested: { label: 'Friend swap requested', tone: 'blue', glyph: 'swapBlue', bucket: 'open' },
+  swapApproved: { label: 'Swap at Main Med', tone: 'green', glyph: 'swapGreen', bucket: 'open' },
+  friendInformed: fromStatus(STATUS.friendInformed),
 };
 
 /**
@@ -165,6 +177,12 @@ export interface StageSource {
    * server sends it (Pending v9.1 orders Friend arrived by it and the desk shows it after the label).
    */
   enroute?: { count?: number; earliestEta?: string | null; state?: string | null; arrivedAt?: string | null } | null;
+  /** (Companion) Set while a friend swap request is open (Accompanied). */
+  swapRequestedAt?: string | null;
+  /** (Companion) Where an approved swap happens: the request's own post ('fa') or Main Med ('mm'). */
+  swapPlace?: string | null;
+  /** (Companion) The request's post, for "Swap at FA 4". */
+  postShort?: string;
 }
 
 export interface DisplayStage extends StageMeta {
@@ -384,6 +402,17 @@ function stageOf(row: StageSource, opts: StageOptions): DisplayStage {
       });
     }
     return of('waiting', { sub: formatDuration(waitMinutes), ...wait, said: STATUS_META[STATUS.waiting].label });
+  }
+  if (status === STATUS.accompanied) {
+    if (row.swapRequestedAt) return of('swapRequested', { fullLabel: STAGE_META.swapRequested.label });
+    const full = STATUS_META[STATUS.accompanied].label;
+    const location = (row.medicalLocation ?? '').trim();
+    return of('accompanied', { fullLabel: full, ...withExtra(location || undefined), said: location ? `${full}, ${location}` : full });
+  }
+  if (status === STATUS.friendInformed) return of('friendInformed');
+  if (isInMedical(status) && (row.swapPlace === 'fa' || row.swapPlace === 'mm') && row.enroute?.state !== 'enroute' && row.enroute?.state !== 'arrived') {
+    const label = `Swap at ${row.swapPlace === 'mm' ? 'Main Med' : row.postShort || 'FA'}`;
+    return of('swapApproved', { label, fullLabel: label, said: label });
   }
   if (isInMedical(status)) {
     const full = STATUS_META[STATUS.inMedical].label;

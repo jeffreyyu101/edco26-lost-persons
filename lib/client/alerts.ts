@@ -16,6 +16,7 @@ import { STATUS, ageGender, alertName, isHeld, isInMedical, sameStaff, statusMet
 import { holdDetail } from '../hold-detail';
 import { formatCaseNumber } from '../format';
 import type { AlertEvent, ToastItem } from './store-contract';
+import { SWAP_REQUESTED_LABEL, isSwapApproved, swapApprovedLabel } from './swap';
 
 export interface AlertContext {
   /** Attribution string of the signed-in staff. */
@@ -49,11 +50,34 @@ function subject(row: RequestSummary): string {
  * named person is.
  */
 export const LOCATED_SUBTITLE = 'Friend can head over';
+/** (Companion) Under "LP-1234 · Located · already accompanied". */
+export const ACCOMPANIED_SUBTITLE = "Don't send the friend";
+
+/**
+ * (Companion) A swap request opened or closed on a request that stayed Accompanied: "Friend swap requested" for
+ * whoever is involved (the answerer decides), "Swap declined" for the creator. Null when neither moved.
+ */
+export function swapAlert(before: RequestSummary, row: RequestSummary): AlertEvent | null {
+  if (row.status !== STATUS.accompanied || before.status !== STATUS.accompanied) return null;
+  if (!before.swapRequestedAt && row.swapRequestedAt) {
+    return { kind: 'swap_requested', requestId: row.id, title: `${subject(row)} · ${SWAP_REQUESTED_LABEL}`, ...(row.postShort ? { subtitle: `${row.postShort} · decide where` } : {}), count: 1 };
+  }
+  if (before.swapRequestedAt && !row.swapRequestedAt) return { kind: 'swap_declined', requestId: row.id, title: `${subject(row)} · Swap declined`, count: 1 };
+  return null;
+}
 
 export function statusAlert(row: RequestSummary, timeZone?: string): AlertEvent {
   // (F5) An Undo of the final Not found, or of In medical, can put the hold back: it reads "Not located yet".
   if (isHeld(row)) return holdAlert(row, timeZone);
   const s = subject(row);
+  // (Companion) Accompanied, Friend informed and an approved swap say so (the push's words).
+  if (row.status === STATUS.accompanied) {
+    return { kind: 'accompanied', requestId: row.id, title: `${s} · ${statusMeta(STATUS.accompanied).label}`, subtitle: ACCOMPANIED_SUBTITLE, count: 1 };
+  }
+  if (row.status === STATUS.friendInformed) return { kind: 'friend_informed', requestId: row.id, title: `${s} · ${statusMeta(STATUS.friendInformed).label}`, count: 1 };
+  if (isSwapApproved(row) && row.swapPlace) {
+    return { kind: 'swap_approved', requestId: row.id, title: `${s} · ${swapApprovedLabel(row.swapPlace, row)}`, count: 1 };
+  }
   if (isInMedical(row.status)) {
     return { kind: 'in_medical', requestId: row.id, title: `${s} ${statusMeta(STATUS.inMedical).shortLabel.toLowerCase()}`, subtitle: LOCATED_SUBTITLE, count: 1 };
   }
@@ -77,7 +101,8 @@ export function holdAlert(row: RequestSummary, timeZone?: string): AlertEvent {
 
 export function newRequestAlert(row: RequestSummary): AlertEvent {
   const who = [alertName(row.name), ageGender(row.age, row.gender)].filter(Boolean).join(' ');
-  const subtitle = [who, row.postShort].filter(Boolean).join(' · ');
+  // (Companion) The intake said a friend may already be with them (the push body says the same).
+  const subtitle = [who, row.postShort, row.friendInMedical === 'yes' ? 'friend may be with them' : ''].filter(Boolean).join(' · ');
   return { kind: 'new_request', requestId: row.id, title: `New request · ${formatCaseNumber(row.caseNumber)}`, ...(subtitle ? { subtitle } : {}), count: 1 };
 }
 
@@ -100,6 +125,13 @@ export function diffAlerts(
     // A change by the same person (another of their phones) is not "someone else".
     const byMe = sameStaff(row.updatedBy, ctx.sessionStaff);
     if (before) {
+      // (Companion) An opened / declined swap request alerts whoever is involved (the answerer), and the creator.
+      const swap = byMe ? null : swapAlert(before, row);
+      if (swap && (mine || row.involved === true)) {
+        ctx.seen.add(key);
+        out.push(swap);
+        continue;
+      }
       if (!mine || byMe) continue;
       if (row.quietClose === true && before.status !== row.status) continue;
       if (before.status === row.status) {
@@ -210,5 +242,17 @@ export function alertToast(alert: AlertEvent, view: (id: string) => void): Omit<
     case 'message':
       // F3: a new message from someone else on a request I'm involved in ("J.D." / "Rae C.: Any tattoos?").
       return { ...base, tone: 'blue', icon: 'message', durationMs: ALERT_TOAST_MS };
+    case 'accompanied':
+      // (Companion) Front of house must NOT send the friend: it stays until dismissed, like Located.
+      return { ...base, tone: 'amber', icon: 'alert', durationMs: null };
+    case 'swap_requested':
+      // The answerer has to decide where: it stays until dismissed.
+      return { ...base, tone: 'blue', icon: 'refresh', durationMs: null };
+    case 'swap_approved':
+      return { ...base, tone: 'green', icon: 'check', durationMs: null };
+    case 'swap_declined':
+      return { ...base, tone: 'neutral', icon: 'x', durationMs: ALERT_TOAST_MS };
+    case 'friend_informed':
+      return { ...base, tone: 'neutral', icon: 'check', durationMs: ALERT_TOAST_MS };
   }
 }

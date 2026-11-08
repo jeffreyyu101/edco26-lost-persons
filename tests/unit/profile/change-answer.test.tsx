@@ -36,6 +36,14 @@ describe('changeAnswerChoices', () => {
     ]);
   });
 
+  it('(Companion) Already accompanied: Located · friend coming, Not located, Back to Waiting for check', () => {
+    expect(changeAnswerChoices(STATUS.accompanied)).toEqual([
+      { to: STATUS.inMedical, label: 'Located · friend coming', kind: 'change' },
+      { to: STATUS.notInMedical, label: 'Not located', kind: 'change' },
+      { to: STATUS.waiting, label: 'Back to Waiting for check', kind: 'change' },
+    ]);
+  });
+
   it('legacy Bring friend: only the moves lp_set_status allows (it has no way back to Waiting)', () => {
     expect(canTransition(STATUS.legacyBringFriend, STATUS.waiting)).toBe(false);
     expect(changeAnswerChoices(STATUS.legacyBringFriend)).toEqual([{ to: STATUS.notInMedical, label: 'Not located', kind: 'change' }]);
@@ -49,7 +57,8 @@ describe('changeAnswerChoices', () => {
 
   it('every status with a Change answer button has a menu, and every choice and its Undo is an allowed move', () => {
     for (const status of STATUSES) {
-      const hasButton = primaryActions(status).some((a) => a.kind === 'change');
+      // (Companion) Already accompanied keeps its Change answer in the ⋯ menu (its bar is Request swap | Friend informed).
+      const hasButton = status === STATUS.accompanied || primaryActions(status).some((a) => a.kind === 'change');
       const choices = changeAnswerChoices(status);
       expect(choices.length > 0, status).toBe(hasButton);
       for (const c of choices) {

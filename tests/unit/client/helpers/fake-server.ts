@@ -172,7 +172,7 @@ export class FakeServer {
     if (path === '/api/sync' && method === 'GET') return this.sync(req.query);
     if (path === '/api/stats') return json(200, { open: { waiting: 0, inMedical: 0 }, serverTime: this.stamp(this.seq) });
     if (path === '/api/requests' && method === 'POST') return this.create(req.body as Record<string, unknown>);
-    const m = /^\/api\/requests\/([^/]+)(\/status|\/cancel|\/photos)?$/.exec(path);
+    const m = /^\/api\/requests\/([^/]+)(\/status|\/cancel|\/photos|\/swap)?$/.exec(path);
     if (!m) return apiError(404, 'not_found', 'Not found');
     const id = decodeURIComponent(m[1] ?? '');
     const cur = this.rows.get(id)?.row;
@@ -199,6 +199,22 @@ export class FakeServer {
       if (!canTransition(cur.status, status)) return apiError(422, 'invalid', 'Not allowed');
       const row = this.change(id, { status }, this.session?.staff);
       return json(200, { changed: true, request: row });
+    }
+    if (action === '/swap') {
+      // (Companion) request / approve(place) / decline, as the backend's POST /api/requests/:id/swap.
+      const body = req.body as { action: 'request' | 'approve' | 'decline' | 'withdraw'; place?: 'fa' | 'mm'; expectedVersion: number };
+      if (body.expectedVersion !== cur.rowVersion) return apiError(409, 'conflict', 'Updated by someone else', { currentStatus: cur.status });
+      if (cur.status !== STATUS.accompanied) return apiError(422, 'invalid', 'Not allowed');
+      const staff = this.session?.staff;
+      if (body.action === 'request') {
+        if (cur.swapRequestedAt) return json(200, { changed: false, request: cur });
+        return json(200, { changed: true, request: this.change(id, { swapRequestedAt: this.stamp(this.seq), swapRequestedBy: staff ?? null }, staff) });
+      }
+      if (!cur.swapRequestedAt) return apiError(422, 'invalid', 'No swap requested');
+      if (body.action === 'approve') {
+        return json(200, { changed: true, request: this.change(id, { status: STATUS.inMedical, swapPlace: body.place ?? null, swapRequestedAt: null, swapRequestedBy: null }, staff) });
+      }
+      return json(200, { changed: true, request: this.change(id, { swapRequestedAt: null, swapRequestedBy: null }, staff) });
     }
     if (action === '/cancel') {
       const { expectedVersion } = req.body as { expectedVersion: number };

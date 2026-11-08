@@ -267,6 +267,10 @@ describe('labels', () => {
       discharged: 'gray',
       cancelled: 'gray',
       inactive: 'gray',
+      accompanied: 'amber',
+      swapRequested: 'blue',
+      swapApproved: 'green',
+      friendInformed: 'gray',
     });
     for (const key of ['needsInfo', 'notFoundYet', 'recheckDue', 'enroute', 'arrived'] as const) expect(STAGE_META[key].bucket).toBe('open');
   });

@@ -43,7 +43,7 @@ import { Banner, ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ProfileSkeleton } from '@/components/ui/Skeleton';
 import { StageGlyph } from '@/components/ui/StageGlyph';
-import { StatusGlyph } from '@/components/ui/StatusGlyph';
+import { StatusGlyph, SwapGlyph } from '@/components/ui/StatusGlyph';
 import type { RequestDetail, RequestSummary } from '@/lib/api-types';
 import { useThreadLoaded } from '@/lib/client/messages-hooks';
 import { goBack, navigate } from '@/lib/client/nav';
@@ -72,6 +72,8 @@ import { Bust } from './Bust';
 import { primeKeyboard } from '@/components/list/hooks';
 import { changeAnswerChoices } from './change-answer';
 import { LocationEditor } from './LocationEditor';
+import { CompanionComingRow, CompanionMenuItems, FriendMayBeRow, LocatedSheet, SwapSheet } from './CompanionSheets';
+import { FRIEND_INFORMED_LABEL, REQUEST_SWAP_LABEL, SWAP_DONE_LABEL, SWAP_REQUESTED_LABEL, isSwapApproved, isSwapRequested } from '@/lib/client/swap';
 import { PhotoViewer, photoUrl } from './PhotoViewer';
 import s from './profile.module.css';
 
@@ -355,15 +357,83 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
   };
 
   // The store owns the optimistic overlay, the Undo bar (answer, change, reunite) and every failure toast.
-  const move = (to: SettableStatus, kind: StatusKind) => void actions.setStatus(row.id, to, kind);
+  const send = (to: SettableStatus, kind: StatusKind) => void actions.setStatus(row.id, to, kind);
+  // (Companion) Located from Waiting / Not located asks "Someone already with them?" first; nothing saves until
+  // one of its two answers is tapped.
+  const [locatedKind, setLocatedKind] = useState<StatusKind | null>(null);
+  const move = (to: SettableStatus, kind: StatusKind) => {
+    if (to === STATUS.inMedical && (row.status === STATUS.waiting || row.status === STATUS.notInMedical) && kind !== 'undo') {
+      setLocatedKind(kind);
+      return;
+    }
+    send(to, kind);
+  };
   const setStatus = (a: StatusAction) => move(a.to, a.kind);
   const menu = menuActions(row.status, isCreator);
+  // (Companion) The swap decision sheet: opens by itself for anyone but the person who asked, once per request.
+  const swapRequested = isSwapRequested(row);
+  const swapApproved = isSwapApproved(row);
+  const swapKey = swapRequested ? `${row.id}:${row.swapRequestedAt ?? ''}` : null;
+  const [swapManual, setSwapManual] = useState(false);
+  const [swapClosedKey, setSwapClosedKey] = useState<string | null>(null);
+  const swapAuto = swapKey !== null && swapClosedKey !== swapKey && !sameStaff(row.swapRequestedBy ?? '', session.staff);
+  const swapOpen = swapRequested && (swapManual || swapAuto);
+  const setSwapOpen = (open: boolean) => {
+    setSwapManual(open);
+    if (!open) setSwapClosedKey(swapKey);
+  };
+  const swap = (a: Parameters<typeof actions.swap>[1]) => {
+    setSwapOpen(false);
+    void actions.swap(row.id, a);
+  };
   // (F5) Medical side, Waiting for check (held or not): the two answers sit inside the status block
   // (design/screens/clarify-7.png, recheck-3.png); front of house keeps them in the bar as before.
   const answersInBlock = isMedicalTeam(session.team) && row.status === STATUS.waiting;
   const footer = answersInBlock ? [] : primaryActions(row.status);
+  // (Companion) Accompanied: Request swap | Friend informed; swap requested: the decision; swap approved: Swap done.
+  const companionFooter: ReactNode =
+    row.status === STATUS.accompanied ? (
+      swapRequested ? (
+        <Button size="3" variant="soft" color="blue" className="lp-hit" disabled={offline} onClick={() => setSwapOpen(true)} data-testid="swap-decide">
+          <SwapGlyph tone="blue" size={15} />
+          {SWAP_REQUESTED_LABEL}
+        </Button>
+      ) : (
+        <>
+          <Button size="3" variant="soft" color="gray" className="lp-hit" disabled={offline} onClick={() => swap({ action: 'request' })} data-testid="request-swap">
+            <SwapGlyph tone="gray" size={15} />
+            {REQUEST_SWAP_LABEL}
+          </Button>
+          <Button size="3" highContrast className="lp-hit" disabled={offline} onClick={() => send(STATUS.friendInformed, 'inform')} data-testid="friend-informed">
+            <Check size={16} aria-hidden />
+            {FRIEND_INFORMED_LABEL}
+          </Button>
+        </>
+      )
+    ) : swapApproved ? (
+      <Button size="3" highContrast className="lp-hit" disabled={offline} onClick={() => send(STATUS.reunited, 'reunite')} data-testid="swap-done">
+        <Check size={16} aria-hidden />
+        {SWAP_DONE_LABEL}
+      </Button>
+    ) : null;
+  const companionCount = row.status === STATUS.accompanied && !swapRequested ? 2 : companionFooter ? 1 : 0;
   // The phone's sticky bar at the foot of the screen; the desk pane's row under the status block.
-  const actionBar =
+  const actionBar = companionFooter ? (
+    <div
+      className={panel ? s.acts : s.foot}
+      data-layout={companionCount === 1 ? 'one' : 'two'}
+      data-sticky-foot={panel ? undefined : ''}
+      data-testid="profile-actions"
+    >
+      {offline ? (
+        <span className={s.offline}>
+          <CloudOff size={13} aria-hidden />
+          {NEEDS_CONNECTION}
+        </span>
+      ) : null}
+      {companionFooter}
+    </div>
+  ) :
     footer.length > 0 ? (
       <div
         className={panel ? s.acts : s.foot}
@@ -408,6 +478,7 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
               <Pencil size={15} aria-hidden />
               Edit details
             </DropdownMenu.Item>
+            <CompanionMenuItems status={row.status} offline={offline} onSend={send} />
             {menu.map((a) => (
               <DropdownMenu.Item key={a.id} disabled={offline} onSelect={() => setStatus(a)}>
                 {a.id === 'discharge' ? <Check size={15} aria-hidden /> : <RotateCcw size={15} aria-hidden />}
@@ -463,7 +534,30 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
           panel={panel}
           onNeedsConnection={() => actions.showToast({ tone: 'amber', icon: 'cloud-off', title: NEEDS_CONNECTION, durationMs: 3_000 })}
           answers={answersInBlock ? <BlockAnswers row={row} offline={offline} onAnswer={setStatus} /> : null}
-          enrouteSlot={<StatusEnroute row={row} />}
+          enrouteSlot={swapApproved && row.swapPlace === 'fa' ? <CompanionComingRow row={row} /> : <StatusEnroute row={row} />}
+        />
+
+        <FriendMayBeRow row={row} />
+
+        <LocatedSheet
+          row={locatedKind ? row : null}
+          open={locatedKind !== null}
+          offline={offline}
+          onClose={() => setLocatedKind(null)}
+          onChoose={(to) => {
+            const kind = locatedKind ?? 'answer';
+            setLocatedKind(null);
+            send(to, kind);
+          }}
+        />
+        <SwapSheet
+          row={swapRequested ? row : null}
+          open={swapOpen}
+          offline={offline}
+          sub={swapSub(row, now, timeZone)}
+          onClose={() => setSwapOpen(false)}
+          onApprove={(place) => swap({ action: 'approve', place })}
+          onDecline={() => swap({ action: 'decline' })}
         />
 
         {panel ? actionBar : null}
@@ -601,6 +695,13 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
 const revoke = (picks: readonly PhotoPick[]) => picks.forEach((p) => URL.revokeObjectURL(p.url));
 
 /** "19 · Female" (the profile spells the gender out; lists use "19 F"). */
+/** (Companion) The swap sheet's "Dana K. · 12:31 PM": who asked and when. */
+function swapSub(row: RequestSummary, now: number, timeZone: string): string {
+  const who = row.swapRequestedBy ? shortStaffName(parseStaff(row.swapRequestedBy).name) : '';
+  const at = row.swapRequestedAt ? formatListTime(row.swapRequestedAt, now, timeZone) : '';
+  return [who, at].filter(Boolean).join(' · ');
+}
+
 function ageGenderLong(row: RequestSummary): string {
   return [row.age === null ? null : String(row.age), row.gender?.trim() || null].filter(Boolean).join(' · ');
 }
@@ -780,7 +881,7 @@ function StatusBlock({
           )}
         </div>
       ) : null}
-      {inMedical ? <LocationRow row={row} offline={offline} panel={panel} onNeedsConnection={onNeedsConnection} /> : null}
+      {inMedical || row.status === STATUS.accompanied ? <LocationRow row={row} offline={offline} panel={panel} onNeedsConnection={onNeedsConnection} /> : null}
       {inMedical ? enrouteSlot : null}
       {answers}
     </div>

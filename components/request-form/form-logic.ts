@@ -15,7 +15,8 @@ import {
   type Gender,
 } from '@/lib/domain';
 
-export type FormKey = keyof RequestFormValues;
+/** (Companion) The intake's friend-in-medical answer is create-only: never part of an edit or its conflict review. */
+export type FormKey = Exclude<keyof RequestFormValues, 'friendInMedical' | 'friendInMedicalName'>;
 export type FormErrors = Partial<Record<FormKey, string>>;
 
 // ---------------------------------------------------------------------------------------------------

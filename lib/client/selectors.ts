@@ -64,6 +64,11 @@ export interface PendingGroups {
   friendComing: RequestSummary[];
   /** Waiting for check, oldest first by createdAt. */
   waiting: RequestSummary[];
+  /**
+   * (Companion) Accompanied with an open friend swap request, oldest request first: Pending's top section (the
+   * answerer must act). Accompanied without one is not on Pending.
+   */
+  swapRequested: RequestSummary[];
 }
 
 export function pendingGroups(rows: readonly RequestSummary[]): PendingGroups {
@@ -77,7 +82,10 @@ export function pendingGroups(rows: readonly RequestSummary[]): PendingGroups {
   const waiting = rows
     .filter((r) => r.status === STATUS.waiting)
     .sort((a, b) => time(a.createdAt) - time(b.createdAt) || a.caseNumber - b.caseNumber);
-  return { friendComing, waiting };
+  const swapRequested = rows
+    .filter((r) => r.status === STATUS.accompanied && !!r.swapRequestedAt)
+    .sort((a, b) => time(a.swapRequestedAt ?? a.updatedAt) - time(b.swapRequestedAt ?? b.updatedAt) || a.caseNumber - b.caseNumber);
+  return { friendComing, waiting, swapRequested };
 }
 
 /** My requests = created on this phone ∪ canonical created_by match with the session staff. */
@@ -122,7 +130,7 @@ export function viewCounts(
   return {
     all: rows.length + outboxShown.length,
     // Pending v9.1: Waiting for check (held requests included) + Friend coming.
-    pending: groups.friendComing.length + groups.waiting.length,
+    pending: groups.friendComing.length + groups.waiting.length + groups.swapRequested.length,
     mine: rows.filter((r) => isMine(r, myIds, sessionStaff)).length + outboxShown.length,
   };
 }

@@ -17,10 +17,40 @@ const COLOR: Readonly<Record<GlyphKind, string>> = {
   logged: 'var(--gray-10)',
   // (F6) gray-9, as the other closed glyphs (3:1 on the panel in both themes).
   inactive: 'var(--gray-9)',
-  // (Companion) lucide users: amber while accompanied, grey once the friend was informed.
+  // (Companion) lucide users: amber while already accompanied, grey once the friend was informed (closed).
   accompanied: 'var(--amber-9)',
   friendInformed: 'var(--gray-9)',
 };
+
+/** (Companion) lucide users (v1.70), 24 px grid. */
+const USERS = (
+  <>
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+  </>
+);
+
+/** (Companion) lucide arrow-left-right: the friend swap (blue requested, green approved). */
+export const SWAP_PATHS = (
+  <>
+    <path d="M8 3 4 7l4 4" />
+    <path d="M4 7h16" />
+    <path d="m16 21 4-4-4-4" />
+    <path d="M20 17H4" />
+  </>
+);
+
+/** (Companion) The swap glyph beside a "Friend swap requested" / "Swap at …" label. */
+export function SwapGlyph({ tone, size = 14, label }: { tone: 'blue' | 'green' | 'gray'; size?: number; label?: string }) {
+  const a11y = label ? { role: 'img' as const, 'aria-label': label } : { 'aria-hidden': true as const };
+  return (
+    <svg width={size + 1} height={size + 1} viewBox="0 0 24 24" fill="none" stroke={`var(--${tone}-9)`} strokeWidth={2.25} strokeLinecap="round" strokeLinejoin="round" style={{ flex: 'none' }} data-glyph={`swap-${tone}`} {...a11y}>
+      {SWAP_PATHS}
+    </svg>
+  );
+}
 
 /** (F6) lucide timer-off (v1.70), on its 24 px grid: Closed · inactive. Drawn here so the first load needs no icon chunk. */
 const TIMER_OFF = (
@@ -57,7 +87,7 @@ export function StatusGlyph(props: StatusGlyphProps) {
   const size = props.size ?? 14;
   const c = COLOR[kind];
   const a11y = props.label ? { role: 'img' as const, 'aria-label': props.label } : { 'aria-hidden': true as const };
-  if (kind === 'inactive') {
+  if (kind === 'inactive' || kind === 'accompanied' || kind === 'friendInformed') {
     // A line glyph draws one pixel larger than the rings, as the stage glyphs do (StageGlyph).
     return (
       <svg
@@ -74,7 +104,7 @@ export function StatusGlyph(props: StatusGlyphProps) {
         data-glyph={kind}
         {...a11y}
       >
-        {TIMER_OFF}
+        {kind === 'inactive' ? TIMER_OFF : USERS}
       </svg>
     );
   }
