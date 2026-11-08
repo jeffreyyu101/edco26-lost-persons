@@ -27,8 +27,8 @@
   container-type: inline-size;
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - var(--desk-top, 56px));
-  min-height: calc(100dvh - var(--desk-top, 56px));
+  min-height: calc(100vh - var(--desk-top, 56px) - var(--desk-gap-bottom, 0px));
+  min-height: calc(100dvh - var(--desk-top, 56px) - var(--desk-gap-bottom, 0px));
   padding-bottom: calc(24px + env(safe-area-inset-bottom));
   box-sizing: border-box;
 }
