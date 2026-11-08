@@ -10,10 +10,8 @@ const load = () => import('./F4Parts');
 const bellPlace = () => <span style={{ display: 'inline-block', width: 36, height: 36, flex: 'none' }} aria-hidden />;
 
 export const ActivityBellSlot = dynamic(() => load().then((m) => m.ActivityBell), { ssr: false, loading: bellPlace });
-export const ActivityNavItemSlot = dynamic(() => load().then((m) => m.ActivityNavItem), { ssr: false });
 export const AlertsBannerSlot = dynamic(() => load().then((m) => m.AlertsBanner), { ssr: false });
 export const ActivityHostSlot = dynamic(() => load().then((m) => m.ActivityHost), { ssr: false });
 export const AccountAlertsRowSlot = dynamic(() => load().then((m) => m.AccountAlertsRow), { ssr: false });
+export const DeskActivitySlot = dynamic(() => load().then((m) => m.DeskActivityItem), { ssr: false });
 export const DeskAlertsRowSlot = dynamic(() => load().then((m) => m.DeskAlertsRow), { ssr: false });
-export const DeskRailAlertsSlot = dynamic(() => load().then((m) => m.DeskRailAlerts), { ssr: false });
-export const DeskRailActivitySlot = dynamic(() => load().then((m) => m.DeskRailActivity), { ssr: false });

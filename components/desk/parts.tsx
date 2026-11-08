@@ -1,5 +1,5 @@
 'use client';
-// Small pieces shared by the sidebar, the rail and the top bar.
+// Small pieces shared by the sidebar and the top bar.
 import type { MouseEvent, ReactNode } from 'react';
 import { hrefFor, navigate, type NavParams } from '@/lib/client/nav';
 import type { LiveState } from '@/lib/client/live-status';
@@ -64,14 +64,17 @@ const LIVE_LABEL: Readonly<Record<LiveState, string>> = {
 /** The corner dot's state (desk.module.css .live): the line's colours, grey while nothing has loaded. */
 const MARK_STATE: Readonly<Record<LiveState, string>> = { healthy: 'live', reconnecting: 'off', offline: 'offline' };
 
+/** The collapsed sidebar's tooltip: the state in a word (the button's name says it in full). */
+const MARK_TIP: Readonly<Record<string, string>> = { live: 'Live', off: 'Reconnecting', offline: 'Offline', loading: 'Syncing' };
+
 /**
- * The compact logo lockup at the top of the sidebar (EDC Orlando | Ground Control on the brand card's dark
- * gradient) or the rail (the two logos stacked on a square), with a live dot on its corner. It reads the same
+ * The logo lockup at the top of the sidebar (EDC Orlando | Ground Control on the brand card's dark gradient; the
+ * EDC logo alone on a 32 px tile while the sidebar is collapsed), with a live dot on its corner. It reads the same
  * live status as the top bar's line and the banner (useLiveStatus, F1.2), so they never disagree: green while
  * healthy, amber while reconnecting, grey offline and while loading. Tap to sync now. The logos are decoration
  * here: the button is named by the live state.
  */
-export function LiveMark({ variant, className }: { variant: 'side' | 'rail'; className?: string }) {
+export function LiveMark() {
   const actions = useActions();
   const live = useLiveStatus();
   const loading = useIsLoading();
@@ -79,17 +82,18 @@ export function LiveMark({ variant, className }: { variant: 'side' | 'rail'; cla
   return (
     <button
       type="button"
-      className={`${d.lockup} ${className ?? ''}`}
+      className={d.lockup}
       onClick={actions.syncNow}
       aria-label={state === 'loading' ? 'Syncing' : LIVE_LABEL[live.state]}
       data-testid="desk-live"
-      data-variant={variant}
-      data-state={state}
     >
-      <img className={d.lockEdc} src="/logos/edc-orlando.png" alt="" width={194} height={132} decoding="async" draggable={false} />
-      <span className={d.lockDiv} aria-hidden />
-      <img className={d.lockGc} src="/logos/ground-control.png" alt="" width={313} height={120} decoding="async" draggable={false} />
+      <span className={d.lockArt}>
+        <img className={d.lockEdc} src="/logos/edc-orlando.png" alt="" width={194} height={132} decoding="async" draggable={false} />
+        <span className={d.lockDiv} aria-hidden />
+        <img className={d.lockGc} src="/logos/ground-control.png" alt="" width={313} height={120} decoding="async" draggable={false} />
+      </span>
       <span className={d.live} data-state={state} />
+      <Tip>{MARK_TIP[state] ?? 'Live'}</Tip>
     </button>
   );
 }
@@ -104,8 +108,9 @@ export function Kbd({ children, className }: { children: ReactNode; className?: 
 }
 
 /**
- * A tooltip with the control's label (hover and keyboard focus; not on touch screens). Decoration only:
- * the control carries its own accessible name. CSS-only, so no tooltip library on the first-load path.
+ * A tooltip with the control's label (hover and keyboard focus; not on touch screens): beside each item of the
+ * collapsed sidebar, under a pane button. Decoration only: the control carries its own accessible name. CSS-only,
+ * so no tooltip library on the first-load path.
  */
 export function Tip({ children, below = false, end = false }: { children: string; below?: boolean; end?: boolean }) {
   return (
