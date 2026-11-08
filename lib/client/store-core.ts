@@ -25,7 +25,6 @@ import type {
   SessionInfo,
   Stats,
   StatsRange,
-  SwapAction,
   SyncResponse,
 } from '../api-types';
 import {

@@ -373,18 +373,15 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
   // (Companion) The swap decision sheet: opens by itself for anyone but the person who asked, once per request.
   const swapRequested = isSwapRequested(row);
   const swapApproved = isSwapApproved(row);
-  const [swapOpen, setSwapOpen] = useState(false);
-  const autoOpened = useRef<string | null>(null);
-  useEffect(() => {
-    if (!swapRequested) {
-      setSwapOpen(false);
-      return;
-    }
-    const key = `${row.id}:${row.swapRequestedAt ?? ''}`;
-    if (autoOpened.current === key || sameStaff(row.swapRequestedBy ?? '', session.staff)) return;
-    autoOpened.current = key;
-    setSwapOpen(true);
-  }, [swapRequested, row.id, row.swapRequestedAt, row.swapRequestedBy, session.staff]);
+  const swapKey = swapRequested ? `${row.id}:${row.swapRequestedAt ?? ''}` : null;
+  const [swapManual, setSwapManual] = useState(false);
+  const [swapClosedKey, setSwapClosedKey] = useState<string | null>(null);
+  const swapAuto = swapKey !== null && swapClosedKey !== swapKey && !sameStaff(row.swapRequestedBy ?? '', session.staff);
+  const swapOpen = swapRequested && (swapManual || swapAuto);
+  const setSwapOpen = (open: boolean) => {
+    setSwapManual(open);
+    if (!open) setSwapClosedKey(swapKey);
+  };
   const swap = (a: Parameters<typeof actions.swap>[1]) => {
     setSwapOpen(false);
     void actions.swap(row.id, a);
@@ -574,7 +571,7 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
         />
         <SwapSheet
           row={swapRequested ? row : null}
-          open={swapOpen && swapRequested}
+          open={swapOpen}
           offline={offline}
           sub={swapSub(row, now, timeZone)}
           onClose={() => setSwapOpen(false)}

@@ -36,7 +36,5 @@ export function changeAnswerChoices(status: string): ChangeChoice[] {
     { to: other, label: other === STATUS.notInMedical ? ANSWER_LABEL.notFound : ANSWER_LABEL.inMedical, kind: 'change' },
     { to: STATUS.waiting, label: BACK_TO_WAITING, kind: 'change' },
   ];
-  // (Companion) Located · friend coming can become Located · already accompanied.
-  if (status === STATUS.inMedical) choices.splice(1, 0, { to: STATUS.accompanied, label: STATUS_META[STATUS.accompanied].label, kind: 'change' });
   return choices.filter((c) => canTransition(status, c.to));
 }
