@@ -123,8 +123,21 @@ export class Loop {
 /** The look of something tappable (by its testid or class token), for a tap that landed on nothing interactive. */
 export const TAPPABLE_LOOK = /(chip|card|row|badge|pill|tile|avatar|thumb|photo|glyph|icon|tab|link|btn|button)/;
 
-/** The live line's ticking text: its mutations are not a response to a tap. */
-export const TICKING = new Set(['live-text', 'card-minutes', 'wait-badge', 'live-indicator', 'live-announcement', 'sort-announcement']);
+/**
+ * Ticking text (the live line, waits, and since 2026-11-08 the request's recheck countdown, its sentence and bar,
+ * every 15 s): their mutations are not a response to a tap.
+ */
+export const TICKING = new Set([
+  'live-text',
+  'card-minutes',
+  'wait-badge',
+  'live-indicator',
+  'live-announcement',
+  'sort-announcement',
+  'recheck-row',
+  'recheck-when',
+  'recheck-bar',
+]);
 
 /**
  * Whether a tap at `t` saw any response within DEAD.responseMs: a view or address change, an /api/* request, a

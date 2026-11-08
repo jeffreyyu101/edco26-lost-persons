@@ -233,18 +233,22 @@ describe('the DOM watcher (fake elements, idle processing)', () => {
     expect(events.filter((e) => e.n === 'dead_tap')).toEqual([expect.objectContaining({ p: expect.objectContaining({ why: 'disabled' }) })]);
   });
 
-  it('three still swipes in the thread: stuck_scroll with a = thread; toaster and grabber swipes never count', async () => {
+  it("three still swipes on the phone's thread: stuck_scroll for the page (a = profile), crumbs where the finger was; toaster and grabber swipes never count", async () => {
+    const crumbs: string[] = [];
+    core.crumb = (code) => crumbs.push(code);
     const watch = attachDom(core);
     const inThread = el('span');
-    el('div', { 'data-testid': 'thread' }, inThread);
+    el('div', { 'data-testid': 'profile' }, el('section', { 'data-testid': 'messages' }, el('div', { 'data-testid': 'thread' }, inThread)));
     for (let i = 0; i < 3; i += 1) {
       swipe(inThread, -80);
       await vi.advanceTimersByTimeAsync(500);
       watch.process();
     }
-    expect(events.filter((e) => e.n === 'stuck_scroll')).toEqual([expect.objectContaining({ a: 'thread', k: 3, p: expect.objectContaining({ dir: 'up', input: 'touch' }) })]);
+    expect(events.filter((e) => e.n === 'stuck_scroll')).toEqual([expect.objectContaining({ a: 'profile', k: 3, p: expect.objectContaining({ dir: 'up', input: 'touch' }) })]);
     const swipes = events.filter((e) => e.n === 'swipe');
-    expect(swipes.every((e) => e.p?.still === 1)).toBe(true);
+    expect(swipes.length).toBe(3);
+    expect(swipes.every((e) => e.a === 'profile' && e.p?.still === 1)).toBe(true);
+    expect(crumbs).toEqual(['w!:thread:u', 'w!:thread:u', 'w!:thread:u']);
 
     events.length = 0;
     const toast = el('span');
@@ -256,6 +260,44 @@ describe('the DOM watcher (fake elements, idle processing)', () => {
       watch.process();
     }
     expect(events).toEqual([]);
+  });
+
+  it("the desk pane's thread scrolls in its own box: its swipes and stuck scroll stay a = thread", async () => {
+    const watch = attachDom(core);
+    const inThread = el('span');
+    el('div', { 'data-testid': 'desk-pane' }, el('div', { 'data-testid': 'profile', 'data-presentation': 'panel' }, el('div', { 'data-testid': 'thread' }, inThread)));
+    for (let i = 0; i < 3; i += 1) {
+      swipe(inThread, -80);
+      await vi.advanceTimersByTimeAsync(500);
+      watch.process();
+    }
+    expect(events.filter((e) => e.n === 'stuck_scroll')).toEqual([expect.objectContaining({ a: 'thread', k: 3 })]);
+    expect(events.filter((e) => e.n === 'swipe').every((e) => e.a === 'thread')).toBe(true);
+  });
+
+  it("a swipe on the phone's thread that scrolls the page is not still", async () => {
+    const watch = attachDom(core);
+    const inThread = el('span');
+    el('div', { 'data-testid': 'profile' }, el('div', { 'data-testid': 'thread' }, inThread));
+    swipe(inThread, -80);
+    f.doc.dispatchEvent(ev('scroll', {}, f.doc));
+    await vi.advanceTimersByTimeAsync(500);
+    watch.process();
+    expect(events.filter((e) => e.n === 'swipe')).toEqual([expect.objectContaining({ a: 'profile' })]);
+    expect(events.filter((e) => e.n === 'swipe')[0]?.p?.still).toBeUndefined();
+  });
+
+  it("the request's recheck countdown ticking (every 15 s) is not a tap's response", async () => {
+    const watch = attachDom(core);
+    const btn = el('button', { 'data-testid': 'not-found-answer' });
+    for (const id of ['recheck-when', 'recheck-bar', 'recheck-row']) {
+      events.length = 0;
+      tap(btn);
+      FakeMutationObserver.fire([{ target: el('span', { 'data-testid': id }) }]);
+      await vi.advanceTimersByTimeAsync(1_300);
+      watch.process();
+      expect(events.filter((e) => e.n === 'dead_tap'), id).toHaveLength(1);
+    }
   });
 
   it('a swipe followed by a scroll in its container is not still', async () => {

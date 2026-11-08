@@ -33,7 +33,9 @@ screenshots.
   numbers and attribute names only, by team. A desktop-only **`/health`** page shows the problem spots with their
   breadcrumb trails, the critical paths, request failure rates, push delivery and alert coverage. It stops by itself at
   **2026-11-10 06:00 ET**; the kill switch is on `/health` (off only) and in SQL (off and back on). See "Telemetry in
-  production" below.
+  production" below. Reading it after the message lane and the phone thread in the page: on a phone a swipe on the
+  thread is the request page's (area `profile`; its trail still says `w!:thread:…`), the desk pane's thread is still
+  `thread`, and a tap in a row's message lane is `message-mark` (BUILD_SPEC A118).
 
 ### 2026-11-06 morning (v2.5, Brian + Jeffrey)
 

@@ -145,13 +145,21 @@ event handler.
   3. the first class token;
   4. `role` or the lowercase tag.
 
-  Examples: `not-found-answer`, `composer-send`, `list.row`, `rt-iconbutton`, `button`.
+  Examples: `not-found-answer`, `composer-send`, `list.row`, `rt-iconbutton`, `button`. (2026-11-08, after `main`'s
+  message lane) A tap in a row's message lane (`[data-thread-badge]`, `MessageMark`, inside the row's `<button>`) is
+  `message-mark` before any of these: that click opens the request at its thread (`openRowAt`), not at the top. An
+  empty lane (no messages) has no marker and stays the row.
 - **`area(target)`**: the first ancestor whose `data-testid` is in `AREAS` (a curated list in `lib/telemetry.ts`:
   `request-list pending-board pending-column-# pending-section-# profile thread composer messages request-form
   alerts-sheet activity-sheet activity-panel activity-popover enroute-sheet location-form photo-viewer crop-frame
   desk-sidebar desk-rail desk-topbar desk-pane desk-table-view dashboard brand-card`), or `lp-toaster`, or the
   `data-testid` (else the class token) of an open `[role=dialog]` around it. Failing all of those, it is the first
   `data-testid` ancestor within 15 levels, or `page`. Areas stay few and stable, so they rank well.
+- **`scrollArea(target)`** (swipe counts and stuck scroll only; 2026-11-08, after `main`'s "Phone thread in the
+  page"): `area(target)`, except that `thread`, `messages` and `composer` outside the desk pane are part of the
+  request page, which scrolls as one (the phone's `.thread` has no box of its own), so a swipe there is `profile`'s.
+  In the desk pane (`[data-presentation=panel]` or `desk-pane`) the thread still scrolls in its own box and keeps
+  `thread`. Taps, crumbs and every other event keep `area()`.
 - **Form fields** (only inside `[data-testid=request-form]`):
   - the field key is the suffix of the input's `id` after React's `useId` prefix (`«r3»-lastSeen` becomes
     `lastseen`), whitelisted against `FORM_FIELDS` (else `field`);
@@ -188,7 +196,7 @@ frustration signal; those carry `tr`.
 | `n` | Fires when | Fields | `p` |
 |---|---|---|---|
 | `tap` (agg) | `pointerup` on a control (a click-length press, ≤ 10 px of movement) | `v a c`, `k` | `ptr` (touch, mouse, pen) |
-| `swipe` (agg) | `touchend` after ≥ 30 px of movement, or a `wheel` burst (desk) | `v a`, `k` | `up` `down` `left` `right` (counts), `still` (no scroll followed, §1.6), `prev` (a touchmove had `defaultPrevented`), `input` (touch or wheel) |
+| `swipe` (agg) | `touchend` after ≥ 30 px of movement, or a `wheel` burst (desk) | `v`, `a` = `scrollArea` (§1.3), `k` | `up` `down` `left` `right` (counts), `still` (no scroll followed, §1.6), `prev` (a touchmove had `defaultPrevented`), `input` (touch or wheel) |
 | `key` (agg) | `keydown` **outside** text fields, whitelisted named keys only (`escape enter arrowup arrowdown j k n slash`) | `v`, `c` = key, `k` | — |
 | `field` (agg) | `focusin` on a request-form field | `v`, `a` = section, `c` = field key, `k` | — |
 | `img_fail` (agg) | an `<img>` fails to load (capture `error`) | `a` = `photo`, `thumb`, `icon`, `logo` or `other` (from the element's class token or testid; never the URL) | — |
@@ -197,7 +205,7 @@ frustration signal; those carry `tr`.
 
 | `n` | Fires when (§1.6) | Fields | `p` |
 |---|---|---|---|
-| `stuck_scroll` | ≥ 3 swipes or wheel bursts with no scroll movement in the same area within 10 s | `v a`, `k` = still swipes | `dir` (the dominant direction), `edge` (top, bottom, mid, unk), `prev` (prevented count), `input`, `sheet` (a dialog was open), `kb` (keyboard probably open: `visualViewport.height < 0.75 × innerHeight`) |
+| `stuck_scroll` | ≥ 3 swipes or wheel bursts with no scroll movement in the same area (`scrollArea`) within 10 s | `v a`, `k` = still swipes | `dir` (the dominant direction), `edge` (top, bottom, mid, unk), `prev` (prevented count), `input`, `sheet` (a dialog was open), `kb` (keyboard probably open: `visualViewport.height < 0.75 × innerHeight`) |
 | `rage_tap` | ≥ 3 `pointerdown`s within 1,000 ms, all within 30 px of the first | `v a c`, `k` = taps | `ptr`, `inter` (the target was interactive), `r` (max radius, px) |
 | `dead_tap` | a tap on something that looks tappable but isn't, or a control that shows no response within 1 s, or a disabled control | `v a c` | `why`: `not_interactive`, `no_response` or `disabled`; `ptr` |
 | `loop` | the same sheet or view is opened and closed within 2 s, twice within 20 s | `v`, `a` = sheet id or `view:<name>`, `k`, `ms` = the shortest dwell | — |
@@ -249,7 +257,7 @@ frustration or error event carries a copy as `tr: [[dt, code], ...]`, where `dt`
 | `v>pending` | view |
 | `s+alerts-sheet` / `s-alerts-sheet` | sheet open / close |
 | `t:thread/bubble-mine` | tap (area/ctl) |
-| `w:thread:u` | swipe up; `!` = no scroll followed, `^` = prevented (`w!:thread:u`) |
+| `w:thread:u` | swipe up where the finger was (`area()`, not `scrollArea`); `!` = no scroll followed, `^` = prevented (`w!:thread:u`) |
 | `sc:thread` | a scroll burst |
 | `k:escape` | key |
 | `f:person/lastseen` | field focus |
@@ -287,7 +295,10 @@ within 300 ms.
 
 **Stuck scroll.** ≥ 3 still swipes in the same `area` within 10 s fire one event, with a 30 s cooldown per area.
 This is exactly the thread scroll trap in `request-page-ux-audit.md` #7 (`overscroll-behavior: contain` at the
-thread's edge: no scroll anywhere).
+thread's edge: no scroll anywhere). (2026-11-08) `main` fixed that trap by putting the phone's thread in the page, so
+the detector now groups by `scrollArea`: on a phone a swipe that starts on the thread is the request page's
+(`profile`), still only when the page itself did not move, with `edge` from the page; its crumbs still say `thread`.
+The desk pane's thread is still its own box (`thread`).
 
 **Rage tap.** A ring of `pointerdown` {t, x, y}. ≥ 3 within 1,000 ms whose distance from the first is ≤ 30 px fire
 one event, and that cluster then stays silent for 2 s. Controls in `REPEAT_OK` (steppers, if any; the list starts
@@ -310,7 +321,8 @@ empty) are skipped.
   - no mutation under the tap's area (a `MutationObserver` with childList and attributes on the area element,
     attached for 1 s and dropped at the first record).
 
-  The live line's ticking text (`live-text`, `card-minutes`, `wait-badge`) is excluded. False "responses" are
+  The live line's ticking text (`live-text`, `card-minutes`, `wait-badge`; since 2026-11-08 the request's recheck
+  countdown, `recheck-row`, `recheck-when`, `recheck-bar`, every 15 s) is excluded. False "responses" are
   possible; false "dead" taps are rare, which is the safe direction.
 
 **Loop.** On each close of a sheet or a profile view, a dwell under 2 s marks it quick. A second quick close of the
@@ -1046,7 +1058,7 @@ does, that section returns `null` and the page shows "—" for it.
 | Spec | What it proves |
 |---|---|
 | `tests/e2e/first-load.spec.ts` (**unchanged**) | Route-only ≤ 43,008 B and total ≤ 239,616 B. A new assertion: none of the HTML's script chunks contains the string `lp-tel` (the collector is not on the first load) |
-| `tests/e2e/telemetry.spec.ts` (`chromium-iphone14` with touch; plus the WebKit project where configured) | Sets `lp-tel-test=1`, signs in, then: All → Pending → a request → Messages. A triple tap on a non-interactive card area writes a `rage_tap` row with a trail (read with the admin client). Three swipes at the top of the thread write `stuck_scroll` with `a = thread`. With the context offline for 30 s and then online, the events arrive afterwards, with `link` offline and online. Setting `enabled=false` through the admin client makes the next send get a 204, and then there is **no `POST /api/telemetry` during 2 more minutes of activity** |
+| `tests/e2e/telemetry.spec.ts` (`chromium-iphone14` with touch; plus the WebKit project where configured) | Sets `lp-tel-test=1`, signs in, then: All → Pending → a request → Messages. A triple tap on a non-interactive card area writes a `rage_tap` row with a trail (read with the admin client). Three swipes on the thread that move nothing write `stuck_scroll` with `a = profile` (the page; 2026-11-08) and `w!:thread:u` crumbs; a real touch swipe from the thread that scrolls the page counts for `profile` and is not still (Chromium). With the context offline for 30 s and then online, the events arrive afterwards, with `link` offline and online. Setting `enabled=false` through the admin client makes the next send get a 204, and then there is **no `POST /api/telemetry` during 2 more minutes of activity** |
 | Privacy (same spec) | Creates a request named `TEST-e2e Quorra Zyxwvut`, phone `407 555 0199`, last seen `Gate Plum`; sends the message `TEST-e2e secret phrase plum`; searches `Quorra`; opens the photo viewer. Then `select row_to_json(e)::text from lp_tel_events e where received_at > :start` contains none of `quorra`, `zyxwvut`, `0199`, `plum` or `secret` (case-insensitive) |
 | No impact (same spec) | Over a scripted 2-minute session, telemetry on versus off: the same number of `/api/sync` requests within ±1, the same median sync duration within ±20 %, and (Chromium) a long-task count no higher. No `/api/telemetry` request ever starts while another `/api/*` request is pending (checked from `page.on('request' \| 'requestfinished' \| 'requestfailed')` timestamps) |
 | `tests/e2e/health.spec.ts` (desktop project) | `/health` without a session goes to `/signin?next=/health` and back after sign-in; seeded rows render every panel; **Refresh makes exactly one `GET /api/telemetry/health`**; no request in 60 s idle (no polling); 390 px wide shows "Desktop only"; the sidebar's Health link is absent until `/health` has been visited on that device, then present; the switch's confirm turns collection off (204 for the next ingest); axe is clean |

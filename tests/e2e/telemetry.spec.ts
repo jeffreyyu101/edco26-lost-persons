@@ -4,7 +4,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import type { RequestDetail, RequestSummary } from '../../lib/api-types';
 import { localDbUrl, testBaseUrl } from '../../scripts/test-env.mjs';
 import { sessionCookieHeader, signedInAs } from './helpers/session';
-import { swipe } from './helpers/swipe';
+import { realTouchSwipe, swipe } from './helpers/swipe';
 
 // In-house telemetry end to end (design/references/observability-design.md §6 E2E), iPhone 14 in Chromium and WebKit,
 // on the production build: the collector loads after idle (opted in with lp-tel-test, as the gate keeps automated
@@ -12,7 +12,9 @@ import { swipe } from './helpers/swipe';
 // personal data (a request named TEST-e2e Quorra Zyxwvut, phone 407 555 0199, last seen Gate Plum, the message "TEST-e2e
 // secret phrase plum", a search for Quorra). Telemetry requests never start while an app request is in flight; offline
 // events arrive once back online; the kill switch's 204 stops every later send; and with the telemetry route failing
-// (500s, timeouts) the app behaves exactly as before. The first load carries none of it.
+// (500s, timeouts) the app behaves exactly as before. The first load carries none of it. (2026-11-08, after main's
+// "Phone thread in the page") the phone's thread has no box of its own: swipes that start on it count for the page
+// (area `profile`, the crumbs keep `thread`), and a real swipe there that scrolls the page is not a still one.
 
 const BASE = testBaseUrl();
 const STAFF = { staffName: 'TEST-e2e Telemetry', team: 'Medical' };
@@ -121,7 +123,8 @@ test('a session lands in lp_tel_events with frustration signals and trails, and 
   const box = (await page.getByTestId('profile-case').first().boundingBox()) ?? { x: 40, y: 120, width: 10, height: 10 };
   for (let i = 0; i < 3; i += 1) await page.mouse.click(box.x + box.width / 2 + i, box.y + box.height / 2);
 
-  // A message with personal text, then three swipes in the thread that move nothing.
+  // A message with personal text, then three swipes that start on the thread and move nothing (synthetic touches:
+  // nothing scrolls), which on a phone is the page's stuck scroll.
   await page.getByTestId('composer-input').fill('TEST-e2e secret phrase plum');
   await page.getByTestId('composer-send').click();
   const thread = page.getByTestId('thread').first();
@@ -144,7 +147,8 @@ test('a session lands in lp_tel_events with frustration signals and trails, and 
   const rage = psql(`select coalesce(n, 0) || '|' || jsonb_array_length(trail) from public.lp_tel_events where device = '${device}' and name = 'rage_tap' limit 1`).split('|');
   expect(Number(rage[0])).toBeGreaterThanOrEqual(3);
   expect(Number(rage[1])).toBeGreaterThan(0);
-  expect(psql(`select area from public.lp_tel_events where device = '${device}' and name = 'stuck_scroll' limit 1`)).toBe('thread');
+  const stuck = psql(`select area || '|' || (trail::text like '%"w!:thread:u"%') from public.lp_tel_events where device = '${device}' and name = 'stuck_scroll' limit 1`);
+  expect(stuck, 'stuck scroll on the page (profile), its trail with the swipes on the thread').toBe('profile|true');
   expect(psql(`select team from public.lp_tel_devices where device = '${device}'`)).toBe('medical');
 
   // No personal data anywhere. Names: not in any event or the device row, as text. Digits ('0199', '555'): not in any
@@ -174,6 +178,39 @@ test('a session lands in lp_tel_events with frustration signals and trails, and 
   // No telemetry fetch ever started while an app request was in flight.
   expect(watch.telemetry()).toBeGreaterThan(0);
   expect(watch.overlaps.every((n) => n === 0), `overlaps: ${watch.overlaps.join(',')}`).toBe(true);
+});
+
+test("the phone's thread is part of the page: a real swipe that starts on it scrolls the page and is not a still swipe", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium-iphone14', 'a real touch goes through DevTools (Chromium)');
+  test.setTimeout(120_000);
+  const r = await createPiiRequest(page);
+  const watch = watchOverlap(page);
+  await page.goto(`/?r=${r.id}`);
+  await expect(page.getByTestId('profile').first()).toBeVisible({ timeout: 15_000 });
+  const device = await collectorRunning(page);
+  await page.getByTestId('composer-input').fill(`${TAG} page swipe`);
+  await page.getByTestId('composer-send').click();
+  const thread = page.getByTestId('thread').first();
+  await expect(thread).toContainText(`${TAG} page swipe`, { timeout: 15_000 });
+  const bubble = page.getByTestId('bubble-mine').last();
+  await bubble.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await page.waitForTimeout(400);
+  const box = (await bubble.boundingBox())!;
+  const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const before = await page.evaluate(() => window.scrollY);
+  expect(before, 'the request page is longer than the screen').toBeGreaterThan(0);
+  expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('[data-testid="thread"]'), at), 'the finger starts on the thread').toBe(true);
+  // Finger down from the bubble: the page scrolls up.
+  await realTouchSwipe(page, at.x, at.y, 120, { ms: 250, steps: 8 });
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => window.scrollY), 'the swipe scrolled the page').toBeLessThan(before);
+  await page.waitForTimeout(1_500);
+  await expect.poll(() => watch.busy(), { timeout: 10_000, intervals: [50] }).toBe(0);
+  await flush(page);
+  const swipes = () => psql(`select coalesce(string_agg(area || ':' || coalesce(props->>'still', '0'), ',' order by area), '') from public.lp_tel_events where device = '${device}' and name = 'swipe' and props->>'input' = 'touch'`);
+  await expect.poll(swipes, { timeout: 30_000 }).toMatch(/profile:0/);
+  expect(swipes()).not.toMatch(/thread/);
+  expect(psql(`select count(*) from public.lp_tel_events where device = '${device}' and name = 'stuck_scroll'`)).toBe('0');
 });
 
 test('offline: events wait, and arrive once back online (with the link going down and up)', async ({ page, context }) => {

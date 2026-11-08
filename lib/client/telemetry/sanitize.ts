@@ -123,10 +123,24 @@ function roleOrTag(el: NodeLike): string {
   return tok(attr(el, 'role')) ?? (tok(tag(el)) || 'unknown');
 }
 
-/** The control's name: its testid, the closest testid ≤ 2 levels up, its first class token, else its role or tag. */
+/**
+ * A row's message lane (components/messages/CardActivity MessageMark, 2026-11-07): a click there opens the request at
+ * its thread, not at the top (openRowAt), so it is a control of its own inside the row's button.
+ */
+const LANE_ATTR = 'data-thread-badge';
+export const LANE_CONTROL = 'message-mark';
+
+/**
+ * The control's name: a row's message lane (`message-mark`) when the tap landed in it; else its testid, the closest
+ * testid ≤ 2 levels up, its first class token, else its role or tag.
+ */
 export function ctl(target: NodeLike | null | undefined): string {
   if (!target) return 'unknown';
-  const el = interactive(target) ?? target;
+  const inter = interactive(target);
+  for (let up: NodeLike | null = target, i = 0; up && up !== inter && i <= 8; i += 1, up = up.parentElement ?? null) {
+    if (up.hasAttribute?.(LANE_ATTR)) return testid(up) ?? LANE_CONTROL;
+  }
+  const el = inter ?? target;
   const own = testid(el);
   if (own) return own;
   let up = el.parentElement ?? null;
@@ -174,6 +188,31 @@ export function area(target: NodeLike | null | undefined): string {
     if (depth > 40) break;
   }
   return firstTestid ?? 'page';
+}
+
+/**
+ * Areas of the request page that scroll with the page, not in a box of their own, everywhere but the desk pane
+ * (2026-11-08, "Phone thread in the page": messages.module.css `.thread` has no overflow; only `.panel .thread`
+ * scrolls).
+ */
+const PAGE_FLOW: ReadonlySet<string> = new Set(['thread', 'messages', 'composer']);
+
+/**
+ * The area a swipe scrolls (the swipe counts and stuck scroll): `area()`, except that outside the desk pane the
+ * request page's Messages (`thread`, `messages`, `composer`) are part of the page, so a swipe that starts there is the
+ * page's (`profile`; else the next area up, else `page`). In the desk pane (`[data-presentation=panel]` or
+ * `desk-pane`) the thread still scrolls in its own box and keeps its own area. `a`: the target's area() when known.
+ */
+export function scrollArea(target: NodeLike | null | undefined, a: string = area(target)): string {
+  if (!PAGE_FLOW.has(a)) return a;
+  let el = target ?? null;
+  for (let depth = 0; el && depth <= 40; depth += 1, el = el.parentElement ?? null) {
+    if (attr(el, 'data-presentation') === 'panel' || attr(el, 'data-testid') === 'desk-pane') return a;
+    const up = areaTestid(el);
+    if (up && !PAGE_FLOW.has(up)) return up;
+    if (isDialog(el)) return dialogId(el);
+  }
+  return 'page';
 }
 
 /** The closest ancestor (or the element) with this testid, within `max` levels. */

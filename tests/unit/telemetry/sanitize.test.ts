@@ -4,7 +4,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { area, classToken, ctl, fnv8, formField, interactive, pathPattern, tok } from '@/lib/client/telemetry/sanitize';
+import { area, classToken, ctl, fnv8, formField, interactive, pathPattern, scrollArea, tok } from '@/lib/client/telemetry/sanitize';
 import { TOKEN_RE } from '@/lib/telemetry';
 import { el, forbiddenReads } from './fakes';
 
@@ -80,6 +80,63 @@ describe('ctl and area', () => {
     expect(ctl(el('button', { class: 'rt-reset rt-IconButton rt-r-size-2' }))).toBe('rt-iconbutton');
     expect(ctl(el('div', { role: 'tab' }))).toBe('tab');
     expect(ctl(el('button'))).toBe('button');
+  });
+
+  it("a tap in a row's message lane is message-mark (it opens the thread); elsewhere in the row, or on an empty lane, the row", () => {
+    // components/messages/CardActivity MessageMark inside a log row (phone) or a desk table row: both are <button>s.
+    const bubble = el('span', { class: 'ZUuQ-G_markBubble' });
+    const outline = el('svg', { class: 'ZUuQ-G_laneIcon' }, el('path'));
+    const unread = el('span', { class: 'ZUuQ-G_lane', 'data-lane': '', 'data-mark': 'unread', 'data-testid': 'message-mark', 'data-thread-badge': '' }, bubble);
+    const read = el('span', { class: 'ZUuQ-G_lane', 'data-lane': '', 'data-mark': 'read', 'data-testid': 'message-mark', 'data-thread-badge': '' }, outline);
+    const empty = el('span', { class: 'ZUuQ-G_lane', 'data-lane': '' });
+    const name = el('span', { class: 'ZUuQ-G_nm' });
+    el('div', { 'data-testid': 'request-list' }, el('button', { class: 'ZUuQ-G_lrow ZUuQ-G_lr' }, el('span', { class: 'ZUuQ-G_lcLane' }, unread), name));
+    el('div', { 'data-testid': 'request-list' }, el('button', { class: 'Ab12Cd_grid Ab12Cd_row' }, read, el('span', {}, empty)));
+    expect(ctl(bubble)).toBe('message-mark');
+    expect(ctl(unread)).toBe('message-mark');
+    expect(ctl(outline.children[0])).toBe('message-mark');
+    expect(ctl(name)).toBe('request-list');
+    expect(ctl(empty)).toBe('request-list');
+    expect(area(bubble)).toBe('request-list');
+  });
+
+  it("the area a swipe scrolls: the phone's thread and composer are the page's (profile); the desk pane's thread keeps its own", () => {
+    // 2026-11-08 "Phone thread in the page": .thread has no box of its own; only .panel .thread scrolls.
+    const phoneBubble = el('span');
+    const phoneField = el('textarea');
+    el(
+      'div',
+      { 'data-testid': 'profile' },
+      el('section', { 'data-testid': 'messages' }, el('div', { 'data-testid': 'thread' }, el('div', { 'data-testid': 'bubble-them' }, phoneBubble)), el('div', { 'data-testid': 'composer' }, phoneField)),
+    );
+    expect(area(phoneBubble)).toBe('thread');
+    expect(scrollArea(phoneBubble)).toBe('profile');
+    expect(scrollArea(phoneField)).toBe('profile');
+
+    const paneBubble = el('span');
+    const paneField = el('textarea');
+    el(
+      'div',
+      { 'data-testid': 'desk-pane' },
+      el(
+        'div',
+        { 'data-testid': 'profile', 'data-presentation': 'panel' },
+        el('section', { 'data-testid': 'messages' }, el('div', { 'data-testid': 'thread' }, el('div', {}, paneBubble)), el('div', { 'data-testid': 'composer' }, paneField)),
+      ),
+    );
+    expect(scrollArea(paneBubble)).toBe('thread');
+    expect(scrollArea(paneField)).toBe('composer');
+
+    // Everything else is area() as it was; a thread with no page around it is the page.
+    const card = el('span');
+    el('div', { 'data-testid': 'profile' }, el('div', { 'data-testid': 'status-block' }, card));
+    expect(scrollArea(card)).toBe('profile');
+    const row = el('span');
+    el('div', { 'data-testid': 'request-list' }, row);
+    expect(scrollArea(row)).toBe('request-list');
+    const loose = el('span');
+    el('div', { 'data-testid': 'thread' }, loose);
+    expect(scrollArea(loose)).toBe('page');
   });
 
   it('interactive: the closest button, link with href, input, role=button…, tabindex ≥ 0', () => {

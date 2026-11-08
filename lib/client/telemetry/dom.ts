@@ -6,7 +6,7 @@ import { KEYS, type TelView } from '../../telemetry';
 import type { Props, TelEvent } from './buffer';
 import { DEAD, Loop, RageTap, StuckScroll, TAPPABLE_LOOK, TICKING, dirOf, isStill, responded, type Dir } from './detect';
 import type { Guard } from './host';
-import { area, ctl, dialogId, firstClassToken, formField, hasClass, interactive, isDialog, isTextField, testid, type NodeLike } from './sanitize';
+import { area, ctl, dialogId, firstClassToken, formField, hasClass, interactive, isDialog, isTextField, scrollArea, testid, type NodeLike } from './sanitize';
 
 
 /** What the DOM watcher needs from the collector. */
@@ -474,7 +474,10 @@ export function attachDom(core: DomCore): DomWatch {
       }
       case 'swipe': {
         if (gesture(item.target)) return;
-        const a = area(item.target);
+        // The crumb keeps where the finger was (`w!:thread:u`); the counts and stuck scroll go by what the swipe
+        // scrolls: on the phone's request page the thread is part of the page (scrollArea → `profile`).
+        const at = area(item.target);
+        const a = scrollArea(item.target, at);
         const dir = dirOf(item.dx, item.dy);
         const target = item.target;
         const still = isStill(
@@ -487,7 +490,7 @@ export function attachDom(core: DomCore): DomWatch {
             return !!el && typeof el.contains === 'function' && !!target && el.contains(target);
           },
         );
-        core.crumb(`w${still ? '!' : ''}${item.prevented ? '^' : ''}:${a}:${DIR_CODE[dir]}`, item.t);
+        core.crumb(`w${still ? '!' : ''}${item.prevented ? '^' : ''}:${at}:${DIR_CODE[dir]}`, item.t);
         if (core.sampled()) {
           core.agg(
             `swipe|${v}|${a}|${item.input}`,
