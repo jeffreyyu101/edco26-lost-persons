@@ -1,8 +1,9 @@
 'use client';
 // Toasts at the top (requests.html .toast: icon circle, title, subtitle, View) and the Undo snackbar at the
 // bottom (.snack). Both are announced politely. A toast closes on tap anywhere or on its ✕ (Dismiss; Brian
-// 2026-11-07: the alerts waiting when the phone is opened close with an x too); sticky ones (durationMs null)
-// stay until then.
+// 2026-11-07: the alerts waiting when the phone is opened close with an x too), or swiped up or sideways like an
+// iPhone banner (lib/client/toast-swipe.ts, attached to .lp-toaster from the F4 host, so this file carries
+// nothing for it); sticky ones (durationMs null) stay until then.
 import { Button, Text } from '@radix-ui/themes';
 import { Bell, Check, CircleAlert, CloudOff, Footprints, Info, MessageCircle, RefreshCw, X } from 'lucide-react';
 import type { MouseEvent } from 'react';

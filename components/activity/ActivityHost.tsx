@@ -10,10 +10,13 @@
 //     syncs at once, and its toast carries the event (lib/client/push-toast.ts: the push's own line when the
 //     sync raised no toast for it), so the bell and the toast show without waiting for the next poll;
 //   * the "New requests" switch (server-side) is the phone's new-request alert pref (the old bell);
+//   * lets the toasts at the top be swiped away (components/ui/use-toast-swipe.ts, Brian 2026-11-07): from here,
+//     so neither the Toaster nor the first load's chunks carry anything for it (A25);
 //   * draws the Alerts sheet.
 import { useEffect, useRef } from 'react';
 import { AlertsSheet } from '@/components/alerts/AlertsSheet';
 import { usePushStarted } from '@/components/alerts/AlertsBanner';
+import { useToastSwipe } from '@/components/ui/use-toast-swipe';
 import { activityClient, markReadWhileOpen } from '@/lib/client/activity-client';
 import { useView } from '@/lib/client/nav';
 import { useAlerts } from '@/lib/client/push-client';
@@ -29,6 +32,7 @@ function openedRequestId(view: ReturnType<typeof useView>): string | null {
 
 export function ActivityHost() {
   usePushStarted();
+  useToastSwipe();
   const session = useSession();
   const actions = useActions();
   const store = useAppStore();
