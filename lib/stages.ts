@@ -101,6 +101,12 @@ export type StageGlyphKind = GlyphKind | 'needsInfo' | 'hourglass' | 'history' |
 
 export interface StageMeta {
   label: string;
+  /**
+   * (Message lane, 2026-11-07) The label the phone log shows under 430 px, where the full one would be cut beside
+   * the message lane and an earlier day's time: "Waiting", "En route", "Arrived", "Recheck" (components/list/rows.tsx
+   * narrowStageLabel). Absent: the label is short already. Sentences always say the full label.
+   */
+  narrow?: string;
   tone: StageTone;
   glyph: StageGlyphKind;
   bucket: StatusBucket;
@@ -108,7 +114,7 @@ export interface StageMeta {
 
 const fromStatus = (status: Status): StageMeta => {
   const m = STATUS_META[status];
-  return { label: m.shortLabel, tone: m.tone, glyph: m.glyph, bucket: m.bucket };
+  return { label: m.shortLabel, ...(m.narrowLabel ? { narrow: m.narrowLabel } : {}), tone: m.tone, glyph: m.glyph, bucket: m.bucket };
 };
 
 /** The ONE stage map: label, colour and glyph per stage. Status stages take their label from STATUS_META. */
@@ -116,10 +122,10 @@ export const STAGE_META: Readonly<Record<Exclude<StageKey, 'legacy'>, StageMeta>
   waiting: fromStatus(STATUS.waiting),
   needsInfo: { label: 'Needs info', tone: 'amber', glyph: 'needsInfo', bucket: 'open' },
   notFoundYet: { label: NOT_FOUND_YET_LABEL, tone: 'violet', glyph: 'hourglass', bucket: 'open' },
-  recheckDue: { label: RECHECK_DUE_LABEL, tone: 'violet', glyph: 'history', bucket: 'open' },
+  recheckDue: { label: RECHECK_DUE_LABEL, narrow: 'Recheck', tone: 'violet', glyph: 'history', bucket: 'open' },
   inMedical: fromStatus(STATUS.inMedical),
-  enroute: { label: 'Friend en route', tone: 'teal', glyph: 'walk', bucket: 'open' },
-  arrived: { label: 'Friend arrived', tone: 'green', glyph: 'arrived', bucket: 'open' },
+  enroute: { label: 'Friend en route', narrow: 'En route', tone: 'teal', glyph: 'walk', bucket: 'open' },
+  arrived: { label: 'Friend arrived', narrow: 'Arrived', tone: 'green', glyph: 'arrived', bucket: 'open' },
   notInMedical: fromStatus(STATUS.notInMedical),
   reunited: fromStatus(STATUS.reunited),
   discharged: fromStatus(STATUS.discharged),

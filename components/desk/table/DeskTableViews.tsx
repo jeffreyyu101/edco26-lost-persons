@@ -25,7 +25,7 @@ import { ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import { useScrollMemory } from '@/components/list/hooks';
-import { resultCount, searchDisplay } from '@/components/list/list-helpers';
+import { resultCount, searchDisplay, unreadTotal } from '@/components/list/list-helpers';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { navigate } from '@/lib/client/nav';
 import { splitOpenClosed } from '@/lib/client/selectors';
@@ -231,7 +231,13 @@ export function DeskAllTable({ status, post, open = false, selected = null }: De
   const archived = (closedRows: readonly RequestSummary[]) =>
     closedRows.length > 0 ? (
       <>
-        <ArchivedFold count={closedRows.length} open={expanded} controls={archivedId} onToggle={() => actions.setPref('closedExpanded', !expanded)} />
+        <ArchivedFold
+          count={closedRows.length}
+          open={expanded}
+          controls={archivedId}
+          onToggle={() => actions.setPref('closedExpanded', !expanded)}
+          unread={unreadTotal(closedRows)}
+        />
         {expanded ? (
           <ArchivedRows id={archivedId}>
             <Rows rows={closedRows} now={now} tz={tz} selected={selected} />
@@ -303,7 +309,14 @@ export function DeskMineTable({ selected = null }: { selected?: string | null })
           <OpenGroups groups={groups} now={now} tz={tz} selected={selected} />
           {groups.closed.length > 0 ? (
             <section data-testid="mine-closed">
-              <ArchivedFold label="Closed" count={groups.closed.length} open={closedOpen} controls={closedId} onToggle={() => setClosedOpen(!closedOpen)} />
+              <ArchivedFold
+                label="Closed"
+                count={groups.closed.length}
+                open={closedOpen}
+                controls={closedId}
+                onToggle={() => setClosedOpen(!closedOpen)}
+                unread={unreadTotal(groups.closed)}
+              />
               {closedOpen ? (
                 <ArchivedRows id={closedId} label="Closed">
                   <Rows rows={groups.closed} now={now} tz={tz} selected={selected} />

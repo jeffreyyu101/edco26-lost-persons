@@ -1,7 +1,10 @@
 // The desk request table's pure model (design/screens/desktop-log.html .tbl / .tr): what each cell shows and
 // what a screen reader hears for a row. No React, no I/O: unit-tested in tests/unit/desk/table-model.test.ts.
 //
-//   #  ·  Friend (name, age / sex muted)  ·  Status  ·  Post  ·  Created  ·  Updated  ·  Logged by
+//   (message lane)  ·  #  ·  Friend (name, age / sex muted)  ·  Status  ·  Post  ·  Created  ·  Updated  ·  Logged by
+//
+// The message lane (DeskTable.tsx MessageMark) is not one of TABLE_COLUMNS: it has no header label, and # drops
+// out while a request is docked (table.module.css).
 //
 // Post and Logged by show only with nothing docked beside the table, Post at every desk width and Logged by
 // on a table 1040 px or wider (the CSS decides); the row's sentence always says them. Times reuse F1's log helpers (lib/format.ts), so the desk and the phone never disagree.

@@ -145,13 +145,18 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
   useEffect(() => {
     const id = row.id;
     let frame = 0;
+    let release = () => {};
     const land = () => {
       if (!threadJumpWaiting(id) || frame) return;
       // After this commit's other effects (the page and the desk pane start a request at its top).
       frame = requestAnimationFrame(() => {
         frame = 0;
         if (!takeThreadJump(id)) return;
-        if (section.current) scrollToSection(section.current, window.matchMedia(REDUCED_MOTION).matches ? 'auto' : 'smooth');
+        release();
+        if (section.current) {
+          scrollToSection(section.current, window.matchMedia(REDUCED_MOTION).matches ? 'auto' : 'smooth');
+          release = holdLanding(section.current);
+        }
         scrollToEnd(false);
         setNewPill(false);
         if (window.matchMedia(COMPUTER).matches) input.current?.focus({ preventScroll: true });
@@ -164,6 +169,7 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
     return () => {
       off();
       cancelAnimationFrame(frame);
+      release();
     };
   }, [row.id, scrollToEnd]);
 
@@ -293,19 +299,117 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
   );
 }
 
-/**
- * (R2) Scrolls the request's own scroller (the desk pane's body, else the page) so the section's top sits under its
- * scroll-margin. Not scrollIntoView: that moves every scroller around it, the desk's list included.
- */
-function scrollToSection(el: HTMLElement, behavior: ScrollBehavior): void {
-  const margin = parseFloat(getComputedStyle(el).scrollMarginTop) || 0;
+/** The request's own scroller: the desk pane's body, or null for the page. */
+function scrollBoxOf(el: HTMLElement): HTMLElement | null {
   for (let box = el.parentElement; box && box !== document.body && box !== document.documentElement; box = box.parentElement) {
     const overflow = getComputedStyle(box).overflowY;
-    if (overflow !== 'auto' && overflow !== 'scroll') continue;
-    box.scrollTo({ top: box.scrollTop + el.getBoundingClientRect().top - box.getBoundingClientRect().top - margin, behavior });
-    return;
+    if (overflow === 'auto' || overflow === 'scroll') return box;
   }
-  window.scrollTo({ top: window.scrollY + el.getBoundingClientRect().top - margin, behavior });
+  return null;
+}
+
+/** Space kept between the composer and the phone's action bar (or the pane's bottom edge). */
+const COMPOSER_GAP = 8;
+
+/**
+ * (R2, design/screens/msg-indicator-5.png) Where a jump lands, as the scroller's scrollTop: the section's top under its
+ * scroll-margin (the Messages heading right under the phone's top bar, 4 px into the desk pane). Where the screen is
+ * too short for the whole section, a little further, so the composer still clears the phone's action bar (stuck to
+ * the foot of the screen, ProfileView's [data-sticky-foot]) or the pane's bottom edge: the newest messages sit right
+ * above it.
+ */
+function landingTop(el: HTMLElement, box: HTMLElement | null): number {
+  const margin = parseFloat(getComputedStyle(el).scrollMarginTop) || 0;
+  const frame = box ? box.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+  const foot = (box ?? document).querySelector<HTMLElement>('[data-sticky-foot]');
+  const visibleBottom = frame.bottom - (foot ? foot.offsetHeight : 0);
+  const rect = el.getBoundingClientRect();
+  const head = rect.top - frame.top - margin;
+  const fit = rect.bottom + COMPOSER_GAP - visibleBottom;
+  return (box ? box.scrollTop : window.scrollY) + Math.max(head, fit);
+}
+
+/**
+ * (R2) Scrolls the request's own scroller (the desk pane's body, else the page) so the section lands (landingTop).
+ * Not scrollIntoView: that moves every scroller around it, the desk's list included.
+ */
+function scrollToSection(el: HTMLElement, behavior: ScrollBehavior): void {
+  const box = scrollBoxOf(el);
+  const to = { top: landingTop(el, box), behavior };
+  if (box) box.scrollTo(to);
+  else window.scrollTo(to);
+}
+
+/** How long a jump keeps its landing while the request settles. */
+const HOLD_MS = 5_000;
+/** A jump's smooth scroll has ended by now (or stopped short: WebKit stops one when the page grows under it). */
+const SETTLE_MS = 900;
+const HAND_BACK = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+
+/**
+ * (R2) Holds a jump's landing while the request settles. What shows after the jump (the thread replacing its
+ * skeleton, the request's details, a photo) changes the height around the section, so a scroll aimed before that
+ * stops short (the page could not yet scroll that far) or lands off. Until the person scrolls, taps or types, or
+ * HOLD_MS pass, every change of the layout aims it again, without animation, as does the end of the smooth scroll.
+ * A scroll from anywhere else (the status bar, a scrollbar, a script) hands it back too. Call it right after the
+ * jump's scrollToSection. Returns the release.
+ */
+function holdLanding(el: HTMLElement): () => void {
+  const box = scrollBoxOf(el);
+  const at = () => (box ? box.scrollTop : window.scrollY);
+  // The smooth scroll's goal, and where it has got to: it only ever closes in on the goal.
+  const goal = landingTop(el, box);
+  let last = at();
+  // Where the section sits in what scrolls, and how tall that is: both stay put while it scrolls.
+  const layout = () => {
+    const top = el.getBoundingClientRect().top - (box ? box.getBoundingClientRect().top : 0) + at();
+    return `${Math.round(top)}|${Math.round(el.offsetHeight)}|${box ? box.scrollHeight : document.documentElement.scrollHeight}`;
+  };
+  let seen = layout();
+  /** Where the last aim left the scroller; null while the jump's smooth scroll runs. */
+  let aimed: number | null = null;
+  let done = false;
+  const aim = () => {
+    if (done || !el.isConnected) return;
+    seen = layout();
+    scrollToSection(el, 'auto');
+    aimed = at();
+  };
+  const moved = () => {
+    if (done || layout() === seen) return false;
+    aim();
+    return true;
+  };
+  const onScroll = () => {
+    if (done || moved()) return;
+    const now = at();
+    if (aimed === null) {
+      if (Math.abs(now - goal) > Math.abs(last - goal) + 2) release();
+      else last = now;
+    } else if (Math.abs(now - aimed) > 2) release();
+  };
+  const settle = () => {
+    if (aimed === null) aim();
+  };
+  const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => void moved());
+  for (let node: HTMLElement | null = el; node && node !== box && node !== document.body; node = node.parentElement) observer?.observe(node);
+  const scroller: EventTarget = box ?? window;
+  scroller.addEventListener('scroll', onScroll, { passive: true });
+  scroller.addEventListener('scrollend', settle);
+  for (const type of HAND_BACK) window.addEventListener(type, release, { capture: true, passive: true });
+  const settleTimer = window.setTimeout(settle, SETTLE_MS);
+  const holdTimer = window.setTimeout(release, HOLD_MS);
+  function release() {
+    if (done) return;
+    done = true;
+    observer?.disconnect();
+    scroller.removeEventListener('scroll', onScroll);
+    scroller.removeEventListener('scrollend', settle);
+    for (const type of HAND_BACK) window.removeEventListener(type, release, { capture: true });
+    window.clearTimeout(settleTimer);
+    window.clearTimeout(holdTimer);
+  }
+  return release;
 }
 
 // ---------------------------------------------------------------------------------------------------

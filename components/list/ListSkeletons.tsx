@@ -28,7 +28,7 @@ export function AllSkeleton() {
     <div className={s.skLog} aria-busy="true" aria-label="Loading requests" data-testid="list-skeleton">
       {LOG_WIDTHS.map(([name, status], i) => (
         <div key={i} className={s.skLogRow}>
-          <Sk w="32px" h={11} />
+          <span />
           <span className={s.skName}>
             <Sk w={name} h={13} />
           </span>
