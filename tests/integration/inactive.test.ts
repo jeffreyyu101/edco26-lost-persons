@@ -324,30 +324,43 @@ rollback;`).split('\n');
     expect(psql("select count(*) from cron.job where jobname = 'lp-close-inactive'")).toBe('0');
   });
 
-  it('turns New requests on for Medical staff who never set it (and their devices); nobody else changes', () => {
-    const med = `test-s staff ${randomUUID().slice(0, 8)} · medical`;
-    const medSet = `test-s staff ${randomUUID().slice(0, 8)} · medical`;
-    const foh = `test-s staff ${randomUUID().slice(0, 8)} · gc/hx - dispatch`;
+  it('turns New requests on for everyone who never set it (and their devices), pasted twice; a switch set in the sheet stays', () => {
+    const id = () => randomUUID().slice(0, 8);
+    const rows: Array<[name: string, team: string, prefsOn: boolean, set: boolean, deviceOn: boolean]> = [
+      [`test-s staff ${id()} · medical`, 'Medical', false, false, false],
+      [`test-s staff ${id()} · medical`, 'Medical', false, true, false],
+      // A row an old bell turned on before (never set in the sheet): it keeps its Activity rows (not the team default).
+      [`test-s staff ${id()} · medical`, 'Medical', true, false, true],
+      // (2026-11-08, Brian: "new requests should be on for everyone by default n configurable") Every team now.
+      [`test-s staff ${id()} · gc/hx - dispatch`, 'GC/HX - Dispatch', false, false, false],
+      [`test-s staff ${id()} · gc/hx - base`, 'GC/HX - Base', false, true, false],
+      [`test-s staff ${id()} · gc/hx - base`, 'GC/HX - Base', true, true, true],
+      [`test-s staff ${id()} · gc/hx - dispatch`, 'GC/HX - Dispatch', true, false, true],
+    ];
     const ep = (s: string) => `https://push.example.test/${encodeURIComponent(s)}`;
-    // A Medical row an old bell turned on before (never set in the sheet): it keeps its Activity rows (not the team default).
-    const medBell = `test-s staff ${randomUUID().slice(0, 8)} · medical`;
     const out = psqlScript(`begin;
 insert into public.lp_push_prefs (staff, team, new_requests, new_requests_set) values
-  (${lit(med)}, 'Medical', false, false), (${lit(medSet)}, 'Medical', false, true), (${lit(foh)}, 'GC/HX - Dispatch', false, false),
-  (${lit(medBell)}, 'Medical', true, false);
+  ${rows.map(([s, team, on, set]) => `(${lit(s)}, ${lit(team)}, ${on}, ${set})`).join(',\n  ')};
 insert into public.lp_push_subscriptions (endpoint, p256dh, auth, staff, team, new_requests) values
-  (${lit(ep(med))}, 'p256dh-key-0123456789', 'auth-0123', ${lit(med)}, 'Medical', false),
-  (${lit(ep(medSet))}, 'p256dh-key-0123456789', 'auth-0123', ${lit(medSet)}, 'Medical', false),
-  (${lit(ep(foh))}, 'p256dh-key-0123456789', 'auth-0123', ${lit(foh)}, 'GC/HX - Dispatch', false),
-  (${lit(ep(medBell))}, 'p256dh-key-0123456789', 'auth-0123', ${lit(medBell)}, 'Medical', true);
+  ${rows.map(([s, team, , , on]) => `(${lit(ep(s))}, 'p256dh-key-0123456789', 'auth-0123', ${lit(s)}, ${lit(team)}, ${on})`).join(',\n  ')};
 ${migrationBody()}
-select string_agg(pr.new_requests::text || '/' || s.new_requests::text || '/' || pr.new_requests_team_default::text, ','
-                  order by pr.staff = ${lit(med)} desc, pr.staff = ${lit(medSet)} desc, pr.staff = ${lit(medBell)} desc)
-  from public.lp_push_prefs pr join public.lp_push_subscriptions s on s.staff = pr.staff
- where pr.staff in (${lit(med)}, ${lit(medSet)}, ${lit(foh)}, ${lit(medBell)});
+${migrationBody()}
+select string_agg(pr.new_requests::text || '/' || s.new_requests::text || '/' || pr.new_requests_team_default::text, ',' order by o.n)
+  from (values ${rows.map(([s], i) => `(${lit(s)}, ${i})`).join(', ')}) o(staff, n)
+  join public.lp_push_prefs pr on pr.staff = o.staff join public.lp_push_subscriptions s on s.staff = pr.staff;
 rollback;`).split('\n');
-    // prefs / device / on by the Medical default alone (push only, no Activity row).
-    expect(out[out.length - 1]).toBe('true/true/true,false/false/false,true/true/false,false/false/false');
+    // prefs / device / on by the team default alone (push only, no Activity row).
+    expect(out[out.length - 1]).toBe(
+      [
+        'true/true/true', // Medical, never set
+        'false/false/false', // Medical, set off in the sheet
+        'true/true/false', // Medical, an old bell's
+        'true/true/true', // front of house, never set
+        'false/false/false', // front of house, set off in the sheet
+        'true/true/false', // front of house, set on in the sheet
+        'true/true/false', // front of house, an old bell's
+      ].join(','),
+    );
   });
 });
 
