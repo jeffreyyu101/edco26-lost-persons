@@ -3,7 +3,7 @@
 //
 // Shape rule (A1): the database RPCs return snake_case JSON. The server maps it to these camelCase
 // types through an EXPLICIT allowlist (legacy columns never leak through) and adds the derived fields.
-import type { EditableField, PhotoTiming, PhotoTimingAny, StatusKind, StatusValue } from './domain';
+import type { EditableField, FriendInMedical, PhotoTiming, PhotoTimingAny, StatusKind, StatusValue, SwapPlace } from './domain';
 import type { CreateRequestBody, RequestPatch } from './validation';
 
 /**
@@ -89,6 +89,18 @@ export interface RequestSummary {
    * migration, or after the job was paused). Nobody is told: no Activity row, no push, and no in-app alert.
    */
   quietClose?: boolean;
+  // Added 2026-11-08 (Companion). Optional: rows cached before this build (and a server from before it) do not
+  // carry them; read as `row.friendInMedical ?? 'unsure'`, the rest `?? null`. Sync, detail and every mutation
+  // response send them.
+  /** Intake: "Is a friend already with them in medical?" ('unsure' by default). */
+  friendInMedical?: FriendInMedical;
+  /** The friend's name when friendInMedical is 'yes' (≤ 60), else null. */
+  friendInMedicalName?: string | null;
+  /** An open friend swap request (Accompanied only): when, and by whom (attribution string). */
+  swapRequestedAt?: IsoDateTime | null;
+  swapRequestedBy?: string | null;
+  /** An approved swap: at the request's own tent / post ('fa') or Main Med ('mm'). */
+  swapPlace?: SwapPlace | null;
   // Added 2026-11-06 evening (F3 Messages + en route, spec §18 A55). All optional: rows cached on a phone
   // before them, and mutation responses (built by lp_row alone), do not carry them; the client keeps the
   // previous values then (sync-merge carryActivity). Sync and the detail always send them.
@@ -371,6 +383,8 @@ export interface Stats {
    * Never a reunion (not in `reunited`, not in avgReuniteMinutes). Absent from a database before F6.
    */
   inactive?: number;
+  /** (Companion, additive) Requests 'Closed – Friend Informed' now. Absent on a database before the companion migration. */
+  friendInformed?: number;
   // ---- Dashboard v4 (GET /api/stats?range=…, lp_stats(p_range), 20261108000000_dashboard_v4.sql). Absent without a
   // range or on a database before that migration (the dashboard then falls back to the fields above).
   range?: { key: StatsRange; from: IsoDateTime; step: number; compare: boolean };
@@ -399,8 +413,11 @@ export interface AttentionItem {
   id: string;
   caseNumber: number;
   tent: string;
-  kind: 'wait' | 'recheck' | 'located';
-  /** Logged (wait), the re-check due time (recheck) or the Located answer (located). */
+  kind: 'wait' | 'recheck' | 'located' | 'swap';
+  /**
+   * Logged (wait), the re-check due time (recheck), the Located answer (located) or (Companion) when the friend
+   * swap was requested (swap: red 10 min after).
+   */
   since: IsoDateTime;
   enroute: boolean;
   etaAt: IsoDateTime | null;

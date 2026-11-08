@@ -13,8 +13,21 @@
 //     (contract B), scrubbed of request ids and phone numbers once more.
 import 'server-only';
 import { after } from 'next/server';
-import { isActivityKind, pushPayload, pushTtl, pushUrgency, requestTitle, scrubDetail, type ActivityEvent } from '../activity';
+import {
+  SWAP_DECLINED_DETAIL,
+  isActivityKind,
+  pushPayload,
+  pushTtl,
+  pushUrgency,
+  requestTitle,
+  scrubDetail,
+  swapApprovedDetail,
+  swapRequestedDetail,
+  type ActivityEvent,
+} from '../activity';
+import type { RequestSummary } from '../api-types';
 import { isUuid } from '../domain';
+import { involvedStaff } from './involved';
 import { groupOutcomes, pushEnabled, sendPushes, type PushTarget } from './push';
 import { rpc } from './supabase';
 import { recordPushSend } from './telemetry';
@@ -124,4 +137,55 @@ export async function notifyLater(recipients: () => Promise<readonly string[]>, 
       log('failed_lookup');
     }
   });
+}
+
+/** (Companion) Who lp_swap says took part: the answerer (request), the requester and the creator (decline). */
+export interface SwapParties {
+  answerer: string | null;
+  requester: string | null;
+  creator: string | null;
+}
+
+/**
+ * (Companion) The event and recipients of a friend swap change (spec table), or null (withdraw tells nobody):
+ *   request → THE STAFF WHO ANSWERED (latest change into Accompanied / Located), else everyone involved
+ *   approve → everyone involved (the requester is: lp_involved_staff counts swap_requested)
+ *   decline → the requester and the creator
+ * The actor is always left out (lp_activity_record). `recipients` null = everyone involved.
+ */
+export function swapEvent(
+  action: 'request' | 'approve' | 'decline' | 'withdraw',
+  row: Pick<RequestSummary, 'id' | 'postShort' | 'swapPlace'>,
+  actor: string,
+  parties: SwapParties,
+): { recipients: string[] | null; event: ActivityEvent } | null {
+  const base = { requestId: row.id, actor };
+  if (action === 'request') {
+    return {
+      recipients: parties.answerer ? [parties.answerer] : null,
+      event: { ...base, kind: 'swap_requested', detail: swapRequestedDetail(row.postShort) },
+    };
+  }
+  if (action === 'approve') {
+    const place = row.swapPlace === 'fa' ? 'fa' : 'mm';
+    return { recipients: null, event: { ...base, kind: 'swap_approved', detail: swapApprovedDetail(place, row.postShort) } };
+  }
+  if (action === 'decline') {
+    const list = [parties.requester, parties.creator].filter((s): s is string => !!s);
+    return { recipients: list, event: { ...base, kind: 'swap_declined', detail: SWAP_DECLINED_DETAIL } };
+  }
+  return null;
+}
+
+/** (Companion) Records and pushes a friend swap change after the response. Never throws. */
+export async function swapNotice(
+  action: 'request' | 'approve' | 'decline' | 'withdraw',
+  row: Pick<RequestSummary, 'id' | 'postShort' | 'swapPlace'>,
+  actor: string,
+  parties: SwapParties,
+): Promise<void> {
+  const plan = swapEvent(action, row, actor, parties);
+  if (!plan) return;
+  const fixed = plan.recipients;
+  await notifyLater(() => (fixed ? Promise.resolve(fixed) : involvedStaff(row.id)), () => plan.event);
 }
