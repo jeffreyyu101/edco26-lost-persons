@@ -580,6 +580,7 @@ export function RequestForm(props: RequestFormProps) {
             errorId={errId('contactNotes')}
           />
         </div>
+        {mode !== 'edit' ? <FriendInMedicalGroup values={values} set={set} readOnly={!!readOnly} id={id('companion')} /> : null}
       </>
     ) : null;
 
@@ -805,4 +806,72 @@ function AutoTextarea(props: TextareaHTMLAttributes<HTMLTextAreaElement> & { val
     el.style.height = `${el.scrollHeight}px`;
   }, [props.value]);
   return <textarea ref={ref} {...props} />;
+}
+
+/** (Companion) "Is a friend already with them in medical?" No · Yes · Not sure (default); Yes adds an optional Name. */
+const FRIEND_CHOICES = [
+  { value: 'no', label: 'No' },
+  { value: 'yes', label: 'Yes' },
+  { value: 'unsure', label: 'Not sure' },
+] as const;
+
+function FriendInMedicalGroup({
+  values,
+  set,
+  readOnly,
+  id,
+}: {
+  values: RequestFormValues;
+  set: <K extends keyof RequestFormValues>(key: K, value: RequestFormValues[K]) => void;
+  readOnly: boolean;
+  id: string;
+}) {
+  const current = values.friendInMedical ?? 'unsure';
+  return (
+    <div className="lp-rf-grp" role="group" aria-labelledby={`${id}-q`} data-testid="friend-in-medical" style={{ marginTop: 12 }}>
+      <div className="lp-rf-field">
+        <div className="lp-rf-r" style={{ flexWrap: 'wrap', rowGap: 8, paddingBlock: 8 }}>
+          <span className="lp-rf-k" id={`${id}-q`} style={{ flex: '1 1 12em', whiteSpace: 'normal' }}>
+            Is a friend already with them in medical?
+          </span>
+          <div role="radiogroup" aria-labelledby={`${id}-q`} style={{ display: 'flex', gap: 6 }}>
+            {FRIEND_CHOICES.map((c) => {
+              const on = current === c.value;
+              return (
+                <Button
+                  key={c.value}
+                  type="button"
+                  size="1"
+                  variant={on ? 'solid' : 'soft'}
+                  color="gray"
+                  highContrast={on}
+                  radius="full"
+                  className="lp-rf-chip lp-hit"
+                  role="radio"
+                  aria-checked={on}
+                  disabled={readOnly}
+                  data-value={c.value}
+                  onClick={() => set('friendInMedical', c.value)}
+                >
+                  {c.label}
+                </Button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+      {current === 'yes' ? (
+        <TextRow
+          inputId={`${id}-name`}
+          label="Name"
+          placeholder=""
+          max={60}
+          value={values.friendInMedicalName ?? ''}
+          onChange={(v) => set('friendInMedicalName', v)}
+          readOnly={readOnly}
+          errorId={`${id}-name-err`}
+        />
+      ) : null}
+    </div>
+  );
 }
