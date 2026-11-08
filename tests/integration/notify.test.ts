@@ -120,7 +120,9 @@ describe('notifyStaff', () => {
       // (R2, 2026-11-07) A message opens the request at its thread.
       expect(x.payload).toMatchObject({ title: 'Jordan TEST-S Diaz', tag: `lp-${r.id}`, url: `/?r=${r.id}&to=thread`, kind: 'message', renotify: true, badge: 1 });
       expect(x.payload.body).toBe('Rae C.: call me on ••• about');
-      const text = JSON.stringify(x.payload);
+      // (Telemetry) sentAt is the server clock, a 13-digit number: checked on its own, left out of the text check.
+      expect(typeof x.payload.sentAt).toBe('number');
+      const text = JSON.stringify({ ...x.payload, sentAt: undefined });
       expect(text).not.toMatch(/LP-?\d/);
       expect(text).not.toContain('555');
       expect(Buffer.byteLength(text)).toBeLessThan(4_000);

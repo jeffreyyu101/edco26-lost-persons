@@ -1,6 +1,7 @@
 // Proxy (spec §6 Proxy): per-request CSP nonce, security headers and the auth redirects for page routes.
 //   * `/` without a valid session cookie → /signin?next=<path+query>
 //   * `/signin` with a valid session cookie → the safe `next`, else `/`
+//   * `/health` (the telemetry dashboard) without a valid session cookie → /signin?next=/health
 // API routes, static assets, the service worker, the manifest, icons, logos and fonts never run through
 // here (see `config.matcher`). Runs on the Node.js runtime (the Next.js 16 default for proxy).
 import { NextResponse, type NextRequest } from 'next/server';
@@ -60,13 +61,21 @@ export async function proxy(request: NextRequest) {
   const csp = contentSecurityPolicy(nonce, process.env.NODE_ENV === 'development', supabaseOrigin());
   const { pathname, search } = request.nextUrl;
 
-  if (pathname === '/' || pathname === '/signin') {
+  if (pathname === '/' || pathname === '/signin' || pathname === '/health') {
     // Same trimmed secret the session routes sign with (serverEnv().sessionSecret).
     const claims = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value, sessionSecretFromEnv());
 
     if (pathname === '/' && !claims) {
       const target = new URL('/signin', request.url);
       if (search) target.searchParams.set('next', `/${search}`);
+      const response = NextResponse.redirect(target, 307);
+      response.headers.set('Cache-Control', 'no-store');
+      return withHeaders(response, csp);
+    }
+
+    if (pathname === '/health' && !claims) {
+      const target = new URL('/signin', request.url);
+      target.searchParams.set('next', '/health');
       const response = NextResponse.redirect(target, 307);
       response.headers.set('Cache-Control', 'no-store');
       return withHeaders(response, csp);

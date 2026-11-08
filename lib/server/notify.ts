@@ -17,6 +17,7 @@ import { isActivityKind, pushPayload, pushTtl, pushUrgency, requestTitle, scrubD
 import { isUuid } from '../domain';
 import { groupOutcomes, pushEnabled, sendPushes, type PushTarget } from './push';
 import { rpc } from './supabase';
+import { recordPushSend } from './telemetry';
 
 export type { ActivityEvent, ActivityKind } from '../activity';
 
@@ -70,6 +71,7 @@ export async function deliver(recipients: readonly string[], event: ActivityEven
     if (targets.length === 0 || !pushEnabled()) return;
     const title = requestTitle(str(data?.firstName), str(data?.lastName));
     const unread = (data?.unread && typeof data.unread === 'object' ? data.unread : {}) as Record<string, unknown>;
+    const sendStarted = performance.now();
     const outcomes = await sendPushes(
       targets,
       (t) => pushPayload({ requestId: event.requestId, kind: event.kind, detail }, title, typeof unread[t.staff] === 'number' ? (unread[t.staff] as number) : null),
@@ -78,6 +80,8 @@ export async function deliver(recipients: readonly string[], event: ActivityEven
     const grouped = groupOutcomes(outcomes);
     if (grouped.gone.length || grouped.failed.length) log('push_partial', { ok: grouped.ok.length, gone: grouped.gone.length, failed: grouped.failed.length });
     await rpc('lp_push_result', { p_ok: grouped.ok, p_gone: grouped.gone, p_failed: grouped.failed });
+    // Telemetry (push_send per team: counts and the round's duration). Never throws, writes nothing when collection is off.
+    await recordPushSend(event.kind, targets, outcomes, performance.now() - sendStarted);
   } catch (error) {
     const code = (error as { code?: unknown })?.code;
     log(typeof code === 'string' ? `failed_${code.replace(/[^a-z_]/gi, '').slice(0, 30)}` : 'failed');

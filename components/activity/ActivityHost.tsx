@@ -12,11 +12,14 @@
 //   * the "New requests" switch (server-side) is the phone's new-request alert pref (the old bell);
 //   * lets the toasts at the top be swiped away (components/ui/use-toast-swipe.ts, Brian 2026-11-07): from here,
 //     so neither the Toaster nor the first load's chunks carry anything for it (A25);
+//   * starts the in-house telemetry collector after idle (components/activity/use-telemetry.ts; its own chunk, never
+//     on the first load; design/references/observability-design.md);
 //   * draws the Alerts sheet.
 import { useEffect, useRef } from 'react';
 import { AlertsSheet } from '@/components/alerts/AlertsSheet';
 import { usePushStarted } from '@/components/alerts/AlertsBanner';
 import { useToastSwipe } from '@/components/ui/use-toast-swipe';
+import { useTelemetry } from './use-telemetry';
 import { activityClient, markReadWhileOpen } from '@/lib/client/activity-client';
 import { useView } from '@/lib/client/nav';
 import { useAlerts } from '@/lib/client/push-client';
@@ -39,6 +42,7 @@ export function ActivityHost() {
   const prefs = usePrefs();
   const alerts = useAlerts();
   const view = useView();
+  useTelemetry(store, view);
   const staff = session.status === 'active' ? session.staff : null;
   const lastStaff = useRef<string | null>(null);
 

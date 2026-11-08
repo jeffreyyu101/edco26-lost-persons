@@ -454,7 +454,8 @@ describe('the routes notify (contract D)', () => {
     expect(p.payload).toMatchObject({ title: 'Jordan TEST-S Diaz', body: 'Located', tag: `lp-${r.id}`, url: `/?r=${r.id}`, kind: 'in_medical', renotify: true, requireInteraction: true });
     expect(p.urgency).toBe('high');
     expect(p.ttl).toBe('3600');
-    const text = JSON.stringify(p.payload);
+    // (Telemetry) sentAt is the server clock, a 13-digit number: left out of the text check.
+    const text = JSON.stringify({ ...p.payload, sentAt: undefined });
     expect(text).not.toMatch(/LP-?\d/);
     expect(text).not.toContain('555');
     // The actor never hears about their own answer (the new-request push Rae's switch asked for is another event).
@@ -543,7 +544,7 @@ describe('the routes notify (contract D)', () => {
     await eventually(() => raePhone.deliveries.some((d) => d.payload.requestId === id));
     const p = raePhone.deliveries.find((d) => d.payload.requestId === id)!;
     expect(p.payload).toMatchObject({ title: 'New request', body: 'Tara TEST-S Ruiz · 24 M · FA 4', kind: 'new_request' });
-    expect(JSON.stringify(p.payload)).not.toContain('555');
+    expect(JSON.stringify({ ...p.payload, sentAt: undefined })).not.toContain('555');
     expect(await activityOf(rae, id)).toMatchObject({ kind: 'new_request', detail: 'Tara TEST-S Ruiz · 24 M · FA 4' });
     expect(await activityOf(dana, id)).toBeNull();
     expect(offPhone.deliveries.some((d) => d.payload.requestId === id)).toBe(false);
@@ -590,7 +591,7 @@ describe('the routes notify (contract D)', () => {
     // Fay's lock screen: the new request, no contact details.
     const p = await eventually(() => fayPhone.deliveries.find((d) => d.payload.requestId === id));
     expect(p.payload).toMatchObject({ title: 'New request', kind: 'new_request' });
-    expect(JSON.stringify(p.payload)).not.toContain('555');
+    expect(JSON.stringify({ ...p.payload, sentAt: undefined })).not.toContain('555');
     // The push only: no Activity row, so Fay's bell and badge never count every request logged.
     expect(await activityOf(fay, id)).toBeNull();
     expect((await api('/api/activity/unread', { cookie: fayCookie })).body.count).toBe(unreadBefore);

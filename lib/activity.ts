@@ -164,6 +164,11 @@ export interface PushPayload {
   requireInteraction?: boolean;
   /** The recipient's unread Activity count (the app icon badge), when known. */
   badge: number | null;
+  /**
+   * (Telemetry, 2026-11-08) Server clock (epoch ms) when the push was built: the worker logs it with the push's
+   * arrival, so the Health page can show push transit times. Optional: older workers ignore it.
+   */
+  sentAt?: number;
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -334,12 +339,13 @@ export function pushPayload(event: Pick<ActivityEvent, 'requestId' | 'kind' | 'd
     renotify: true,
     requireInteraction: event.kind === 'in_medical',
     badge: typeof badge === 'number' && Number.isFinite(badge) && badge >= 0 ? Math.floor(badge) : null,
+    sentAt: Date.now(),
   };
 }
 
 /** "Send a test alert". */
 export function testPayload(): PushPayload {
-  return { v: 1, title: APP_NAME, body: 'Test alert', tag: 'lp-test', url: '/', kind: 'test', requestId: null, renotify: true, badge: null };
+  return { v: 1, title: APP_NAME, body: 'Test alert', tag: 'lp-test', url: '/', kind: 'test', requestId: null, renotify: true, badge: null, sentAt: Date.now() };
 }
 
 // ---------------------------------------------------------------------------------------------------

@@ -125,13 +125,25 @@ describe('push payload', () => {
   it('never carries an LP number, a phone number or more than the limit', () => {
     for (const kind of ACTIVITY_KINDS) {
       const p = pushPayload({ requestId: ID, kind, detail: `LP-0012 call 407-555-0142 ${'z'.repeat(400)}` }, 'Jordan Diaz', 9);
-      const json = JSON.stringify(p);
+      // (Telemetry) sentAt is the server clock, a 13-digit number: checked on its own below, left out of the text check.
+      const { sentAt, ...rest } = p;
+      expect(typeof sentAt).toBe('number');
+      expect(Buffer.byteLength(JSON.stringify(p))).toBeLessThan(PUSH_PAYLOAD_MAX_BYTES);
+      const json = JSON.stringify(rest);
       expect(json).not.toMatch(/LP-?\d/);
       expect(json).not.toContain('555');
       expect(Buffer.byteLength(json)).toBeLessThan(PUSH_PAYLOAD_MAX_BYTES);
       expect(Buffer.byteLength(json)).toBeLessThan(4_000);
     }
     expect(testPayload()).toMatchObject({ kind: 'test', tag: 'lp-test', url: '/' });
+  });
+
+  it('(telemetry) every push carries sentAt, the server clock when it was built', () => {
+    const before = Date.now();
+    const p = pushPayload({ requestId: ID, kind: 'new_request', detail: 'x' }, 'Tara Ruiz', null);
+    expect(p.sentAt).toBeGreaterThanOrEqual(before);
+    expect(p.sentAt).toBeLessThanOrEqual(Date.now());
+    expect(testPayload().sentAt).toBeGreaterThanOrEqual(before);
   });
 
   it('urgency and TTL: new requests, answers and messages are high', () => {
