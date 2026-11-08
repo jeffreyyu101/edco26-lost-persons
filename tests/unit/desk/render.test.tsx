@@ -127,6 +127,9 @@ describe('DeskNav', () => {
     expect(lockup).toMatch(/^data-testid="desk-live" data-variant="side"/);
     expect(lockup.indexOf('src="/logos/edc-orlando.png"')).toBeGreaterThan(0);
     expect(lockup.indexOf('src="/logos/ground-control.png"')).toBeGreaterThan(lockup.indexOf('edc-orlando.png'));
+    // The hover rainbow sits on the EDC Orlando logo only, hidden from screen readers.
+    expect(lockup).toMatch(/src="\/logos\/edc-orlando.png"[^>]*\/?><span[^>]*aria-hidden="true"[^>]*data-testid="desk-live-rainbow"/);
+    expect(lockup.indexOf('desk-live-rainbow')).toBeLessThan(lockup.indexOf('ground-control.png'));
     expect(sidebarHtml.indexOf('data-testid="desk-live"')).toBeLessThan(sidebarHtml.indexOf('href="/"'));
     expect(sidebar).not.toContain('Is my friend in medical?');
     expect(sidebar).toContain(`All requests ${counts.all}`);
@@ -155,7 +158,7 @@ describe('DeskNav', () => {
     const html = render(<DeskNav main={ALL_VIEW} />);
     const rail = html.slice(html.indexOf('data-testid="desk-rail"'));
     // The rail's lockup: both logos stacked on the square.
-    expect(rail).toMatch(/data-testid="desk-live" data-variant="rail"[^>]*>(<img [^>]*>)<span[^>]*><\/span>(<img [^>]*>)/);
+    expect(rail).toMatch(/data-testid="desk-live" data-variant="rail"[^>]*><span[^>]*>(<img [^>]*>)<span[^>]*><\/span><\/span><span[^>]*><\/span>(<img [^>]*>)/);
     expect(rail).toContain('aria-label="All requests"');
     expect(rail).toContain(`aria-label="Pending ${counts.pending}"`);
     expect(rail).toContain('aria-label="My requests"');

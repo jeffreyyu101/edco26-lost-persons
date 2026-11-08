@@ -86,7 +86,12 @@ export function LiveMark({ variant, className }: { variant: 'side' | 'rail'; cla
       data-variant={variant}
       data-state={state}
     >
-      <img className={d.lockEdc} src="/logos/edc-orlando.png" alt="" width={194} height={132} decoding="async" draggable={false} />
+      {/* Easter egg (Brian, 2026-11-08): on hover with a mouse, a rainbow runs left to right through the white
+          EDC Orlando logo, clipped to the logo's own shape (desk.module.css .lockRainbow). */}
+      <span className={d.lockEdcWrap}>
+        <img className={d.lockEdc} src="/logos/edc-orlando.png" alt="" width={194} height={132} decoding="async" draggable={false} />
+        <span className={d.lockRainbow} aria-hidden data-testid="desk-live-rainbow" />
+      </span>
       <span className={d.lockDiv} aria-hidden />
       <img className={d.lockGc} src="/logos/ground-control.png" alt="" width={313} height={120} decoding="async" draggable={false} />
       <span className={d.live} data-state={state} />
