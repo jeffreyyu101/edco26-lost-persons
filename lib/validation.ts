@@ -124,6 +124,9 @@ export const createRequestSchema = z
     clientMutationId: uuidSchema,
     reportingLocation: postField,
     ...fieldShape,
+    // (Companion) "Is a friend already with them in medical?" Default 'unsure'; the name is kept only for 'yes'.
+    friendInMedical: z.enum(['yes', 'no', 'unsure']).optional(),
+    friendInMedicalName: optionalText(LIMITS.medicalLocation).optional(),
   })
   .superRefine(otherNeedsLocation)
   .transform((v) => (v.reportingLocation === OTHER_POST ? v : { ...v, otherLocation: null }));

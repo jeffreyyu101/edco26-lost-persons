@@ -109,7 +109,26 @@ export interface RequestSummary {
   enroute?: EnrouteSummary | null;
   /** The caller is involved in the request (lp_involved_staff): a new message from someone else alerts. */
   involved?: boolean;
+  // Added 2026-11-08 (Companion). Optional: rows cached before this build do not carry them.
+  /** Intake answer to "Is a friend already with them in medical?" (default 'unsure'). */
+  friendInMedical?: FriendInMedical;
+  /** Optional companion name from the intake (≤ 60), only kept when friendInMedical = 'yes'. */
+  friendInMedicalName?: string | null;
+  /** Set while a friend swap request is open. */
+  swapRequestedAt?: IsoDateTime | null;
+  /** Who requested the open swap ("Name · Team"). */
+  swapRequestedBy?: string | null;
+  /** Where an approved swap happens: the request's own post ('fa') or Main Med ('mm'). */
+  swapPlace?: SwapPlace | null;
 }
+
+/** (Companion) patients.friend_in_medical. */
+export type FriendInMedical = 'yes' | 'no' | 'unsure';
+/** (Companion) patients.swap_place. */
+export type SwapPlace = 'fa' | 'mm';
+/** (Companion) POST /api/requests/:id/swap body (plus expectedVersion, like the status route). Returns ChangeResponse. */
+export type SwapAction = { action: 'request' } | { action: 'approve'; place: SwapPlace } | { action: 'decline' };
+export type SwapBody = SwapAction & { expectedVersion: number };
 
 /** RequestSummary.lastMessage (F3). */
 export interface LastMessage {

@@ -30,6 +30,10 @@ export const STATUS = {
    * 5 minutes). Never written by a client; Reopen brings it back to In medical.
    */
   inactive: 'Closed – Inactive',
+  /** (Companion) Located, but someone is already with them: don't send the friend (Main Med allows one companion). */
+  accompanied: 'Found – Accompanied',
+  /** (Companion) Closed: the friend was told the patient is accompanied. Reopen / Undo goes back to Accompanied. */
+  friendInformed: 'Closed – Friend Informed',
 } as const;
 
 /** Every value the status CHECK allows, in the constraint's order. */
@@ -42,6 +46,8 @@ export const STATUSES = [
   STATUS.legacyBringFriend,
   STATUS.cancelled,
   STATUS.inactive,
+  STATUS.accompanied,
+  STATUS.friendInformed,
 ] as const;
 
 export type Status = (typeof STATUSES)[number];
@@ -56,6 +62,8 @@ export const SETTABLE_STATUSES = [
   STATUS.inMedical,
   STATUS.reunited,
   STATUS.discharged,
+  STATUS.accompanied,
+  STATUS.friendInformed,
 ] as const;
 export type SettableStatus = (typeof SETTABLE_STATUSES)[number];
 
@@ -80,7 +88,9 @@ export type GlyphKind =
   | 'closed' // filled check, grey
   | 'queued' // dashed ring, grey (outbox item, not sent yet)
   | 'logged' // empty ring, gray-10 (audit trail "Logged")
-  | 'inactive'; // (F6) lucide timer-off, bare outline, grey (Closed · inactive)
+  | 'inactive' // (F6) lucide timer-off, bare outline, grey (Closed · inactive)
+  | 'accompanied' // (Companion) lucide users, amber (Located · already accompanied)
+  | 'friendInformed'; // (Companion) lucide users, grey (Friend informed)
 
 export interface StatusMeta {
   /** Full UI label, e.g. "Located · friend coming". */
@@ -120,6 +130,8 @@ export const STATUS_META: Readonly<Record<Status, StatusMeta>> = {
   [STATUS.legacyBringFriend]: { label: 'Located · friend coming', shortLabel: 'Located', tone: 'green', glyph: 'inMedical', bucket: 'open' },
   // (F6) "Inactive" on a narrow phone, where "Closed · inactive" would take the name's room (the timer glyph says the rest).
   [STATUS.inactive]: { label: 'Closed · inactive', shortLabel: 'Closed · inactive', narrowLabel: 'Inactive', tone: 'gray', glyph: 'inactive', bucket: 'closed' },
+  [STATUS.accompanied]: { label: 'Located · already accompanied', shortLabel: 'Accompanied', tone: 'amber', glyph: 'accompanied', bucket: 'open' },
+  [STATUS.friendInformed]: { label: 'Friend informed', shortLabel: 'Friend informed', tone: 'gray', glyph: 'friendInformed', bucket: 'closed' },
 };
 
 /**
@@ -155,15 +167,20 @@ export type StatusKind = (typeof STATUS_KINDS)[number];
 
 /** Allowed status → status moves through lp_set_status. MUST match the SQL CASE (unit-tested). */
 export const TRANSITIONS: Readonly<Record<Status, readonly Status[]>> = {
-  [STATUS.waiting]: [STATUS.notInMedical, STATUS.inMedical],
-  [STATUS.notInMedical]: [STATUS.inMedical, STATUS.waiting],
-  [STATUS.inMedical]: [STATUS.reunited, STATUS.notInMedical, STATUS.discharged, STATUS.waiting],
+  [STATUS.waiting]: [STATUS.notInMedical, STATUS.inMedical, STATUS.accompanied],
+  [STATUS.notInMedical]: [STATUS.inMedical, STATUS.waiting, STATUS.accompanied],
+  [STATUS.inMedical]: [STATUS.reunited, STATUS.notInMedical, STATUS.discharged, STATUS.waiting, STATUS.accompanied],
   [STATUS.reunited]: [STATUS.inMedical],
   [STATUS.discharged]: [STATUS.inMedical],
   [STATUS.cancelled]: [STATUS.waiting],
   [STATUS.legacyBringFriend]: [STATUS.reunited, STATUS.discharged, STATUS.notInMedical],
   // (F6) Reopen only (kind 'reopen', any staff).
   [STATUS.inactive]: [STATUS.inMedical],
+  // (Companion) Change answer (Located friend coming / Not located / Waiting), Friend informed, Discharged. A swap
+  // approval moves Accompanied → In medical through POST /api/requests/:id/swap.
+  [STATUS.accompanied]: [STATUS.inMedical, STATUS.notInMedical, STATUS.waiting, STATUS.friendInformed, STATUS.discharged],
+  // (Companion) Reopen / Undo.
+  [STATUS.friendInformed]: [STATUS.accompanied],
 };
 
 export function canTransition(from: string, to: string): boolean {
