@@ -676,12 +676,16 @@ function takePendingOpen() {
 
 /**
  * This click, once kept, is gone: a page took it (lp-take-open) and opened it, or a newer click replaced
- * it (that click opens its own). Read in turn after the save. False when Cache Storage fails.
+ * it (that click opens its own). Read in turn after the save. False when Cache Storage fails or the entry
+ * cannot be read back: the click then navigates or opens a window, as before.
  */
 function pendingTaken(open) {
   return pendingStep(async () => {
-    const stored = await readPendingOpen(await caches.open(META));
-    return !(stored && stored.url === open.url && stored.at === open.at);
+    const meta = await caches.open(META);
+    const res = await meta.match(PENDING_OPEN_KEY);
+    if (!res) return true;
+    const data = await res.json();
+    return !(data && data.url === open.url && data.at === open.at);
   }).catch(() => false);
 }
 
