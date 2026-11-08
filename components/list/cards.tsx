@@ -484,7 +484,7 @@ export const MineCard = memo(function MineCard({
         )}
         <Stepper model={stepperModel(row.status)} />
       </div>
-      {/* F3: en route, the last message, En route / Arrived and Message (updates.html v7 "2 · My requests"). */}
+      {/* F3: en route, the last message, En route / Reunited and Message (updates.html v7 "2 · My requests"; no Arrived since 2026-11-08). */}
       <MineActivity row={row} />
     </Card>
   );

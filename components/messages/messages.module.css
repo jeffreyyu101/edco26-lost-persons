@@ -45,7 +45,8 @@
   color: var(--gray-12);
 }
 
-/* The thread scrolls inside its own box and opens at the newest message. */
+/* The thread scrolls inside its own box and opens at the newest message. (2026-11-08, T4) On a phone a swipe that
+   reaches the thread's end carries on to the page (no scroll trap); the desk pane keeps the thread's scroll to itself. */
 .scroller {
   position: relative;
   display: flex;
@@ -53,8 +54,10 @@
   max-height: min(60vh, 520px);
   max-height: min(60dvh, 520px);
   overflow-y: auto;
-  overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+}
+.panel .scroller {
+  overscroll-behavior: contain;
 }
 
 .chat {
@@ -80,6 +83,11 @@
 .from b {
   font-weight: 500;
   color: var(--gray-12);
+}
+/* (2026-11-08, T5) The time over my own run, at its right. */
+.fromMe {
+  align-self: flex-end;
+  margin: 10px 12px 3px 0;
 }
 
 .gap {
@@ -284,22 +292,14 @@
   padding: 4px 0 6px;
 }
 
-/* Quick lines: one row that scrolls sideways; never cut off, never wrapped. */
+/* Quick lines: they wrap onto more rows, never cut off and never a sideways scroller (2026-11-08, T3: lines past the
+   phone's edge went unseen), on the phone as in the desk pane. */
 .pills {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
-  overflow-x: auto;
   padding: 0 2px;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-}
-.pills::-webkit-scrollbar {
-  display: none;
-}
-.panel .pills {
-  flex-wrap: wrap;
-  overflow: visible;
 }
 
 .pill {
@@ -667,6 +667,28 @@ button.enr:focus-visible {
   flex: 1 1 auto;
   min-height: 44px;
   padding: 12px 10px 12px 12px;
+}
+/* (2026-11-08, T2) The whole message on up to two lines (three under 360 px), then its time and the ⌄ at the right. */
+.tpBox .previewText {
+  flex: 1 1 auto;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 359px) {
+  .tpBox .previewText {
+    -webkit-line-clamp: 3;
+  }
+}
+.tpTime {
+  flex: none;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .threadPreview:hover .tpBox {
   background: var(--gray-a4);

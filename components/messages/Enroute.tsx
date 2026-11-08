@@ -93,7 +93,10 @@ export function EnrouteRow({ enroute, status, onEdit, pressed, testId = 'enroute
   );
 }
 
-/** What a tap that was not delivered asked for, in words (screen readers). */
+/**
+ * What a tap that was not delivered asked for, in words (screen readers). 'arrive' is no longer offered (2026-11-08),
+ * but an older build's queued Arrived tap can still be on the phone, so it keeps its words.
+ */
 function tapPhrase(job: MessageJob): string {
   switch (job.enroute?.action) {
     case 'arrive':
@@ -255,7 +258,8 @@ export function EnrouteSheet({ open, mode, current, onClose, onSend, onCancelEnr
 }
 
 // ---------------------------------------------------------------------------------------------------
-// Controller: the row, the En route / Arrived button and the sheet for one request
+// Controller: the row, the En route button and the sheet for one request (2026-11-08: no Arrived; the server still
+// accepts an older build's 'arrive', and the row still shows "Friend arrived" for one)
 // ---------------------------------------------------------------------------------------------------
 
 export interface EnrouteControl {
@@ -267,7 +271,6 @@ export interface EnrouteControl {
   available: boolean;
   openNew: () => void;
   openEdit: () => void;
-  arrive: () => void;
   /** The sheet element to render once, anywhere in the container. */
   sheet: ReactNode;
   sheetOpen: boolean;
@@ -307,7 +310,6 @@ export function useEnrouteControl(row: RequestSummary): EnrouteControl {
     available,
     openNew: () => setMode('new'),
     openEdit: () => setMode('edit'),
-    arrive: () => void api?.setEnroute(row.id, 'arrive', null),
     sheet,
     sheetOpen: mode !== null,
     failed,

@@ -1,6 +1,6 @@
 // Overflow probe for the F3 screens (Brian: "no element wider than its container, nothing outside the
 // viewport"). Walks every rendered element under `root`: none may stick out of the viewport unless an
-// ancestor clips or scrolls it (the quick-line pills scroll sideways on purpose), none may be wider than its
+// ancestor clips or scrolls it (the quick-line pills wrap since 2026-11-08, so they get no pass), none may be wider than its
 // parent unless that parent scrolls, and the page itself never scrolls sideways.
 //
 // Overflow check for a screen (F4 rule: every new screen gets one at 375, 390, 820, 1180 and 1440 px): no

@@ -1,10 +1,11 @@
 'use client';
 // Messages on a request (F3; design/screens/updates.html v7 "1 · Messages on the request", #clarify 6–7,
 // f34-states.html 6). A chat thread that belongs to the request, at every status: bubbles only (no system
-// lines, no timestamps), iMessage grouping with "Name · Team" above the first bubble of someone else's run,
-// and under MY latest message "Delivered" or "Read 4:14 PM" in words. Queued bubbles are dimmed with
-// "Sending…"; failed ones say "Not delivered · Retry". Long-press (or right-click, or the ⋯ on a desktop)
-// gives Copy, and Unsend for my own within 15 minutes. Plain text only.
+// lines), iMessage grouping with "Name · Team · 12:14 PM" above the first bubble of someone else's run and the
+// time alone at the right over my own (2026-11-08, T5: reverses F3's "no timestamps"; a run also breaks after
+// 5 minutes, messages-logic buildBubbles), and under MY latest message "Delivered" or "Read 4:14 PM" in words.
+// Queued bubbles are dimmed with "Sending…"; failed ones say "Not delivered · Retry". Long-press (or right-click,
+// or the ⋯ on a desktop) gives Copy, and Unsend for my own within 15 minutes. Plain text only.
 //
 // (R1, Brian 2026-11-07) It sits below the request's details and photos. A jump (R2: a Message button, a desk
 // row's unread badge, a message's Activity row, toast or notification, the page's own preview line) brings it
@@ -12,11 +13,11 @@
 //
 // The thread scrolls in its own box and opens at the newest message; "New messages" shows when new ones
 // arrive while it is scrolled up; screen readers hear new incoming messages (polite). The composer is one
-// rounded field with the send arrow inside it and the quick lines for this status and side above it. A message
-// quick line fills the field (appended after a space to anything typed), and nothing is posted until Send
-// (Brian 2026-11-07 13:55); En route opens its sheet and Arrived acts at once, as before.
+// rounded field with the send arrow inside it and the quick lines for this status and side above it (they wrap).
+// A message quick line fills the field (appended after a space to anything typed), and nothing is posted until
+// Send (Brian 2026-11-07 13:55); En route opens its sheet. (2026-11-08) There is no Arrived quick line any more.
 import { Button, ContextMenu, DropdownMenu, IconButton, Skeleton, TextArea, VisuallyHidden } from '@radix-ui/themes';
-import { ArrowDown, ArrowUp, Check, CloudOff, Copy, Ellipsis, MessageCircle, RotateCcw, Trash2, Undo2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, CloudOff, Copy, Ellipsis, MessageCircle, RotateCcw, Trash2, Undo2 } from 'lucide-react';
 import { WalkIcon } from './WalkIcon';
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { createPortal, flushSync } from 'react-dom';
@@ -34,7 +35,7 @@ import s from './messages.module.css';
 
 export interface MessagesSectionProps {
   row: RequestSummary;
-  /** In the desk pane (the quick lines wrap instead of scrolling sideways). */
+  /** In the desk pane (the thread keeps its scroll to itself, and a jump lands under the pane's top). */
   panel?: boolean;
 }
 
@@ -216,47 +217,46 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
           </div>
         ) : (
           <div className={s.chat} role="log" aria-label="Messages">
-            {bubbles.map((b, i) => (
-              <Fragment key={b.key}>
-                {b.runStart && i > 0 ? <div className={s.gap} aria-hidden /> : null}
-                {b.runStart && !b.mine ? (
-                  <span className={s.from} aria-hidden>
-                    <b>{b.by}</b>
-                    {b.team ? ` · ${b.team}` : ''}
-                  </span>
-                ) : null}
-                <BubbleRow
-                  bubble={b}
-                  now={now}
-                  onCopy={() => copy(b.body)}
-                  onUnsend={b.message && b.mine ? () => void api?.unsend(row.id, b.message!.id) : null}
-                  onRetry={b.jobId ? () => api?.retry(b.jobId!) : null}
-                  onDelete={b.jobId && b.pending === 'failed' ? () => void api?.discard(b.jobId!) : null}
-                />
-                {b.pending === 'sending' ? (
-                  <span className={s.receipt} data-testid="receipt-sending">
-                    Sending…
-                  </span>
-                ) : b.pending === 'failed' ? (
-                  <span className={`${s.receipt} ${s.failed}`} data-testid="receipt-failed">
-                    <b>Not delivered</b> ·
-                    <button type="button" className={s.retry} onClick={() => b.jobId && api?.retry(b.jobId)}>
-                      Retry
-                    </button>
-                  </span>
-                ) : receipt && b.message?.id === receipt.messageId ? (
-                  <span className={s.receipt} data-testid="receipt">
-                    {receipt.readAt ? (
-                      <>
-                        <b>Read</b> {formatCreatedTime(receipt.readAt, now, timeZone)}
-                      </>
-                    ) : (
-                      'Delivered'
-                    )}
-                  </span>
-                ) : null}
-              </Fragment>
-            ))}
+            {bubbles.map((b, i) => {
+              const time = timeOf(b.createdAt, now, timeZone);
+              return (
+                <Fragment key={b.key}>
+                  {b.runStart && i > 0 ? <div className={s.gap} aria-hidden /> : null}
+                  {b.runStart ? <RunLabel bubble={b} time={time} /> : null}
+                  <BubbleRow
+                    bubble={b}
+                    time={time}
+                    now={now}
+                    onCopy={() => copy(b.body)}
+                    onUnsend={b.message && b.mine ? () => void api?.unsend(row.id, b.message!.id) : null}
+                    onRetry={b.jobId ? () => api?.retry(b.jobId!) : null}
+                    onDelete={b.jobId && b.pending === 'failed' ? () => void api?.discard(b.jobId!) : null}
+                  />
+                  {b.pending === 'sending' ? (
+                    <span className={s.receipt} data-testid="receipt-sending">
+                      Sending…
+                    </span>
+                  ) : b.pending === 'failed' ? (
+                    <span className={`${s.receipt} ${s.failed}`} data-testid="receipt-failed">
+                      <b>Not delivered</b> ·
+                      <button type="button" className={s.retry} onClick={() => b.jobId && api?.retry(b.jobId)}>
+                        Retry
+                      </button>
+                    </span>
+                  ) : receipt && b.message?.id === receipt.messageId ? (
+                    <span className={s.receipt} data-testid="receipt">
+                      {receipt.readAt ? (
+                        <>
+                          <b>Read</b> {formatCreatedTime(receipt.readAt, now, timeZone)}
+                        </>
+                      ) : (
+                        'Delivered'
+                      )}
+                    </span>
+                  ) : null}
+                </Fragment>
+              );
+            })}
           </div>
         )}
         {newPill ? (
@@ -286,11 +286,43 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
           return ok;
         }}
         onEnroute={enroute.openNew}
-        onArrived={enroute.arrive}
       />
       {enroute.sheet}
     </section>
   );
+}
+
+/** "12:14 PM" ("Thu 11:02 PM" an earlier day) for a bubble's run label and its screen-reader label; '' when unreadable. */
+export function timeOf(iso: string, now: number, timeZone: string): string {
+  return Number.isFinite(Date.parse(iso)) ? formatCreatedTime(iso, now, timeZone) : '';
+}
+
+/**
+ * (2026-11-08, T5) The line over a run: "Rae C. · Medical · 12:14 PM" over someone else's, the time alone at the right
+ * over mine. Hidden from screen readers: each bubble's label says who and when.
+ */
+export function RunLabel({ bubble, time }: { bubble: Pick<Bubble, 'by' | 'team' | 'mine'>; time: string }) {
+  if (bubble.mine) {
+    return time ? (
+      <span className={`${s.from} ${s.fromMe}`} aria-hidden data-testid="run-label" data-mine="">
+        {time}
+      </span>
+    ) : null;
+  }
+  return (
+    <span className={s.from} aria-hidden data-testid="run-label">
+      <b>{bubble.by}</b>
+      {bubble.team ? ` · ${bubble.team}` : ''}
+      {time ? ` · ${time}` : ''}
+    </span>
+  );
+}
+
+/** A bubble's screen-reader label: "Rae C., Medical, 12:14 PM: Any tattoos or marks?." / "You, 12:16 PM: …. Sending.". */
+export function bubbleSaid(bubble: Pick<Bubble, 'by' | 'team' | 'mine' | 'body' | 'pending'>, time: string): string {
+  const who = bubble.mine ? 'You' : `${bubble.by}${bubble.team ? `, ${bubble.team}` : ''}`;
+  const state = bubble.pending === 'sending' ? ' Sending.' : bubble.pending === 'failed' ? ' Not delivered.' : '';
+  return `${who}${time ? `, ${time}` : ''}: ${bubble.body}.${state}`;
 }
 
 /**
@@ -322,6 +354,7 @@ interface MenuItem {
 
 function BubbleRow({
   bubble,
+  time,
   now,
   onCopy,
   onUnsend,
@@ -329,6 +362,8 @@ function BubbleRow({
   onDelete,
 }: {
   bubble: Bubble;
+  /** "12:14 PM": said in the bubble's label (the run's label shows it once on screen). */
+  time: string;
   now: number;
   onCopy: () => void;
   onUnsend: (() => void) | null;
@@ -341,8 +376,6 @@ function BubbleRow({
   if (bubble.pending === 'failed' && onRetry) items.push({ key: 'retry', label: 'Retry', icon: RotateCcw, run: onRetry });
   if (onDelete) items.push({ key: 'delete', label: 'Delete', icon: Trash2, danger: true, run: onDelete });
   const run = bubble.runStart && bubble.runEnd ? 'single' : bubble.runStart ? 'start' : bubble.runEnd ? 'end' : 'mid';
-  const who = bubble.mine ? 'You' : `${bubble.by}${bubble.team ? `, ${bubble.team}` : ''}`;
-  const state = bubble.pending === 'sending' ? ' Sending.' : bubble.pending === 'failed' ? ' Not delivered.' : '';
   const more = (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger>
@@ -372,7 +405,7 @@ function BubbleRow({
             data-testid={bubble.mine ? 'bubble-mine' : 'bubble-them'}
             role="article"
             tabIndex={0}
-            aria-label={`${who}: ${bubble.body}.${state}`}
+            aria-label={bubbleSaid(bubble, time)}
           >
             {bubble.body}
           </div>
@@ -400,13 +433,11 @@ function Composer({
   inputRef,
   onSendText,
   onEnroute,
-  onArrived,
 }: {
   lines: ReturnType<typeof quickLines>;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   onSendText: (text: string) => Promise<boolean>;
   onEnroute: () => void;
-  onArrived: () => void;
 }) {
   const [value, setValue] = useState('');
   const counterId = useId();
@@ -462,13 +493,11 @@ function Composer({
               data-kind={l.kind}
               onClick={() => {
                 if (l.kind === 'enroute') onEnroute();
-                else if (l.kind === 'arrived') onArrived();
                 else fill(l.text);
               }}
-              aria-label={l.kind === 'message' ? `Add to message: ${l.text}` : l.kind === 'enroute' ? 'En route: bringing the friend' : 'Arrived with the friend'}
+              aria-label={l.kind === 'enroute' ? 'En route: bringing the friend' : `Add to message: ${l.text}`}
             >
               {l.kind === 'enroute' ? <WalkIcon size={15} strokeWidth={2} aria-hidden /> : null}
-              {l.kind === 'arrived' ? <Check size={15} strokeWidth={2} aria-hidden /> : null}
               {l.text}
             </button>
           ))}

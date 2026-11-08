@@ -139,7 +139,10 @@ export function newestAt(messages: readonly ThreadMessage[]): string | null {
   return messages.length ? (messages[messages.length - 1]?.createdAt ?? null) : null;
 }
 
-/** What one bubble shows. `run`: first of a run of the same sender (gets the "Name · Team" line). */
+/**
+ * What one bubble shows. `run`: first of a run of the same sender (gets the "Name · Team · 12:14 PM" line, or the time
+ * alone over my own run).
+ */
 export interface Bubble {
   key: string;
   /** Server message, or a queued one from this phone (jobId). */
@@ -149,7 +152,7 @@ export interface Bubble {
   mine: boolean;
   by: string;
   team: string;
-  /** First bubble of this sender's run (others' runs get the name line; a gap goes above every run). */
+  /** First bubble of this sender's run (others' runs get the name line, mine the time; a gap goes above every run). */
   runStart: boolean;
   /** Last bubble of the run (the tail corner). */
   runEnd: boolean;
@@ -159,8 +162,21 @@ export interface Bubble {
 }
 
 /**
+ * (2026-11-08, T5) A run also breaks when more than this passed since the bubble before it, so the time on a run's
+ * label is never far from any bubble under it ("Dana K. · 12:14 PM" over a message sent at 12:32 would mislead).
+ */
+export const RUN_BREAK_MS = 5 * 60_000;
+
+/** More than RUN_BREAK_MS from `a` to `b` (an unreadable time, or a queued bubble timed before the last, never breaks). */
+function farApart(a: { createdAt: string }, b: { createdAt: string }): boolean {
+  const gap = Date.parse(b.createdAt) - Date.parse(a.createdAt);
+  return Number.isFinite(gap) && gap > RUN_BREAK_MS;
+}
+
+/**
  * Bubbles in order: the server's messages, then this phone's queued ones (not yet confirmed). A queued
- * message the server already has (same clientMutationId) shows once, as the server's.
+ * message the server already has (same clientMutationId) shows once, as the server's. A run is one sender's
+ * bubbles in a row, none more than 5 minutes after the one before it (display only: nothing else reads runs).
  */
 export function buildBubbles(messages: readonly ThreadMessage[], queued: readonly MessageJob[], me: { by: string; team: string }): Bubble[] {
   const confirmedIds = new Set(messages.map((m) => m.clientMutationId));
@@ -190,10 +206,11 @@ export function buildBubbles(messages: readonly ThreadMessage[], queued: readonl
     });
   }
   const sender = (b: Omit<Bubble, 'runStart' | 'runEnd'>) => (b.mine ? '\u0000me' : `${b.by}\u0000${b.team}`);
+  const sameRun = (a: Omit<Bubble, 'runStart' | 'runEnd'>, b: Omit<Bubble, 'runStart' | 'runEnd'>) => sender(a) === sender(b) && !farApart(a, b);
   return items.map((b, i) => {
     const prev = items[i - 1];
     const next = items[i + 1];
-    return { ...b, runStart: !prev || sender(prev) !== sender(b), runEnd: !next || sender(next) !== sender(b) };
+    return { ...b, runStart: !prev || !sameRun(prev, b), runEnd: !next || !sameRun(b, next) };
   });
 }
 

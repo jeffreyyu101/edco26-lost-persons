@@ -16,6 +16,8 @@ import { newSignedInContext, signedInAs } from './helpers/session';
 //       "/?r=<id>" open at the top
 //       (a count only from the phone's cache, read meanwhile on another device, keeps no line, not even for a moment)
 //   overflow at 375, 390, 820, 1180 and 1440 px in light and dark; axe on the request with the line.
+//   (2026-11-08, request page tonight) the line has no Needs info chip of its own (T1), wraps to two lines with the
+//   message's time at its right (T2); the thread is no scroll trap on the phone, the desk pane keeps its own (T4).
 // Synthetic rows only (TEST-RO-…), closed again afterwards.
 
 const BASE = testBaseUrl();
@@ -23,6 +25,8 @@ const FOH = { staffName: 'TEST-RO Dana Front', team: 'GC/HX - Dispatch' };
 const MED = { staffName: 'TEST-RO Rae Medic', team: 'Medical' };
 const TAG = `TEST-RO-${Date.now().toString(36)}`;
 const SYNC = { timeout: 20_000 };
+/** The latest message's time on the line (T2): the clock today. */
+const TIME = /^\d{1,2}:\d\d (AM|PM)$/;
 const DESK = { viewport: { width: 1440, height: 900 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 } as const;
 let seq = 0;
 
@@ -224,10 +228,16 @@ test.describe('phone', () => {
     await page.goto(`/?r=${r.id}`);
     await expect(line(page)).toBeVisible(SYNC);
     expect(ascending(await order(page, true)), (await order(page, true)).join(', ')).toBe(true);
-    await expect(line(page).getByTestId('stage-chip')).toHaveText('Needs info');
+    // (T1) No second Needs info chip on the line: the status block right above it says Needs info.
+    await expect(line(page).getByTestId('stage-chip')).toHaveCount(0);
+    await expect(page.getByTestId('status-block')).toContainText('Needs info');
     await expect(line(page)).toContainText('Any tattoos or marks?');
     await expect(line(page).getByTestId('preview-unread')).toBeVisible();
-    await expect(line(page)).toHaveAccessibleName(/^Needs info\. Last message, unread, from .+: Any tattoos or marks\? Go to messages\.$/);
+    // (T2) The message's time at the right, and in the sentence.
+    await expect(line(page).getByTestId('preview-time')).toHaveText(TIME);
+    await expect(line(page)).toHaveAccessibleName(/^Last message, unread, from .+ at \d{1,2}:\d\d (AM|PM): Any tattoos or marks\? Go to messages\.$/);
+    // (T4) The thread is no scroll trap on the phone: a swipe that reaches its end carries on to the page.
+    expect(await messages(page).getByTestId('thread').evaluate((el) => getComputedStyle(el).overscrollBehaviorY)).toBe('auto');
     const box = (await line(page).boundingBox())!;
     expect(box.height).toBeGreaterThanOrEqual(44);
     // Right under the status block.
@@ -440,8 +450,17 @@ test.describe('phone', () => {
         try {
           await p.goto(`/?r=${r.id}`);
           await expect(line(p)).toBeVisible(SYNC);
-          // One line: the text ends in an ellipsis inside the button.
-          expect((await line(p).boundingBox())!.height, `${width} ${theme}`).toBeLessThanOrEqual(46);
+          // (T2) At most two lines (12 + 2 × 20 + 12 px), cut with an ellipsis inside the button; on a phone this
+          // long question takes both (it is no longer cut to one).
+          const box = (await line(p).boundingBox())!;
+          expect(box.height, `${width} ${theme}`).toBeLessThanOrEqual(66);
+          if (phone) expect(box.height, `${width} ${theme}: two lines`).toBeGreaterThan(56);
+          // The time sits at the line's right, before the ⌄, inside the button.
+          const time = (await line(p).getByTestId('preview-time').boundingBox())!;
+          const go = (await line(p).locator('svg').last().boundingBox())!;
+          expect(time.x, `${width} ${theme}`).toBeGreaterThan(box.x + box.width / 2);
+          expect(time.x + time.width, `${width} ${theme}`).toBeLessThanOrEqual(go.x + 1);
+          expect(go.x + go.width, `${width} ${theme}`).toBeLessThanOrEqual(box.x + box.width + 1);
           await expectNoOverflow(p, '[data-testid="profile"]', `request ${width} px ${theme}`);
         } finally {
           await ctx.close();
@@ -467,6 +486,8 @@ test.describe('desk', () => {
     await expectAtThread(page);
     await expect(composer(page)).toBeFocused();
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    // (T4) In the desk pane the thread keeps its scroll to itself.
+    expect(await messages(page).getByTestId('thread').evaluate((el) => getComputedStyle(el).overscrollBehaviorY)).toBe('contain');
 
     // Back to its top: the order, then the line.
     await page.evaluate(() => {

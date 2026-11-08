@@ -14,8 +14,9 @@
 //                has them: a pin, "Chair 14" and a pencil, or "+ Location" (Pending v8, 2026-11-06 afternoon;
 //                the location editor is a sheet on the phone, a popover in the desk pane); who and when for
 //                the other answers
-//   preview      (R1, Brian 2026-11-07) the latest message on one line, only while the request needs info or
-//                has unread messages for me; a tap brings the thread into view (CardActivity ThreadPreview)
+//   preview      (R1, Brian 2026-11-07) the latest message, only while the request needs info or has unread
+//                messages for me; a tap brings the thread into view (CardActivity ThreadPreview). (2026-11-08) Two
+//                lines and its time; no second Needs info chip on it (the status block says Needs info)
 //   details      Missing person / Friend or family, filled fields only, each with Edit; Phone has Call
 //   photos       tiles → full-screen viewer; Add tile (needs a connection) until there are 3
 //   messages     (F3; R1: below the details and photos, like Linear / Zendesk / GitHub issues) the thread
@@ -222,7 +223,8 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
   const shownStage = displayStage(row, { now, timeZone });
   const needsInfo = shownStage.key === 'needsInfo' ? shownStage : null;
   const preview = threadPreviewShown(needsInfo !== null, seenUnread, row.lastMessage) ? (
-    <ThreadPreview row={row} needsInfo={needsInfo} unread={seenUnread && !row.lastMessage?.mine} />
+    // (2026-11-08, T1) No chip on the line: the status block above it already says Needs info, in words and glyph.
+    <ThreadPreview row={row} needsInfo={null} unread={seenUnread && !row.lastMessage?.mine} />
   ) : null;
 
   // --- Retry the detail when the connection comes back --------------------------------------------------

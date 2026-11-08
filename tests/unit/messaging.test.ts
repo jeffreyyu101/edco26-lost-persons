@@ -39,6 +39,7 @@ import {
   jobSendable,
   mergeEarlierPage,
   mergeLatestPage,
+  RUN_BREAK_MS,
   receiptFor,
   storedJob,
   type MessageJob,
@@ -99,10 +100,12 @@ describe('quick lines (status × side)', () => {
     // (HIPAA, Brian 2026-11-07 14:18) "Not ready yet — wait" (was "Being worked up — wait"); "Hold — not ready yet",
     // now the same words, is gone.
     expect(texts('in_medical', 'medical')).toEqual(['message:Bring 1 person only', 'message:Not ready yet — wait', 'message:Ready for them']);
-    // (2026-11-07 13:52) "Can't find them" is gone; En route / Arrived and "Friend left the area" stay.
+    // (2026-11-07 13:52) "Can't find them" is gone; En route and "Friend left the area" stay.
     expect(texts('in_medical', 'foh')).toEqual(['enroute:En route', 'message:Friend left the area']);
-    expect(texts('in_medical', 'foh', true)).toEqual(['arrived:Arrived', 'message:Friend left the area']);
-    // Once the friend arrived neither En route nor Arrived is offered again (as on the cards).
+    // (2026-11-08) No Arrived: once I am en route the line is gone (my row in the status block changes or cancels it;
+    // Reunited is in the request's bar).
+    expect(texts('in_medical', 'foh', true)).toEqual(['message:Friend left the area']);
+    // An old row whose friend arrived offers no En route either (as on the cards).
     expect(texts('in_medical', 'foh', false, true)).toEqual(['message:Friend left the area']);
     expect(texts('in_medical', 'foh', true, true)).toEqual(['message:Friend left the area']);
     for (const stage of ['waiting', 'in_medical', 'closed'] as const) {
@@ -112,6 +115,8 @@ describe('quick lines (status × side)', () => {
             const all = texts(stage, side, mine, arrived).join('|');
             expect(all).not.toContain("Can't find them");
             expect(all).not.toMatch(/worked up|Hold —/);
+            // (2026-11-08) Arrived is offered nowhere, as a kind or as words.
+            expect(all, `${stage} ${side} ${mine} ${arrived}`).not.toMatch(/arrived|Arrived/);
           }
         }
       }
@@ -271,6 +276,32 @@ describe('thread pages', () => {
     ]);
     // En route jobs are not bubbles.
     expect(buildBubbles([], [job(1, { kind: 'enroute', body: undefined, enroute: { action: 'set', etaMinutes: 5 } })], { by: '', team: '' })).toEqual([]);
+  });
+
+  it('(T5) a run also breaks after more than 5 minutes since the bubble before it, so its time fits every bubble under it', () => {
+    expect(RUN_BREAK_MS).toBe(5 * 60_000);
+    const sec = (s: number) => new Date(NOW + s * 1000).toISOString();
+    const runs = (messages: ThreadMessage[], queued: MessageJob[] = []) =>
+      buildBubbles(messages, queued, { by: 'Dana K.', team: 'Dispatch' }).map((b) => `${b.body}:${b.runStart ? 'S' : '-'}${b.runEnd ? 'E' : '-'}`);
+    // Same sender: 4 min, then exactly 5 min (still one run), then 5 min 1 s (a new run), then 1 min.
+    expect(
+      runs([
+        msg(1, { createdAt: sec(0) }),
+        msg(2, { createdAt: sec(240) }),
+        msg(3, { createdAt: sec(540) }),
+        msg(4, { createdAt: sec(841) }),
+        msg(5, { createdAt: sec(901) }),
+      ]),
+    ).toEqual(['Message 1:S-', 'Message 2:--', 'Message 3:-E', 'Message 4:S-', 'Message 5:-E']);
+    // My own runs break the same way; another sender still breaks at once.
+    const mine = (n: number, s: number) => msg(n, { mine: true, by: 'Dana K.', team: 'Dispatch', createdAt: sec(s) });
+    expect(runs([mine(1, 0), mine(2, 60), mine(3, 1_000), msg(4, { createdAt: sec(1_010) })])).toEqual(['Message 1:S-', 'Message 2:-E', 'Message 3:SE', 'Message 4:SE']);
+    // A queued bubble timed by the phone before the server's last message (clocks apart) never breaks its run; one
+    // queued 20 minutes after my last confirmed one starts a new run.
+    expect(runs([mine(1, 600)], [job(1, { createdAt: NOW + 590_000 })])).toEqual(['Message 1:S-', 'Queued 1:-E']);
+    expect(runs([mine(1, 0)], [job(1, { createdAt: NOW + 1_200_000 })])).toEqual(['Message 1:SE', 'Queued 1:SE']);
+    // An unreadable time never breaks a run.
+    expect(runs([msg(1, { createdAt: 'not a time' }), msg(2, { createdAt: sec(3_600) })])).toEqual(['Message 1:S-', 'Message 2:-E']);
   });
 
   it('the receipt sits under my latest confirmed message: Read with the time, else Delivered', () => {
