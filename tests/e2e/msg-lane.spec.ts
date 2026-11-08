@@ -16,7 +16,9 @@ import { newSignedInContext, signedInAs } from './helpers/session';
 //                              filled bubble (blue-9 in dark mode)
 //   landing                    every jump lands as mockup frame 5, by every route and in both engines: the Messages
 //                              heading under the top bar (or the page's end), the composer whole above the action bar
-//                              or inside the pane (expectLanded), a 5-message thread included
+//                              or inside the pane (expectLanded), a 5-message thread included (on a phone that
+//                              thread is part of the page and taller than the room: its newest message on screen,
+//                              the heading just under the top bar)
 // Synthetic rows only (TEST-ML-…), closed again afterwards.
 
 const BASE = testBaseUrl();
@@ -171,11 +173,20 @@ async function expectLanded(page: Page): Promise<void> {
   await check();
 }
 
-/** The request open at its Messages: the heading on screen, the request's name scrolled past, landed (expectLanded). */
+/**
+ * The request open at its Messages: the request's name scrolled past, landed (expectLanded), and the heading on
+ * screen. (Request page tonight row 7, 2026-11-08) On a phone the thread is part of the page, not a box capped at
+ * 60 % of the screen, so a long one makes the section taller than the room between the bars: then the heading goes
+ * under the top bar (expectLanded holds it to just as far as the composer needs) and the newest message is on
+ * screen above the composer instead.
+ */
 async function expectAtThread(page: Page): Promise<void> {
-  await expect(threadHead(page)).toBeInViewport(SYNC);
+  await expect(page.getByTestId('messages')).toBeInViewport(SYNC);
   await expect(title(page)).not.toBeInViewport();
   await expectLanded(page);
+  const at = await landing(page);
+  if (at.head >= -2) await expect(threadHead(page)).toBeInViewport();
+  else await expect(page.getByTestId('messages').locator('[data-bubble]').last()).toBeInViewport({ ratio: 1 });
   // Regression (the lane's unread mark once reused the chat's .bubble class, which turned every message into a
   // 17 px blue tab): the thread's bubbles keep their own shape.
   const bubble = page.getByTestId('messages').locator('[data-testid="bubble-them"], [data-testid="bubble-mine"]').first();

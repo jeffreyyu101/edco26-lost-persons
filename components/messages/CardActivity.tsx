@@ -24,7 +24,7 @@ import { STATUS, alertName, isInMedical } from '@/lib/domain';
 import { formatCreatedTime } from '@/lib/format';
 import { useStatusTap } from '@/components/list/hooks';
 import { previewText, sideOfTeam, unreadOf } from '@/lib/messaging';
-import { markCount, messageMark } from '@/components/list/list-helpers';
+import { markCount, messageMark } from '@/components/list/message-mark';
 import type { DisplayStage } from '@/lib/stages';
 import { StageChip } from '@/components/list/StageChips';
 import { EnrouteFailed, EnrouteRow, useEnrouteControl } from './Enroute';
