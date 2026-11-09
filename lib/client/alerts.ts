@@ -16,7 +16,7 @@ import { STATUS, ageGender, alertName, isHeld, isInMedical, sameStaff, statusMet
 import { holdDetail } from '../hold-detail';
 import { formatCaseNumber } from '../format';
 import type { AlertEvent, ToastItem } from './store-contract';
-import { SWAP_REQUESTED_LABEL, isSwapApproved, swapApprovedLabel } from './swap';
+import { SWAP_REQUESTED_LABEL, isSwapApproved, isSwapRequested, swapApprovedLabel } from './swap';
 
 export interface AlertContext {
   /** Attribution string of the signed-in staff. */
@@ -66,7 +66,10 @@ export function swapAlert(before: RequestSummary, row: RequestSummary): AlertEve
   if (!before.swapRequestedAt && row.swapRequestedAt) {
     return { kind: 'swap_requested', requestId: row.id, title: `${subject(row)} · ${SWAP_REQUESTED_LABEL}`, ...(row.postShort ? { subtitle: `${row.postShort} · decide where` } : {}), count: 1 };
   }
-  if (before.swapRequestedAt && !row.swapRequestedAt && before.swapRequestedBy && sameStaff(row.updatedBy, before.swapRequestedBy)) {
+  // (Post-event) The server says how it ended (swapClosed): only a decline reads "Swap declined", whoever cancelled.
+  // A server before it: a clear by the requester is a cancel.
+  const closed = row.swapClosed ?? (before.swapRequestedBy && sameStaff(row.updatedBy, before.swapRequestedBy) ? 'cancelled' : 'declined');
+  if (before.swapRequestedAt && !row.swapRequestedAt && closed !== 'declined') {
     return { kind: 'swap_cancelled', requestId: row.id, title: `${subject(row)} · Swap request cancelled`, count: 1 };
   }
   if (before.swapRequestedAt && !row.swapRequestedAt) return { kind: 'swap_declined', requestId: row.id, title: `${subject(row)} · Swap declined`, count: 1 };
@@ -133,8 +136,10 @@ export function diffAlerts(
     const byMe = sameStaff(row.updatedBy, ctx.sessionStaff);
     if (before) {
       // (Companion) An opened / declined swap request alerts whoever is involved (the answerer), and the creator.
+      // (Post-event) "Friend swap requested · decide where" is for the staff who answered (involved), not the creator,
+      // as its push; how a request ended goes to the creator too.
       const swap = byMe ? null : swapAlert(before, row);
-      if (swap && (mine || row.involved === true)) {
+      if (swap && (swap.kind === 'swap_requested' ? row.involved === true && !mine : mine || row.involved === true)) {
         ctx.seen.add(key);
         out.push(swap);
         continue;
@@ -210,11 +215,13 @@ export function latestPerRequest<T extends { alert: AlertEvent }>(items: readonl
 export function alertStillCurrent(
   kind: AlertEvent['kind'],
   alertedStatus: string | null,
-  row: Pick<RequestSummary, 'status' | 'recheckAt'> | undefined,
+  row: Pick<RequestSummary, 'status' | 'recheckAt' | 'swapRequestedAt'> | undefined,
   alertedHeld?: boolean,
 ): boolean {
   if (!row || kind === 'new_request' || kind === 'combined') return true;
   if (alertedHeld !== undefined && isHeld(row) !== alertedHeld) return false;
+  // (Post-event) "Friend swap requested · decide where" goes once nobody is asking (decided, declined, cancelled).
+  if (kind === 'swap_requested') return isSwapRequested(row);
   if (kind === 'in_medical') return isInMedical(row.status);
   if (alertedStatus === null) return true;
   return row.status === alertedStatus || (isInMedical(row.status) && isInMedical(alertedStatus));

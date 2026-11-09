@@ -2,11 +2,13 @@
 // pure swap rules, the status meta / stages, Pending's swap group, the alerts and the pushed kinds, and the intake
 // field in the create body. Synthetic data only.
 import { describe, expect, it } from 'vitest';
+import type { RequestSummary } from '@/lib/api-types';
 import { UNDO_MS } from '@/lib/client/constants';
-import { ACCOMPANIED_SUBTITLE, diffAlerts, statusAlert, swapAlert, type AlertContext } from '@/lib/client/alerts';
+import { ACCOMPANIED_SUBTITLE, alertStillCurrent, diffAlerts, statusAlert, swapAlert, type AlertContext } from '@/lib/client/alerts';
 import { PUSHED_ALERT_KINDS } from '@/lib/client/push-client';
 import { EMPTY_FORM_VALUES, formValuesFromCreateBody, toCreateBody } from '@/lib/client/form-values';
-import { pendingGroups, viewCounts } from '@/lib/client/selectors';
+import { filterAll, pendingGroups, viewCounts } from '@/lib/client/selectors';
+import { stepperModel } from '@/components/list/list-helpers';
 import { COPY } from '@/lib/client/store-core';
 import { friendMayBeWith, isSwapApproved, isSwapRequested, swapCancelState, swapDisplay, swapOverlayFields, swapPlaceLabel, swapToastTitle } from '@/lib/client/swap';
 import { STATUS, STATUS_META, SETTABLE_STATUSES, canTransition, statusMeta } from '@/lib/domain';
@@ -88,6 +90,18 @@ describe('Pending (companion)', () => {
   });
 });
 
+describe('lists (post-event)', () => {
+  it('the Located filter (the dashboard Located drill-down) keeps Already accompanied, as the count does', () => {
+    const rows = [makeRow(1, { status: STATUS.inMedical }), makeRow(2, { status: STATUS.accompanied }), makeRow(3, { status: STATUS.waiting })];
+    expect(filterAll(rows, { status: STATUS.inMedical, post: null }).map((r) => r.caseNumber)).toEqual([1001, 1002]);
+  });
+
+  it('the progress line: Accompanied open and amber at Located; Friend informed closed after it', () => {
+    expect(stepperModel(STATUS.accompanied)).toEqual({ steps: ['Logged', 'Checked', 'Accompanied'], current: 2, mode: 'cur', color: 'var(--amber-9)' });
+    expect(stepperModel(STATUS.friendInformed)).toMatchObject({ steps: ['Logged', 'Checked', 'Accompanied', 'Friend informed'], current: 3, color: 'var(--gray-9)' });
+  });
+});
+
 describe('create body (intake)', () => {
   const base = { ...EMPTY_FORM_VALUES, name: 'Ava Lin', reportingLocation: FA4 as never };
   it('Not sure sends nothing (server default); Yes sends the name; No sends no name', () => {
@@ -131,6 +145,39 @@ describe('alerts (companion)', () => {
   });
 });
 
+describe('alerts (post-event)', () => {
+  const ctx = (staff: string): AlertContext => ({ sessionStaff: staff, myIds: new Set(), ownMutationIds: new Set(), ownKeys: new Set(), bell: false, seen: new Set() });
+  const asked = makeRow(1, { status: STATUS.accompanied, name: '', rowVersion: 3, swapRequestedAt: '2026-11-08T20:10:00Z', swapRequestedBy: STAFF.rae.staff, createdBy: STAFF.rae.staff });
+
+  it('a request cancelled by someone other than the requester reads "Swap request cancelled", a decline "Swap declined"', () => {
+    const cleared = { ...asked, swapRequestedAt: null, swapRequestedBy: null, rowVersion: 4, updatedBy: 'Dee Desk · GC/HX - Dispatch' };
+    expect(swapAlert(asked, { ...cleared, swapClosed: 'cancelled' })).toMatchObject({ kind: 'swap_cancelled', title: 'LP-1001 · Swap request cancelled' });
+    expect(swapAlert(asked, { ...cleared, swapClosed: 'declined' })).toMatchObject({ kind: 'swap_declined', title: 'LP-1001 · Swap declined' });
+    // The requester's device (the creator here) sees the same.
+    expect(diffAlerts(new Map([[asked.id, asked]]), [{ ...cleared, swapClosed: 'cancelled' }], ctx(STAFF.rae.staff)).map((x) => x.title)).toEqual(['LP-1001 · Swap request cancelled']);
+  });
+
+  it('"Friend swap requested · decide where" reaches the involved staff, not the creator; the outcome reaches both', () => {
+    // makeRow: Sam Lee logged it; Rae asks for the swap.
+    const before = makeRow(1, { status: STATUS.accompanied, name: '', postShort: 'FA 4', rowVersion: 2 });
+    const opened = { ...before, swapRequestedAt: '2026-11-08T20:10:00Z', swapRequestedBy: STAFF.rae.staff, rowVersion: 3, updatedBy: STAFF.rae.staff };
+    const kinds = (row: RequestSummary, viewer: string, from: RequestSummary = before) => diffAlerts(new Map([[from.id, from]]), [row], ctx(viewer)).map((a) => a.kind);
+    expect(kinds(opened, STAFF.sam.staff)).toEqual([]);
+    expect(kinds({ ...opened, involved: true }, STAFF.sam.staff)).toEqual([]);
+    expect(kinds({ ...opened, involved: true }, STAFF.dana.staff)).toEqual(['swap_requested']);
+    expect(kinds(opened, STAFF.dana.staff)).toEqual([]);
+    // Declined by Dana: the creator hears it.
+    const declined = { ...opened, swapRequestedAt: null, swapRequestedBy: null, swapClosed: 'declined' as const, rowVersion: 4, updatedBy: STAFF.dana.staff };
+    expect(kinds(declined, STAFF.sam.staff, opened)).toEqual(['swap_declined']);
+  });
+
+  it('"Friend swap requested" stays only while someone is asking', () => {
+    expect(alertStillCurrent('swap_requested', STATUS.accompanied, asked)).toBe(true);
+    expect(alertStillCurrent('swap_requested', STATUS.accompanied, { status: STATUS.accompanied, swapRequestedAt: null })).toBe(false);
+    expect(alertStillCurrent('swap_requested', STATUS.accompanied, { status: STATUS.inMedical, swapRequestedAt: null })).toBe(false);
+  });
+});
+
 describe('store.swap (the real store)', () => {
   installStoreHooks();
   const swapPosts = (server: FakeServer) => server.requests('POST', '/api/requests/').filter((r) => r.path.endsWith('/swap')).map((r) => r.body);
@@ -151,7 +198,7 @@ describe('store.swap (the real store)', () => {
     expect(s().confirmed.get(row.id)?.swapRequestedAt ?? null).toBeNull();
   });
 
-  it('approve at Main Med → In medical with swapPlace; decline returns to Accompanied', async () => {
+  it('approve at Main Med → In medical with swapPlace; decline returns to Accompanied (each with its Undo bar)', async () => {
     const asked = makeRow(1, { status: STATUS.accompanied, rowVersion: 5, swapRequestedAt: '2026-11-08T20:10:00Z', swapRequestedBy: STAFF.rae.staff });
     const other = makeRow(2, { status: STATUS.accompanied, rowVersion: 2, swapRequestedAt: '2026-11-08T20:11:00Z', swapRequestedBy: STAFF.rae.staff });
     const server = new FakeServer([asked, other]);
@@ -159,16 +206,100 @@ describe('store.swap (the real store)', () => {
     await ready();
     await finish(a.swap(asked.id, { action: 'approve', place: 'mm' }));
     expect(s().confirmed.get(asked.id)).toMatchObject({ status: STATUS.inMedical, swapPlace: 'mm', swapRequestedAt: null });
-    expect(s().toasts.map((t) => t.title)).toContain('LP-1001 · Swap at Main Med');
+    expect(s().snackbar?.message).toBe('LP-1001 · Swap at Main Med');
     await finish(a.swap(other.id, { action: 'decline' }));
     expect(s().confirmed.get(other.id)).toMatchObject({ status: STATUS.accompanied, swapRequestedAt: null });
+    expect(s().snackbar?.message).toBe('LP-1002 · Swap declined');
     expect(swapPosts(server)).toEqual([
       { action: 'approve', place: 'mm', expectedVersion: 5 },
       { action: 'decline', expectedVersion: 2 },
     ]);
   });
 
-  it('cancel from requested: stays Accompanied, request cleared; Undo = request again', async () => {
+  it('(post-event) Undo of Decline and of Swap at … = restore: the request is back with its original requester', async () => {
+    const at = '2026-11-08T20:10:00Z';
+    const one = makeRow(1, { status: STATUS.accompanied, rowVersion: 5, swapRequestedAt: at, swapRequestedBy: STAFF.rae.staff });
+    const two = makeRow(2, { status: STATUS.accompanied, rowVersion: 2, swapRequestedAt: at, swapRequestedBy: STAFF.rae.staff });
+    const server = new FakeServer([one, two]);
+    const { a, s } = boot(server);
+    await ready();
+    await finish(a.swap(one.id, { action: 'decline' }));
+    await finish(a.undo(s().snackbar?.id ?? ''));
+    await advance(0);
+    expect(s().confirmed.get(one.id)).toMatchObject({ status: STATUS.accompanied, swapRequestedAt: at, swapRequestedBy: STAFF.rae.staff });
+    await finish(a.swap(two.id, { action: 'approve', place: 'fa' }));
+    await finish(a.undo(s().snackbar?.id ?? ''));
+    await advance(0);
+    expect(s().confirmed.get(two.id)).toMatchObject({ status: STATUS.accompanied, swapPlace: null, swapRequestedAt: at, swapRequestedBy: STAFF.rae.staff });
+    expect(swapPosts(server)).toEqual([
+      { action: 'decline', expectedVersion: 5 },
+      { action: 'restore', expectedVersion: 6 },
+      { action: 'approve', place: 'fa', expectedVersion: 2 },
+      { action: 'restore', expectedVersion: 3 },
+    ]);
+    expect(s().toasts).toHaveLength(0);
+  });
+
+  it('(post-event) a stale Swap at … after someone declined in between: conflict, not resent', async () => {
+    const asked = makeRow(1, { status: STATUS.accompanied, rowVersion: 5, swapRequestedAt: '2026-11-08T20:10:00Z', swapRequestedBy: STAFF.rae.staff });
+    const server = new FakeServer([asked]);
+    const { a, s } = boot(server);
+    await ready();
+    // Declined on another device; this one has not synced yet (its row is still v5, requested).
+    server.change(asked.id, { swapRequestedAt: null, swapRequestedBy: null, swapClosed: 'declined' }, STAFF.rae.staff);
+    const res = await finish(a.swap(asked.id, { action: 'approve', place: 'mm' }));
+    expect(res).toMatchObject({ ok: false, reason: 'conflict' });
+    expect(swapPosts(server)).toEqual([{ action: 'approve', place: 'mm', expectedVersion: 5 }]);
+    expect(s().toasts.map((t) => t.title)).toContain(COPY.conflict);
+    expect(server.row(asked.id).status).toBe(STATUS.accompanied);
+    expect(server.row(asked.id).swapPlace ?? null).toBeNull();
+  });
+
+  it('(post-event) a stale Friend informed after a swap was requested in between: conflict, not resent', async () => {
+    const row = makeRow(1, { status: STATUS.accompanied, rowVersion: 3 });
+    const server = new FakeServer([row]);
+    const { a, s } = boot(server);
+    await ready();
+    server.change(row.id, { swapRequestedAt: '2026-11-08T20:10:00Z', swapRequestedBy: STAFF.rae.staff }, STAFF.rae.staff);
+    const res = await finish(a.setStatus(row.id, STATUS.friendInformed, 'inform'));
+    expect(res).toMatchObject({ ok: false, reason: 'conflict' });
+    expect(server.requests('POST', '/api/requests/').filter((r) => r.path.endsWith('/status'))).toHaveLength(1);
+    expect(server.row(row.id).status).toBe(STATUS.accompanied);
+    expect(s().toasts.map((t) => t.title)).toContain(COPY.conflict);
+  });
+
+  it('(post-event) a swap Undo that fails says so: offline', async () => {
+    const row = makeRow(1, { status: STATUS.accompanied, rowVersion: 3 });
+    const server = new FakeServer([row]);
+    const { a, fe, s } = boot(server);
+    await ready();
+    await finish(a.swap(row.id, { action: 'request' }));
+    fe.setOnline(false);
+    fe.fire('window', 'offline');
+    await finish(a.undo(s().snackbar?.id ?? ''));
+    await advance(0);
+    expect(s().toasts.map((t) => t.title)).toContain(COPY.needsConnection);
+    expect(swapPosts(server)).toEqual([{ action: 'request', expectedVersion: 3 }]);
+    expect(s().confirmed.get(row.id)?.swapRequestedAt).toBeTruthy();
+  });
+
+  it('(post-event) a swap Undo that fails says so: someone else moved the request first', async () => {
+    const asked = makeRow(1, { status: STATUS.accompanied, rowVersion: 5, swapRequestedAt: '2026-11-08T20:10:00Z', swapRequestedBy: STAFF.rae.staff });
+    const server = new FakeServer([asked]);
+    const { a, s } = boot(server);
+    await ready();
+    await finish(a.swap(asked.id, { action: 'decline' }));
+    // Someone else asks again before the Undo: the decline is no longer the latest step.
+    server.change(asked.id, { swapRequestedAt: '2026-11-08T20:12:00Z', swapRequestedBy: STAFF.rae.staff }, STAFF.rae.staff);
+    server.change(asked.id, { swapRequestedAt: null, swapRequestedBy: null }, STAFF.rae.staff);
+    await advance(7_000);
+    await finish(a.undo(s().snackbar?.id ?? ''));
+    await advance(0);
+    expect(swapPosts(server).at(-1)).toEqual({ action: 'restore', expectedVersion: 8 });
+    expect(s().toasts.map((t) => t.title)).toContain(COPY.undoStale);
+  });
+
+  it('cancel from requested: stays Accompanied, request cleared; Undo = restore (the original requester kept)', async () => {
     const asked = makeRow(1, { status: STATUS.accompanied, rowVersion: 5, swapRequestedAt: '2026-11-08T20:10:00Z', swapRequestedBy: STAFF.rae.staff });
     expect(swapCancelState(asked)).toBe('requested');
     const server = new FakeServer([asked]);
@@ -179,11 +310,11 @@ describe('store.swap (the real store)', () => {
     expect(s().snackbar?.message).toBe('LP-1001 · Swap request cancelled');
     await finish(a.undo(s().snackbar?.id ?? ''));
     await advance(0);
-    expect(swapPosts(server)).toEqual([{ action: 'cancel', expectedVersion: 5 }, { action: 'request', expectedVersion: 6 }]);
-    expect(s().confirmed.get(asked.id)?.swapRequestedAt).toBeTruthy();
+    expect(swapPosts(server)).toEqual([{ action: 'cancel', expectedVersion: 5 }, { action: 'restore', expectedVersion: 6 }]);
+    expect(s().confirmed.get(asked.id)).toMatchObject({ swapRequestedAt: '2026-11-08T20:10:00Z', swapRequestedBy: STAFF.rae.staff });
   });
 
-  it('cancel from approved: back to Accompanied, swapPlace cleared; Undo = approve again at the same place', async () => {
+  it('cancel from approved: back to Accompanied, swapPlace cleared; Undo = restore the swap at the same place', async () => {
     const approved = makeRow(1, { status: STATUS.inMedical, rowVersion: 7, swapPlace: 'fa' });
     expect(swapCancelState(approved)).toBe('approved');
     expect(swapOverlayFields({ action: 'cancel' }, null, 'x')).toEqual({ status: STATUS.accompanied, swapRequestedAt: null, swapRequestedBy: null, swapPlace: null });
@@ -195,7 +326,9 @@ describe('store.swap (the real store)', () => {
     expect(s().snackbar?.message).toBe('LP-1001 · Swap cancelled');
     await finish(a.undo(s().snackbar?.id ?? ''));
     await advance(0);
-    expect(swapPosts(server).at(-1)).toEqual({ action: 'approve', place: 'fa', expectedVersion: 8 });
+    expect(swapPosts(server).at(-1)).toEqual({ action: 'restore', expectedVersion: 8 });
+    expect(s().confirmed.get(approved.id)).toMatchObject({ status: STATUS.inMedical, swapPlace: 'fa' });
+    expect(s().toasts).toHaveLength(0);
   });
 
   it('the "Friend swap requested" Undo closes when someone else answers the request', async () => {

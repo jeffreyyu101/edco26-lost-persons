@@ -279,8 +279,9 @@ export interface StoreActions {
   /**
    * (Companion) POST /api/requests/:id/swap: request a friend swap (Accompanied), approve it at the request's own
    * post ('fa') or Main Med ('mm') (→ In medical, swapPlace set), or decline it (back to Accompanied). Optimistic,
-   * serialised per request, resent once on a 409 when the status did not move. A request gets the Undo bar
-   * (Undo = decline); approve / decline say so in a toast.
+   * serialised per request, resent once on a 409 when neither the status nor the swap moved. Every step gets the
+   * Undo bar: a request's Undo withdraws it; (post-event) Cancel swap, Decline and Swap at … are undone by
+   * 'restore', which puts back exactly what they replaced. A failed Undo says why in a toast.
    */
   swap(id: string, action: SwapAction, opts?: MutationOptions): Promise<MutationResult>;
   /** Creator only, while Waiting. */

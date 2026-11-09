@@ -153,7 +153,9 @@ describe('privacy: a scripted session with names and phone numbers everywhere', 
       outbox: [trapped({ mutationId: 'mmmm', photos: [], serverId: null, caseNumber: null, state: 'pending', attempts: 0, nextAttemptAt: null, lastError: null, createdAt: Date.now(), source: 'app' } as never, ['payload', 'operator'])],
       syncing: true,
     });
-    store.set({ syncing: false, lastSyncLocalAt: Date.now(), lastSyncAt: new Date().toISOString(), toasts: [], outbox: [] });
+    // The store's own order: the sync saves its time, then syncing goes false in its own patch.
+    store.set({ lastSyncLocalAt: Date.now(), lastSyncAt: new Date().toISOString() });
+    store.set({ syncing: false, toasts: [], outbox: [] });
     void prev;
     messaging.set({ threads: new Map(), jobs: [trapped({ id: 'job1', kind: 'message', requestId: ID, createdAt: Date.now(), state: 'pending', attempts: 0, nextAttemptAt: null, error: null } as never, ['body', 'operator'])] });
     messaging.set({ threads: new Map(), jobs: [] });

@@ -88,6 +88,24 @@ describe('the collector and the app', () => {
     expect(telPosts()).toHaveLength(2);
   });
 
+  it('(post-event) a sync counts as ok when it saved a new time, in the store\'s own patch order', async () => {
+    await start();
+    for (let i = 0; i < 2; i += 1) {
+      store.set({ syncing: true });
+      store.set({ lastSyncLocalAt: Date.now() + i, lastSyncAt: new Date().toISOString() });
+      store.set({ syncing: false });
+      await vi.advanceTimersByTimeAsync(1_000);
+    }
+    // A failed sync saves nothing.
+    store.set({ syncing: true });
+    store.set({ syncing: false });
+    await vi.advanceTimersByTimeAsync(130_000);
+    await hide();
+    const syncs = sentEvents().filter((e) => e.n === 'sync') as Array<{ n: string; p?: { ok: number; fail: number } }>;
+    const total = syncs.reduce((acc, e) => ({ ok: acc.ok + (e.p?.ok ?? 0), fail: acc.fail + (e.p?.fail ?? 0) }), { ok: 0, fail: 0 });
+    expect(total).toEqual({ ok: 2, fail: 1 });
+  });
+
   it('visibilitychange and pagehide listen in the bubble phase (after the store’s own hide work)', async () => {
     const seen: Array<[string, unknown]> = [];
     f = fakeBrowser();

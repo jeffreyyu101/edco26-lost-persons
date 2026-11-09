@@ -6,9 +6,9 @@ import { STATUS, postShort, type SwapPlace } from '../domain';
 
 /**
  * The body of POST /api/requests/:id/swap without its expectedVersion (lib/validation swapSchema). 'withdraw' is the
- * requester's Undo of a request (nobody is told).
+ * requester's Undo of a request; (post-event) 'restore' is the Undo of Cancel swap, Decline and Swap at ….
  */
-export type SwapAction = { action: 'request' } | { action: 'approve'; place: SwapPlace } | { action: 'decline' } | { action: 'withdraw' } | { action: 'cancel' };
+export type SwapAction = { action: 'request' } | { action: 'approve'; place: SwapPlace } | { action: 'decline' } | { action: 'withdraw' } | { action: 'cancel' } | { action: 'restore' };
 import { formatCaseNumber } from '../format';
 
 type SwapRow = Pick<RequestSummary, 'status' | 'swapRequestedAt' | 'swapPlace'>;
@@ -36,6 +36,11 @@ export const CANCEL_SWAP_REQUEST_LABEL = 'Cancel swap request';
 export const CANCEL_SWAP_LABEL = 'Cancel swap';
 export const SWAP_REQUEST_CANCELLED_LABEL = 'Swap request cancelled';
 export const SWAP_CANCELLED_LABEL = 'Swap cancelled';
+
+/** (Post-event) The same swap: the same open request (by when it was asked) and the same approved place. */
+export function sameSwap(a: SwapRow, b: SwapRow): boolean {
+  return (a.swapRequestedAt ?? null) === (b.swapRequestedAt ?? null) && (a.swapPlace ?? null) === (b.swapPlace ?? null);
+}
 
 /** (Companion follow-up) What the ⋯ menu's cancel calls off: an open request, an approved swap, or nothing. */
 export function swapCancelState(row: SwapRow): 'requested' | 'approved' | null {
@@ -73,6 +78,8 @@ export function swapOverlayFields(action: SwapAction, staff: string | null, nowI
       return { swapRequestedAt: null, swapRequestedBy: null };
     case 'cancel':
       return { status: STATUS.accompanied, swapRequestedAt: null, swapRequestedBy: null, swapPlace: null };
+    case 'restore':
+      return {};
   }
 }
 

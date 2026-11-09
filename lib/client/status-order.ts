@@ -9,7 +9,7 @@
 //                       first, no ETA last) → nobody coming (longest since found first).
 //   Archived / Closed   every closed request, newest closed first (All folds it; My requests calls it Closed).
 import type { RequestSummary } from '../api-types';
-import { STATUS, isHeld, isInMedical, statusBucket, type GlyphKind } from '../domain';
+import { STATUS, STATUS_META, isHeld, isInMedical, statusBucket, type GlyphKind } from '../domain';
 import type { StageSource } from '../stages';
 
 /** F3's en route summary, read loosely (rows of a build without F3 simply don't have it). */
@@ -95,6 +95,12 @@ export const STATUS_GROUP_META: Readonly<Record<StatusGroupName, { label: string
   coming: { label: 'Friend coming', glyph: 'inMedical' },
   closed: { label: 'Archived', glyph: 'closed' },
 };
+
+/**
+ * (Post-event) A list sorted by status: its second group also holds Located · already accompanied (and swap
+ * requests), so its divider reads "Located"; Pending's queue, In medical only, keeps "Friend coming".
+ */
+export const LOCATED_GROUP_LABEL = STATUS_META[STATUS.inMedical].shortLabel;
 
 export interface StatusGroups {
   waiting: RequestSummary[];
