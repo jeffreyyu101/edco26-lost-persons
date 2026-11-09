@@ -185,6 +185,8 @@ export const swapSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('decline'), expectedVersion: expectedVersionSchema }),
   z.strictObject({ action: z.literal('withdraw'), expectedVersion: expectedVersionSchema }),
   z.strictObject({ action: z.literal('cancel'), expectedVersion: expectedVersionSchema }),
+  // (Post-event) The Undo of the caller's own Cancel swap / Decline / Swap at … (lp_swap 'restore').
+  z.strictObject({ action: z.literal('restore'), expectedVersion: expectedVersionSchema }),
 ]);
 export type SwapBody = z.input<typeof swapSchema>;
 

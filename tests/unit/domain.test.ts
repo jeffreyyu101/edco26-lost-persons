@@ -42,6 +42,8 @@ const ROOT = join(__dirname, '..', '..');
 const MIGRATION = readFileSync(join(ROOT, 'supabase/migrations/20261106000000_rework.sql'), 'utf8');
 /** (Companion) The latest lp_set_status, lp_clean_fields and status CHECK. */
 const COMPANION = readFileSync(join(ROOT, 'supabase/migrations/20261108120000_companion.sql'), 'utf8');
+/** (Post-event) The latest lp_set_status (its TRANSITIONS block). */
+const POST_EVENT = readFileSync(join(ROOT, 'supabase/migrations/20261109120000_companion_post_event.sql'), 'utf8');
 
 function sqlBlock(marker: string, source = MIGRATION): string {
   const start = source.indexOf(`-- ${marker}:BEGIN`);
@@ -96,7 +98,7 @@ describe('statuses', () => {
 
 describe('transitions', () => {
   it('match the lp_set_status CASE in the migration exactly', () => {
-    const block = sqlBlock('TRANSITIONS', COMPANION);
+    const block = sqlBlock('TRANSITIONS', POST_EVENT);
     const fromSql: Record<string, string[]> = {};
     for (const m of block.matchAll(/when '([^']+)' then p_status in \(([^)]*)\)/g)) {
       fromSql[m[1] as string] = [...(m[2] as string).matchAll(/'([^']+)'/g)].map((x) => x[1] as string).sort();

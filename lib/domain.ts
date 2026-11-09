@@ -217,7 +217,8 @@ export const TRANSITIONS: Readonly<Record<Status, readonly Status[]>> = {
   [STATUS.cancelled]: [STATUS.waiting],
   [STATUS.legacyBringFriend]: [STATUS.reunited, STATUS.discharged, STATUS.notInMedical],
   // (F6) Reopen only (kind 'reopen', any staff).
-  [STATUS.inactive]: [STATUS.inMedical],
+  // (Post-event) Reopen of a request closed while already accompanied goes back to it (lp_set_status picks it).
+  [STATUS.inactive]: [STATUS.inMedical, STATUS.accompanied],
   [STATUS.accompanied]: [STATUS.friendInformed, STATUS.inMedical, STATUS.notInMedical, STATUS.discharged, STATUS.waiting],
   [STATUS.friendInformed]: [STATUS.accompanied],
 };

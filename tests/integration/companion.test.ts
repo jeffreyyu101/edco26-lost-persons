@@ -227,12 +227,14 @@ describe('POST /api/requests/:id/swap', () => {
     expect((await swap(ANSWERER, done, { action: 'cancel' })).status).toBe(422);
   });
 
-  it('a status change ends an open swap request', async () => {
+  it('a status change ends an open swap request; (post-event) Friend informed over one is a conflict', async () => {
     const r = await accompanied();
     const asked = (await swap(ASKER, r, { action: 'request' })).body.request as RequestSummary;
     const informed = await setStatus(ANSWERER, asked, STATUS.friendInformed, 'inform');
-    expect(informed.status, informed.text).toBe(200);
-    expect(informed.body.request.swapRequestedAt).toBeNull();
+    expect(informed.status, informed.text).toBe(409);
+    const changed = await setStatus(ANSWERER, asked, STATUS.notInMedical, 'change');
+    expect(changed.status, changed.text).toBe(200);
+    expect(changed.body.request.swapRequestedAt).toBeNull();
   });
 
   it('not Accompanied → 422; stale version → 409; bad body → 422', async () => {
@@ -290,5 +292,165 @@ describe('payloads, stats, inactive close', () => {
     expect(Number(psql(`select public.lp_close_inactive(array[${lit(r.id)}]::uuid[])`))).toBe(1);
     const { data } = await admin().from('patients').select('status, swap_requested_at').eq('id', r.id).single();
     expect(data).toEqual({ status: STATUS.inactive, swap_requested_at: null });
+  });
+});
+
+// (Post-event) 20261109120000_companion_post_event.sql: a stale approve, restore (the Undo of Cancel swap / Decline /
+// Swap at …), withdraw telling the answerer, the answerer skipping Undo / Reopen, swap_closed, Undo of a change
+// bringing a swap request back, Reopen of an Accompanied request closed as inactive or discharged, and the friend's
+// clock restarting at a swap approval.
+describe('post-event fixes', () => {
+  const body = async (res: Awaited<ReturnType<typeof swap>>) => {
+    expect(res.status, res.text).toBe(200);
+    return res.body.request as RequestSummary;
+  };
+
+  it('approve needs an open request: after a decline (or cancel) a stale approve is 422, the decline stands', async () => {
+    const r = await accompanied();
+    const asked = await body(await swap(ASKER, r, { action: 'request' }));
+    const declined = await body(await swap(OTHER, asked, { action: 'decline' }));
+    expect(declined.swapClosed).toBe('declined');
+    const late = await swap(ANSWERER, declined, { action: 'approve', place: 'mm' });
+    expect(late.status, late.text).toBe(422);
+    const { data } = await admin().from('patients').select('status, swap_place').eq('id', r.id).single();
+    expect(data).toEqual({ status: STATUS.accompanied, swap_place: null });
+  });
+
+  it('an app from before this build undoes its own Cancel swap by approving again at the same place: still allowed, for that person only', async () => {
+    const r = await accompanied();
+    const asked = await body(await swap(ASKER, r, { action: 'request' }));
+    const approved = await body(await swap(ANSWERER, asked, { action: 'approve', place: 'mm' }));
+    const cancelled = await body(await swap(OTHER, approved, { action: 'cancel' }));
+    expect((await swap(ASKER, cancelled, { action: 'approve', place: 'mm' })).status).toBe(422);
+    expect((await swap(OTHER, cancelled, { action: 'approve', place: 'fa' })).status).toBe(422);
+    const again = await body(await swap(OTHER, cancelled, { action: 'approve', place: 'mm' }));
+    expect(again).toMatchObject({ status: STATUS.inMedical, swapPlace: 'mm' });
+  });
+
+  it('swap_closed says how a request ended: cancelled by anyone, withdrawn; a new request clears it', async () => {
+    const r = await accompanied();
+    const asked = await body(await swap(ASKER, r, { action: 'request' }));
+    const cancelled = await body(await swap(OTHER, asked, { action: 'cancel' }));
+    expect(cancelled.swapClosed).toBe('cancelled');
+    const again = await body(await swap(ASKER, cancelled, { action: 'request' }));
+    expect(again.swapClosed).toBeNull();
+    expect((await body(await swap(ASKER, again, { action: 'withdraw' }))).swapClosed).toBe('withdrawn');
+  });
+
+  it('withdraw tells the answerer "Swap request cancelled"', async () => {
+    const r = await accompanied();
+    const asked = await body(await swap(ASKER, r, { action: 'request' }));
+    await activityOf(r.id, ANSWERER, 'swap_requested');
+    await body(await swap(ASKER, asked, { action: 'withdraw' }));
+    expect((await activityOf(r.id, ANSWERER, 'swap_cancelled')).detail).toBe('Swap request cancelled');
+  });
+
+  it('restore after someone else cancelled the request: back with its original requester and time; the answerer is told again', async () => {
+    const r = await accompanied();
+    const asked = await body(await swap(ASKER, r, { action: 'request' }));
+    const cancelled = await body(await swap(OTHER, asked, { action: 'cancel' }));
+    await activityOf(r.id, ANSWERER, 'swap_cancelled');
+    // Only the person who cancelled can take it back.
+    expect((await swap(ASKER, cancelled, { action: 'restore' })).status).toBe(422);
+    const back = await body(await swap(OTHER, cancelled, { action: 'restore' }));
+    expect(back).toMatchObject({ status: STATUS.accompanied, swapRequestedBy: staffOf(ASKER), swapRequestedAt: asked.swapRequestedAt, swapClosed: null });
+    expect((await activityOf(r.id, ANSWERER, 'swap_requested')).actor).toBe(staffOf(OTHER));
+    // A repeat is a no-op.
+    expect((await swap(OTHER, back, { action: 'restore' })).body.changed).toBe(false);
+  });
+
+  it('restore after a decline: the request is back (the requester kept)', async () => {
+    const r = await accompanied();
+    const asked = await body(await swap(ASKER, r, { action: 'request' }));
+    const declined = await body(await swap(ANSWERER, asked, { action: 'decline' }));
+    const back = await body(await swap(ANSWERER, declined, { action: 'restore' }));
+    expect(back).toMatchObject({ status: STATUS.accompanied, swapRequestedBy: staffOf(ASKER), swapRequestedAt: asked.swapRequestedAt });
+  });
+
+  it('restore after Swap at …: Accompanied with the request open again; everyone involved told "Swap cancelled"', async () => {
+    const r = await accompanied();
+    const asked = await body(await swap(ASKER, r, { action: 'request' }));
+    const approved = await body(await swap(ANSWERER, asked, { action: 'approve', place: 'fa' }));
+    await activityOf(r.id, ASKER, 'swap_approved');
+    const back = await body(await swap(ANSWERER, approved, { action: 'restore' }));
+    expect(back).toMatchObject({ status: STATUS.accompanied, swapPlace: null, swapRequestedBy: staffOf(ASKER), swapRequestedAt: asked.swapRequestedAt, reunionStartedAt: null });
+    expect((await activityOf(r.id, ASKER, 'swap_cancelled')).detail).toBe('Swap cancelled');
+  });
+
+  it('restore after Cancel swap on an approved swap: the swap is back at the same place, "Swap at …" again', async () => {
+    const r = await accompanied();
+    const asked = await body(await swap(ASKER, r, { action: 'request' }));
+    const approved = await body(await swap(ANSWERER, asked, { action: 'approve', place: 'mm' }));
+    const cancelled = await body(await swap(OTHER, approved, { action: 'cancel' }));
+    await activityOf(r.id, ASKER, 'swap_cancelled');
+    const back = await body(await swap(OTHER, cancelled, { action: 'restore' }));
+    expect(back).toMatchObject({ status: STATUS.inMedical, swapPlace: 'mm', reunionStartedAt: approved.reunionStartedAt });
+    expect((await activityOf(r.id, ASKER, 'swap_approved')).detail).toBe('Swap at Main Med');
+  });
+
+  it('the staff who answered skips Undo / Reopen: a swap request after someone undid Friend informed still reaches the answerer', async () => {
+    const r = await accompanied();
+    const informed = (await setStatus(OTHER, r, STATUS.friendInformed, 'inform')).body.request as RequestSummary;
+    const undone = await setStatus(OTHER, informed, STATUS.accompanied, 'undo');
+    expect(undone.status, undone.text).toBe(200);
+    await body(await swap(OTHER, undone.body.request, { action: 'request' }));
+    expect((await activityOf(r.id, ANSWERER, 'swap_requested')).actor).toBe(staffOf(OTHER));
+  });
+
+  it('Undo of a change made while a swap was requested brings the request back', async () => {
+    const r = await accompanied();
+    const asked = await body(await swap(ASKER, r, { action: 'request' }));
+    const changed = await setStatus(ANSWERER, asked, STATUS.inMedical, 'change');
+    expect(changed.status, changed.text).toBe(200);
+    expect(changed.body.request.swapRequestedAt).toBeNull();
+    const undone = await setStatus(ANSWERER, changed.body.request, STATUS.accompanied, 'undo');
+    expect(undone.status, undone.text).toBe(200);
+    expect(undone.body.request).toMatchObject({ status: STATUS.accompanied, swapRequestedAt: asked.swapRequestedAt, swapRequestedBy: staffOf(ASKER) });
+  });
+
+  it('Reopen of an Accompanied request closed as inactive, or discharged, goes back to Accompanied ("Don\'t send the friend")', async () => {
+    const r = await accompanied();
+    psql(
+      `update public.audit_events set occurred_at = occurred_at - interval '61 minutes' where patient_id = ${lit(r.id)};` +
+        ` update public.patients set created_at = created_at - interval '61 minutes' where id = ${lit(r.id)};`,
+    );
+    expect(Number(psql(`select public.lp_close_inactive(array[${lit(r.id)}]::uuid[])`))).toBe(1);
+    const closed = (await api(`/api/requests/${r.id}`, { cookie: await cookieFor(FOH) })).body as RequestDetail;
+    const reopened = await setStatus(OTHER, closed, STATUS.inMedical, 'reopen');
+    expect(reopened.status, reopened.text).toBe(200);
+    expect(reopened.body.request.status).toBe(STATUS.accompanied);
+    const told = await eventually(async () => {
+      const row = await activity(r.id, FOH);
+      return row?.actor === staffOf(OTHER) ? row : null;
+    });
+    expect(told.kind).toBe('accompanied');
+
+    const discharged = await setStatus(ANSWERER, reopened.body.request, STATUS.discharged, 'discharge');
+    expect(discharged.status, discharged.text).toBe(200);
+    const again = await setStatus(OTHER, discharged.body.request, STATUS.inMedical, 'reopen');
+    expect(again.body.request.status).toBe(STATUS.accompanied);
+
+    // A plain In medical request closed as inactive still reopens to In medical.
+    const plain = await createRequest(FOH);
+    const located = (await setStatus(ANSWERER, plain, STATUS.inMedical)).body.request as RequestSummary;
+    psql(`update public.audit_events set occurred_at = occurred_at - interval '61 minutes' where patient_id = ${lit(located.id)}; update public.patients set created_at = created_at - interval '61 minutes' where id = ${lit(located.id)};`);
+    expect(Number(psql(`select public.lp_close_inactive(array[${lit(located.id)}]::uuid[])`))).toBe(1);
+    const closedPlain = (await api(`/api/requests/${located.id}`, { cookie: await cookieFor(FOH) })).body as RequestDetail;
+    expect((await setStatus(OTHER, closedPlain, STATUS.inMedical, 'reopen')).body.request.status).toBe(STATUS.inMedical);
+  });
+
+  it('Needs attention times an approved swap from the approval, not from the Accompanied answer', async () => {
+    const r = await accompanied();
+    psql(`update public.audit_events set occurred_at = occurred_at - interval '40 minutes' where patient_id = ${lit(r.id)};`);
+    const asked = await body(await swap(ASKER, { id: r.id, rowVersion: r.rowVersion }, { action: 'request' }));
+    await body(await swap(ANSWERER, asked, { action: 'approve', place: 'mm' }));
+    const minutes = Number(
+      psql(
+        `select coalesce(max(extract(epoch from now() - (x ->> 'since')::timestamptz) / 60), -1) from public.lp_stats('event') s,` +
+          ` jsonb_array_elements(s #> '{attention,items}') x where x ->> 'id' = ${lit(r.id)}`,
+      ),
+    );
+    // On the card (when it makes the top 5): minutes since the approval, not 40.
+    expect(minutes).toBeLessThan(5);
   });
 });

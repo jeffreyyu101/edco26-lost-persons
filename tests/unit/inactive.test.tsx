@@ -136,9 +136,10 @@ describe('the status', () => {
   });
 
   it('Reopen (back to In medical, kind reopen, no Undo) is its only move, for anyone; nothing moves into it', () => {
-    expect(TRANSITIONS[STATUS.inactive]).toEqual([STATUS.inMedical]);
+    // (Post-event) lp_set_status sends a Reopen of a request that was Accompanied back to Accompanied.
+    expect(TRANSITIONS[STATUS.inactive]).toEqual([STATUS.inMedical, STATUS.accompanied]);
     expect(canTransition(STATUS.inactive, STATUS.inMedical)).toBe(true);
-    for (const to of STATUSES) if (to !== STATUS.inMedical) expect(canTransition(STATUS.inactive, to), to).toBe(false);
+    for (const to of STATUSES) if (to !== STATUS.inMedical && to !== STATUS.accompanied) expect(canTransition(STATUS.inactive, to), to).toBe(false);
     for (const from of STATUSES) expect(canTransition(from, STATUS.inactive), from).toBe(false);
     expect(primaryActions(STATUS.inactive).map((a) => [a.id, a.label, a.to, a.kind, a.undoable, a.creatorOnly])).toEqual([
       ['reopen', 'Reopen', STATUS.inMedical, 'reopen', false, false],

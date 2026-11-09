@@ -363,7 +363,7 @@ describe('lp_stats avgReuniteMinutes and loggedLastHour: exact values on a scrat
     psql(`create database ${SCRATCH}`);
     scratchCreated = true;
     const chain = readdirSync(join(ROOT, 'supabase', 'migrations')).filter((f) => f.endsWith('.sql')).sort();
-    expect(chain.at(-1)).toBe('20261108120000_companion.sql');
+    expect(chain.at(-1)).toBe('20261109120000_companion_post_event.sql');
     for (const file of chain) scratch(['-f', join(ROOT, 'supabase', 'migrations', file)]);
     expect(scratchStats()).toMatchObject({ total: 0, avgReuniteMinutes: null, loggedLastHour: 0, avgAnswerMinutes: null });
   }, 60_000);
@@ -440,6 +440,18 @@ describe('lp_stats avgReuniteMinutes and loggedLastHour: exact values on a scrat
        join public.patients p on p.first_name = 'TEST-core-12';`,
     ]);
     expect(scratchStats()).toMatchObject({ total: 12, avgReuniteMinutes: 13.9, loggedLastHour: 6 });
+
+    // (Post-event) A swap: Accompanied 50, approved 20 (Accompanied → Located), Swap done 14 → 6 min, not 36.
+    insertNight(
+      [['TEST-core-13', S.reunited, 55]],
+      [
+        change('TEST-core-13', S.waiting, S.accompanied, 'answer', 50),
+        ['TEST-core-13', 'status_changed', { status: S.accompanied }, { status: S.inMedical, kind: 'swap', swap_place: 'mm' }, 20],
+        change('TEST-core-13', S.inMedical, S.reunited, 'reunite', 14),
+      ],
+    );
+    // (71 + 12.333… + 6) / 7 = 12.76… → 12.8.
+    expect(scratchStats()).toMatchObject({ total: 13, avgReuniteMinutes: 12.8 });
   });
 });
 

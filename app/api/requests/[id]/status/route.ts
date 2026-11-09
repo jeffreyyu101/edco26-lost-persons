@@ -43,7 +43,7 @@ export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/status'
   } else if (out.changed) {
     // (F4) Every other real change. Decided by the target too: a hold's row is still Waiting for check, which
     // must never read as "Back to Waiting for check".
-    const event = statusChangeEvent(out.request.status, out.request.medicalLocation ?? null);
+    const event = statusChangeEvent(out.request.status, out.request.medicalLocation ?? null, { place: out.request.swapPlace, post: out.request.postShort });
     if (event) await notifyLater(() => involvedStaff(id), () => ({ requestId: id, actor: session.staff, ...event }));
   }
   return json(out);
