@@ -58,9 +58,16 @@ export const ACCOMPANIED_SUBTITLE = "Don't send the friend";
  * whoever is involved (the answerer decides), "Swap declined" for the creator. Null when neither moved.
  */
 export function swapAlert(before: RequestSummary, row: RequestSummary): AlertEvent | null {
+  // (Companion follow-up) An approved swap called off: back to Accompanied.
+  if (row.status === STATUS.accompanied && isSwapApproved(before) && !row.swapPlace) {
+    return { kind: 'swap_cancelled', requestId: row.id, title: `${subject(row)} · Swap cancelled`, count: 1 };
+  }
   if (row.status !== STATUS.accompanied || before.status !== STATUS.accompanied) return null;
   if (!before.swapRequestedAt && row.swapRequestedAt) {
     return { kind: 'swap_requested', requestId: row.id, title: `${subject(row)} · ${SWAP_REQUESTED_LABEL}`, ...(row.postShort ? { subtitle: `${row.postShort} · decide where` } : {}), count: 1 };
+  }
+  if (before.swapRequestedAt && !row.swapRequestedAt && before.swapRequestedBy && sameStaff(row.updatedBy, before.swapRequestedBy)) {
+    return { kind: 'swap_cancelled', requestId: row.id, title: `${subject(row)} · Swap request cancelled`, count: 1 };
   }
   if (before.swapRequestedAt && !row.swapRequestedAt) return { kind: 'swap_declined', requestId: row.id, title: `${subject(row)} · Swap declined`, count: 1 };
   return null;
@@ -251,6 +258,7 @@ export function alertToast(alert: AlertEvent, view: (id: string) => void): Omit<
     case 'swap_approved':
       return { ...base, tone: 'green', icon: 'check', durationMs: null };
     case 'swap_declined':
+    case 'swap_cancelled':
       return { ...base, tone: 'neutral', icon: 'x', durationMs: ALERT_TOAST_MS };
     case 'friend_informed':
       return { ...base, tone: 'neutral', icon: 'check', durationMs: ALERT_TOAST_MS };

@@ -244,7 +244,7 @@ export interface AlertEvent {
 }
 
 /** (Companion) The friend swap / companion alerts (same names as the Activity kinds). */
-export type CompanionAlertKind = 'accompanied' | 'swap_requested' | 'swap_approved' | 'swap_declined' | 'friend_informed';
+export type CompanionAlertKind = 'accompanied' | 'swap_requested' | 'swap_approved' | 'swap_declined' | 'swap_cancelled' | 'friend_informed';
 
 export interface StoreActions {
   /** Tap-the-live-dot / Try again. Coalesced with any poll in flight. */

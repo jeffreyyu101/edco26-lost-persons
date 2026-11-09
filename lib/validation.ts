@@ -184,6 +184,7 @@ export const swapSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('approve'), place: z.enum(SWAP_PLACES), expectedVersion: expectedVersionSchema }),
   z.strictObject({ action: z.literal('decline'), expectedVersion: expectedVersionSchema }),
   z.strictObject({ action: z.literal('withdraw'), expectedVersion: expectedVersionSchema }),
+  z.strictObject({ action: z.literal('cancel'), expectedVersion: expectedVersionSchema }),
 ]);
 export type SwapBody = z.input<typeof swapSchema>;
 

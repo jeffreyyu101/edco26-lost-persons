@@ -143,6 +143,31 @@ test('Friend informed closes; Decline returns to Accompanied', async ({ page }) 
   await expect.poll(async () => (await detail(page.request, b.id)).swapRequestedAt ?? null).toBeNull();
 });
 
+test('⋯ Cancel swap request → stays Accompanied, request cleared', async ({ page }) => {
+  const r = await accompanied(page.request);
+  await page.goto(`/?r=${r.id}`);
+  await page.getByTestId('request-swap').click();
+  await expect(statusLabel(page)).toHaveText('Friend swap requested', { timeout: 20_000 });
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByTestId('cancel-swap').filter({ hasText: 'Cancel swap request' }).click();
+  await expect(statusLabel(page)).toHaveText('Located · already accompanied', { timeout: 20_000 });
+  await expect.poll(async () => (await detail(page.request, r.id)).swapRequestedAt ?? null).toBeNull();
+  expect((await detail(page.request, r.id)).status).toBe(STATUS.accompanied);
+});
+
+test('⋯ Cancel swap on an approved swap → back to Accompanied, swap place cleared', async ({ page }) => {
+  const r = await accompanied(page.request);
+  const asked = (await call<{ request: RequestSummary }>(page.request, 'POST', `/api/requests/${r.id}/swap`, { action: 'request', expectedVersion: r.rowVersion })).request;
+  await call(page.request, 'POST', `/api/requests/${r.id}/swap`, { action: 'approve', place: 'mm', expectedVersion: asked.rowVersion });
+  await page.goto(`/?r=${r.id}`);
+  await expect(statusLabel(page)).toHaveText('Swap at Main Med', { timeout: 20_000 });
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByTestId('cancel-swap').filter({ hasText: 'Cancel swap' }).click();
+  await expect(statusLabel(page)).toHaveText('Located · already accompanied', { timeout: 20_000 });
+  await expect.poll(async () => (await detail(page.request, r.id)).swapPlace ?? null).toBeNull();
+  expect((await detail(page.request, r.id)).status).toBe(STATUS.accompanied);
+});
+
 test('offline: Friend informed says "Needs a connection" and stays Accompanied', async ({ page, context }) => {
   const r = await accompanied(page.request);
   await page.goto(`/?r=${r.id}`);

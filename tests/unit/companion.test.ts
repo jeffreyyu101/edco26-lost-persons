@@ -73,9 +73,10 @@ describe('statuses', () => {
 
 describe('activity', () => {
   it('kinds, glyphs and copy (spec table)', () => {
-    for (const k of ['accompanied', 'swap_requested', 'swap_approved', 'swap_declined', 'friend_informed'] as const) {
+    for (const k of ['accompanied', 'swap_requested', 'swap_approved', 'swap_declined', 'swap_cancelled', 'friend_informed'] as const) {
       expect(ACTIVITY_KINDS).toContain(k);
     }
+    expect(ACTIVITY_GLYPH.swap_cancelled).toEqual({ icon: 'swap-x', tone: 'gray' });
     expect(ACTIVITY_GLYPH.accompanied).toEqual({ icon: 'users', tone: 'amber' });
     expect(ACTIVITY_GLYPH.swap_requested).toEqual({ icon: 'arrow-left-right', tone: 'blue' });
     expect(ACTIVITY_GLYPH.swap_approved).toEqual({ icon: 'arrow-left-right', tone: 'green' });
@@ -121,6 +122,18 @@ describe('notify swapEvent recipients', async () => {
     });
     expect(swapEvent('withdraw', row, 'Cy · Command', parties)).toBeNull();
   });
+
+  it('cancel: from requested → the answerer (copy "Swap request cancelled"); from approved → everyone involved ("Swap cancelled")', () => {
+    expect(swapEvent('cancel', row, 'Cy · Command', { ...parties, from: 'requested' })).toEqual({
+      recipients: ['Bob · Special Ops'],
+      event: { requestId: ID, actor: 'Cy · Command', kind: 'swap_cancelled', detail: 'Swap request cancelled' },
+    });
+    expect(swapEvent('cancel', row, 'Cy · Command', { ...parties, answerer: null, from: 'requested' })?.recipients).toBeNull();
+    expect(swapEvent('cancel', row, 'Bob · Special Ops', { ...parties, from: 'approved' })).toEqual({
+      recipients: null,
+      event: { requestId: ID, actor: 'Bob · Special Ops', kind: 'swap_cancelled', detail: 'Swap cancelled' },
+    });
+  });
 });
 
 describe('validation', () => {
@@ -139,5 +152,7 @@ describe('validation', () => {
     expect(swapSchema.safeParse({ action: 'approve', expectedVersion: 3 }).success).toBe(false);
     expect(swapSchema.safeParse({ action: 'decline', place: 'mm', expectedVersion: 3 }).success).toBe(false);
     expect(swapSchema.safeParse({ action: 'withdraw', expectedVersion: 3 }).success).toBe(true);
+    expect(swapSchema.safeParse({ action: 'cancel', expectedVersion: 3 }).success).toBe(true);
+    expect(swapSchema.safeParse({ action: 'cancel', place: 'mm', expectedVersion: 3 }).success).toBe(false);
   });
 });

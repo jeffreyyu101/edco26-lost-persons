@@ -51,6 +51,8 @@ export const ACTIVITY_KINDS = [
   'swap_approved',
   /** (Companion) The swap was declined. */
   'swap_declined',
+  /** (Companion) A swap request or an approved swap was cancelled. */
+  'swap_cancelled',
   /** (Companion) The friend was told the patient is already accompanied (closed). */
   'friend_informed',
 ] as const;
@@ -319,6 +321,10 @@ export function swapApprovedDetail(place: SwapPlace, post: string): string {
 /** (Companion) swap_declined. */
 export const SWAP_DECLINED_DETAIL = 'Swap declined';
 
+/** (Companion) swap_cancelled: an open swap request, or an approved swap, called off. */
+export const SWAP_REQUEST_CANCELLED_DETAIL = 'Swap request cancelled';
+export const SWAP_CANCELLED_DETAIL = 'Swap cancelled';
+
 /** (Companion) friend_informed: the status label, "Friend informed". */
 export function friendInformedDetail(): string {
   return STATUS_META[STATUS.friendInformed].label;
@@ -471,6 +477,7 @@ export const ACTIVITY_GLYPH: Readonly<Record<ActivityKind, ActivityGlyph>> = {
   swap_requested: { icon: 'arrow-left-right', tone: 'blue' },
   swap_approved: { icon: 'arrow-left-right', tone: 'green' },
   swap_declined: { icon: 'swap-x', tone: 'gray' },
+  swap_cancelled: { icon: 'swap-x', tone: 'gray' },
   friend_informed: { icon: 'users', tone: 'gray' },
 };
 
@@ -572,6 +579,7 @@ const SPOKEN_KIND: Readonly<Record<ActivityKind, string>> = {
   swap_requested: 'friend swap requested',
   swap_approved: 'friend swap approved',
   swap_declined: 'friend swap declined',
+  swap_cancelled: 'friend swap cancelled',
   friend_informed: 'closed',
 };
 

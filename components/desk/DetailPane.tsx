@@ -12,6 +12,7 @@ import { goBack, navigate, parseView, viewToParams } from '@/lib/client/nav';
 import { useActions, useConnection, useRequest, useSession, type MutationResult } from '@/lib/client/store-contract';
 import { canCancel, menuActions, sameStaff, type StatusAction } from '@/lib/domain';
 import { CompanionMenuItems } from '@/components/profile/CompanionSheets';
+import { swapCancelState } from '@/lib/client/swap';
 import { formatCaseNumber } from '@/lib/format';
 import { MAIN_SELECTOR, readRowIds, rowElement } from './keyboard';
 import { Tip } from './parts';
@@ -276,7 +277,13 @@ function PaneMenu({ row, label }: { row: RequestSummary | null; label: string })
             <Pencil size={15} aria-hidden />
             Edit details
           </DropdownMenu.Item>
-          <CompanionMenuItems status={row.status} offline={offline} onSend={(to, kind) => void actions.setStatus(row.id, to, kind)} />
+          <CompanionMenuItems
+            status={row.status}
+            offline={offline}
+            onSend={(to, kind) => void actions.setStatus(row.id, to, kind)}
+            swapCancel={swapCancelState(row)}
+            onCancelSwap={() => void actions.swap(row.id, { action: 'cancel' })}
+          />
           {menu.map((a) => (
             <DropdownMenu.Item key={a.id} disabled={offline} onSelect={() => setStatus(a)}>
               {a.id === 'discharge' ? <Check size={15} aria-hidden /> : <RotateCcw size={15} aria-hidden />}

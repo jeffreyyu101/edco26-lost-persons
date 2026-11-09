@@ -73,7 +73,7 @@ import { primeKeyboard } from '@/components/list/hooks';
 import { changeAnswerChoices } from './change-answer';
 import { LocationEditor } from './LocationEditor';
 import { CompanionComingRow, CompanionMenuItems, FriendMayBeRow, LocatedSheet, SwapSheet } from './CompanionSheets';
-import { FRIEND_INFORMED_LABEL, REQUEST_SWAP_LABEL, SWAP_DONE_LABEL, SWAP_REQUESTED_LABEL, isSwapApproved, isSwapRequested } from '@/lib/client/swap';
+import { FRIEND_INFORMED_LABEL, REQUEST_SWAP_LABEL, SWAP_DONE_LABEL, SWAP_REQUESTED_LABEL, isSwapApproved, isSwapRequested, swapCancelState } from '@/lib/client/swap';
 import { PhotoViewer, photoUrl } from './PhotoViewer';
 import s from './profile.module.css';
 
@@ -478,7 +478,7 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
               <Pencil size={15} aria-hidden />
               Edit details
             </DropdownMenu.Item>
-            <CompanionMenuItems status={row.status} offline={offline} onSend={send} />
+            <CompanionMenuItems status={row.status} offline={offline} onSend={send} swapCancel={swapCancelState(row)} onCancelSwap={() => swap({ action: 'cancel' })} />
             {menu.map((a) => (
               <DropdownMenu.Item key={a.id} disabled={offline} onSelect={() => setStatus(a)}>
                 {a.id === 'discharge' ? <Check size={15} aria-hidden /> : <RotateCcw size={15} aria-hidden />}

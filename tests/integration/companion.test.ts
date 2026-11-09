@@ -192,6 +192,41 @@ describe('POST /api/requests/:id/swap', () => {
     expect((await activity(r.id, ASKER))?.kind).toBe('swap_declined');
   });
 
+  it('cancel from requested → stays Accompanied, the answerer told "Swap request cancelled"; repeat is {changed: false}', async () => {
+    const r = await accompanied();
+    const asked = (await swap(ASKER, r, { action: 'request' })).body.request as RequestSummary;
+    await activityOf(r.id, ANSWERER, 'swap_requested');
+    const cancelled = await swap(ASKER, asked, { action: 'cancel' });
+    expect(cancelled.status, cancelled.text).toBe(200);
+    const c = cancelled.body.request as RequestSummary;
+    expect(c.status).toBe(STATUS.accompanied);
+    expect(c.swapRequestedAt).toBeNull();
+    expect(c.swapRequestedBy).toBeNull();
+    expect((await activityOf(r.id, ANSWERER, 'swap_cancelled')).detail).toBe('Swap request cancelled');
+    const again = await swap(ASKER, c, { action: 'cancel' });
+    expect(again.status).toBe(200);
+    expect(again.body.changed).toBe(false);
+  });
+
+  it('cancel from approved → back to Accompanied, swapPlace cleared, everyone involved told "Swap cancelled"; Reunited → 422', async () => {
+    const r = await accompanied();
+    const asked = (await swap(ASKER, r, { action: 'request' })).body.request as RequestSummary;
+    const approved = (await swap(ANSWERER, asked, { action: 'approve', place: 'mm' })).body.request as RequestSummary;
+    const cancelled = await swap(ANSWERER, approved, { action: 'cancel' });
+    expect(cancelled.status, cancelled.text).toBe(200);
+    const c = cancelled.body.request as RequestSummary;
+    expect(c.status).toBe(STATUS.accompanied);
+    expect(c.swapPlace).toBeNull();
+    expect(c.reunionStartedAt).toBeNull();
+    expect((await activityOf(r.id, ASKER, 'swap_cancelled')).detail).toBe('Swap cancelled');
+    expect((await activityOf(r.id, FOH, 'swap_cancelled')).detail).toBe('Swap cancelled');
+
+    const asked2 = (await swap(ASKER, c, { action: 'request' })).body.request as RequestSummary;
+    const approved2 = (await swap(ANSWERER, asked2, { action: 'approve', place: 'fa' })).body.request as RequestSummary;
+    const done = (await setStatus(ANSWERER, approved2, STATUS.reunited, 'reunite')).body.request as RequestSummary;
+    expect((await swap(ANSWERER, done, { action: 'cancel' })).status).toBe(422);
+  });
+
   it('a status change ends an open swap request', async () => {
     const r = await accompanied();
     const asked = (await swap(ASKER, r, { action: 'request' })).body.request as RequestSummary;
