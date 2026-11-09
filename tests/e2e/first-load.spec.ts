@@ -13,11 +13,14 @@ const KB = 1024;
 // A119 (Brian, 2026-11-08 morning: "sure we can raise it"): route-only 42 → 43 KB, the total stays 234 KB. Tonight's
 // releases left 1 B of route-only room (43,007 of 43,008 B); the network fixes (the "Updating…" line) need ~50–100 B.
 // A122 (Brian, 2026-11-08 19:08): total 234 → 235 KB for the companion feature (240,033 B against 239,616).
+// A123 (2026-11-09, post-event brief: raise route-only to at most 44 KB if a trim is not possible): route-only 43 → 44 KB.
+// main after #30 was already over (44,268 B against 44,032); with the post-event fixes 44,352 B. The total stays 235 KB
+// (240,388 B against 240,640).
 const BUDGET = {
   /** Everything `/` loads first: framework + Radix baseline (~192 KB at Phase 1a) + app code. */
   homeTotal: 235 * KB,
   /** Scripts `/` loads that /signin does not: the app's own first-load code (shell, store, nav). */
-  homeOnly: 43 * KB,
+  homeOnly: 44 * KB,
 };
 
 async function scriptSizes(request: APIRequestContext, path: string, cookie?: string): Promise<Map<string, number>> {
