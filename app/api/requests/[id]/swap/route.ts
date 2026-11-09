@@ -3,6 +3,8 @@
 //   {action: 'approve', place: 'fa'|'mm'} → In medical (Located · friend coming) with swapPlace. Tells everyone involved.
 //   {action: 'decline'}                  → the request cleared, stays Accompanied. Tells the requester and the creator.
 //   {action: 'withdraw'}                 → the same, telling nobody (the requester's Undo of Request swap).
+//   {action: 'cancel'}                   → swap requested: cleared, stays Accompanied (tells the answerer); swap
+//                                          approved: back to Accompanied, swapPlace cleared (tells everyone involved).
 // Same conventions as the status route: idempotent repeat → 200 {changed: false}; stale expectedVersion → 409
 // (currentStatus); not Accompanied → 422. Returns {changed, request}. Notifications run after the response.
 import { swapNotice } from '@/lib/server/notify';
@@ -23,6 +25,7 @@ interface SwapResult {
   answerer?: unknown;
   requester?: unknown;
   creator?: unknown;
+  from?: unknown;
 }
 
 export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/swap', {}, async ({ request, params, session }) => {
@@ -44,6 +47,7 @@ export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/swap', 
       answerer: str(data.answerer),
       requester: str(data.requester),
       creator: str(data.creator),
+      from: data.from === 'requested' || data.from === 'approved' ? data.from : null,
     });
   }
   return json(out);

@@ -14,7 +14,9 @@
 import 'server-only';
 import { after } from 'next/server';
 import {
+  SWAP_CANCELLED_DETAIL,
   SWAP_DECLINED_DETAIL,
+  SWAP_REQUEST_CANCELLED_DETAIL,
   isActivityKind,
   pushPayload,
   pushTtl,
@@ -144,6 +146,8 @@ export interface SwapParties {
   answerer: string | null;
   requester: string | null;
   creator: string | null;
+  /** (Companion) cancel: what was cancelled, 'requested' (an open request) or 'approved' (a running swap). */
+  from?: 'requested' | 'approved' | null;
 }
 
 /**
@@ -151,10 +155,11 @@ export interface SwapParties {
  *   request → THE STAFF WHO ANSWERED (latest change into Accompanied / Located), else everyone involved
  *   approve → everyone involved (the requester is: lp_involved_staff counts swap_requested)
  *   decline → the requester and the creator
+ *   cancel  → from requested: the staff who answered (as request); from approved: everyone involved
  * The actor is always left out (lp_activity_record). `recipients` null = everyone involved.
  */
 export function swapEvent(
-  action: 'request' | 'approve' | 'decline' | 'withdraw',
+  action: 'request' | 'approve' | 'decline' | 'withdraw' | 'cancel',
   row: Pick<RequestSummary, 'id' | 'postShort' | 'swapPlace'>,
   actor: string,
   parties: SwapParties,
@@ -174,12 +179,21 @@ export function swapEvent(
     const list = [parties.requester, parties.creator].filter((s): s is string => !!s);
     return { recipients: list, event: { ...base, kind: 'swap_declined', detail: SWAP_DECLINED_DETAIL } };
   }
+  if (action === 'cancel') {
+    if (parties.from === 'requested') {
+      return {
+        recipients: parties.answerer ? [parties.answerer] : null,
+        event: { ...base, kind: 'swap_cancelled', detail: SWAP_REQUEST_CANCELLED_DETAIL },
+      };
+    }
+    return { recipients: null, event: { ...base, kind: 'swap_cancelled', detail: SWAP_CANCELLED_DETAIL } };
+  }
   return null;
 }
 
 /** (Companion) Records and pushes a friend swap change after the response. Never throws. */
 export async function swapNotice(
-  action: 'request' | 'approve' | 'decline' | 'withdraw',
+  action: 'request' | 'approve' | 'decline' | 'withdraw' | 'cancel',
   row: Pick<RequestSummary, 'id' | 'postShort' | 'swapPlace'>,
   actor: string,
   parties: SwapParties,

@@ -12,7 +12,7 @@ import type { RequestSummary } from '@/lib/api-types';
 import { STATUS, type SettableStatus, type StatusKind, type SwapPlace } from '@/lib/domain';
 import { changeAnswerChoices } from './change-answer';
 import { formatCaseNumber } from '@/lib/format';
-import { COMPANION_COMING_LABEL, friendMayBeWith, swapApprovedLabel, swapPlaceLabel } from '@/lib/client/swap';
+import { CANCEL_SWAP_LABEL, CANCEL_SWAP_REQUEST_LABEL, COMPANION_COMING_LABEL, friendMayBeWith, swapApprovedLabel, swapPlaceLabel } from '@/lib/client/swap';
 import { Sheet, SheetTitle } from '@/components/ui/Sheet';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import { WALK } from '@/components/ui/StageGlyph';
@@ -246,10 +246,32 @@ export function CompanionComingRow({ row }: { row: RequestSummary }) {
  * Change answer (Located · friend coming, Not located, Back to Waiting for check) and Mark discharged; Friend
  * informed → Reopen (back to Accompanied). Nothing for any other status (menuActions covers those).
  */
-export function CompanionMenuItems({ status, offline, onSend }: { status: string; offline: boolean; onSend: (to: SettableStatus, kind: StatusKind) => void }) {
+export function CompanionMenuItems({
+  status,
+  offline,
+  onSend,
+  swapCancel = null,
+  onCancelSwap,
+}: {
+  status: string;
+  offline: boolean;
+  onSend: (to: SettableStatus, kind: StatusKind) => void;
+  /** (Companion follow-up) An open swap request or an approved swap: the ⋯ menu can call it off. */
+  swapCancel?: 'requested' | 'approved' | null;
+  onCancelSwap?: () => void;
+}) {
+  const cancelItem =
+    swapCancel && onCancelSwap ? (
+      <DropdownMenu.Item disabled={offline} onSelect={onCancelSwap} data-testid="cancel-swap">
+        <X size={15} aria-hidden />
+        {swapCancel === 'requested' ? CANCEL_SWAP_REQUEST_LABEL : CANCEL_SWAP_LABEL}
+      </DropdownMenu.Item>
+    ) : null;
+  if (status !== STATUS.accompanied && status !== STATUS.friendInformed) return cancelItem;
   if (status === STATUS.accompanied) {
     return (
       <>
+        {cancelItem}
         {changeAnswerChoices(status).map((c) => (
           <DropdownMenu.Item key={c.to} disabled={offline} onSelect={() => onSend(c.to, c.kind)} data-to={c.to}>
             <StatusGlyph status={c.to} size={15} />

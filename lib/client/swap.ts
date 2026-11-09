@@ -8,7 +8,7 @@ import { STATUS, postShort, type SwapPlace } from '../domain';
  * The body of POST /api/requests/:id/swap without its expectedVersion (lib/validation swapSchema). 'withdraw' is the
  * requester's Undo of a request (nobody is told).
  */
-export type SwapAction = { action: 'request' } | { action: 'approve'; place: SwapPlace } | { action: 'decline' } | { action: 'withdraw' };
+export type SwapAction = { action: 'request' } | { action: 'approve'; place: SwapPlace } | { action: 'decline' } | { action: 'withdraw' } | { action: 'cancel' };
 import { formatCaseNumber } from '../format';
 
 type SwapRow = Pick<RequestSummary, 'status' | 'swapRequestedAt' | 'swapPlace'>;
@@ -32,6 +32,17 @@ export function swapPlaceLabel(place: SwapPlace, row: Pick<RequestSummary, 'repo
 export const SWAP_REQUESTED_LABEL = 'Friend swap requested';
 const STATUS_LABEL_ACCOMPANIED = 'Accompanied';
 export const SWAP_DONE_LABEL = 'Swap done';
+export const CANCEL_SWAP_REQUEST_LABEL = 'Cancel swap request';
+export const CANCEL_SWAP_LABEL = 'Cancel swap';
+export const SWAP_REQUEST_CANCELLED_LABEL = 'Swap request cancelled';
+export const SWAP_CANCELLED_LABEL = 'Swap cancelled';
+
+/** (Companion follow-up) What the ⋯ menu's cancel calls off: an open request, an approved swap, or nothing. */
+export function swapCancelState(row: SwapRow): 'requested' | 'approved' | null {
+  if (isSwapRequested(row)) return 'requested';
+  if (isSwapApproved(row)) return 'approved';
+  return null;
+}
 export const REQUEST_SWAP_LABEL = 'Request swap';
 export const FRIEND_INFORMED_LABEL = 'Friend informed';
 export const COMPANION_COMING_LABEL = 'Companion coming';
@@ -60,15 +71,18 @@ export function swapOverlayFields(action: SwapAction, staff: string | null, nowI
     case 'decline':
     case 'withdraw':
       return { swapRequestedAt: null, swapRequestedBy: null };
+    case 'cancel':
+      return { status: STATUS.accompanied, swapRequestedAt: null, swapRequestedBy: null, swapPlace: null };
   }
 }
 
 /** "LP-1234 · Friend swap requested" / "LP-1234 · Swap at FA 4" / "LP-1234 · Swap declined". */
-export function swapToastTitle(action: SwapAction, row: Pick<RequestSummary, 'caseNumber' | 'reportingLocation' | 'otherLocation'> & { postShort?: string }): string {
+export function swapToastTitle(action: SwapAction, row: Pick<RequestSummary, 'caseNumber' | 'reportingLocation' | 'otherLocation'> & { postShort?: string; swapPlace?: SwapPlace | null }): string {
   const lp = formatCaseNumber(row.caseNumber);
   if (action.action === 'request') return `${lp} · ${SWAP_REQUESTED_LABEL}`;
   if (action.action === 'approve') return `${lp} · ${swapApprovedLabel(action.place, row)}`;
   if (action.action === 'withdraw') return `${lp} · ${STATUS_LABEL_ACCOMPANIED}`;
+  if (action.action === 'cancel') return `${lp} · ${row.swapPlace ? SWAP_CANCELLED_LABEL : SWAP_REQUEST_CANCELLED_LABEL}`;
   return `${lp} · Swap declined`;
 }
 

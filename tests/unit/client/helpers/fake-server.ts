@@ -202,10 +202,14 @@ export class FakeServer {
     }
     if (action === '/swap') {
       // (Companion) request / approve(place) / decline, as the backend's POST /api/requests/:id/swap.
-      const body = req.body as { action: 'request' | 'approve' | 'decline' | 'withdraw'; place?: 'fa' | 'mm'; expectedVersion: number };
+      const body = req.body as { action: 'request' | 'approve' | 'decline' | 'withdraw' | 'cancel'; place?: 'fa' | 'mm'; expectedVersion: number };
       if (body.expectedVersion !== cur.rowVersion) return apiError(409, 'conflict', 'Updated by someone else', { currentStatus: cur.status });
-      if (cur.status !== STATUS.accompanied) return apiError(422, 'invalid', 'Not allowed');
       const staff = this.session?.staff;
+      // (Companion follow-up) cancel: an open request → cleared; an approved swap → back to Accompanied.
+      if (body.action === 'cancel' && cur.status === STATUS.inMedical && cur.swapPlace) {
+        return json(200, { changed: true, request: this.change(id, { status: STATUS.accompanied, swapPlace: null }, staff) });
+      }
+      if (cur.status !== STATUS.accompanied) return apiError(422, 'invalid', 'Not allowed');
       if (body.action === 'request') {
         if (cur.swapRequestedAt) return json(200, { changed: false, request: cur });
         return json(200, { changed: true, request: this.change(id, { swapRequestedAt: this.stamp(this.seq), swapRequestedBy: staff ?? null }, staff) });

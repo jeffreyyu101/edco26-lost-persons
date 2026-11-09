@@ -55,6 +55,7 @@ export const COMPANION_ACTIVITY_GLYPH: Readonly<Record<string, { icon: Companion
   swap_requested: { icon: 'arrow-left-right', tone: 'blue' },
   swap_approved: { icon: 'arrow-left-right', tone: 'green' },
   swap_declined: { icon: 'swap-x', tone: 'gray' },
+  swap_cancelled: { icon: 'swap-x', tone: 'gray' },
   friend_informed: { icon: 'users', tone: 'gray' },
 };
 

@@ -615,6 +615,7 @@ export const PUSHED_ALERT_KINDS: ReadonlySet<AlertEvent['kind']> = new Set<Alert
   'swap_requested',
   'swap_approved',
   'swap_declined',
+  'swap_cancelled',
   'friend_informed',
 ]);
 

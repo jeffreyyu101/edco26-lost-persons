@@ -47,7 +47,7 @@ import {
 } from '../domain';
 import { formatCaseNumber } from '../format';
 import { syncPath } from './api-paths';
-import { swapOverlayFields, swapToastTitle } from './swap';
+import { isSwapRequested, swapCancelState, swapOverlayFields, swapToastTitle, type SwapAction } from './swap';
 import {
   alertKey,
   alertStillCurrent,
@@ -356,8 +356,23 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const emit = () => {
     for (const l of [...listeners]) l();
   };
+  /** (Companion) The "Friend swap requested" Undo on screen: it closes once the row is no longer swap-requested. */
+  let swapRequestUndo: { snackId: string; id: string } | null = null;
   const set = (patch: Partial<StoreState>) => {
     state = { ...state, ...patch };
+    if (swapRequestUndo) {
+      if (state.snackbar?.id !== swapRequestUndo.snackId) swapRequestUndo = null;
+      else if (patch.confirmed) {
+        const r = state.confirmed.get(swapRequestUndo.id);
+        if (!r || !isSwapRequested(r)) {
+          customUndos.delete(swapRequestUndo.snackId);
+          if (snackTimer) clearTimeout(snackTimer);
+          snackTimer = undefined;
+          swapRequestUndo = null;
+          state = { ...state, snackbar: null };
+        }
+      }
+    }
     emit();
   };
 
@@ -2523,9 +2538,16 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
           commitOwn(request, id);
           markLive();
           if (res.data.changed && !quiet) {
-            const title = swapToastTitle(swapAction, request);
+            const title = swapToastTitle(swapAction, swapAction.action === 'cancel' ? row : request);
             if (swapAction.action === 'request') {
               showCustomUndo(title, UNDO_MS, () => void actions.swap(id, { action: 'withdraw' }, { quiet: true }));
+              if (state.snackbar) swapRequestUndo = { snackId: state.snackbar.id, id };
+            } else if (swapAction.action === 'cancel') {
+              // (Companion follow-up) Undo puts back what was cancelled: the request, or the approval at the same place.
+              const was = swapCancelState(row);
+              const place = row.swapPlace;
+              const again: SwapAction = was === 'approved' && place ? { action: 'approve', place } : { action: 'request' };
+              showCustomUndo(title, UNDO_MS, () => void actions.swap(id, again, { quiet: true }));
             } else {
               showToast({ tone: swapAction.action === 'approve' ? 'green' : 'neutral', icon: swapAction.action === 'approve' ? 'check' : 'x', title, durationMs: 4_000 });
             }
