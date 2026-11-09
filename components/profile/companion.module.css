@@ -1,0 +1,30 @@
+/* (Companion, 2026-11-08) design/screens/companion-v1.html ?w=B: the Located follow-up and the swap decision.
+   Neutral buttons, no fills, no circled icons; the icon's colour carries the meaning (with its glyph). */
+.step { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 999px; background: var(--green-a3); color: var(--green-11); font-size: 13px; font-weight: 600; }
+.change { all: unset; margin-left: auto; font-size: 13px; color: var(--gray-11); cursor: pointer; padding: 8px 4px; }
+.change:focus-visible { outline: 2px solid var(--focus-8); border-radius: 4px; }
+.q { font-size: 20px; line-height: 26px; font-weight: 600; letter-spacing: -0.01em; color: var(--gray-12); margin: 14px 2px 0; }
+.opts { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding-bottom: 8px; }
+.opt { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 0 16px; border-radius: 14px; background: var(--gray-a3); box-shadow: inset 0 0 0 1px var(--gray-a5); cursor: pointer; }
+.opt:focus-visible { outline: 2px solid var(--focus-8); outline-offset: 2px; }
+.opt[aria-disabled='true'] { opacity: 0.5; cursor: default; }
+.opt[data-hint] { box-shadow: inset 0 0 0 2px var(--gray-a8); }
+.gi { display: flex; flex: none; color: var(--gray-12); }
+.gi[data-tone='green'] { color: var(--green-11); }
+.gi[data-tone='amber'] { color: var(--amber-11); }
+.gi[data-tone='gray'] { color: var(--gray-11); }
+.t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.yn { font-size: 13px; line-height: 20px; font-weight: 600; color: var(--gray-11); }
+.t2 { font-size: 17px; line-height: 24px; font-weight: 600; letter-spacing: -0.01em; color: var(--gray-12); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.go { display: flex; color: var(--gray-11); opacity: 0.8; }
+.head { display: flex; align-items: center; gap: 10px; }
+.head .n { font-size: 17px; font-weight: 600; color: var(--gray-12); }
+.head .a { font-size: 13px; color: var(--gray-11); }
+.hx { display: flex; flex-direction: column; min-width: 0; }
+.pty { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px; border-radius: 12px; background: var(--gray-a2); color: var(--gray-11); font-size: 15px; }
+.pty .k { color: var(--gray-12); font-weight: 500; }
+.pty .n { color: var(--gray-12); font-weight: 600; }
+.comp { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 12px; font-size: 15px; font-weight: 600; white-space: nowrap; background: var(--teal-a3); color: var(--teal-12); }
+.comp .ic { display: flex; color: var(--teal-11); }
+.comp .w { margin-left: auto; font-variant-numeric: tabular-nums; }

@@ -16,7 +16,7 @@ import { admin, api, cookieFor, createBody, createRequest, dbUrl, newStaff, pii,
 withTestServer();
 
 const lit = (v: string) => `'${v.replace(/'/g, "''")}'`;
-const OPEN_SQL = `status in (${[STATUS.waiting, STATUS.inMedical, STATUS.legacyBringFriend].map(lit).join(', ')})`;
+const OPEN_SQL = `status in (${[STATUS.waiting, STATUS.inMedical, STATUS.legacyBringFriend, STATUS.accompanied].map(lit).join(', ')})`;
 
 /** count(*) of patients matching a SQL condition (local database, test-only). */
 async function count(where = 'true'): Promise<number> {
@@ -40,7 +40,7 @@ function expectedAvgAnswerMinutes(): number | null {
       'now', extract(epoch from clock_timestamp()))), '[]')
     from public.audit_events e join public.patients p on p.id = e.patient_id`);
   const events = JSON.parse(raw) as Array<{ pid: string; type: string; prev: string | null; next: string | null; outcome: string | null; held: string | null; at: number; created: number; now: number }>;
-  const answers = new Set([STATUS.notInMedical, STATUS.inMedical, STATUS.legacyBringFriend] as string[]);
+  const answers = new Set([STATUS.notInMedical, STATUS.inMedical, STATUS.legacyBringFriend, STATUS.accompanied] as string[]);
   const first = new Map<string, { at: number; created: number }>();
   let now = Date.now() / 1000;
   for (const e of events) {
@@ -81,7 +81,7 @@ function rawAudit() {
 function expectedAvgReuniteMinutes(): number | null {
   const events = rawAudit();
   const now = events[0]?.now ?? Date.now() / 1000;
-  const intoMedical = new Set<string>([STATUS.inMedical, STATUS.legacyBringFriend]);
+  const intoMedical = new Set<string>([STATUS.inMedical, STATUS.legacyBringFriend, STATUS.accompanied]);
   const fromUnanswered = new Set<string>([STATUS.waiting, STATUS.notInMedical]);
   const byPatient = new Map<string, typeof events>();
   for (const e of events) byPatient.set(e.pid, [...(byPatient.get(e.pid) ?? []), e]);
@@ -123,7 +123,7 @@ describe('GET /api/stats', () => {
 
     const s = await stats();
     const waiting = await count(`status = ${lit(STATUS.waiting)}`);
-    const inMedical = await count(`status in (${lit(STATUS.inMedical)}, ${lit(STATUS.legacyBringFriend)})`);
+    const inMedical = await count(`status in (${lit(STATUS.inMedical)}, ${lit(STATUS.legacyBringFriend)}, ${lit(STATUS.accompanied)})`);
     expect(s.open).toEqual({ waiting, inMedical });
     expect(s.notInMedical).toBe(await count(`status = ${lit(STATUS.notInMedical)}`));
     expect(s.reunited).toBe(await count(`status = ${lit(STATUS.reunited)}`));
@@ -363,7 +363,7 @@ describe('lp_stats avgReuniteMinutes and loggedLastHour: exact values on a scrat
     psql(`create database ${SCRATCH}`);
     scratchCreated = true;
     const chain = readdirSync(join(ROOT, 'supabase', 'migrations')).filter((f) => f.endsWith('.sql')).sort();
-    expect(chain.at(-1)).toBe('20261108000000_dashboard_v4.sql');
+    expect(chain.at(-1)).toBe('20261108120000_companion.sql');
     for (const file of chain) scratch(['-f', join(ROOT, 'supabase', 'migrations', file)]);
     expect(scratchStats()).toMatchObject({ total: 0, avgReuniteMinutes: null, loggedLastHour: 0, avgAnswerMinutes: null });
   }, 60_000);

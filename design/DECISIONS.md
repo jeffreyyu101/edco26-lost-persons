@@ -609,3 +609,7 @@ Brian: "HOW TO INDICATE THERES A MESSAGE ON A REQUEST... IN ALL REQUESTS VIEW I 
 - **Alerts** is a menu row with shadcn's 32 × 18 switch showing this computer's alerts (dimmed when the browser blocks them); the row still opens the Alerts sheet, named "Alerts On".
 - **Top bar** in the card: 48 px; the toggle and a 16 px line, then the title (16 px, 500) and its count; the live line, search, New request (32 px, radius 6) and the Activity bell (28 px) as before. The pane's header is 48 px too, so the two lines meet.
 - **Phones (under 768 px) are unchanged.** BUILD_SPEC A120.
+
+## First-load total raised for the companion feature (Brian 2026-11-08 19:08)
+
+- **Total first-load JS of `/`: 234 → 235 KB** (route-only stays 43 KB). The companion feature measured 240,033 B against 239,616 B (417 B over); Brian chose to raise the limit and ship rather than trim. BUILD_SPEC A122.

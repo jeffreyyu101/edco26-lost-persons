@@ -112,7 +112,8 @@ export function statusGroups(rows: readonly RequestSummary[]): StatusGroups {
   const coming: RequestSummary[] = [];
   const closed: RequestSummary[] = [];
   for (const row of rows) {
-    if (isInMedical(row.status)) coming.push(row);
+    // (Companion) Located · already accompanied sits with the other Located requests.
+    if (isInMedical(row.status) || row.status === STATUS.accompanied) coming.push(row);
     else if (statusBucket(row.status) === 'open') waiting.push(row);
     else closed.push(row);
   }

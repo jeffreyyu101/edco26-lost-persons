@@ -12,9 +12,10 @@ const KB = 1024;
 // loading after start (lib/client/messages-lazy.ts).
 // A119 (Brian, 2026-11-08 morning: "sure we can raise it"): route-only 42 → 43 KB, the total stays 234 KB. Tonight's
 // releases left 1 B of route-only room (43,007 of 43,008 B); the network fixes (the "Updating…" line) need ~50–100 B.
+// A122 (Brian, 2026-11-08 19:08): total 234 → 235 KB for the companion feature (240,033 B against 239,616).
 const BUDGET = {
   /** Everything `/` loads first: framework + Radix baseline (~192 KB at Phase 1a) + app code. */
-  homeTotal: 234 * KB,
+  homeTotal: 235 * KB,
   /** Scripts `/` loads that /signin does not: the app's own first-load code (shell, store, nav). */
   homeOnly: 43 * KB,
 };

@@ -48,7 +48,7 @@ function Row({ row, now, timeZone, onOpen }: { row: ActivityRow; now: number; ti
       <VisuallyHidden>{activityAriaLabel(row, now)}</VisuallyHidden>
       {row.read ? null : <span className={s.dot} aria-hidden />}
       <span className={s.glyph} aria-hidden>
-        <ActivityGlyphIcon icon={glyph.icon} tone={glyph.tone} size={18} />
+        <ActivityGlyphIcon icon={glyph.icon} tone={glyph.tone} size={18} kind={row.kind} />
       </span>
       <span className={s.text} aria-hidden>
         <span className={s.line1}>{row.title}</span>

@@ -47,6 +47,7 @@ import {
 } from '../domain';
 import { formatCaseNumber } from '../format';
 import { syncPath } from './api-paths';
+import { swapOverlayFields, swapToastTitle } from './swap';
 import {
   alertKey,
   alertStillCurrent,
@@ -279,7 +280,7 @@ export const COPY = {
   sessionChanged: 'Session changed — try again',
 } as const;
 
-const UNDOABLE_KINDS: ReadonlySet<StatusKind> = new Set(['answer', 'change', 'reunite']);
+const UNDOABLE_KINDS: ReadonlySet<StatusKind> = new Set(['answer', 'change', 'reunite', 'inform']);
 const MAX_TOASTS = 3;
 const MAX_SYNC_PAGES = 40;
 const ROWS_WRITE_MS = 3_000;
@@ -2479,6 +2480,56 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
           if (res.data.changed) carryUndoFor(id, base, request.rowVersion);
           commitOwn(request, id);
           markLive();
+          return { ok: true, changed: !!res.data.changed, request: state.confirmed.get(id) ?? request };
+        }
+        return mutationFailed(id, res.ok ? { ok: false, kind: 'network' } : res, { conflictToast: true, quiet });
+      });
+    },
+
+    async swap(id, swapAction, opts) {
+      const quiet = !!opts?.quiet;
+      if (offlineNow()) return refuseOffline(quiet);
+      return serialize(id, async () => {
+        const blocked = await writeGate(quiet);
+        if (blocked) return blocked;
+        const gen = ownerGen();
+        const row = state.confirmed.get(id);
+        if (!row) return fail('not_found', COPY.notFound);
+        const from = row.status;
+        setOverlay(id, { mutationId: uuid(), kind: 'status', fields: swapOverlayFields(swapAction, state.session.staff, new Date(now()).toISOString()), startedAt: now() });
+        const send = (version: number) =>
+          call<ChangeResponse>(`/api/requests/${encodeURIComponent(id)}/swap`, {
+            method: 'POST',
+            json: { ...swapAction, expectedVersion: version },
+            timeoutMs: MUTATION_TIMEOUT_MS,
+          });
+        let res = await send(row.rowVersion);
+        if (gen !== state.generation) return fail('failed', COPY.failed);
+        if (!res.ok && res.kind === 'http' && res.status === 409) {
+          // Only fields changed in between (same status as the tap started from): resend once, as setStatus.
+          const latest = await fetchRow(id);
+          if (gen !== state.generation) return fail('failed', COPY.failed);
+          if (latest && latest.status === from) {
+            res = await send(latest.rowVersion);
+            if (gen !== state.generation) return fail('failed', COPY.failed);
+          } else {
+            dropOverlay(id);
+            if (!quiet) showToast({ tone: 'amber', icon: 'alert', title: COPY.conflict, durationMs: 6_000 });
+            return fail('conflict', COPY.conflict, latest ?? undefined);
+          }
+        }
+        if (res.ok && isRow(res.data.request)) {
+          const request = res.data.request;
+          commitOwn(request, id);
+          markLive();
+          if (res.data.changed && !quiet) {
+            const title = swapToastTitle(swapAction, request);
+            if (swapAction.action === 'request') {
+              showCustomUndo(title, UNDO_MS, () => void actions.swap(id, { action: 'withdraw' }, { quiet: true }));
+            } else {
+              showToast({ tone: swapAction.action === 'approve' ? 'green' : 'neutral', icon: swapAction.action === 'approve' ? 'check' : 'x', title, durationMs: 4_000 });
+            }
+          }
           return { ok: true, changed: !!res.data.changed, request: state.confirmed.get(id) ?? request };
         }
         return mutationFailed(id, res.ok ? { ok: false, kind: 'network' } : res, { conflictToast: true, quiet });

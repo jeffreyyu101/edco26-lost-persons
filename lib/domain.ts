@@ -30,6 +30,13 @@ export const STATUS = {
    * 5 minutes). Never written by a client; Reopen brings it back to In medical.
    */
   inactive: 'Closed – Inactive',
+  /**
+   * (Companion) Located, and someone is already with them: Main Med allows one companion, so the friend is not
+   * sent. Open; counts as located / In medical in stats. Request swap / Friend informed from here.
+   */
+  accompanied: 'Found – Accompanied',
+  /** (Companion) The friend was told the patient is already accompanied. Closed; Reopen / Undo → Accompanied. */
+  friendInformed: 'Closed – Friend Informed',
 } as const;
 
 /** Every value the status CHECK allows, in the constraint's order. */
@@ -42,6 +49,8 @@ export const STATUSES = [
   STATUS.legacyBringFriend,
   STATUS.cancelled,
   STATUS.inactive,
+  STATUS.accompanied,
+  STATUS.friendInformed,
 ] as const;
 
 export type Status = (typeof STATUSES)[number];
@@ -56,6 +65,8 @@ export const SETTABLE_STATUSES = [
   STATUS.inMedical,
   STATUS.reunited,
   STATUS.discharged,
+  STATUS.accompanied,
+  STATUS.friendInformed,
 ] as const;
 export type SettableStatus = (typeof SETTABLE_STATUSES)[number];
 
@@ -80,7 +91,9 @@ export type GlyphKind =
   | 'closed' // filled check, grey
   | 'queued' // dashed ring, grey (outbox item, not sent yet)
   | 'logged' // empty ring, gray-10 (audit trail "Logged")
-  | 'inactive'; // (F6) lucide timer-off, bare outline, grey (Closed · inactive)
+  | 'inactive' // (F6) lucide timer-off, bare outline, grey (Closed · inactive)
+  | 'accompanied' // (Companion) lucide users, amber (Located · already accompanied)
+  | 'friendInformed'; // (Companion) lucide users, grey (Friend informed)
 
 export interface StatusMeta {
   /** Full UI label, e.g. "Located · friend coming". */
@@ -120,6 +133,8 @@ export const STATUS_META: Readonly<Record<Status, StatusMeta>> = {
   [STATUS.legacyBringFriend]: { label: 'Located · friend coming', shortLabel: 'Located', tone: 'green', glyph: 'inMedical', bucket: 'open' },
   // (F6) "Inactive" on a narrow phone, where "Closed · inactive" would take the name's room (the timer glyph says the rest).
   [STATUS.inactive]: { label: 'Closed · inactive', shortLabel: 'Closed · inactive', narrowLabel: 'Inactive', tone: 'gray', glyph: 'inactive', bucket: 'closed' },
+  [STATUS.accompanied]: { label: 'Located · already accompanied', shortLabel: 'Accompanied', tone: 'amber', glyph: 'accompanied', bucket: 'open' },
+  [STATUS.friendInformed]: { label: 'Friend informed', shortLabel: 'Friend informed', tone: 'gray', glyph: 'friendInformed', bucket: 'closed' },
 };
 
 /**
@@ -140,6 +155,45 @@ export function isInMedical(status: string): boolean {
   return status === STATUS.inMedical || status === STATUS.legacyBringFriend;
 }
 
+/**
+ * (Companion) Located: In medical (friend coming) or already accompanied. Stats and lists count both as located;
+ * isInMedical stays "a friend is coming" (en route, Reunited, the reunion timer).
+ */
+export function isLocated(status: string): boolean {
+  return isInMedical(status) || status === STATUS.accompanied;
+}
+
+/** (Companion) A friend swap request is open: Accompanied with swap_requested_at set (the answerer must act). */
+export function isSwapRequested(row: { status: string; swapRequestedAt?: string | null }): boolean {
+  return row.status === STATUS.accompanied && !!row.swapRequestedAt;
+}
+
+/** (Companion) Where a friend swap happens: the request's own tent / post, or Main Med. */
+export type SwapPlace = 'fa' | 'mm';
+export const SWAP_PLACES = ['fa', 'mm'] as const;
+
+/** (Companion) A swap was approved and is running: In medical with swap_place set. */
+export function isSwapApproved(row: { status: string; swapPlace?: SwapPlace | null }): boolean {
+  return isInMedical(row.status) && (row.swapPlace === 'fa' || row.swapPlace === 'mm');
+}
+
+/** (Companion) "Main Med" for 'mm'; the request's post for 'fa' ("FA 4", "Command"). */
+export function swapPlaceLabel(place: SwapPlace, post: string): string {
+  return place === 'mm' ? 'Main Med' : post || 'FA';
+}
+
+/** (Companion) The approved swap's status label: "Swap at Main Med" / "Swap at FA 4". */
+export function swapLabel(place: SwapPlace, post: string): string {
+  return `Swap at ${swapPlaceLabel(place, post)}`;
+}
+
+/** (Companion) The open swap request's status label (blue, swap glyph). */
+export const SWAP_REQUESTED_LABEL = 'Friend swap requested';
+
+/** (Companion) The intake answer "Is a friend already with them in medical?". */
+export const FRIEND_IN_MEDICAL = ['no', 'yes', 'unsure'] as const;
+export type FriendInMedical = (typeof FRIEND_IN_MEDICAL)[number];
+
 /** CSS colour for a glyph or bar in a given tone (Radix step 9). */
 export function toneColorVar(tone: StatusTone): string {
   return `var(--${tone}-9)`;
@@ -150,20 +204,22 @@ export function toneColorVar(tone: StatusTone): string {
 // ---------------------------------------------------------------------------------------------------
 
 /** Labels for audit entries: answer, change, reunite, discharge, undo, reopen. */
-export const STATUS_KINDS = ['answer', 'change', 'reunite', 'discharge', 'undo', 'reopen'] as const;
+export const STATUS_KINDS = ['answer', 'change', 'reunite', 'discharge', 'undo', 'reopen', 'inform'] as const;
 export type StatusKind = (typeof STATUS_KINDS)[number];
 
 /** Allowed status → status moves through lp_set_status. MUST match the SQL CASE (unit-tested). */
 export const TRANSITIONS: Readonly<Record<Status, readonly Status[]>> = {
-  [STATUS.waiting]: [STATUS.notInMedical, STATUS.inMedical],
-  [STATUS.notInMedical]: [STATUS.inMedical, STATUS.waiting],
-  [STATUS.inMedical]: [STATUS.reunited, STATUS.notInMedical, STATUS.discharged, STATUS.waiting],
+  [STATUS.waiting]: [STATUS.notInMedical, STATUS.inMedical, STATUS.accompanied],
+  [STATUS.notInMedical]: [STATUS.inMedical, STATUS.waiting, STATUS.accompanied],
+  [STATUS.inMedical]: [STATUS.reunited, STATUS.notInMedical, STATUS.discharged, STATUS.waiting, STATUS.accompanied],
   [STATUS.reunited]: [STATUS.inMedical],
-  [STATUS.discharged]: [STATUS.inMedical],
+  [STATUS.discharged]: [STATUS.inMedical, STATUS.accompanied],
   [STATUS.cancelled]: [STATUS.waiting],
   [STATUS.legacyBringFriend]: [STATUS.reunited, STATUS.discharged, STATUS.notInMedical],
   // (F6) Reopen only (kind 'reopen', any staff).
   [STATUS.inactive]: [STATUS.inMedical],
+  [STATUS.accompanied]: [STATUS.friendInformed, STATUS.inMedical, STATUS.notInMedical, STATUS.discharged, STATUS.waiting],
+  [STATUS.friendInformed]: [STATUS.accompanied],
 };
 
 export function canTransition(from: string, to: string): boolean {
@@ -480,6 +536,8 @@ export const LIMITS = {
   gender: 40,
   /** Where medical has the patient ("Chair 14"), free text (Dani + Brian, 2026-11-06 afternoon). */
   medicalLocation: 60,
+  /** (Companion) The name of the friend already with them in medical. */
+  friendInMedicalName: 60,
 } as const;
 
 /** The old numeric age range. The server no longer enforces it: age is free text (LIMITS.age). */
@@ -532,6 +590,9 @@ export const FIELD_COLUMNS = {
   lastName: 'last_name',
   /** Set from Pending and the request once medical has the patient; never part of the request form. */
   medicalLocation: 'medical_location',
+  /** (Companion) The intake "Is a friend already with them in medical?" and, when yes, their name. */
+  friendInMedical: 'friend_in_medical',
+  friendInMedicalName: 'friend_in_medical_name',
 } as const;
 
 export type EditableField = keyof typeof FIELD_COLUMNS;
@@ -580,6 +641,8 @@ export const FIELD_LABELS = {
   contactRelationship: 'Relation',
   contactNotes: 'Contact notes',
   medicalLocation: 'Location',
+  friendInMedical: 'Friend in medical',
+  friendInMedicalName: 'Friend with them',
 } as const;
 export type DisplayField = keyof typeof FIELD_LABELS;
 

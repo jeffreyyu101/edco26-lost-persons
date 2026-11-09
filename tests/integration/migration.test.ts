@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, describe, expect, it } from 'vitest';
 import { ROOT } from '../../scripts/test-env.mjs';
-import { admin, dbUrl, psql } from './harness';
+import { admin, dbUrl, psql, reapplyAfterRework } from './harness';
 
 const run = promisify(execFile);
 
@@ -44,6 +44,8 @@ describe('20261106000000_rework.sql', () => {
     expect(stdout).toContain('apply #2: ok');
     expect(stdout).toContain('lp_stats byPost adds up to open: ok');
     expect(stdout).toContain('verify-migration: all good');
+    // (Companion) The script re-pasted the rework file: put the rest of the chain back.
+    reapplyAfterRework();
     await waitForSchema();
   }, 150_000);
 

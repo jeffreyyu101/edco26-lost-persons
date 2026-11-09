@@ -118,7 +118,8 @@ describe('push payload', () => {
     for (const kind of ACTIVITY_KINDS) {
       const p = pushPayload({ requestId: ID, kind, detail: 'Friend arrived' }, 'Jordan Diaz', null);
       expect(p.renotify, kind).toBe(true);
-      expect(p.requireInteraction, kind).toBe(kind === 'in_medical');
+      // (Companion) "Don't send the friend" stays until dismissed too.
+      expect(p.requireInteraction, kind).toBe(kind === 'in_medical' || kind === 'accompanied');
     }
   });
 

@@ -4,6 +4,7 @@
 // since (Jeffrey, 2026-11-06 10:31): age and gender are free text, sent trimmed with '' → null, like every
 // other text field; the form no longer checks an age range or a gender list.
 import type { RequestSummary } from '../api-types';
+import type { FriendInMedical } from '../domain';
 import {
   AGE_MAX,
   AGE_MIN,
@@ -39,6 +40,10 @@ export interface RequestFormValues {
   contactPhone: string;
   contactRelationship: string;
   contactNotes: string;
+  /** (Companion) "Is a friend already with them in medical?" No · Yes · Not sure (default). Create only. */
+  friendInMedical?: FriendInMedical;
+  /** (Companion) Their name, optional, kept only with Yes. */
+  friendInMedicalName?: string;
 }
 
 export const EMPTY_FORM_VALUES: Readonly<RequestFormValues> = Object.freeze({
@@ -119,6 +124,12 @@ export function toCreateBody(values: RequestFormValues, clientMutationId: string
     gender: clean(values.gender),
   };
   for (const key of TEXT_FIELDS) body[key] = clean(values[key]);
+  // (Companion) Sent only when answered: the server stores 'unsure' by default.
+  if (values.friendInMedical === 'yes' || values.friendInMedical === 'no') body.friendInMedical = values.friendInMedical;
+  if (values.friendInMedical === 'yes') {
+    const name = cleanName(values.friendInMedicalName ?? '');
+    if (name) body.friendInMedicalName = name.slice(0, 60);
+  }
   return body;
 }
 
@@ -189,6 +200,8 @@ export function formValuesFromCreateBody(payload: CreateRequestBody): RequestFor
     otherLocation: post === OTHER_POST ? (payload.otherLocation ?? '') : '',
   };
   for (const key of TEXT_FIELDS) values[key] = payload[key] ?? '';
+  if (payload.friendInMedical === 'yes' || payload.friendInMedical === 'no') values.friendInMedical = payload.friendInMedical;
+  if (payload.friendInMedicalName) values.friendInMedicalName = payload.friendInMedicalName;
   return values;
 }
 

@@ -19,6 +19,7 @@ import type {
   Stats,
   StatsRange,
 } from '../api-types';
+import type { SwapAction } from './swap';
 import type { PhotoTiming, SettableStatus, StatusKind } from '../domain';
 import type { MessagingApi } from './messages-core';
 import { DEFAULT_PREFS, type Prefs } from './prefs';
@@ -234,13 +235,16 @@ export interface AlertEvent {
    * 'status_changed' (added in Phase 1b): any other status change of one of my requests by someone else
    * (back to Waiting after an Undo, Discharged, Cancelled), since spec §7 alerts on ANY status change.
    */
-  kind: 'in_medical' | 'not_in_medical' | 'reunited' | 'new_request' | 'combined' | 'status_changed' | 'message';
+  kind: 'in_medical' | 'not_in_medical' | 'reunited' | 'new_request' | 'combined' | 'status_changed' | 'message' | CompanionAlertKind;
   /** Absent for 'combined'. */
   requestId?: string;
   title: string;
   subtitle?: string;
   count: number;
 }
+
+/** (Companion) The friend swap / companion alerts (same names as the Activity kinds). */
+export type CompanionAlertKind = 'accompanied' | 'swap_requested' | 'swap_approved' | 'swap_declined' | 'friend_informed';
 
 export interface StoreActions {
   /** Tap-the-live-dot / Try again. Coalesced with any poll in flight. */
@@ -272,6 +276,13 @@ export interface StoreActions {
    * latest value wins). An Undo still on screen for the request stays usable: a location is not a status.
    */
   setMedicalLocation(id: string, location: string | null, opts?: MutationOptions): Promise<MutationResult>;
+  /**
+   * (Companion) POST /api/requests/:id/swap: request a friend swap (Accompanied), approve it at the request's own
+   * post ('fa') or Main Med ('mm') (→ In medical, swapPlace set), or decline it (back to Accompanied). Optimistic,
+   * serialised per request, resent once on a 409 when the status did not move. A request gets the Undo bar
+   * (Undo = decline); approve / decline say so in a toast.
+   */
+  swap(id: string, action: SwapAction, opts?: MutationOptions): Promise<MutationResult>;
   /** Creator only, while Waiting. */
   cancel(id: string, opts?: MutationOptions): Promise<MutationResult>;
   /** Photos for an existing request (needs a connection in v1). */
@@ -511,7 +522,7 @@ function selectMerged(state: StoreState): RequestSummary[] {
 }
 
 const pendingEqual = (a: PendingGroups, b: PendingGroups) =>
-  shallowEqual(a.friendComing, b.friendComing) && shallowEqual(a.waiting, b.waiting);
+  shallowEqual(a.friendComing, b.friendComing) && shallowEqual(a.waiting, b.waiting) && shallowEqual(a.swapRequested, b.swapRequested);
 const selectPending = (s: StoreState) => pendingGroups(selectMerged(s));
 const selectMine = (s: StoreState) => mineRows(selectMerged(s), s.myIds, s.session.staff);
 const selectOutbox = (s: StoreState) => visibleOutbox(s.outbox, s.confirmed);

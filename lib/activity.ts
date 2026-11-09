@@ -7,7 +7,18 @@
 // once more where the text leaves the server. The push title is the request's full name (alertName, Brian
 // 2026-11-07), except a new request: "New request". Status words always come from STATUS_META, so a
 // later rename of a label flows through.
-import { NOT_FOUND_YET_LABEL, STATUS, STATUS_META, ageGender, alertName, initials, joinName } from './domain';
+import {
+  NOT_FOUND_YET_LABEL,
+  STATUS,
+  STATUS_META,
+  SWAP_REQUESTED_LABEL,
+  ageGender,
+  alertName,
+  initials,
+  joinName,
+  swapLabel,
+  type SwapPlace,
+} from './domain';
 import { agoPhrase, formatClockAmPm, eventDate, minutesSince } from './format';
 import { threadPath } from './thread-link';
 
@@ -32,6 +43,16 @@ export const ACTIVITY_KINDS = [
   'edited',
   /** (F6) The server closed it after an hour In medical with no activity (lib/server/inactive-notify.ts). */
   'closed_inactive',
+  /** (Companion) Answered Located · already accompanied (or changed to it): don't send the friend. */
+  'accompanied',
+  /** (Companion) A friend swap was asked for: the staff who answered decides where. */
+  'swap_requested',
+  /** (Companion) The swap was approved: at the request's tent / post or Main Med. */
+  'swap_approved',
+  /** (Companion) The swap was declined. */
+  'swap_declined',
+  /** (Companion) The friend was told the patient is already accompanied (closed). */
+  'friend_informed',
 ] as const;
 
 export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
@@ -231,9 +252,20 @@ export function enrouteDetail(etaMinutes?: number | null): string {
     : 'Friend en route';
 }
 
-/** new_request: "Tara Reyes · 24 M · FA 4". */
-export function newRequestDetail(row: { name: string | null; age: string | null; gender: string | null; postShort: string }): string {
-  return [alertName(row.name), ageGender(row.age, row.gender), row.postShort].filter(Boolean).join(' · ');
+/**
+ * new_request: "Tara Reyes · 24 M · FA 4", and (Companion) " · friend may be with them" when the intake says a
+ * friend is already with them in medical.
+ */
+export function newRequestDetail(row: {
+  name: string | null;
+  age: string | null;
+  gender: string | null;
+  postShort: string;
+  friendInMedical?: string | null;
+}): string {
+  return [alertName(row.name), ageGender(row.age, row.gender), row.postShort, row.friendInMedical === 'yes' ? FRIEND_MAY_BE_WITH_THEM : '']
+    .filter(Boolean)
+    .join(' · ');
 }
 
 /** in_medical: "Located · Chair 9", or "Located" (the label is STATUS_META's). */
@@ -268,6 +300,33 @@ export function inactiveDetail(): string {
   return STATUS_META[STATUS.inactive].label;
 }
 
+/** (Companion) accompanied: "Located · already accompanied · Don't send the friend". */
+export const DONT_SEND_FRIEND = "Don't send the friend";
+export function accompaniedDetail(): string {
+  return `${STATUS_META[STATUS.accompanied].label} · ${DONT_SEND_FRIEND}`;
+}
+
+/** (Companion) swap_requested: "Friend swap requested · FA 4 · decide where" (post = the request's postShort). */
+export function swapRequestedDetail(post: string): string {
+  return [SWAP_REQUESTED_LABEL, post.trim(), 'decide where'].filter(Boolean).join(' · ');
+}
+
+/** (Companion) swap_approved: "Swap at Main Med" / "Swap at FA 4". */
+export function swapApprovedDetail(place: SwapPlace, post: string): string {
+  return swapLabel(place, post);
+}
+
+/** (Companion) swap_declined. */
+export const SWAP_DECLINED_DETAIL = 'Swap declined';
+
+/** (Companion) friend_informed: the status label, "Friend informed". */
+export function friendInformedDetail(): string {
+  return STATUS_META[STATUS.friendInformed].label;
+}
+
+/** (Companion) A new request whose intake says a friend may already be with them gets this after its detail. */
+export const FRIEND_MAY_BE_WITH_THEM = 'friend may be with them';
+
 /**
  * The event of a status change made through POST /api/requests/:id/status (contract D, F4's kinds), or null.
  * Not in medical is never raised here: the Not found yet hold (F5) owns both its answers.
@@ -278,6 +337,8 @@ export function statusChangeEvent(status: string, medicalLocation: string | null
   if (status === STATUS.reunited) return { kind: 'reunited', detail: closedDetail('reunited') };
   if (status === STATUS.discharged) return { kind: 'discharged', detail: closedDetail('discharged') };
   if (status === STATUS.cancelled) return { kind: 'cancelled', detail: closedDetail('cancelled') };
+  if (status === STATUS.accompanied) return { kind: 'accompanied', detail: accompaniedDetail() };
+  if (status === STATUS.friendInformed) return { kind: 'friend_informed', detail: friendInformedDetail() };
   return null;
 }
 
@@ -311,7 +372,17 @@ export function requestTitle(firstName: string | null | undefined, lastName: str
 // ---------------------------------------------------------------------------------------------------
 
 /** Answers, new requests and messages are time-critical; the rest can wait a little. */
-const HIGH: ReadonlySet<ActivityKind> = new Set(['new_request', 'in_medical', 'not_in_medical', 'back_to_waiting', 'message']);
+const HIGH: ReadonlySet<ActivityKind> = new Set([
+  'new_request',
+  'in_medical',
+  'not_in_medical',
+  'back_to_waiting',
+  'message',
+  // (Companion) "Don't send the friend" and a swap waiting on a decision must arrive now.
+  'accompanied',
+  'swap_requested',
+  'swap_approved',
+]);
 
 export type PushUrgency = 'high' | 'normal';
 
@@ -337,7 +408,7 @@ export function pushPayload(event: Pick<ActivityEvent, 'requestId' | 'kind' | 'd
     kind: event.kind,
     requestId: event.requestId,
     renotify: true,
-    requireInteraction: event.kind === 'in_medical',
+    requireInteraction: event.kind === 'in_medical' || event.kind === 'accompanied',
     badge: typeof badge === 'number' && Number.isFinite(badge) && badge >= 0 ? Math.floor(badge) : null,
     sentAt: Date.now(),
   };
@@ -353,9 +424,24 @@ export function testPayload(): PushPayload {
 // ---------------------------------------------------------------------------------------------------
 
 /** lucide icon names the Activity row maps to components (components/activity/glyphs.tsx). */
-export type ActivityIcon = 'message-square' | 'cross' | 'walk' | 'check' | 'map-pin' | 'hourglass' | 'x' | 'undo-2' | 'plus' | 'pencil' | 'timer-off';
+export type ActivityIcon =
+  | 'message-square'
+  | 'cross'
+  | 'walk'
+  | 'check'
+  | 'map-pin'
+  | 'hourglass'
+  | 'x'
+  | 'undo-2'
+  | 'plus'
+  | 'pencil'
+  | 'timer-off'
+  // (Companion) lucide users (accompanied, friend informed), arrow-left-right (swap), and the swap with a ✕ (declined).
+  | 'users'
+  | 'arrow-left-right'
+  | 'swap-x';
 /** Radix colour scale; the glyph is step 11 of it. */
-export type ActivityTone = 'gray' | 'green' | 'teal' | 'violet' | 'blue';
+export type ActivityTone = 'gray' | 'green' | 'teal' | 'violet' | 'blue' | 'amber';
 
 export interface ActivityGlyph {
   icon: ActivityIcon;
@@ -380,6 +466,12 @@ export const ACTIVITY_GLYPH: Readonly<Record<ActivityKind, ActivityGlyph>> = {
   edited: { icon: 'pencil', tone: 'gray' },
   // (F6) The status glyph of Closed · inactive (StatusGlyph 'inactive'), grey: closed.
   closed_inactive: { icon: 'timer-off', tone: 'gray' },
+  // (Companion) amber users, blue swap, green swap, grey swap-x, grey users.
+  accompanied: { icon: 'users', tone: 'amber' },
+  swap_requested: { icon: 'arrow-left-right', tone: 'blue' },
+  swap_approved: { icon: 'arrow-left-right', tone: 'green' },
+  swap_declined: { icon: 'swap-x', tone: 'gray' },
+  friend_informed: { icon: 'users', tone: 'gray' },
 };
 
 /** The Pending hold (F5's "Not found yet"): its detail starts with these words (lib/domain's label, so a rename flows through). */
@@ -476,6 +568,11 @@ const SPOKEN_KIND: Readonly<Record<ActivityKind, string>> = {
   cancelled: 'closed',
   edited: 'details changed',
   closed_inactive: 'closed',
+  accompanied: 'answer',
+  swap_requested: 'friend swap requested',
+  swap_approved: 'friend swap approved',
+  swap_declined: 'friend swap declined',
+  friend_informed: 'closed',
 };
 
 /** Spoken form of line 1: "Request Jane Doe"; NO_NAME is "A request with no name". */

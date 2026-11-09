@@ -57,7 +57,8 @@ import {
 } from '@/lib/client/store-contract';
 import { refreshSync } from '@/lib/client/refresh-now';
 import { useLiveStatus } from '@/lib/client/use-live-status';
-import { STATUS, notFoundHolds, parsePostFilterKey, postFilterLabel, statusMeta, type GlyphKind } from '@/lib/domain';
+import { STATUS, notFoundHolds, parsePostFilterKey, postFilterLabel, statusMeta, type GlyphKind, type SettableStatus } from '@/lib/domain';
+import { LocatedSheet } from '@/components/profile/CompanionSheets';
 import { formatCreatedTime, formatUpdatedAgo, updatedPhrase } from '@/lib/format';
 import { useInDesk } from '@/components/desk/desk-context';
 import { AppHeader } from './AppHeader';
@@ -454,7 +455,7 @@ function useRecheckNow(rows: readonly RequestSummary[]): number {
 }
 
 export function PendingView({ selected = null }: PendingViewProps = {}) {
-  const { friendComing, waiting } = usePending();
+  const { friendComing, waiting, swapRequested } = usePending();
   const loading = useIsLoading();
   const now = useRecheckNow(waiting);
   // Rule 2: pendingGroups already gives Waiting for check longest wait first. Rule 4 for Friend coming.
@@ -511,9 +512,22 @@ export function PendingView({ selected = null }: PendingViewProps = {}) {
     [tap, offline, mark, unmark],
   );
   const onReunited = useCallback((row: RequestSummary) => void tap(row.id, STATUS.reunited, 'reunite'), [tap]);
+  // (Companion) Located asks "Someone already with them?" first (LocatedSheet); nothing saves until it is answered.
+  const [asking, setAsking] = useState<{ row: RequestSummary; card: HTMLElement | null } | null>(null);
   const onInMedical = useCallback(
     (row: RequestSummary, card: HTMLElement | null) => {
-      const result = tap(row.id, STATUS.inMedical, 'answer');
+      // Offline: the answer is refused with "Needs a connection" before the follow-up opens (as every answer).
+      if (offline) {
+        refuseOffline(actions);
+        return;
+      }
+      setAsking({ row, card });
+    },
+    [offline, actions],
+  );
+  const onLocated = useCallback(
+    (row: RequestSummary, card: HTMLElement | null, to: SettableStatus) => {
+      const result = tap(row.id, to, 'answer');
       if (!result) return;
       // iOS opens the keyboard only for a focus made during the tap: the sheet's field takes it over.
       if (!inDesk) primeKeyboard();
@@ -524,6 +538,19 @@ export function PendingView({ selected = null }: PendingViewProps = {}) {
       });
     },
     [tap, inDesk, openLocation],
+  );
+  const asked = (
+    <LocatedSheet
+      row={asking?.row ?? null}
+      open={asking !== null}
+      offline={offline}
+      onClose={() => setAsking(null)}
+      onChoose={(to) => {
+        const a = asking;
+        setAsking(null);
+        if (a) onLocated(a.row, a.card, to);
+      }}
+    />
   );
   const onLocate = useCallback(
     (row: RequestSummary, card: HTMLElement | null) => {
@@ -564,6 +591,7 @@ export function PendingView({ selected = null }: PendingViewProps = {}) {
   const queues = {
     waiting,
     coming,
+    swapRequested,
     now,
     offline,
     leaving,
@@ -578,6 +606,7 @@ export function PendingView({ selected = null }: PendingViewProps = {}) {
       <Chrome view="pending" skeleton={<PendingSkeleton />}>
         <PendingBoard {...queues} />
         {editor}
+        {asked}
       </Chrome>
     );
   }
@@ -588,6 +617,7 @@ export function PendingView({ selected = null }: PendingViewProps = {}) {
         <PendingQueues {...queues} />
       </div>
       {editor}
+      {asked}
     </Chrome>
   );
 }

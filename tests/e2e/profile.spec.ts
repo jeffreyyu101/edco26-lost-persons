@@ -143,6 +143,7 @@ test('renders from the request, answers, changes the answer, reunites, reopens a
 
   // Waiting → In medical.
   await page.getByRole('button', { name: 'Located', exact: true }).click();
+  await page.getByTestId('located-no').click(); // (Companion) "Someone already with them?" No
   await expect(profileStatus(page, 'Found – Awaiting Reunion')).toBeVisible();
   await expect(statusBlock(page)).toContainText('Located · friend coming');
   // Who answered and when, then where medical has them (Pending v8): no "heading to Main Med" line.
@@ -157,6 +158,7 @@ test('renders from the request, answers, changes the answer, reunites, reopens a
   await expect(profileStatus(page, 'Checked – Not Found')).toBeVisible();
   await expect(statusBlock(page)).toContainText(FRONT.staffName);
   await chooseChange(page, 'Located');
+  await page.getByTestId('located-no').click(); // (Companion) "Someone already with them?" No
   await expect(profileStatus(page, 'Found – Awaiting Reunion')).toBeVisible();
 
   // Reunited closes it: no actions.
@@ -235,6 +237,7 @@ test('Not located is closed and grey, and keeps exactly its actions: Change answ
   // And Change answer still works.
   await page.goto(`/?r=${row.id}`);
   await chooseChange(page, 'Located');
+  await page.getByTestId('located-no').click(); // (Companion) "Someone already with them?" No
   await expect(profileStatus(page, 'Found – Awaiting Reunion')).toBeVisible();
   await expect(statusBlock(page)).toHaveAttribute('data-tone', 'green');
 });
@@ -249,6 +252,7 @@ test('Change answer opens a menu: the other answer or Back to Waiting for check,
 
   // Waiting → In medical from the profile button: Undo is offered.
   await page.getByRole('button', { name: 'Located', exact: true }).click();
+  await page.getByTestId('located-no').click(); // (Companion) "Someone already with them?" No
   await expect(profileStatus(page, 'Found – Awaiting Reunion')).toBeVisible();
   await expect(page.getByText(`${lp} · Located`)).toBeVisible();
   await expect(undoButton(page)).toBeVisible();
@@ -306,6 +310,7 @@ test('Change answer opens a menu: the other answer or Back to Waiting for check,
 
   // Not located → In medical through the menu, then Reunited: both offer Undo.
   await chooseChange(page, 'Located');
+  await page.getByTestId('located-no').click(); // (Companion) "Someone already with them?" No
   await expect(profileStatus(page, 'Found – Awaiting Reunion')).toBeVisible();
   await expect(undoButton(page)).toBeVisible();
   await page.getByRole('button', { name: 'Reunited', exact: true }).click();

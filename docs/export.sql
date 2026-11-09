@@ -47,6 +47,8 @@ select
     when 'Found – Discharged' then 'Discharged'
     when 'Cancelled' then 'Cancelled'
     when 'Closed – Inactive' then 'Closed · inactive'
+    when 'Found – Accompanied' then 'Located · already accompanied'
+    when 'Closed – Friend Informed' then 'Friend informed'
     else p.status
   end as "Status",
   p.status as "Status (database)",

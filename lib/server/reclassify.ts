@@ -13,7 +13,9 @@ import { OPAQUE_DB_ERROR, db } from './supabase';
 export type MutationKind =
   | { fn: 'status'; expectedVersion: number; target: string }
   | { fn: 'update'; expectedVersion: number }
-  | { fn: 'cancel'; expectedVersion: number };
+  | { fn: 'cancel'; expectedVersion: number }
+  // (Companion) lp_swap: version mismatch → P0409, else (not Accompanied) → P0422 illegal_transition.
+  | { fn: 'swap'; expectedVersion: number };
 
 async function currentRow(id: string): Promise<{ status: string; row_version: number } | null | 'error'> {
   try {
@@ -47,6 +49,10 @@ export async function reclassify(failure: unknown, id: string, kind: MutationKin
     case 'cancel':
       if (row.status !== STATUS.waiting && row.status !== STATUS.cancelled) return illegal(row.status);
       if (row.row_version !== kind.expectedVersion) return conflict(row.status);
+      return failure;
+    case 'swap':
+      if (row.row_version !== kind.expectedVersion) return conflict(row.status);
+      if (row.status !== STATUS.accompanied) return illegal(row.status);
       return failure;
   }
 }

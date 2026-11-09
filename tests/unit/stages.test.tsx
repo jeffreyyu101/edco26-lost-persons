@@ -241,6 +241,9 @@ describe('labels', () => {
       enroute: 'En route',
       arrived: 'Arrived',
       inactive: 'Inactive',
+      // (Companion) The swap labels, whole beside an 80 px name at 375 px.
+      swapRequested: 'Swap asked',
+      swapApproved: 'Swapping',
     });
     // The log row reads them through narrowStageLabel (legacy statuses keep their label).
     for (const [key, narrow] of [['enroute', 'En route'], ['arrived', 'Arrived'], ['recheckDue', 'Recheck'], ['waiting', 'Waiting'], ['inactive', 'Inactive']] as const) {
@@ -267,6 +270,10 @@ describe('labels', () => {
       discharged: 'gray',
       cancelled: 'gray',
       inactive: 'gray',
+      accompanied: 'amber',
+      swapRequested: 'blue',
+      swapApproved: 'green',
+      friendInformed: 'gray',
     });
     for (const key of ['needsInfo', 'notFoundYet', 'recheckDue', 'enroute', 'arrived'] as const) expect(STAGE_META[key].bucket).toBe('open');
   });

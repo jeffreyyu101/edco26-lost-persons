@@ -209,6 +209,7 @@ test('the request (medical): Pending · not located yet in violet, the first che
   await expect(page.getByTestId('audit-item').first()).toContainText(`Recheck ${formatClockAmPm(held.recheckAt as string, TZ)}`);
   // In medical from the block clears the hold.
   await answers.getByRole('button', { name: IN_MEDICAL, exact: true }).click();
+  await page.getByTestId('located-no').click(); // (Companion) "Someone already with them?" No
   await expect(block).toHaveAttribute('data-tone', 'green');
   await expect(block.getByTestId('recheck-row')).toHaveCount(0);
 });

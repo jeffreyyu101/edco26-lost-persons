@@ -82,6 +82,12 @@ export function mapRow(raw: unknown): RequestSummary {
     notFoundChecks: reqNum(r.not_found_checks),
     // (F6) A backlog auto-close nobody is told about. A database before F6 sends nothing: false.
     quietClose: r.quiet_close === true,
+    // (Companion) A database before the companion migration sends none: unsure, nothing open.
+    friendInMedical: r.friend_in_medical === 'yes' || r.friend_in_medical === 'no' ? r.friend_in_medical : 'unsure',
+    friendInMedicalName: str(r.friend_in_medical_name),
+    swapRequestedAt: str(r.swap_requested_at),
+    swapRequestedBy: str(r.swap_requested_by),
+    swapPlace: r.swap_place === 'fa' || r.swap_place === 'mm' ? r.swap_place : null,
   };
 }
 

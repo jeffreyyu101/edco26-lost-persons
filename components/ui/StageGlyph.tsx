@@ -7,7 +7,7 @@ import type { CSSProperties } from 'react';
 import { Check, History, Hourglass } from 'lucide-react';
 import type { GlyphKind } from '@/lib/domain';
 import type { StageGlyphKind } from '@/lib/stages';
-import { StatusGlyph } from './StatusGlyph';
+import { StatusGlyph, SwapGlyph } from './StatusGlyph';
 
 export interface StageGlyphProps {
   glyph: StageGlyphKind;
@@ -19,7 +19,7 @@ export interface StageGlyphProps {
 }
 
 /** The walking figure (design/screens/updates.html P.walk), on the 24 px grid. */
-const WALK = (
+export const WALK = (
   <>
     <circle cx="13" cy="4" r="2" />
     <path d="m7 21 2-6 3 3v3" />
@@ -68,6 +68,9 @@ export function StageGlyph({ glyph, size = 14, label, className, style }: StageG
           {WALK}
         </svg>
       );
+    case 'swapBlue':
+    case 'swapGreen':
+      return <SwapGlyph tone={glyph === 'swapBlue' ? 'blue' : 'green'} size={size} {...(label ? { label } : {})} />;
     case 'arrived':
       return <Check size={size + 1} strokeWidth={2.4} color="var(--green-11)" {...common} />;
     default:
