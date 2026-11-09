@@ -34,6 +34,8 @@ export function changeAnswerChoices(status: string): ChangeChoice[] {
   if (other === null) return [];
   const choices: ChangeChoice[] = [
     { to: other, label: other === STATUS.notInMedical ? ANSWER_LABEL.notFound : ANSWER_LABEL.inMedical, kind: 'change' },
+    // (Post-event) Located · friend coming → already accompanied (the way back from it is offered above).
+    ...(status === STATUS.inMedical ? [{ to: STATUS.accompanied, label: STATUS_META[STATUS.accompanied].label, kind: 'change' as const }] : []),
     { to: STATUS.waiting, label: BACK_TO_WAITING, kind: 'change' },
   ];
   return choices.filter((c) => canTransition(status, c.to));

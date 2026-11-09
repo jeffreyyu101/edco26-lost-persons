@@ -78,12 +78,15 @@ export interface AttentionRow extends AttentionInput {
   eta: number | null;
 }
 
-/** Most urgent first; waiting and located turn red 30 minutes in, an overdue re-check 10 minutes past due. */
+/**
+ * Most urgent first; waiting and located turn red 30 minutes in, an overdue re-check 10 minutes past due, (post-event)
+ * a swap request 10 minutes after it was asked (lp_stats(text) scores it the same way).
+ */
 export function attentionRows(items: readonly AttentionInput[], now: number): AttentionRow[] {
   return items
     .map((it) => {
       const t = (now - Date.parse(it.since)) / 60_000;
-      const re = it.kind === 'recheck';
+      const re = it.kind === 'recheck' || it.kind === 'swap';
       const eta = it.enroute && it.etaAt ? Math.max(0, Math.ceil((Date.parse(it.etaAt) - now) / 60_000)) : null;
       return { ...it, t, sev: re ? overSev(t) : ageSev(t), score: t - (re ? 10 : 30), eta };
     })

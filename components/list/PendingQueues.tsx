@@ -255,8 +255,8 @@ export function PendingQueues({ waiting, coming, swapRequested = [], now, offlin
         oldestWait={oldest}
         variant={variant}
         boardClasses={boardClasses}
+        lead={variant === 'board' ? swaps : null}
       >
-        {variant === 'board' ? swaps : null}
         {leaving.items.map(({ row, leaving: out, height }) =>
           out ? (
             <div key={`leaving-${row.id}`} className={s.leaveWrap} style={{ ['--leave-h' as string]: `${height ?? 0}px` }}>
@@ -297,6 +297,7 @@ function Queue({
   marker = null,
   variant,
   boardClasses,
+  lead = null,
   children,
 }: {
   queue: QueueKey;
@@ -309,25 +310,29 @@ function Queue({
   marker?: ReactNode;
   variant: 'phone' | 'board';
   boardClasses?: { col?: string; cards?: string };
+  /** (Post-event) Shown at the top of the column whatever the fold and the count (the desk's swap requests). */
+  lead?: ReactNode;
   children: ReactNode;
 }) {
   const base = useId();
   const headingId = `${base}-h`;
   const cardsId = `${base}-cards`;
   const board = variant === 'board';
-  const shown = (open || count === 0) && hasCards;
+  const showCards = (open || count === 0) && hasCards;
+  const shown = showCards || (lead !== null && lead !== undefined);
   return (
     <section
       className={board ? boardClasses?.col : s.qsec}
       aria-labelledby={headingId}
       data-queue={queue}
-      data-open={shown ? '' : undefined}
+      data-open={showCards ? '' : undefined}
       data-testid={board ? `pending-column-${queue}` : `pending-section-${queue}`}
     >
       <QueueHeader queue={queue} count={count} open={open} onToggle={onToggle} oldestWait={oldestWait} controls={cardsId} id={headingId} marker={marker} />
       {shown ? (
         <div id={cardsId} className={board ? boardClasses?.cards : s.qcards}>
-          {children}
+          {lead}
+          {showCards ? children : null}
         </div>
       ) : null}
     </section>

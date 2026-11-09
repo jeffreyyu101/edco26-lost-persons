@@ -1297,6 +1297,20 @@ button.lr:focus-visible {
   text-overflow: ellipsis;
 }
 
+/* (Post-event) An approved swap on a Friend coming card: "⇄ Swap at FA 4", green, beside the location chip. */
+.swapTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 28px;
+  margin-left: 10px;
+  color: var(--green-11);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 /* ---- Pending v9.1 (design/screens/pending-v9.html, Brian 2026-11-06 19:35–20:40) ----------------------------
    One page on the phone: Waiting for check, then Friend coming, each under a 44 px header row that folds it
    (components/list/PendingQueues.tsx). The headers pin under the title while their section scrolls; on the desk

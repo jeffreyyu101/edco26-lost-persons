@@ -152,16 +152,17 @@ export function ColumnHeader({ sort }: { sort?: TableSort }) {
 }
 
 /** (Pending v9.1) "○ Waiting for check  7": a group header row over a status group, sticky under the column header. */
-export function GroupRow({ group, count }: { group: StatusGroupName; count: number }) {
+export function GroupRow({ group, count, label }: { group: StatusGroupName; count: number; label?: string }) {
   const g = STATUS_GROUP_META[group];
+  const name = label ?? g.label;
   return (
     <div className={t.gh} role="heading" aria-level={2} data-group={group} data-testid={`group-${group}`}>
       <StatusGlyph kind={g.glyph} size={14} />
-      <span aria-hidden>{g.label}</span>
+      <span aria-hidden>{name}</span>
       <span className={t.ghn} aria-hidden>
         {count}
       </span>
-      <span className={t.vh}>{`${g.label} ${count} ${count === 1 ? 'request' : 'requests'}`}</span>
+      <span className={t.vh}>{`${name} ${count} ${count === 1 ? 'request' : 'requests'}`}</span>
     </div>
   );
 }

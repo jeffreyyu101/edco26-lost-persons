@@ -90,3 +90,17 @@ describe('the status block (Pending v8)', () => {
     expect(STATUS.waiting).toBe('Added');
   });
 });
+
+describe('(post-event) Friend swap requested', () => {
+  it('the line under it names who asked and when, not who answered Accompanied', () => {
+    const asked = new Date(NOW - 4 * 60_000).toISOString();
+    const html = render(
+      store((r) => ({ ...r, status: STATUS.accompanied, reunionStartedAt: null, swapRequestedAt: asked, swapRequestedBy: 'Tina Tent · FA 4' })),
+      <ProfileView id={stubId(1004)} />,
+    );
+    const sub = html.slice(html.indexOf('data-testid="status-sub"'));
+    expect(text(sub.slice(0, sub.indexOf('</div>')))).toMatch(/Tina T\. · \d{1,2}:\d{2}/);
+    expect(text(statusBlock(html))).toMatch(/^Friend swap requested Tina T\./);
+    expect(text(statusBlock(html))).not.toContain('Rae Chen');
+  });
+});

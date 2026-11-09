@@ -58,7 +58,13 @@ test.afterEach(async () => {
       } else if (row.status === STATUS.inMedical) {
         await request.fetch(`/api/requests/${id}/status`, { method: 'POST', data: { status: STATUS.reunited, expectedVersion: row.rowVersion, kind: 'reunite' }, headers: { Origin: BASE } });
       } else if (row.status === STATUS.accompanied) {
-        await request.fetch(`/api/requests/${id}/status`, { method: 'POST', data: { status: STATUS.friendInformed, expectedVersion: row.rowVersion, kind: 'inform' }, headers: { Origin: BASE } });
+        // (Post-event) Friend informed over an open swap request is a conflict: cancel the request first.
+        let version = row.rowVersion;
+        if (row.swapRequestedAt) {
+          const res = await request.fetch(`/api/requests/${id}/swap`, { method: 'POST', data: { action: 'cancel', expectedVersion: version }, headers: { Origin: BASE } });
+          if (res.ok()) version = ((await res.json()) as { request: RequestSummary }).request.rowVersion;
+        }
+        await request.fetch(`/api/requests/${id}/status`, { method: 'POST', data: { status: STATUS.friendInformed, expectedVersion: version, kind: 'inform' }, headers: { Origin: BASE } });
       }
     } catch {
       // Best effort.
@@ -182,4 +188,47 @@ test('offline: Friend informed says "Needs a connection" and stays Accompanied',
   expect((await detail(page.request, r.id)).status).toBe(STATUS.accompanied);
   await page.getByTestId('friend-informed').click();
   await expect(statusLabel(page)).toHaveText('Friend informed', { timeout: 20_000 });
+});
+
+test('(post-event) Decline → Undo: the request is back with its original time', async ({ page }) => {
+  const r = await accompanied(page.request);
+  const asked = (await call<{ request: RequestSummary }>(page.request, 'POST', `/api/requests/${r.id}/swap`, { action: 'request', expectedVersion: r.rowVersion })).request;
+  await page.goto(`/?r=${r.id}`);
+  await expect(statusLabel(page)).toHaveText('Friend swap requested', { timeout: 20_000 });
+  await page.getByTestId('swap-decide').click();
+  await page.getByTestId('swap-sheet').getByTestId('swap-decline').click();
+  await expect(statusLabel(page)).toHaveText('Located · already accompanied', { timeout: 20_000 });
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(statusLabel(page)).toHaveText('Friend swap requested', { timeout: 20_000 });
+  await expect.poll(async () => (await detail(page.request, r.id)).swapRequestedAt ?? null).toBe(asked.swapRequestedAt);
+});
+
+test('(post-event) desk Pending board: Friend swap requested stays on top with Waiting for check folded or empty', async ({ page }) => {
+  const r = await accompanied(page.request);
+  await call(page.request, 'POST', `/api/requests/${r.id}/swap`, { action: 'request', expectedVersion: r.rowVersion });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/?view=pending');
+  const column = page.getByTestId('pending-column-check');
+  await expect(column.getByTestId('pending-section-swap')).toBeVisible({ timeout: 20_000 });
+  // With Waiting for check folded (when it has requests; with none, its header is plain and the case above is it).
+  const toggle = page.getByTestId('queue-toggle-check');
+  if ((await toggle.count()) > 0) {
+    if ((await toggle.getAttribute('aria-expanded')) === 'true') await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(column.getByTestId('check-card')).toHaveCount(0);
+  }
+  await expect(column.getByTestId('pending-section-swap')).toBeVisible();
+});
+
+test('(post-event) the Located follow-up closes when someone else answers first; their answer stands', async ({ page }) => {
+  const r = await createRequest(page.request);
+  await page.goto(`/?r=${r.id}`);
+  await page.getByTestId('profile-actions').getByRole('button', { name: 'Located', exact: true }).click();
+  const sheet = page.getByTestId('located-sheet');
+  await expect(sheet.getByText('Someone already with them?')).toBeVisible();
+  // Another phone answers Located · friend coming; this page's next sync brings it in.
+  await setStatus(page.request, r, STATUS.inMedical);
+  await expect(sheet).toHaveCount(0, { timeout: 20_000 });
+  await expect(statusLabel(page)).toHaveText('Located · friend coming', { timeout: 20_000 });
+  expect((await detail(page.request, r.id)).status).toBe(STATUS.inMedical);
 });

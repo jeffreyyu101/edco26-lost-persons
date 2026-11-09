@@ -34,7 +34,7 @@ import { LocationEditor, anchorFor, type LocationTarget, type Measurable } from 
 import type { RequestSummary } from '@/lib/api-types';
 import { goBack, navigate } from '@/lib/client/nav';
 import { splitOpenClosed } from '@/lib/client/selectors';
-import { byFriendComing, nextRecheckAt, statusGroups } from '@/lib/client/status-order';
+import { LOCATED_GROUP_LABEL, byFriendComing, nextRecheckAt, statusGroups } from '@/lib/client/status-order';
 import { useMineClosedOpen, useSortOrder } from '@/lib/client/view-prefs';
 import {
   useActions,
@@ -364,7 +364,7 @@ export function AllView({ status, post, open = false }: AllViewProps) {
               ) : null}
               {groups.coming.length > 0 ? (
                 <>
-                  <GroupDivider group="coming" count={groups.coming.length} />
+                  <GroupDivider group="coming" count={groups.coming.length} label={LOCATED_GROUP_LABEL} />
                   <Rows rows={groups.coming} now={now} tz={tz} />
                 </>
               ) : null}
@@ -514,6 +514,8 @@ export function PendingView({ selected = null }: PendingViewProps = {}) {
   const onReunited = useCallback((row: RequestSummary) => void tap(row.id, STATUS.reunited, 'reunite'), [tap]);
   // (Companion) Located asks "Someone already with them?" first (LocatedSheet); nothing saves until it is answered.
   const [asking, setAsking] = useState<{ row: RequestSummary; card: HTMLElement | null } | null>(null);
+  // (Post-event) Someone else answered it while the sheet was open: it closes, as the answer buttons would go.
+  if (asking && !waiting.some((r) => r.id === asking.row.id && r.status === asking.row.status)) setAsking(null);
   const onInMedical = useCallback(
     (row: RequestSummary, card: HTMLElement | null) => {
       // Offline: the answer is refused with "Needs a connection" before the follow-up opens (as every answer).
@@ -665,8 +667,8 @@ export function MineView() {
             </section>
           ) : null}
           {groups.coming.length > 0 ? (
-            <section aria-label={`Friend coming, ${groups.coming.length}`} data-testid="mine-group-coming">
-              <GroupDivider group="coming" count={groups.coming.length} cards />
+            <section aria-label={`${LOCATED_GROUP_LABEL}, ${groups.coming.length}`} data-testid="mine-group-coming">
+              <GroupDivider group="coming" count={groups.coming.length} label={LOCATED_GROUP_LABEL} cards />
               <div className={s.scroll}>{groups.coming.map(card)}</div>
             </section>
           ) : null}

@@ -506,7 +506,7 @@ test.describe('fixture', () => {
       await expect(toggle).toHaveAttribute('aria-pressed', 'true');
       await expect(page.getByTestId('sort-announcement')).toHaveText('Sorted by status');
       await expect(page.getByRole('heading', { name: 'Waiting for check 7 requests' })).toBeVisible();
-      await expect(page.getByRole('heading', { name: 'Friend coming 3 requests' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Located 3 requests' })).toBeVisible();
       expect(await rowIds(list)).toEqual(ids(['P.V.', 'S.O.', 'M.R.', 'B.W.', 'K.T.', 'J.D.', 'E.N.', 'M.P.', 'A.L.', 'R.P.']));
       await expect(page.getByTestId('closed-fold')).toHaveAccessibleName('Archived 3 requests');
       await expect(page.getByTestId('closed-fold')).toHaveAttribute('aria-expanded', 'false');
@@ -689,7 +689,7 @@ test.describe('fixture', () => {
       await expect(header('status')).toHaveAttribute('aria-sort', 'other');
       await expect(header('created')).not.toHaveAttribute('aria-sort', /.+/);
       await expect(page.getByRole('heading', { name: 'Waiting for check 7 requests' })).toBeVisible();
-      await expect(page.getByRole('heading', { name: 'Friend coming 3 requests' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Located 3 requests' })).toBeVisible();
       expect((await rowIds(table)).slice(0, 10)).toEqual(ids(['P.V.', 'S.O.', 'M.R.', 'B.W.', 'K.T.', 'J.D.', 'E.N.', 'M.P.', 'A.L.', 'R.P.']));
       const cell = (n: string) => table.locator(`[data-request-id="${idOf(n)}"] [data-col="status"]`);
       await expect(cell('B.W.')).toHaveText('Waiting for check· 27m');
