@@ -433,6 +433,7 @@ test.describe('desk 1440 × 900', () => {
       await openButton(r).focus();
       await checkCard(page, r.id).getByRole('button', { name: 'Located', exact: true }).focus();
       await page.keyboard.press('Enter');
+      await page.getByTestId('located-no').click(); // (Companion) "Someone already with them?" No
       const pop = page.getByRole('dialog', { name: `${nameOf(r)} located` });
       await expect(pop.getByRole('textbox', { name: 'Location' })).toBeFocused();
       return pop;
