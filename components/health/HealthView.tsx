@@ -120,9 +120,14 @@ export function HealthDashboard({ data, onTrail }: { data: HealthData; onTrail: 
 type LoadResult = { kind: 'ok'; data: HealthData } | { kind: 'auth' } | { kind: 'fail' };
 
 /** GET /api/telemetry/health for one window. Never rejects. */
-async function loadHealth(w: HealthWindow): Promise<LoadResult> {
+async function loadHealth(w: HealthWindow, event: string): Promise<LoadResult> {
   try {
-    const res = await fetch(`/api/telemetry/health?window=${w}`, { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } });
+    const res = await fetch(`/api/telemetry/health?window=${w}`, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      // (Events) An event route refuses a call that does not say which event it is for (409 wrong_event).
+      headers: { Accept: 'application/json', 'X-LP-Event': event },
+    });
     if (res.status === 401) return { kind: 'auth' };
     if (!res.ok) return { kind: 'fail' };
     return { kind: 'ok', data: (await res.json()) as HealthData };
@@ -131,7 +136,7 @@ async function loadHealth(w: HealthWindow): Promise<LoadResult> {
   }
 }
 
-export function HealthView({ lead }: { lead: boolean }) {
+export function HealthView({ lead, event }: { lead: boolean; event: string }) {
   const desk = useSyncExternalStore(subscribeDesk, deskNow, deskServer);
   const [win, setWin] = useState<HealthWindow>('3h');
   const [data, setData] = useState<HealthData | null>(null);
@@ -156,7 +161,7 @@ export function HealthView({ lead }: { lead: boolean }) {
   const refresh = (w: HealthWindow = win) => {
     if (loading) return;
     setLoading(true);
-    void loadHealth(w).then(apply);
+    void loadHealth(w, event).then(apply);
   };
 
   useEffect(() => {
@@ -166,13 +171,13 @@ export function HealthView({ lead }: { lead: boolean }) {
       // the sidebar link is a convenience
     }
     let live = true;
-    void loadHealth('3h').then((r) => {
+    void loadHealth('3h', event).then((r) => {
       if (live) apply(r);
     });
     return () => {
       live = false;
     };
-  }, [apply]);
+  }, [apply, event]);
 
   const setEnabled = async (enabled: boolean) => {
     setSwitching(true);

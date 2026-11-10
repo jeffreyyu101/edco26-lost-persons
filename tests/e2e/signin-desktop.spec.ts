@@ -6,6 +6,7 @@
 //
 // POST /api/session is mocked with page.route, so this runs against any build with no database. Synthetic
 // names only; the console must never show them or the passwords.
+import './helpers/api-event';
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 import { axeViolations, overlappingTargets, smallTargets } from './helpers/a11y';
 

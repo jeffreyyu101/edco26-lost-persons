@@ -6,6 +6,7 @@
 //     is an incorrect password, the old join link still opens the Ended screen, and the Reopen sheet says New one
 //     needed for both, with no time left.
 // Synthetic names only; every event is ended (and its password and link dropped) in afterAll. Both browsers.
+import './helpers/api-event';
 import { randomInt } from 'node:crypto';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { loadTestEnv } from '../../scripts/test-env.mjs';

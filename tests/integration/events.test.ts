@@ -1025,9 +1025,41 @@ describe('(phase 2) X-LP-Event: a tab never writes into another event than the o
     const who = await api<SessionInfo>('/api/session', as(a.event.id));
     expect(who.status).toBe(200);
     expect(who.body.eventId).toBe(b.event.id);
-    // Its own event, or no header / 'none' (a tab that knows no event yet), go through.
+    // Its own event, or 'none' (a tab that knows no event yet), go through.
     expect((await api('/api/requests', { json: createBody({ reportingLocation: 'Main Stage Tent' }), ...as(b.event.id) })).status).toBe(201);
     expect((await api('/api/sync', as('none'))).status).toBe(200);
+  });
+
+  it("(cut-over fix A1) no header at all (the old build's app) is refused like a wrong one; the headerless routes still answer", async () => {
+    const e = await makeEvent();
+    archivedAtEnd.push(e.event.id);
+    const cookie = (await signIn(newStaff('Site Ops'), e.password)).cookie;
+    const bare = { cookie, event: false as const };
+    // A write (the old outbox's create, post 'Other' which every event accepts) and the old app's poll.
+    const write = await api('/api/requests', { json: createBody({ reportingLocation: 'Other' }), ...bare });
+    expect(write.status).toBe(409);
+    expect(write.body.error.code).toBe('wrong_event');
+    const poll = await api('/api/sync', bare);
+    expect(poll.status).toBe(409);
+    expect(poll.body.error.code).toBe('wrong_event');
+    expect(psql(`select count(*) from public.patients where event_id = '${e.event.id}'`)).toBe('0');
+    // The session check needs no event: the old app still learns who is signed in (and the new app which event).
+    expect((await api<SessionInfo>('/api/session', bare)).body.eventId).toBe(e.event.id);
+    // With the cookie's event, as the new client sends it: as before.
+    expect((await api('/api/requests', { json: createBody({ reportingLocation: 'Other' }), cookie, event: e.event.id })).status).toBe(201);
+    expect((await api('/api/sync', { cookie, event: e.event.id })).status).toBe(200);
+    // The routes whose calls cannot carry the header (an <img src>, sendBeacon, the service worker) answer without it.
+    const photo = await api(`/api/photos/${randomUUID()}`, bare);
+    expect(photo.status).toBe(404);
+    expect(photo.body.error.code).toBe('not_found');
+    const beacon = await api('/api/telemetry', { body: 'not a batch', headers: { 'content-type': 'text/plain' }, ...bare });
+    expect(beacon.body?.error?.code ?? null).not.toBe('wrong_event');
+    expect([200, 204, 400, 415, 422]).toContain(beacon.status);
+    const resubscribe = await api('/api/push/subscribe', { json: { endpoint: 'https://push.invalid/x', keys: { p256dh: 'x', auth: 'y' } }, ...bare });
+    expect(resubscribe.body?.error?.code ?? null).not.toBe('wrong_event');
+    expect(resubscribe.status).not.toBe(409);
+    // …but never for another event than the cookie's.
+    expect((await api(`/api/photos/${randomUUID()}`, { cookie, event: EVENT_ID })).status).toBe(409);
   });
 });
 
