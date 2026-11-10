@@ -32,7 +32,8 @@ screenshots.
   requests, errors, sync and push health, and timed flows (open, resume, answer, message, new request, alert), as
   numbers and attribute names only, by team. A desktop-only **`/health`** page shows the problem spots with their
   breadcrumb trails, the critical paths, request failure rates, push delivery and alert coverage. It stops by itself at
-  **2026-11-10 06:00 ET**; the kill switch is on `/health` (off only) and in SQL (off and back on). See "Telemetry in
+  **2026-11-10 06:00 ET**; the kill switch is on `/health` (off only) and in SQL (off and back on). (Events, 2026-11-10: the switch on
+  `/health` is a lead's, off and back on; staff see it disabled.) See "Telemetry in
   production" below. Reading it after the message lane and the phone thread in the page: on a phone a swipe on the
   thread is the request page's (area `profile`; its trail still says `w!:thread:…`), the desk pane's thread is still
   `thread`, and a tap in a row's message lane is `message-mark` (BUILD_SPEC A118).
