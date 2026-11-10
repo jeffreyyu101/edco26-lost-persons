@@ -386,6 +386,11 @@ test.describe('brand row on a cold load', () => {
       await new Promise((resolve) => setTimeout(resolve, 1_000));
       await route.continue();
     });
+    // F4's alerts reminder (an iPhone Safari tab here, so always) is drawn above everything once /api/push/prefs
+    // answers, which can be before or after the list's first paint; it pushes the row down 128 px by itself.
+    // That is the reminder's own arrival, not the logos or the rows: push off here, so the row is measured in
+    // one layout. (The reminder's place is checked in alerts.spec.ts and pending-v9.spec.ts.)
+    await page.route('**/api/push/prefs', (route) => route.fulfill({ json: { enabled: false, publicKey: null, newRequests: false, myUpdates: true } }));
     // The row and the view menu title, measured the moment they first appear.
     await page.addInitScript(() => {
       const w = window as unknown as { __firstSeen?: unknown };
