@@ -9,8 +9,8 @@ Follow the steps in order. Every SQL step runs in Supabase → **SQL Editor** (r
 issue.
 
 **Do this only while no event is live.** EDC is over; Warped Tour Orlando practice starts Thu 2026-11-12. The old build
-and the new build cannot share a database: from the migration until the new deployment is Ready, every screen fails,
-so nobody may be working a live log then.
+and the new build cannot share a database: from the migration until the new deployment is Ready, nothing reaches the
+log (phones keep what they already show), so nobody may be working a live log then.
 
 ## 1. Before the day
 
@@ -70,8 +70,8 @@ then `psql "$URL" -f pre-events-data.sql`; or ask Supabase support to restore th
 | --- | --- | --- |
 | 0 | Nothing yet | The old build, EDC's log (EDC is over; nobody works in it). |
 | 1. Dry run | SQL Editor: the **patients fingerprint** (section 4), write down both values. Then paste the whole events file, change its **last** line `commit;` to `rollback;`, run. It must finish without an error (notices are fine). | Nothing changes. |
-| 2. Migration | Paste the file again **unchanged** (ending in `commit;`) and run it. **The outage starts here.** | Every screen fails: lists and new requests answer "Couldn't reach the log" (the old build calls functions this file retired). |
-| 3. Deploy | Merge the PR to `main` at once. Vercel builds and deploys it. | The same error until the new deployment is Ready. Then old sessions are refused, so everyone lands on sign-in, and every password is refused (none is set yet). |
+| 2. Migration | Paste the file again **unchanged** (ending in `commit;`) and run it. **The outage starts here.** | Nothing reaches the log (the old build calls functions this file retired). A phone keeps its last list with "Updating…" and holds a new request on the phone as "Waiting to send". Only a phone with nothing stored shows "Can't reach the log". |
+| 3. Deploy | Merge the PR to `main` at once. Vercel builds and deploys it. | The same until the new deployment is Ready. Then old sessions are refused, so everyone lands on sign-in, and every password is refused (none is set yet). A phone or computer that last ran the old build may show the old EDC screen until it signs in or reloads. |
 | 4. Bootstrap | In the checkout: `set -a; . <the file from 1>; set +a; node scripts/bootstrap-events.mjs --dry-run`, then the same without `--dry-run`. It asks for the lead passcode twice (hidden). If it stops after `lead passcode set.` (before `retired staff password recorded`), run it again with `--force`: without it, it refuses a passcode that is already set. Type the same passcode. **The outage ends here.** | The lead passcode signs in as a lead (the Events list). The EDC password is refused like any wrong password. |
 | 5. Check | Section 4 below, signed in. | — |
 | 6. Next event | A lead creates Warped Tour in the app (section 5) and leaves it in practice until the show. | Its staff sign in with its password or join link. |
@@ -105,16 +105,20 @@ values must equal the ones written down in step 1. If they differ, roll back (se
 - `select slug, stage, case_seq, staff_password_hash is null as no_pw, invite_code_sha256 is null as no_link from public.events;`
   → one row: `edco26 | archived | <highest EDC LP number> | true | true`.
 - `select count(*) from public.patients where event_id is null;` → `0`.
-- `select count(*) from cron.job where jobname = 'lp-close-inactive';` → `1` (unchanged; it now only touches live events).
+- `select count(*), bool_and(active) from cron.job where jobname = 'lp-close-inactive';` → `1 | true` (unchanged; it
+  now only touches live events). `false` means it was paused before the release: it is not needed for correctness, but
+  turn it back on as it was.
 
 ### After step 4, signed in (a phone and a computer)
 
 Lead (phone):
 - [ ] Sign-in → your name and team → Continue → the lead passcode in "Event password" → the **Events** list. EDC Orlando
-      is under "Archived 1" with the Archived chip and no logo (EDC has none until a lead uploads one in Event setup).
-- [ ] Open EDC Orlando → its log: read-only (no New request), the Archived chip in the header, the dashboard with day
+      is under "Archived 1" with the Archived chip and an initials tile (EO) for its logo (EDC has none until a lead
+      uploads one on the event's screen).
+- [ ] Open EDC Orlando → its log: read-only (no New request), the Archived chip by "Updated", the dashboard with day
       tabs (All + one per show day). Account menu → Events → back to the list.
-- [ ] Account menu (top right) → Lead passcode is there; leave it unchanged.
+- [ ] On the Events list: account menu (top right) → Lead passcode is there; leave it unchanged. (The event log's
+      account menu has no Lead passcode.)
 - [ ] `select lead_passcode_hash is not null, lead_passcode_version, (select ended_password_hash is not null from public.events where slug = 'edco26') from public.lp_org;`
       → `true | 1 | true`.
 
@@ -132,25 +136,50 @@ Lead (computer, 1024 px or wider), with a throwaway practice event:
 - [ ] Back as lead: the sidebar's event switcher lists EDC Orlando and Release check; switching shows each event's rows
       only.
 - [ ] Go live (the sheet shows "1" practice request) → the second browser loses the practice request within a few
-      seconds and shows the **Live** chip; a new request there is **LP-0001** again.
+      seconds and the Practice chip goes away (a phone shows the green **Live** chip; the desk shows none); a new
+      request there is **LP-0001** again.
 - [ ] End event → the second browser shows the **Ended** screen: Ground Control (and the event's logo, if one was uploaded), the event name,
       the Archived chip, "This event is now closed. Thank you for your work.", and nothing else. Opening the join link
       again shows the same screen; its password is refused.
 - [ ] The test event's request now belongs to an archived event: it never shows to any other event. Leave it, or
       remove it with section 6, step 1 (Reopen, delete, End). A rollback needs it gone.
 
+A phone or computer that last ran the old build shows the old EDC screen until it signs in. If a check above shows
+the old screen (EDC banner, New request on EDC, no event switcher), sign in again, or tap **Update ready** → **Reload**,
+and check again.
+
 ## 5. Setting up Warped Tour (no developer needed)
 
-Lead, on a phone or computer: Events → **New event**: name, link name (suggested), dates, time zone, "Day starts"
-hour, logo (PNG, WebP or JPEG up to 1 MB; a single-colour logo on a transparent background is tinted, anything else is
-shown as uploaded), posts, teams (mark the medical team), "Last seen" chips, main medical → **Create**. Then **Set** the
-staff password and **Create** the join link (shown once: Copy it). The event starts in practice: every screen shows the
-amber Practice chip. **Go live** on the morning of the show deletes every practice request (rows, messages, photos) and
-restarts numbering at LP-0001; phones already open drop the practice rows at their next sync. **End event** signs staff
-out to the Ended screen; nothing is deleted. **Reopen** brings an archived event back to live. Within 24 hours of the end
-it keeps the same staff password and join link (staff sign in again with what they have); after that, set a new
-password and link. The Reopen sheet shows which: Password and Join link, each **Kept** or **New one needed**, and the
-time left.
+Lead, on a phone or computer: Events → **New event**, in the screen's order: Name, Link (suggested), Dates, Time zone,
+Day starts, Posts, Main medical, Teams (mark the medical team), Last seen, Report (Department, Prepared by, Staffing) →
+**Create**.
+
+- Names: a post up to 40 characters, a team up to 80. Give a post longer than 16 characters a **Short** of 16 or fewer,
+  and a team longer than 24 a Short of 24 or fewer (the Short is what charts and chips show).
+- After Create the event's screen shows **Logo** → **Upload** (PNG, WebP or JPEG up to 1 MB; a single-colour logo on a
+  transparent background is tinted on the staff, desk and sign-in screens, anything else is shown as uploaded).
+- Password → Staff → **Set** the staff password. Join link → **Create**, then **Copy** it at once: it is shown once.
+  **New link** replaces the link already sent; the old one stops working.
+
+The event starts in practice: every screen shows the amber Practice chip. **Go live** on the morning of the show deletes
+every practice request (rows, messages, photos) and restarts numbering at LP-0001; phones already open drop the practice
+rows at their next sync. Practice requests in any new event close the rollback path (section 6).
+
+**End event** signs staff out to the Ended screen; nothing on the server is deleted. End only after the last request is
+in: a request a phone still holds as "Waiting to send" is dropped when the event ends, and Reopen does not bring it back.
+
+**Reopen** (on the event's screen: Events → the event → account menu **Event**, or the desk sidebar's **Event** →
+Reopen) brings an archived event back to live. Within 24 hours of the end it keeps the same staff password and join link
+(staff sign in again with what they have); after that, set a new password and link. The Reopen sheet shows which:
+Password and Join link, each **Kept** or **New one needed**, and the time left.
+
+## Tell staff before the first show
+
+Three lines a lead can paste into the briefing:
+
+- Before the show, open the app once on signal or Wi-Fi and sign in with the new link.
+- If the old EDC screen shows, sign in again, or tap Update ready → Reload.
+- Nothing typed into the old EDC screen is sent.
 
 ## 6. Roll back
 
@@ -160,8 +189,9 @@ otherwise and changes nothing. So: before Warped Tour's first request (practice 
 If the Vercel build failed in section 3, step 3, the old build is still serving: do steps 2, 3 and 5 only.
 
 1. For every event other than EDC that holds requests (the Release check event from section 4 does):
-   1. If it is archived, **Reopen** it in the app first (Events → the event → Reopen). An archived event's requests
-      can't be deleted: the write guard answers `event_ended` to every delete.
+   1. If it is archived, **Reopen** it in the app first (Events → the event → account menu **Event**, or the desk
+      sidebar's **Event** → Reopen). An archived event's requests can't be deleted: the write guard answers
+      `event_ended` to every delete.
    2. SQL Editor: delete its requests, with its link name in place of `<link name>` (three times):
       ```sql
       begin;
@@ -179,12 +209,21 @@ If the Vercel build failed in section 3, step 3, the old build is still serving:
 4. At once: Vercel → Deployments → the 0a416a9 production deployment noted in 1 → **Instant Rollback** (seconds). The
    old build works again with the env password and join link. Later pushes to `main` are not promoted until you
    promote one by hand.
-5. Check: sign in with the EDC password → EDC's log; `select count(*) from public.patients;` matches section 2's count.
+5. Check: sign in with the EDC password → EDC's log; `select count(*) from public.patients;` is section 2's count plus
+   any request someone typed during the outage. Those were held on the phone and are sent once the old build is back
+   (they have no event, and go to `edco26` if you go forward again). A device that ran the new build shows it once:
+   reload. A computer that opened the test event may still list its request: sign out and clear the site's data on it,
+   or ignore it (the database count is the truth).
 
 What stays after a rollback: the `events` and `lp_org` tables, every `event_id` column with its values, the lead
-functions and the `event-logos` bucket. Requests the old build creates meanwhile have no event; running the events file
-again later puts them in `edco26` with the rest. To go forward again, start this runbook from 2 (the file is safe to
-run twice and on a rolled-back database).
+functions, the `event-logos` bucket, and `lp_tel_events_team_check` in its looser form. Requests the old build creates
+meanwhile have no event; running the events file again later puts them in `edco26` with the rest.
+
+To go forward again: start at section 3 step 1 (the fingerprint and the dry run; the file is safe to run twice and on a
+rolled-back database), then steps 2 and 3. Skip step 4: the lead passcode and EDC's retired password are kept (the
+bootstrap's `--dry-run` refuses: "a lead passcode is already set"). The outage ends when the deployment is Ready.
+Expect `lead_passcode_version` unchanged, and one more archived event per test event ("Archived 2" with Release check;
+two rows in the step 2 events check).
 
 ## Ended, sign-in and passwords
 
@@ -237,11 +276,17 @@ run twice and on a rolled-back database).
 - **Alerts banner (phase 3):** the device remembers the banner it last showed (`localStorage lp-alerts-banner`, not per
   event) and holds its place from the first paint, so a second cold load no longer moves the list. A first-ever visit
   still shifts once.
-- **Old phones (2a):** caches and queued items live under the event's id. A phone that still holds EDC's cache, or a
-  request queued before the cut-over, simply never shows or sends it. Jeffrey's pre-rework queue
+- **Old phones (2a, cut-over fixes):** a phone that holds the old build shows the old EDC screen until it signs in.
+  Signing in loads the new build from the network (the sign-in deletes the stored app page `/`, so the old service
+  worker cannot serve the old app), and the new build's worker takes over without "Update ready". A request left unsent
+  in the old app is not sent and not shown: the new app keeps caches and queued items under the event's id, and the
+  server refuses any event call without `X-LP-Event` (`409 wrong_event`), which the old app never sends, so it cannot
+  write into a new event either. Nobody should keep unsent EDC requests. Jeffrey's pre-rework queue
   (`localStorage edc_pending_queue`) is no longer imported.
 - **`X-LP-Event` (2a):** every client call names the event the tab works; a cookie of another event (signed in in
-  another tab) answers `409 wrong_event` on event routes and the tab re-reads its session.
+  another tab) answers `409 wrong_event` on event routes and the tab re-reads its session. No header at all answers the
+  same (the log line has `dbCode: no_header`: the old build's app), except on the three routes whose calls cannot carry
+  one, marked `headerless` (photo images, telemetry beacons, the service worker's push re-subscribe).
 - **Telemetry (2a):** on while any event is in practice or live (the kill switch on `/health` still applies); no fixed
   off date.
 - **Renamed teams (2a):** keep their earlier labels in `teams[].aliases` (server-maintained; sending them back is
