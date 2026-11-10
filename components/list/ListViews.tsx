@@ -24,7 +24,7 @@ import { Button, Text } from '@radix-ui/themes';
 import { MapPin, Plus, Search as SearchIcon, X } from 'lucide-react';
 import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { AccountMenu } from '@/components/account/AccountMenu';
-import { AlertsBannerSlot as AlertsBanner } from '@/components/activity/slots';
+import { AlertsBannerSlot as AlertsBanner } from '@/components/alerts/banner-slot';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LiveIndicator } from '@/components/ui/LiveIndicator';
@@ -165,7 +165,7 @@ function Chrome({ view, sort = null, chips, filtered = false, skeleton, children
     <div className={s.root} data-view={view} ref={rootRef}>
       {brand ? <BrandCard onHide={hideBrand} /> : null}
       {/* F4: until lock-screen alerts work on this phone (on the desk it sits in the main column). */}
-      {inDesk ? null : <AlertsBanner />}
+      {inDesk ? null : <AlertsBanner place="list" />}
       <div className={s.sticky} ref={stickyRef}>
         <AppHeader
           view={view}
@@ -202,7 +202,7 @@ function Chrome({ view, sort = null, chips, filtered = false, skeleton, children
       <main className={s.body}>
         {inDesk ? (
           <div className={s.alertsWrap} ref={alertsRef}>
-            <AlertsBanner />
+            <AlertsBanner place="desk-main" />
           </div>
         ) : null}
         {body}
