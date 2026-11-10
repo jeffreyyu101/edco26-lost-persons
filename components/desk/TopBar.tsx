@@ -26,7 +26,7 @@ import { SIDEBAR_ID } from './sidebar-model';
 import { toggleSidebar, useSidebar } from './sidebar-state';
 import type { MainView } from './views';
 import d from './desk.module.css';
-import { EventStageChip, PRACTICE } from '@/components/ui/EventStageChip';
+import { EventStageChip, NOT_LIVE, PRACTICE } from '@/components/ui/EventStageChip';
 import { useEventConfig } from '@/lib/client/event-config';
 
 /** nav.parseView ignores a longer ?q=. */
@@ -81,8 +81,9 @@ export function DeskTop({ main, pane = false }: DeskTopProps) {
       ) : (
         <>
           <ListLive />
-          {/* (Events) The event's stage, after the line. */}
-          <EventStageChip className={d.stage} />
+          {/* (Events) Practice and archived, after the line. Not Live: a running event is the normal case, and the top bar
+              gives its room to the title, its count and the line (they are never cut). */}
+          <EventStageChip only={NOT_LIVE} className={d.stage} />
           <span className={d.sp} />
           <SearchField main={main} />
           <IconButton

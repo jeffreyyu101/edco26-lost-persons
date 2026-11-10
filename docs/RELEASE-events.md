@@ -77,3 +77,22 @@ To go forward again: the same cut-over from step 1 (the file is safe to run twic
   so end the test events and remove their rows), or give that branch a stack that never had the events file.
 - New migrations go after the events file and must keep its guards: every write RPC calls `lp_require_writable(event)`
   first; requests and their audit, messages, photos and en route rows of an archived event are refused by triggers.
+
+## Phase 2a (client, `feat/events-client`)
+
+Ships with the same cut-over (the migration file was edited in place; it has still not been applied anywhere real).
+
+- **First-load budget:** `/` is 235.4 KB in total (route-only 43.9 KB). The total limit is raised from 235 to 236 KB in
+  `tests/e2e/first-load.spec.ts`. **This needs the owner's approval before release.**
+- **Old phones:** caches and queued items now live under the event's id. A phone that still holds EDC's cache (key
+  `cache:edco26:…`) or a request queued before the cut-over simply never shows or sends it (it belongs to no event).
+  Jeffrey's pre-rework queue (`localStorage edc_pending_queue`) is no longer imported, for the same reason.
+- **Every client call carries `X-LP-Event`** (the event the tab works). A cookie of another event (signed in in another
+  tab) answers `409 wrong_event` on event routes, and the tab re-reads its session. Old clients send no header and are
+  not affected.
+- **Lead screens (phase 2b)** that open another event (`POST /api/session/event`) should call
+  `markSignedInEvent(eventId)` (`lib/client/signed-in-at.ts`) and then `location.replace('/')`; after changing the open
+  event's settings, `actions.refreshSession()` re-reads the config. Read the config with `useEventConfig()`
+  (`lib/client/event-config.ts`); the chip is `components/ui/StageChip.tsx`, the logo `components/ui/EventLogo.tsx`.
+- **Renamed teams** keep their earlier labels in `teams[].aliases` (server-maintained; a lead never sends them, and
+  sending them back is accepted and ignored).

@@ -1,5 +1,5 @@
-/* (Events) The stage chip (design/screens/events-v2 .stg): a soft tint and the step-11 text of its colour, never a
-   large fill. Both themes through the Radix alpha scales. */
+/* (Events) The stage chip (design/screens/events-v2 .stg): a soft tint, the glyph in step 11 of its colour and the
+   word in step 12 (4.5:1 on the tint in both themes), never a large fill. */
 .chip {
   flex: none;
   display: inline-flex;
@@ -20,14 +20,23 @@
 }
 .chip[data-stage='practice'] {
   background: var(--amber-a4);
+  color: var(--amber-12);
+}
+.chip[data-stage='practice'] svg {
   color: var(--amber-11);
 }
 .chip[data-stage='live'] {
   background: var(--green-a4);
+  color: var(--green-12);
+}
+.chip[data-stage='live'] svg {
   color: var(--green-11);
 }
 .chip[data-stage='archived'] {
   background: var(--gray-a4);
+  color: var(--gray-12);
+}
+.chip[data-stage='archived'] svg {
   color: var(--gray-11);
 }
 .sm {

@@ -519,11 +519,12 @@ test.describe('desktop 1440 × 900', () => {
     await expect(page.getByRole('searchbox', { name: 'Search requests' })).toBeInViewport();
     await expect(page.getByTestId('desk-new')).toBeInViewport();
 
-    // The sidebar starts with the lockup: both logos on the brand's dark gradient, the live dot on its corner;
+    // The sidebar starts with the lockup: (events) Ground Control (and the event's logo when it has one; the local test
+    // event has none) on the brand's dark gradient, the live dot on its corner;
     // it is the sync button, named by the live state. 48 px tall, the sidebar's width less its 8 px sides.
     const lockup = page.getByTestId('desk-sidebar').getByTestId('desk-live');
     await expect(lockup).toHaveAccessibleName(/^(Live\. Tap to sync now|Syncing)$/);
-    await expect(lockup.locator('img')).toHaveCount(2);
+    await expect(lockup.locator('img')).toHaveCount(1);
     await expect.poll(() => imagesLoaded(lockup)).toBe(true);
     const lock = (await lockup.boundingBox())!;
     expect(lock.height).toBe(48);
@@ -867,13 +868,14 @@ test.describe('laptop 1024 × 768', () => {
     expect(wide.height).toBeLessThan(wide.size * 1.5);
     await expect(card.locator('[class*="datesLong"]')).toBeVisible();
 
-    // Collapsed under 1280 px: the lockup is a 32 px tile with the EDC logo alone (and the live dot).
+    // Collapsed under 1280 px: the lockup is a 32 px tile with one logo (the event's; Ground Control when it has
+    // none) and the live dot.
     await expect(sidebar(page)).toHaveAttribute('data-state', 'collapsed');
     const lockup = sidebar(page).getByTestId('desk-live');
     const lock = (await lockup.boundingBox())!;
     expect([lock.width, lock.height]).toEqual([32, 32]);
     await expect(lockup.locator('img').first()).toBeVisible();
-    await expect(lockup.locator('img').nth(1)).toBeHidden();
+    await expect(lockup.locator('img')).toHaveCount(1);
     await expect.poll(() => imagesLoaded(lockup)).toBe(true);
 
     // A 532 px column next to the 420 px pane: the short dates go back under the title, which stays one line,

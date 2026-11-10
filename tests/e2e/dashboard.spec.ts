@@ -153,7 +153,8 @@ test('offline: the Reconnecting / Offline banner; back online it goes', async ({
 test('phone: ‹ Dashboard with who is on, the range under it, one column in order, timers tick, no sideways scroll', async ({ page }) => {
   await page.goto('/?dashboard=1');
   await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
-  await expect(page.getByTestId('who')).toHaveAccessibleName(/^\d+ people on in the last 10 minutes: Medical/);
+  // (Events) Who's on names the event's teams (their short names) in its setup order.
+  await expect(page.getByTestId('who')).toHaveAccessibleName(/^\d+ people on in the last 10 minutes: GCHX Med Transpo [^,]+, Dispatch [^,]+, GCHX Base [^,]+, Medical /);
   const ys = [];
   for (const id of ['status', 'attention', 'speed', 'calls', 'recap']) ys.push((await page.getByTestId(id).boundingBox())!.y);
   expect([...ys].sort((a, b) => a - b)).toEqual(ys);
