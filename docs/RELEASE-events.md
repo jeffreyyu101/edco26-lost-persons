@@ -94,5 +94,10 @@ Ships with the same cut-over (the migration file was edited in place; it has sti
   `markSignedInEvent(eventId)` (`lib/client/signed-in-at.ts`) and then `location.replace('/')`; after changing the open
   event's settings, `actions.refreshSession()` re-reads the config. Read the config with `useEventConfig()`
   (`lib/client/event-config.ts`); the chip is `components/ui/StageChip.tsx`, the logo `components/ui/EventLogo.tsx`.
+- **Telemetry** no longer stops at the old fixed off date (2026-11-10 06:00 ET) on the phone either: collection
+  follows the server's `on` (an event in practice or live, kill switch on). Phones on the old build stopped this morning.
+- **Sign-in cost:** a wrong password is compared with every event's bcrypt hash (≈ 70 ms each, archived events
+  included so their staff get the Ended screen). Fine for a few events a year; a stack holding hundreds of test events
+  makes failed sign-ins take seconds.
 - **Renamed teams** keep their earlier labels in `teams[].aliases` (server-maintained; a lead never sends them, and
   sending them back is accepted and ignored).
