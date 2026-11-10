@@ -137,31 +137,36 @@ export async function sessionBody(claims: SessionClaims, known?: EventRow | null
   return sessionInfo(claims, row ? eventConfig(row) : null);
 }
 
-/** A sign-in team card (no event is known before a password or join link signs in). */
+/** A sign-in team card, with the link name of the event it belongs to (a join link shows only its event's cards). */
 export interface SignInTeam {
   label: string;
   short: string;
   medical: boolean;
+  /** The event's slug. */
+  event: string;
 }
 
 /**
- * The sign-in cards: the teams of every event in practice or live, in setup order, each label once (oldest event
- * first). A password does not say which event it is until it signs in, so the cards are every running event's
- * (Ground Control's teams are usually the same at every event); the server then spells the team as the matched event
- * does, or keeps it as Other text. [] when none can be read (the Other field still works).
+ * The sign-in cards: the teams of every event in practice or live, in setup order (oldest event first), each with its
+ * event's slug. A join link names its event, so its sign-in shows that event's cards only (components/signin/logic.ts
+ * cardsFor). A password does not say which event it is until it signs in, so without a link the cards are every
+ * running event's, each label once; the server then spells the team as the matched event does, or keeps it as Other
+ * text. (Known follow-up: with two events running, a password sign-in can still pick the other event's team.)
+ * [] when none can be read (the Other field still works).
  */
 export async function signInTeams(): Promise<SignInTeam[]> {
   try {
-    const { data, error } = await db().from('events').select('teams').in('stage', ['practice', 'live']).order('created_at');
+    const { data, error } = await db().from('events').select('slug, teams').in('stage', ['practice', 'live']).order('created_at');
     if (error || !Array.isArray(data)) return [];
-    const seen = new Set<string>();
     const out: SignInTeam[] = [];
-    for (const row of data as Array<{ teams?: unknown }>) {
+    for (const row of data as Array<{ slug?: unknown; teams?: unknown }>) {
+      const event = str(row.slug).trim();
+      const seen = new Set<string>();
       for (const t of Array.isArray(row.teams) ? (row.teams as Array<Partial<EventTeam>>) : []) {
         const label = str(t.label).trim();
         if (!label || seen.has(label.toLowerCase())) continue;
         seen.add(label.toLowerCase());
-        out.push({ label, short: str(t.short).trim() || label, medical: t.medical === true });
+        out.push({ label, short: str(t.short).trim() || label, medical: t.medical === true, event });
       }
     }
     return out;

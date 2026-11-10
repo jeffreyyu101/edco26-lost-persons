@@ -2,6 +2,7 @@
 // remembered identity, and how every POST /api/session response is shown. Synthetic names only.
 import { describe, expect, it } from 'vitest';
 import {
+  cardsFor,
   DEFAULT_RETRY_SECONDS,
   EMPTY_DRAFT,
   FORBIDDEN_CHAR_MESSAGE,
@@ -185,5 +186,23 @@ describe('retry timing', () => {
     expect(retryMinutes(61)).toBe(2);
     expect(retryMinutes(899)).toBe(15);
     expect(MESSAGES.rateLimited(retryMinutes(540))).toBe('Too many attempts. Try again in 9 min');
+  });
+});
+
+describe('(events) cardsFor: a join link shows only its event\'s teams', () => {
+  const teams = [
+    { label: 'Medical', short: 'Med', medical: true, event: 'warped' },
+    { label: 'Dispatch', short: 'Dispatch', medical: false, event: 'warped' },
+    { label: 'Medics', short: 'Medics', medical: true, event: 'release-check' },
+    { label: 'Rovers', short: 'Rovers', medical: false, event: 'release-check' },
+    { label: 'dispatch', short: 'Disp', medical: false, event: 'release-check' },
+  ];
+  it('with a link: its event only', () => {
+    expect(cardsFor(teams, 'warped').map((t) => t.label)).toEqual(['Medical', 'Dispatch']);
+    expect(cardsFor(teams, 'release-check').map((t) => t.label)).toEqual(['Medics', 'Rovers', 'dispatch']);
+  });
+  it('without a link, or a link whose event is not running: every running event\'s, each label once', () => {
+    expect(cardsFor(teams, null).map((t) => t.label)).toEqual(['Medical', 'Dispatch', 'Medics', 'Rovers']);
+    expect(cardsFor(teams, 'gone').map((t) => t.label)).toEqual(['Medical', 'Dispatch', 'Medics', 'Rovers']);
   });
 });
