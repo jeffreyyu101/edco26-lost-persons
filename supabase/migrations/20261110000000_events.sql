@@ -1539,7 +1539,8 @@ $fn$;
 
 
 -- lp_tel_config: what the ingest route caches for 30 s. {on, until (epoch ms), cap, capBytes, flushSeconds, sample}.
--- on = enabled and before off_at. No settings row: off.
+-- on = enabled and some event in practice or live (until = off_at, kept in the answer but no longer used). No
+-- settings row: off.
 create or replace function public.lp_tel_config()
 returns jsonb
 language plpgsql
@@ -1569,8 +1570,8 @@ end
 $fn$;
 
 drop function if exists public.lp_tel_ingest(text, text, text, text, bigint, jsonb, jsonb, integer, text);
--- lp_tel_ingest: one batch from one phone, in one statement's worth of work. Off (kill switch, past off_at, no
--- settings row) → {on: false} and nothing is written. A batch id seen before → {dup: true}. Three quota rows count
+-- lp_tel_ingest: one batch from one phone, in one statement's worth of work. Off (kill switch, no event in practice
+-- or live, no settings row) → {on: false} and nothing is written. A batch id seen before → {dup: true}. Three quota rows count
 -- every event and byte offered this hour: the body's device id and the route's sign-in key (p_quota) against the
 -- device caps, and '*' against the fleet caps. Past any of them the rest is dropped ({capped: true}). The event time
 -- is the phone's plus the route's skew correction, clamped to [now − 2 days, now].

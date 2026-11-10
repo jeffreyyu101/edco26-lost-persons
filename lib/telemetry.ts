@@ -188,7 +188,7 @@ export const TEL_LIMITS = {
   sendTimeoutMs: 8_000,
 } as const;
 
-export { TEL_DEFAULT_UNTIL, TEL_KEYS } from './telemetry-keys';
+export { TEL_KEYS } from './telemetry-keys';
 
 /** The pass-through fetch observer (design §4.3, decision §8). Off: resource timing only (status `unk` on WebKit). */
 export const FETCH_OBSERVER = true;

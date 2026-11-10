@@ -1,10 +1,10 @@
 // Telemetry can never throw into the app: every handler is wrapped (an error inside never reaches the dispatcher), the
-// 20th fault stops the collector, stop takes everything off. And the gate: past `until` (the auto-off), after the
-// server said off, and in automated browsers that did not opt in, the collector never loads.
+// 20th fault stops the collector, stop takes everything off. And the gate: after the server said off, and in automated
+// browsers that did not opt in, the collector never loads; (Events) there is no fixed off date any more.
 import { describe, expect, it, vi } from 'vitest';
 import { MAX_FAULTS, createGuard } from '@/lib/client/telemetry/host';
 import { telemetryAllowed } from '@/lib/client/telemetry-gate';
-import { TEL_DEFAULT_UNTIL, TEL_KEYS } from '@/lib/telemetry';
+import { TEL_KEYS } from '@/lib/telemetry';
 import { FakeStorage } from './fakes';
 
 describe('the guard', () => {
@@ -58,16 +58,13 @@ describe('the guard', () => {
 describe('the gate', () => {
   const env = (storage: FakeStorage | null, webdriver = false) => ({ storage, webdriver });
 
-  it('on by default before the auto-off (2026-11-10 06:00 ET = 11:00 UTC)', () => {
-    expect(TEL_DEFAULT_UNTIL).toBe(Date.parse('2026-11-10T11:00:00Z'));
-    expect(telemetryAllowed(TEL_DEFAULT_UNTIL - 1, env(new FakeStorage()))).toBe(true);
-    expect(telemetryAllowed(TEL_DEFAULT_UNTIL, env(new FakeStorage()))).toBe(false);
-  });
-
-  it('the server’s `until` wins over the built-in one', () => {
+  it('(Events) no fixed off date: on past the old auto-off (2026-11-10 06:00 ET) and a year on; a stored lp-tel-until is ignored', () => {
     const s = new FakeStorage();
-    s.setItem(TEL_KEYS.until, String(Date.parse('2026-11-09T11:00:00Z')));
-    expect(telemetryAllowed(Date.parse('2026-11-09T12:00:00Z'), env(s))).toBe(false);
+    s.setItem('lp-tel-until', String(Date.parse('2026-11-09T11:00:00Z')));
+    for (const at of ['2026-11-10T11:00:00Z', '2026-11-10T12:00:00Z', '2027-11-10T12:00:00Z']) {
+      expect(telemetryAllowed(Date.parse(at), env(new FakeStorage())), at).toBe(true);
+      expect(telemetryAllowed(Date.parse(at), env(s)), at).toBe(true);
+    }
   });
 
   it('after the server said off: no until the probe is due', () => {
