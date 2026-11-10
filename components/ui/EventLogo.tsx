@@ -14,7 +14,15 @@ export type LogoKind = 'mono' | 'full';
 const KIND_KEY = 'lp-logo-kind';
 const memory = new Map<string, LogoKind>();
 
+/**
+ * (Phase 3) Only a versioned URL (?v=<object id>: the app's own logo URLs) is remembered. The join-link sign-in asks
+ * for /api/events/logo/<slug> before it knows the version, and a replaced logo answers there too: its kind is read
+ * from the pixels each time.
+ */
+const versioned = (src: string) => /[?&]v=/.test(src);
+
 function remembered(src: string): LogoKind | null {
+  if (!versioned(src)) return null;
   const hit = memory.get(src);
   if (hit) return hit;
   try {
@@ -31,6 +39,7 @@ function remembered(src: string): LogoKind | null {
 }
 
 function remember(src: string, kind: LogoKind): void {
+  if (!versioned(src)) return;
   memory.set(src, kind);
   try {
     const all = JSON.parse(window.localStorage.getItem(KIND_KEY) ?? '{}') as Record<string, unknown>;
