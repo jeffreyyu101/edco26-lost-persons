@@ -129,7 +129,8 @@ test('Request swap → the sheet → Swap at Main Med → Swap done → Reunited
   await expect.poll(async () => (await detail(page.request, r.id)).swapPlace).toBe('mm');
   await page.getByTestId('swap-done').click();
   await expect(statusLabel(page)).toHaveText('Reunited', { timeout: 20_000 });
-  expect((await detail(page.request, r.id)).status).toBe(STATUS.reunited);
+  // The label is the tap's (optimistic): the server's answer may still be on its way under load.
+  await expect.poll(async () => (await detail(page.request, r.id)).status).toBe(STATUS.reunited);
 });
 
 test('Friend informed closes; Decline returns to Accompanied', async ({ page }) => {
@@ -137,7 +138,8 @@ test('Friend informed closes; Decline returns to Accompanied', async ({ page }) 
   await page.goto(`/?r=${a.id}`);
   await page.getByTestId('friend-informed').click();
   await expect(statusLabel(page)).toHaveText('Friend informed', { timeout: 20_000 });
-  expect((await detail(page.request, a.id)).status).toBe(STATUS.friendInformed);
+  // The label is the tap's (optimistic): the server's answer may still be on its way under load.
+  await expect.poll(async () => (await detail(page.request, a.id)).status).toBe(STATUS.friendInformed);
 
   const b = await accompanied(page.request);
   await page.goto(`/?r=${b.id}`);
