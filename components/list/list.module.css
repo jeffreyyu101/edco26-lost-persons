@@ -1844,7 +1844,7 @@ button.qheadBtn:focus-visible {
   gap: 12px;
 }
 
-/* (Events) The event's stage chip between the view menu and the icons. */
+/* (Events) The event's stage chip on the header's second line, after the live line. */
 .stage {
   flex: none;
 }

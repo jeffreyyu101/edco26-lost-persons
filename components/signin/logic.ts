@@ -60,7 +60,7 @@ export interface WhoCheck {
  * Step 1 validity (spec §8: Continue is disabled until the name has 2+ characters and a team is chosen).
  * Mirrors signInSchema: name 2–60 code points, Other team 2–80, no "·"/"•" or control characters.
  */
-export function checkWho(draft: WhoDraft): WhoCheck {
+export function checkWho(draft: WhoDraft, teams: readonly SignInTeam[] = []): WhoCheck {
   const name = collapse(draft.name);
   const other = collapse(draft.otherTeam);
   const nameError = STAFF_FORBIDDEN_CHARS.test(name) ? FORBIDDEN_CHAR_MESSAGE : null;
@@ -70,8 +70,9 @@ export function checkWho(draft: WhoDraft): WhoCheck {
   let team: string | null = null;
   if (draft.team) team = draft.team;
   else if (!otherTeamError && codePoints(other) >= OTHER_TEAM_MIN && codePoints(other) <= OTHER_TEAM_MAX) {
-    // (Events) As typed: the server spells it as the event does when it is one of its teams, else it stays Other.
-    team = other;
+    // (Events) Text naming one of the cards (its label or short name, any case: "dispatch") is that card; anything else
+    // stays as typed (the server then spells it as the matched event does when it is one of its teams).
+    team = cardFor(other, teams) ?? other;
   }
   return { identity: nameOk && team ? { name, team } : null, nameError, otherTeamError };
 }
@@ -83,10 +84,10 @@ export function draftFromIdentity(identity: Identity | null, teams: readonly Sig
   return { name: identity.name, team: card, otherTeam: card ? '' : identity.team };
 }
 
-/** The card a team is (by label, case-insensitive), or null. */
+/** The card a team is (by its label or short name, case-insensitive), or null. */
 export function cardFor(team: string, teams: readonly SignInTeam[]): string | null {
-  const t = team.trim().toLowerCase();
-  return teams.find((x) => x.label.toLowerCase() === t)?.label ?? null;
+  const t = collapse(team).toLowerCase();
+  return teams.find((x) => x.label.toLowerCase() === t || x.short.toLowerCase() === t)?.label ?? null;
 }
 
 /** Remembered name and team (both or neither) skip straight to step 2 (spec §8, A29). */

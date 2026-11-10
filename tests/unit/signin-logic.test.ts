@@ -40,9 +40,14 @@ describe('checkWho (step 1, Continue)', () => {
     expect(checkWho(draft({ name: 'Dana Kim', otherTeam: '  Site   Ops ' })).identity).toEqual({ name: 'Dana Kim', team: 'Site Ops' });
   });
 
-  it('(events) keeps Other team text as typed: no event-specific alias list (the server spells an event team as the event does)', () => {
+  it("(events) Other text naming a card (its label or short name, any case) is that card; no event-specific alias list", () => {
+    expect(checkWho(draft({ name: 'Dana Kim', otherTeam: 'dispatch' }), TEAMS).identity?.team).toBe('GC/HX - Dispatch');
+    expect(checkWho(draft({ name: 'Dana Kim', otherTeam: ' gchx   base ' }), TEAMS).identity?.team).toBe('GC/HX - Base');
+    expect(checkWho(draft({ name: 'Dana Kim', otherTeam: 'PREVENT' }), TEAMS).identity?.team).toBe('PREVENT');
+    // EDC's old aliases ("transport", "med transpo") are not built in any more.
+    expect(checkWho(draft({ name: 'Dana Kim', otherTeam: 'transport' }), TEAMS).identity?.team).toBe('transport');
+    // Without cards (no running event known): as typed.
     expect(checkWho(draft({ name: 'Dana Kim', otherTeam: 'dispatch' })).identity?.team).toBe('dispatch');
-    expect(checkWho(draft({ name: 'Dana Kim', otherTeam: 'PREVENT' })).identity?.team).toBe('PREVENT');
   });
 
   it('enforces the 60 / 80 code point limits', () => {
@@ -78,7 +83,7 @@ describe('checkWho (step 1, Continue)', () => {
       draft({ name: 'x'.repeat(61), team: MED }),
     ];
     for (const d of cases) {
-      const { identity } = checkWho(d);
+      const { identity } = checkWho(d, TEAMS);
       if (!identity) continue;
       const parsed = signInSchema.safeParse(signInBody(identity, 'pw', TEAMS));
       expect(parsed.success, JSON.stringify(d)).toBe(true);

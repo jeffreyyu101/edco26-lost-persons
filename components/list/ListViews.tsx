@@ -73,6 +73,7 @@ import { AllSkeleton, MineSkeleton, PendingSkeleton } from './ListSkeletons';
 import { ArchivedFold, ArchivedRows, ColumnHeader, GroupDivider, LogGrid, LogRow, OutboxLogRow, SearchLogRow } from './rows';
 import type { ListViewName } from './ViewSwitcher';
 import s from './list.module.css';
+import { EventStageChip } from '@/components/ui/EventStageChip';
 import { useEventConfig } from '@/lib/client/event-config';
 
 const selectHydrated = (state: StoreState) => state.hydrated;
@@ -182,11 +183,18 @@ function Chrome({ view, sort = null, chips, filtered = false, skeleton, children
           <div className={s.liveRow} data-testid="live-row">
             <div className={s.liveIn}>
               <LiveIndicator className={s.liveLead} line={live} onRefresh={refresh} />
+              {/* (Events) The event's stage, on the header's second line (the title keeps its room). */}
+              <EventStageChip className={s.stage} />
               {sort}
             </div>
           </div>
         ) : (
-          <LiveIndicator className={s.live} line={live} onRefresh={refresh} />
+          <div className={s.liveRow}>
+            <div className={s.liveIn}>
+              <LiveIndicator className={s.liveLead} line={live} onRefresh={refresh} />
+              <EventStageChip className={s.stage} />
+            </div>
+          </div>
         )}
         {loading ? null : <ConnectionBanner status={live} />}
         {chips}

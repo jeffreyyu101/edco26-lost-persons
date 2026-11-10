@@ -1,3 +1,4 @@
+import { eventDatesShown } from './helpers/events';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import type { ChangeResponse, CreateResponse, RequestDetail, RequestSummary } from '../../lib/api-types';
@@ -465,12 +466,14 @@ test.describe('desktop 1440 × 900', () => {
     await expect(card).toBeVisible();
     // One row: the desk's (the list's own is phone only).
     await expect(page.getByTestId('brand-card')).toHaveCount(1);
-    await expect(card.getByRole('img', { name: 'EDC Orlando' })).toBeVisible();
+    // (Events) Ground Control; the event's logo only when it has one (the local test event has none).
+    await expect(card.getByRole('img', { name: 'EDC Orlando' })).toHaveCount(0);
     await expect(card.getByRole('img', { name: 'Ground Control' })).toBeVisible();
+    const shownDates = await eventDatesShown(page.request);
     // F1.1's compact row (design/screens/live-indicator.html, the Desktop frame): the title, the long dates
     // beside it, the X; no kicker, no credit line, no rings.
     await expect(card.locator('p[class*="title"]')).toHaveText('Is my friend in medical?');
-    await expect(card.locator('[class*="datesLong"]')).toHaveText('NOVEMBER 6–8, 2026', { useInnerText: true });
+    await expect(card.locator('[class*="datesLong"]')).toHaveText(shownDates.long, { useInnerText: true });
     await expect(card.locator('[class*="datesShort"]')).toBeHidden();
     await expect(card).not.toContainText(/event op/i);
     await expect(card).not.toContainText('Built by');
@@ -881,7 +884,7 @@ test.describe('laptop 1024 × 768', () => {
     expect(docked.size).toBeGreaterThanOrEqual(16);
     expect(docked.size).toBeLessThanOrEqual(wide.size);
     expect(docked.height).toBeLessThan(docked.size * 1.5);
-    await expect(card.locator('[class*="datesShort"]')).toHaveText('NOV 6–8', { useInnerText: true });
+    await expect(card.locator('[class*="datesShort"]')).toHaveText((await eventDatesShown(page.request)).short, { useInnerText: true });
     await expect(card.locator('[class*="datesLong"]')).toBeHidden();
     const box = (await card.boundingBox())!;
     expect(box.height).toBeLessThanOrEqual(64);

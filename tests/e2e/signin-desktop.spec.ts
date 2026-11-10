@@ -85,7 +85,8 @@ for (const size of SIZES) {
 
       // The logos sit above the card, outside it.
       await expect(card(page).getByRole('img')).toHaveCount(0);
-      for (const alt of ['EDC Orlando', 'Ground Control']) {
+      // (Events) Ground Control alone (a password says which event it is only once it signs in).
+      for (const alt of ['Ground Control']) {
         const logo = await box(page.getByRole('img', { name: alt }));
         expect(logo.y + logo.height).toBeLessThan(c.y);
       }

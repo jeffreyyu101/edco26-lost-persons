@@ -92,8 +92,14 @@ export async function goLive(id: string): Promise<EventAdmin> {
   return ((await res.json()) as { event: EventAdmin }).event;
 }
 
+/** Ends the event (an event still in practice goes live first: only a live event can end). */
 export async function endEvent(id: string): Promise<void> {
-  const res = await (await lead()).post(`/api/events/${id}/end`, { data: {} });
+  const ctx = await lead();
+  let res = await ctx.post(`/api/events/${id}/end`, { data: {} });
+  if (res.status() === 409 && JSON.stringify(await res.json().catch(() => ({}))).includes('practice')) {
+    await goLive(id);
+    res = await ctx.post(`/api/events/${id}/end`, { data: {} });
+  }
   expect([200, 409], await res.text()).toContain(res.status());
 }
 
@@ -138,4 +144,24 @@ export async function rowNames(api: APIRequestContext): Promise<string[]> {
   const res = await api.get(`${BASE}/api/sync`);
   expect(res.ok(), `GET /api/sync → ${res.status()}`).toBe(true);
   return ((await res.json()) as { rows: Array<{ name: string }> }).rows.map((r) => r.name);
+}
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+/**
+ * The brand row's dates for the signed-in event (GET /api/session), as the row shows them (CSS capitals): short
+ * "NOV 9–11", long "NOVEMBER 9–11, 2026". The local test event's dates move with today (scripts/test-env.mjs).
+ */
+export async function eventDatesShown(api: APIRequestContext): Promise<{ short: string; long: string }> {
+  const res = await api.get(`${BASE}/api/session`);
+  expect(res.ok()).toBe(true);
+  const { event } = (await res.json()) as { event: { startsOn: string; endsOn: string } };
+  const [y1, m1, d1] = event.startsOn.split('-').map(Number) as [number, number, number];
+  const [y2, m2, d2] = event.endsOn.split('-').map(Number) as [number, number, number];
+  const fmt = (form: 'short' | 'long') => {
+    const month = (m: number) => (form === 'short' ? MONTHS[m - 1]!.slice(0, 3) : MONTHS[m - 1]!);
+    const range = y1 === y2 && m1 === m2 ? (d1 === d2 ? `${month(m1)} ${d1}` : `${month(m1)} ${d1}–${d2}`) : `${month(m1)} ${d1}–${month(m2)} ${d2}`;
+    return (form === 'long' ? `${range}, ${y2}` : range).toUpperCase();
+  };
+  return { short: fmt('short'), long: fmt('long') };
 }

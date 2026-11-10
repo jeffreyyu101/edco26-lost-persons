@@ -70,14 +70,15 @@ test('status: Open is Waiting + Pending + Located; the legend opens the lists; a
   await expect(page).toHaveURL(/[?&]r=[0-9a-f-]{36}/);
 });
 
-test('range: Tonight by default; a choice asks the server for that range and is remembered; the next poll asks for it again', async ({ page }) => {
+test('range: Today (the show day) by default; a choice asks the server for that range and is remembered; the next poll asks for it again', async ({ page }) => {
   test.slow();
   const urls = statsUrls(page);
   await page.goto('/?dashboard=1');
   await expect(page.getByTestId('calls-total')).toBeVisible();
   const range = page.getByRole('radiogroup', { name: 'Time range' });
-  await expect(range.getByRole('radio', { name: 'Tonight' })).toHaveAttribute('aria-checked', 'true');
-  // (Events) PHASE2: the dashboard's Tonight is the event's show day, which the server calls 'today'.
+  // (Events) Today: the event's show day (from its day-start hour, in its time zone).
+  await expect(range.getByRole('radio', { name: 'Today' })).toHaveAttribute('aria-checked', 'true');
+  await expect(range.getByRole('radio', { name: 'Tonight' })).toHaveCount(0);
   expect(urls.at(-1)!.url).toContain('range=today');
 
   await range.getByRole('radio', { name: '1h' }).click();
@@ -91,19 +92,22 @@ test('range: Tonight by default; a choice asks the server for that range and is 
   await expect.poll(() => urls.slice(before).some((u) => u.url.includes('range=1h')), { timeout: 25_000 }).toBe(true);
 });
 
-test('calls: Total bars, By tent with its legend, the Heatmap, and the same numbers as a table', async ({ page }) => {
+test('calls: Total bars, By post with its legend (the range\'s posts), the Heatmap, and the same numbers as a table', async ({ page }) => {
   await page.goto('/?dashboard=1');
   const calls = page.getByTestId('calls');
   await expect(calls.getByRole('img', { name: /^Calls per 15 minutes/ })).toBeVisible();
   const view = page.getByRole('radiogroup', { name: 'Calls view' });
-  await view.getByRole('radio', { name: 'By tent' }).click();
-  await expect(calls.getByRole('img', { name: /stacked by tent/ })).toBeVisible();
-  for (const t of ['FA 4', 'FA 3', 'Other']) await expect(calls.getByText(t, { exact: true }).first()).toBeVisible();
+  await expect(view.getByRole('radio', { name: 'By tent' })).toHaveCount(0);
+  await view.getByRole('radio', { name: 'By post' }).click();
+  await expect(calls.getByRole('img', { name: /stacked by post/ })).toBeVisible();
+  // (Events) The legend is the range's posts as the server ordered them (the four busiest, then Other).
+  const stats = (await (await page.request.get('/api/stats?range=today')).json()) as { range: { posts: Array<{ post: string }> } };
+  for (const { post } of stats.range.posts) await expect(calls.getByText(post, { exact: true }).first()).toBeVisible();
   await view.getByRole('radio', { name: 'Heatmap' }).click();
-  await expect(page.getByTestId('heat-chart').getByRole('img', { name: /^Calls by (hour|15 minutes) and tent/ })).toBeVisible();
+  await expect(page.getByTestId('heat-chart').getByRole('img', { name: /^Calls by (hour|15 minutes) and post/ })).toBeVisible();
   await page.getByTestId('calls-table-toggle').click();
   await expect(calls.locator('table')).toBeVisible();
-  await expect(calls.locator('th').first()).toHaveText('Tent');
+  await expect(calls.locator('th').first()).toHaveText('Post');
   await view.getByRole('radio', { name: 'Total' }).click();
 });
 

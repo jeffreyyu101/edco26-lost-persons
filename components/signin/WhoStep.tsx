@@ -46,7 +46,7 @@ export interface WhoStepProps {
 }
 
 export function WhoStep({ teams, eventLogo = null, draft, onDraft, onContinue, autoFocus, submitting = false, message = null, locked = false, continueHint = null }: WhoStepProps) {
-  const check = checkWho(draft);
+  const check = checkWho(draft, teams);
   const teamLabelId = useId();
   const nameErrorId = useId();
   const otherErrorId = useId();

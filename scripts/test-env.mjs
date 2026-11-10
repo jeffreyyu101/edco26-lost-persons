@@ -244,6 +244,17 @@ export function pauseInactiveJob(url = localDbUrl()) {
 
 // --- (Events) The local test event ------------------------------------------------------------------------------
 
+/**
+ * LOCAL ONLY. (Phase 2) Every other event still in practice or live (left by an earlier run, e.g. an integration test's
+ * practice event, which cannot be ended without going live) is archived, so the sign-in cards (every running event's
+ * teams) and the running events are the local test event's alone when the e2e suite starts. Rows are kept.
+ */
+export function archiveOtherEvents(url = localDbUrl()) {
+  assertLocalUrl('database URL', url);
+  const sql = `update public.events set stage = 'archived', ended_at = coalesce(ended_at, now()), updated_at = now() where id <> '${TEST_EVENT_ID}' and stage in ('practice', 'live');`;
+  execFileSync('psql', [url, '-v', 'ON_ERROR_STOP=1', '-q', '-c', sql], { stdio: ['ignore', 'ignore', 'pipe'] });
+}
+
 /** The seed's live local event (supabase/seed.sql): every test row belongs to it unless a test makes its own event. */
 export const TEST_EVENT_ID = '10ca1000-0000-4000-8000-000000000001';
 export const TEST_EVENT_SLUG = 'local';

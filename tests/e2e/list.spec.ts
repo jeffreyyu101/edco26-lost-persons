@@ -1,3 +1,4 @@
+import { eventDatesShown } from './helpers/events';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type APIRequestContext, type Page, type Route } from '@playwright/test';
 import type { RequestDetail, RequestSummary } from '../../lib/api-types';
@@ -158,7 +159,6 @@ async function brandLook(page: Page) {
       colors: [...el.querySelectorAll('p, p *')].map((n) => getComputedStyle(n).color),
       titleSize: Number.parseFloat(getComputedStyle(title).fontSize),
       titleHeight: title.getBoundingClientRect().height,
-      edcFilter: getComputedStyle(el.querySelector('img[alt="EDC Orlando"]')!).filter,
       logos: [...el.querySelectorAll('img')].map((img) => ({ alt: img.alt, loaded: img.complete && img.naturalWidth > 0, height: img.getBoundingClientRect().height })),
       // Shown text lines only (one of the two date lines is display: none at any width).
       shown: [...el.querySelectorAll<HTMLElement>('p')].filter((p) => p.offsetParent !== null).map((p) => p.innerText),
@@ -180,15 +180,18 @@ test('brand row on All only: one compact row with the logos, the title and the d
   await expect(page.getByTestId('request-list')).toBeVisible({ timeout: 10_000 });
   const card = brand(page);
   await expect(card).toBeVisible();
-  await expect(card.getByRole('img', { name: 'EDC Orlando' })).toBeVisible();
+  // (Events) Ground Control, the permanent brand; the event's logo beside it only when it has one (the local test
+  // event has none); the event's own dates.
+  const dates = await eventDatesShown(page.request);
   await expect(card.getByRole('img', { name: 'Ground Control' })).toBeVisible();
+  await expect(card.getByRole('img', { name: 'EDC Orlando' })).toHaveCount(0);
   await expect(card.locator('p[class*="title"]')).toHaveText('Is my friend in medical?');
   await expect(card.locator('[class*="accent"]')).toHaveText('in medical?');
   await expect(card.locator('[class*="accent"]')).toHaveCSS('color', 'rgb(142, 240, 231)');
   await expect(card.locator('[class*="accent"]')).toHaveCSS('font-weight', '500');
   await expect(card.locator('p[class*="title"]')).toHaveCSS('font-size', '16px');
   await expect(card.locator('p[class*="title"]')).toHaveCSS('font-weight', '700');
-  await expect(card.locator('[class*="datesShort"]')).toHaveText('NOV 6–8', { useInnerText: true });
+  await expect(card.locator('[class*="datesShort"]')).toHaveText(dates.short, { useInnerText: true });
   await expect(card.locator('[class*="datesShort"]')).toHaveCSS('color', 'rgb(205, 185, 240)');
   await expect(card.locator('[class*="datesShort"]')).toHaveCSS('font-size', '10px');
   // No "event operations" / "event ops" anywhere, and no credit line or rings.
@@ -201,8 +204,8 @@ test('brand row on All only: one compact row with the logos, the title and the d
   await expect(card.getByRole('heading')).toHaveCount(0);
   await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
 
-  // iPhone 14 (390 px): one row about 56 px tall with a 12 px margin, the title on one line, the logos at
-  // their size, EDC made white, no glow around it.
+  // iPhone 14 (390 px): one row about 56 px tall with a 12 px margin, the title on one line, the logo at its
+  // size, no glow around it.
   await expect.poll(async () => (await brandLook(page)).logos.every((l) => l.loaded)).toBe(true);
   const light = await brandLook(page);
   expect(light.box.x).toBe(12);
@@ -211,12 +214,8 @@ test('brand row on All only: one compact row with the logos, the title and the d
   expect(light.box.height).toBeGreaterThanOrEqual(52);
   expect(light.box.height).toBeLessThanOrEqual(64);
   expect(light.titleHeight).toBeLessThan(light.titleSize * 1.5);
-  expect(light.shown).toEqual(['Is my friend in medical?', 'NOV 6–8']);
-  expect(light.logos.map((l) => [l.alt, l.height])).toEqual([
-    ['EDC Orlando', 19],
-    ['Ground Control', 16],
-  ]);
-  expect(light.edcFilter).toContain('invert(1)');
+  expect(light.shown).toEqual(['Is my friend in medical?', dates.short]);
+  expect(light.logos.map((l) => [l.alt, l.height])).toEqual([['Ground Control', 16]]);
   expect(light.background).toContain('linear-gradient');
   expect(light.shadow).toBe('none');
   // The X: 30 px, inside the row's right edge, its middle on the row's middle.
@@ -280,8 +279,8 @@ test('brand row on All only: one compact row with the logos, the title and the d
   await expect(page.getByRole('searchbox', { name: 'Search requests' })).toBeVisible();
   await expect(brand(page)).toHaveCount(0);
 
-  // Wider phone screens (720 px up to the desk's 768): the same single row, wider, with "NOVEMBER 6–8, 2026"
-  // beside the title.
+  // Wider phone screens (720 px up to the desk's 768): the same single row, wider, with the long dates
+  // ("NOVEMBER 9–11, 2026") beside the title.
   await page.setViewportSize({ width: 760, height: 1000 });
   await page.goto('/');
   await expect(brand(page)).toBeVisible();
@@ -290,7 +289,7 @@ test('brand row on All only: one compact row with the logos, the title and the d
   expect(wide.box.width).toBe(760 - 24);
   expect(wide.box.height).toBeLessThanOrEqual(64);
   expect(wide.titleHeight).toBeLessThan(wide.titleSize * 1.5);
-  expect(wide.shown).toEqual(['Is my friend in medical?', 'NOVEMBER 6–8, 2026']);
+  expect(wide.shown).toEqual(['Is my friend in medical?', dates.long]);
   const t = (await brand(page).locator('p[class*="title"]').boundingBox())!;
   const d = (await brand(page).locator('[class*="datesLong"]').boundingBox())!;
   expect(d.x).toBeGreaterThan(t.x + t.width);
@@ -422,7 +421,7 @@ test.describe('brand row on a cold load', () => {
     };
     // It was measured before the logos, the rows and the first sync were there (the line reads "Updating…" until
     // that sync lands: network fix 1d; it was empty before)…
-    expect(first.logosLoaded).toEqual([false, false]);
+    expect(first.logosLoaded).toEqual([false]);
     expect(first.skeleton).toBe(true);
     expect(first.live).toBe('healthy');
     expect(first.liveText).toBe('Updating…');

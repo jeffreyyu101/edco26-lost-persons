@@ -651,8 +651,9 @@ describe('list views render', () => {
       const live = html.indexOf('data-testid="live-indicator"');
       expect(live, name).toBeGreaterThan(header);
       // Directly after the header, inside the sticky bar, before the list. (Pending v9.1) On All and My requests the
-      // line shares its row with the "⇅" sort toggle, at the row's right end; Pending has no toggle.
-      const row = name === 'Pending' ? '' : '<div class="[^"]*liveRow[^"]*" data-testid="live-row"><div class="[^"]*liveIn[^"]*">';
+      // line shares its row with the "⇅" sort toggle, at the row's right end; Pending has no toggle. (Events) Every
+      // view's row also holds the event's stage chip, after the line.
+      const row = name === 'Pending' ? '<div class="[^"]*liveRow[^"]*"><div class="[^"]*liveIn[^"]*">' : '<div class="[^"]*liveRow[^"]*" data-testid="live-row"><div class="[^"]*liveIn[^"]*">';
       expect(html.slice(header, live), name).toMatch(new RegExp(`^</header>${row}<div class="[^"]*live[^"]*"[^>]*data-state="healthy"\\s*$`));
       expect(live, name).toBeLessThan(html.indexOf('data-testid="request-list"'));
       if (name === 'Pending') expect(html, name).not.toContain('data-testid="sort-toggle"');
