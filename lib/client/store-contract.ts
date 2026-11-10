@@ -11,11 +11,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type {
   CreateRequestBody,
+  EventConfig,
   IsoDateTime,
   OutboxItem,
   RequestDetail,
   RequestPatch,
   RequestSummary,
+  SessionRole,
   Stats,
   StatsRange,
 } from '../api-types';
@@ -152,6 +154,13 @@ export interface StoreState {
   eventTimezone: string;
   /** IndexedDB works on this device. When false, offline save is disabled (never memory-only). */
   durableStorage: boolean;
+  /**
+   * (Events) The signed-in event's config (GET /api/session, refreshed when sync says its version moved), or null: not
+   * known yet, or a lead with no event open. Read it with useEventConfig() (lib/client/event-config.ts).
+   */
+  event: EventConfig | null;
+  /** (Events) 'staff' or 'lead' once known (an offline reload starts from the last one), else null. */
+  role: SessionRole | null;
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -299,6 +308,13 @@ export interface StoreActions {
   /** GET /api/stats (use the useStats hook in components); Dashboard v4 passes its range (?range=…). */
   fetchStats(range?: StatsRange): Promise<Stats>;
 
+  /**
+   * (Events) Re-read GET /api/session now (the event's config and stage). A lead screen calls it after changing the
+   * open event's settings; a different event (POST /api/session/event) needs a reload instead (location.replace('/')),
+   * which loads that event's own cache.
+   */
+  refreshSession?(): Promise<void>;
+
   outbox: {
     /** Retry now (resets backoff). */
     retry(mutationId: string): void;
@@ -423,7 +439,7 @@ export interface AppStore {
  * loaded, nothing queued, connection 'live', session 'unknown', default prefs. Build it once per store and
  * return that same object from getServerState().
  */
-export function createServerState(eventTimezone: string): StoreState {
+export function createServerState(eventTimezone: string, event: EventConfig | null = null, role: SessionRole | null = null): StoreState {
   return {
     hydrated: false,
     hasData: false,
@@ -445,6 +461,8 @@ export function createServerState(eventTimezone: string): StoreState {
     generation: 0,
     eventTimezone,
     durableStorage: true,
+    event,
+    role,
   };
 }
 

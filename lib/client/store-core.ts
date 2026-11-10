@@ -113,6 +113,7 @@ import {
 import { chunk, isRow, mergeRows, overlayForPatch, replaceAll, sameRow, staleIds, summaryOf } from './sync-merge';
 import type { HoldFields, HoldRules } from './hold-rules';
 import { uuid } from './uuid';
+import { readStoredEvent, writeStoredEvent } from './event-config';
 
 // ---------------------------------------------------------------------------------------------------
 // Environment (injectable for tests; the browser default is built lazily in start())
@@ -350,7 +351,12 @@ const isSettable = (s: string): s is SettableStatus => (SETTABLE_STATUSES as rea
 export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const serverState = createServerState(options.eventTimezone);
   // Pure: readPrefs() only reads localStorage (DEFAULT_PREFS on the server).
-  let state: StoreState = { ...createServerState(options.eventTimezone), prefs: readPrefs() };
+  // (Events) The last event config this device had (localStorage): an offline reload renders with it.
+  const stored = readStoredEvent();
+  let state: StoreState = {
+    ...createServerState(stored?.event?.timezone ?? options.eventTimezone, stored?.event ?? null, stored?.role ?? null),
+    prefs: readPrefs(),
+  };
   const listeners = new Set<() => void>();
   const alertListeners = new Set<(alert: AlertEvent) => void>();
 
@@ -959,6 +965,14 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     void messaging.clear(false);
   };
 
+  /** (Events) The session's role and event config into the state (and onto this device for an offline reload). */
+  const applyEvent = (info: SessionInfo) => {
+    const role = info.role === 'lead' ? 'lead' : 'staff';
+    const event = info.event ?? null;
+    writeStoredEvent({ role, event });
+    if (state.role !== role || state.event !== event) set({ role, event, ...(event?.timezone ? { eventTimezone: event.timezone } : {}) });
+  };
+
   /** False when a sign-out overtook it (nothing applied then). */
   const applySession = async (info: SessionInfo): Promise<boolean> => {
     const gen = ownerGen();
@@ -971,6 +985,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       cacheStaff = canon;
     }
     set({ session: { status: 'active', staffName: info.staffName, team: info.team, staff: info.staff, expiresAt: info.expiresAt } });
+    applyEvent(info);
     if (sessionEndedToastId) dismissToast(sessionEndedToastId);
     sessionEndedToastId = null;
     const last: StoredStaff = { staffName: info.staffName, team: info.team, staff: info.staff };

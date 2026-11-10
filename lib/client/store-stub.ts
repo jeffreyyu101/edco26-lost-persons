@@ -2,7 +2,7 @@
 // IndexedDB. It follows the same domain rules (transitions, creator checks, versions, undo) so screens
 // behave plausibly. Phase 1b (C) replaces its use in lib/client/store.tsx with the real store; after that
 // only tests import it (v2.2 A25: the stub and stub-data must not be in the production first load).
-import type { RequestDetail, RequestSummary, Stats } from '../api-types';
+import type { EventConfig, RequestDetail, RequestSummary, SessionRole, Stats } from '../api-types';
 import {
   STATUS,
   canTransition,
@@ -36,7 +36,7 @@ import {
 } from './store-contract';
 import { UNDO_MS } from './constants';
 import { readPrefs, writePref } from './prefs';
-import { STUB_SESSION, stubDetail, stubRows } from './stub-data';
+import { STUB_EVENT, STUB_SESSION, stubDetail, stubRows } from './stub-data';
 
 let seq = 0;
 const nextId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${(seq += 1)}`;
@@ -46,6 +46,9 @@ export interface StubOptions {
   now?: number;
   /** Start with no rows (to render empty states). */
   empty?: boolean;
+  /** (Events) The event config (default: STUB_EVENT in options.eventTimezone; null: none open). */
+  event?: EventConfig | null;
+  role?: SessionRole;
 }
 
 type PostCount = Stats['byPost'][number];
@@ -88,6 +91,8 @@ export function createStubStore(options: StubOptions): AppStore {
     generation: 0,
     eventTimezone: options.eventTimezone,
     durableStorage: true,
+    event: options.event === undefined ? { ...STUB_EVENT, timezone: options.eventTimezone } : options.event,
+    role: options.role ?? 'staff',
   };
 
   const listeners = new Set<() => void>();
