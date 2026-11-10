@@ -4,9 +4,11 @@
 //   * practice → go live deletes every practice request (rows, audit, messages, photos with their objects) and
 //     numbering restarts at LP-0001;
 //   * end → every write path answers event_ended at all three guard layers (route 410, lp_require_writable P0410, the
-//     patients trigger) while reads still work; (phase 3) the end clears its staff password and join link: the old
-//     password is a wrong password (401), the old link (its slug) → 410 with the Ended screen's event; reopen →
-//     writable again, numbering continues;
+//     patients trigger) while reads still work; (grace period) for 24 h the end keeps its staff password and join
+//     link, which then answer 410 with the Ended screen's event and sign nobody in; after 24 h (ended_at moved back,
+//     the way these tests move time) both are cleared, lazily at sign-in / reopen and by the auto-close job: the old
+//     password is a wrong password (401), the old link (its slug) still → 410; reopen → writable again, numbering
+//     continues, with the same password and link inside the 24 h and neither after them;
 //   * a staff session never reaches another event by passing its ids;
 //   * lead vs staff route access; a lead opens an event with a re-issued cookie;
 //   * the password rule (lead passcode first; a password names one way in).
@@ -17,7 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { EventAdmin, EventStats, RequestSummary, SessionInfo, SyncResponse } from '@/lib/api-types';
 import { STATUS } from '@/lib/domain';
 import { ROOT, TEST_EVENT_SLUG, ensureTestEvent, loadTestEnv } from '../../scripts/test-env.mjs';
-import { BASE, EVENT_ID, PASSWORD, admin, api, clearAttempts, cookieFor, createBody, freshIp, newStaff, pii, psql, randomUUID, setCookies, uniq, withTestServer, type Staff } from './harness';
+import { BASE, EVENT_ID, PASSWORD, admin, api, clearAttempts, cookieFor, createBody, freshIp, newStaff, pii, psql, psqlAsync, randomUUID, setCookies, uniq, withTestServer, type Staff } from './harness';
 
 withTestServer();
 
@@ -544,13 +546,27 @@ describe('end → event_ended at every layer; staff are locked out, leads keep r
     expect(psql(`select public.lp_close_inactive(array['${r.id}']::uuid[])`)).toBe('0');
   });
 
-  it('(phase 3) the end clears its staff password and join link; the hash is kept apart for the lead passcode check only', async () => {
-    expect(psql(`select (staff_password_hash is null)::text || '/' || (ended_password_hash is not null)::text || '/' || (invite_code_sha256 is null)::text || '/' || (invite_expires_at is null)::text from public.events where id = '${e.event.id}'`)).toBe('true/true/true/true');
-    // Sign-in compares running events' hashes only.
+  it('(grace period) for 24 h the end keeps its staff password and join link; no other event and not the lead passcode may take that password', async () => {
+    expect(psql(`select (staff_password_hash is not null)::text || '/' || (ended_password_hash is null)::text || '/' || (invite_code_sha256 is not null)::text || '/' || (invite_expires_at is not null)::text from public.events where id = '${e.event.id}'`)).toBe('true/true/true/true');
+    // Sign-in compares it (a held event: its match is the Ended answer).
     const secrets = JSON.parse(psql('select public.lp_auth_secrets()::text')) as { events: Array<{ id: string; stage: string }> };
-    expect(secrets.events.some((x) => x.id === e.event.id || x.stage === 'archived')).toBe(false);
-    // And an archived event takes neither back (Reopen first).
+    expect(secrets.events.find((x) => x.id === e.event.id)).toMatchObject({ stage: 'archived' });
+    // The lead sees what a Reopen keeps, and until when.
     const lead = await leadCookie();
+    const got = await api<{ event: EventAdmin }>(`/api/events/${e.event.id}`, { cookie: lead });
+    expect(got.body.event).toMatchObject({ stage: 'archived', hasStaffPassword: true });
+    expect(got.body.event.joinLinkExpiresAt).not.toBeNull();
+    expect(Date.parse(got.body.event.holdUntil!) - Date.parse(got.body.event.endedAt!)).toBe(24 * 3600_000);
+    // The uniqueness rule counts it as running: another event may not take its password, nor may the lead passcode.
+    const other = await makeEvent({ practice: true });
+    archivedAtEnd.push(other.event.id);
+    const clash = await api(`/api/events/${other.event.id}/password`, { json: { password: e.password }, cookie: lead });
+    expect(clash.status).toBe(422);
+    expect(clash.body.error).toMatchObject({ code: 'invalid', field: 'password' });
+    const asLead = await api('/api/org/lead-passcode', { json: { passcode: e.password }, cookie: lead });
+    expect(asLead.status).toBe(422);
+    expect(asLead.body.error).toMatchObject({ code: 'invalid', field: 'passcode' });
+    // And an archived event takes no new password or link (Reopen first).
     const pw = await api(`/api/events/${e.event.id}/password`, { json: { password: `pw-${uniq()}-${uniq()}` }, cookie: lead });
     expect(pw.status).toBe(409);
     expect(pw.body.error).toMatchObject({ code: 'conflict', field: 'password' });
@@ -559,9 +575,28 @@ describe('end → event_ended at every layer; staff are locked out, leads keep r
     expect(link.body.error).toMatchObject({ code: 'conflict', field: 'invite' });
   });
 
-  it('sign-in with the ended event\'s old password is a wrong password (401); its old join link → 410 event_ended with the event for the Ended screen; no cookie', async () => {
+  it('(grace period) held: sign-in with its password or its join link → 410 event_ended with the Ended screen\'s event; nobody is signed in', async () => {
+    const res = await api('/api/session', { json: { staffName: pii(`TEST-S Late ${uniq()}`), team: 'Site Ops', password: e.password }, headers: { 'x-real-ip': await ip() } });
+    expect(res.status).toBe(410);
+    expect(res.body.error).toMatchObject({ code: 'event_ended', event: { id: e.event.id, name: e.event.name, stage: 'archived', logoUrl: null } });
+    expect(setCookies(res.headers)).toEqual([]);
+    const viaLink = await api('/api/session', { json: { staffName: pii(`TEST-S Late ${uniq()}`), team: 'Site Ops', invite: oldLink }, headers: { 'x-real-ip': await ip() } });
+    expect(viaLink.status).toBe(410);
+    expect(viaLink.body.error).toMatchObject({ code: 'event_ended', event: { id: e.event.id, stage: 'archived' } });
+    expect(setCookies(viaLink.headers)).toEqual([]);
+    // Still held: nothing was cleared by those sign-ins.
+    expect(psql(`select staff_password_hash is not null and invite_code_sha256 is not null from public.events where id = '${e.event.id}'`)).toBe('t');
+  });
+
+  it('after 24 h: the first sign-in clears it (lazily); the old password is a wrong password (401); its old join link → 410 event_ended by its slug; no cookie', async () => {
+    // 25 hours after the end (the clock moved the way these tests move it: the row's time goes back).
+    psql(`update public.events set ended_at = ended_at - interval '25 hours' where id = '${e.event.id}'`);
+    expect(psql(`select staff_password_hash is not null from public.events where id = '${e.event.id}'`)).toBe('t');
     const res = await api('/api/session', { json: { staffName: pii(`TEST-S Late ${uniq()}`), team: 'Site Ops', password: e.password }, headers: { 'x-real-ip': await ip() } });
     expect(res.status).toBe(401);
+    // Cleared by that sign-in; the hash is kept apart for the lead passcode check only.
+    expect(psql(`select (staff_password_hash is null)::text || '/' || (ended_password_hash is not null)::text || '/' || (invite_code_sha256 is null)::text || '/' || (invite_expires_at is null)::text from public.events where id = '${e.event.id}'`)).toBe('true/true/true/true');
+    expect((await api<{ event: EventAdmin }>(`/api/events/${e.event.id}`, { cookie: await leadCookie() })).body.event).toMatchObject({ hasStaffPassword: false, joinLinkExpiresAt: null, holdUntil: null });
     expect(res.body.error).toMatchObject({ code: 'unauthorized', field: 'password' });
     expect(setCookies(res.headers)).toEqual([]);
     // The old join link: its code is gone, its slug names the event.
@@ -577,7 +612,7 @@ describe('end → event_ended at every layer; staff are locked out, leads keep r
     expect(running.status).toBe(401);
   });
 
-  it('reopen: archived → live, writable again, numbering continues; its password and join link are cleared; only from archived', async () => {
+  it('reopen after 24 h: archived → live, writable again, numbering continues; its password and join link are gone; only from archived', async () => {
     const lead = await leadCookie();
     const reopened = await api<{ event: EventAdmin }>(`/api/events/${e.event.id}/reopen`, { json: {}, cookie: lead });
     expect(reopened.status).toBe(200);
@@ -663,7 +698,7 @@ describe('lead vs staff', () => {
 });
 
 describe('the password rule', () => {
-  it('a staff password may not be the lead passcode or another running event\'s; an archived event\'s is free again', async () => {
+  it('a staff password may not be the lead passcode or another running or held event\'s; an ended event\'s is free again after 24 h', async () => {
     const lead = await leadCookie();
     const one = await makeEvent();
     const two = await makeEvent({ practice: true });
@@ -676,8 +711,11 @@ describe('the password rule', () => {
     expect((await set(two.event.id, PASSWORD)).status).toBe(422); // the local test event's (live)
     // The same password again on its own event is fine.
     expect((await set(one.event.id, one.password)).status).toBe(200);
-    // Once one has ended, its password may be used again; the running event wins at sign-in.
+    // Once one has ended its password stays taken for 24 h (a Reopen would bring it back); after that it is free
+    // again, and the running event wins at sign-in.
     expect((await api(`/api/events/${one.event.id}/end`, { json: {}, cookie: lead })).status).toBe(200);
+    expect((await set(two.event.id, one.password)).status).toBe(422);
+    psql(`update public.events set ended_at = ended_at - interval '25 hours' where id = '${one.event.id}'`);
     expect((await set(two.event.id, one.password)).status).toBe(200);
     const who = await signIn(newStaff('Site Ops'), one.password);
     expect(who.status).toBe(200);
@@ -711,7 +749,9 @@ describe('reopen never captures another event\'s staff', () => {
     expect(link.status).toBe(201);
     const token = decodeURIComponent(new URL(link.body.link).hash.slice('#join='.length));
     expect((await api(`/api/events/${a.event.id}/end`, { json: {}, cookie: lead })).status).toBe(200);
-    // A's password is free once A has ended: B takes it.
+    // A's password is free once A's 24 h are over: B takes it.
+    expect((await api(`/api/events/${b.event.id}/password`, { json: { password: a.password }, cookie: lead })).status).toBe(422);
+    psql(`update public.events set ended_at = ended_at - interval '25 hours' where id = '${a.event.id}'`);
     expect((await api(`/api/events/${b.event.id}/password`, { json: { password: a.password }, cookie: lead })).status).toBe(200);
     const reopened = await api<{ event: EventAdmin }>(`/api/events/${a.event.id}/reopen`, { json: {}, cookie: lead });
     expect(reopened.status).toBe(200);
@@ -727,6 +767,132 @@ describe('reopen never captures another event\'s staff', () => {
     const clash = await api(`/api/events/${a.event.id}/password`, { json: { password: a.password }, cookie: lead });
     expect(clash.status).toBe(422);
     expect(clash.body.error).toMatchObject({ field: 'password' });
+  });
+});
+
+describe('(grace period) End by mistake, Reopen inside 24 h: the same password and join link', () => {
+  it('reopened 23 h after the end: live again with both kept; staff sign in with what they have and find their requests', async () => {
+    const lead = await leadCookie();
+    const e = await makeEvent();
+    archivedAtEnd.push(e.event.id);
+    const link = await api<{ link: string; expiresAt: string }>(`/api/events/${e.event.id}/join-link`, { json: {}, cookie: lead });
+    expect(link.status).toBe(201);
+    const token = decodeURIComponent(new URL(link.body.link).hash.slice('#join='.length));
+    const staff = newStaff('Site Ops');
+    const before = await create((await signIn(staff, e.password)).cookie);
+    expect((await api(`/api/events/${e.event.id}/end`, { json: {}, cookie: lead })).status).toBe(200);
+    psql(`update public.events set ended_at = ended_at - interval '23 hours' where id = '${e.event.id}'`);
+    const shown = (await api<{ event: EventAdmin }>(`/api/events/${e.event.id}`, { cookie: lead })).body.event;
+    expect(shown).toMatchObject({ stage: 'archived', hasStaffPassword: true });
+    expect(Date.parse(shown.joinLinkExpiresAt!)).toBe(Date.parse(link.body.expiresAt));
+    const left = Date.parse(shown.holdUntil!) - Date.now();
+    expect(left).toBeGreaterThan(55 * 60_000);
+    expect(left).toBeLessThanOrEqual(3600_000);
+
+    const reopened = await api<{ event: EventAdmin }>(`/api/events/${e.event.id}/reopen`, { json: {}, cookie: lead });
+    expect(reopened.status).toBe(200);
+    expect(reopened.body.event).toMatchObject({ stage: 'live', endedAt: null, holdUntil: null, hasStaffPassword: true });
+    expect(Date.parse(reopened.body.event.joinLinkExpiresAt!)).toBe(Date.parse(link.body.expiresAt));
+    const again = await signIn(staff, e.password);
+    expect(again.status).toBe(200);
+    expect(again.info.eventId).toBe(e.event.id);
+    expect((await sync(again.cookie)).rows.map((r) => r.id)).toContain(before.id);
+    const viaLink = await api<SessionInfo>('/api/session', { json: { staffName: pii(`TEST-S Link ${uniq()}`), team: 'Site Ops', invite: token }, headers: { 'x-real-ip': await ip() } });
+    expect(viaLink.status).toBe(200);
+    expect(viaLink.body.eventId).toBe(e.event.id);
+    expect((await create(again.cookie)).caseNumber).toBe(before.caseNumber + 1);
+  });
+
+  it('reopened 25 h after the end with no sign-in in between: the reopen itself clears both (lazily) and needs new ones', async () => {
+    const lead = await leadCookie();
+    const e = await makeEvent();
+    archivedAtEnd.push(e.event.id);
+    expect((await api(`/api/events/${e.event.id}/join-link`, { json: {}, cookie: lead })).status).toBe(201);
+    expect((await api(`/api/events/${e.event.id}/end`, { json: {}, cookie: lead })).status).toBe(200);
+    psql(`update public.events set ended_at = ended_at - interval '25 hours' where id = '${e.event.id}'`);
+    // Nothing cleared it yet (files run one at a time; nobody signed in since).
+    expect(psql(`select staff_password_hash is not null and invite_code_sha256 is not null from public.events where id = '${e.event.id}'`)).toBe('t');
+    const reopened = await api<{ event: EventAdmin }>(`/api/events/${e.event.id}/reopen`, { json: {}, cookie: lead });
+    expect(reopened.status).toBe(200);
+    expect(reopened.body.event).toMatchObject({ stage: 'live', hasStaffPassword: false, joinLinkExpiresAt: null, holdUntil: null });
+    expect(psql(`select (staff_password_hash is null)::text || '/' || (ended_password_hash is not null)::text || '/' || (invite_code_sha256 is null)::text from public.events where id = '${e.event.id}'`)).toBe('true/true/true');
+    expect((await signIn(newStaff('Site Ops'), e.password)).status).toBe(401);
+  });
+
+  it('the auto-close job clears holds over 24 h old and leaves younger ones', async () => {
+    const lead = await leadCookie();
+    const old = await makeEvent();
+    const young = await makeEvent();
+    archivedAtEnd.push(old.event.id, young.event.id);
+    for (const x of [old, young]) {
+      expect((await api(`/api/events/${x.event.id}/join-link`, { json: {}, cookie: lead })).status).toBe(201);
+      expect((await api(`/api/events/${x.event.id}/end`, { json: {}, cookie: lead })).status).toBe(200);
+    }
+    psql(`update public.events set ended_at = ended_at - interval '24 hours 1 minute' where id = '${old.event.id}'`);
+    psql(`update public.events set ended_at = ended_at - interval '23 hours 59 minutes' where id = '${young.event.id}'`);
+    // What pg_cron runs every 5 minutes.
+    psql('select public.lp_close_inactive()');
+    const state = (id: string) => psql(`select (staff_password_hash is null)::text || '/' || (ended_password_hash is null)::text || '/' || (invite_code_sha256 is null)::text || '/' || (invite_expires_at is null)::text from public.events where id = '${id}'`);
+    expect(state(old.event.id)).toBe('true/false/true/true');
+    expect(state(young.event.id)).toBe('false/true/false/false');
+    // Run again: nothing more to do.
+    expect(psql('select public.lp_event_release_held()')).toBe('0');
+  });
+
+  it('sign-in cost: an event that ended long ago is never compared, even if its hash were still there', async () => {
+    const lead = await leadCookie();
+    const e = await makeEvent();
+    archivedAtEnd.push(e.event.id);
+    expect((await api(`/api/events/${e.event.id}/end`, { json: {}, cookie: lead })).status).toBe(200);
+    // Ended 30 days ago, hash still in place (no sign-in, reopen or job since): listed for nobody.
+    psql(`update public.events set ended_at = ended_at - interval '30 days' where id = '${e.event.id}'`);
+    const listed = (sql: string) => (JSON.parse(psql(sql)) as { events: Array<{ id: string }> }).events.map((x) => x.id);
+    expect(psql(`select (stage = 'archived' and staff_password_hash is not null and not public.lp_event_held(e, clock_timestamp()))::text from public.events e where e.id = '${e.event.id}'`)).toBe('true');
+    expect(listed('select public.lp_auth_secrets()::text')).not.toContain(e.event.id);
+    // Every event sign-in compares is running or ended under 24 h ago.
+    const kinds = psql(`select string_agg(distinct case when e.stage <> 'archived' then 'running' when e.ended_at > now() - interval '24 hours' then 'held' else 'old' end, ',')
+                          from public.events e where e.id in (select (x ->> 'id')::uuid from jsonb_array_elements(public.lp_auth_secrets() -> 'events') x)`);
+    expect(kinds.split(',').sort().filter((k) => k === 'old')).toEqual([]);
+    // And it was cleared on the way (the hash kept apart for the lead passcode check only).
+    expect(psql(`select (staff_password_hash is null)::text || '/' || (ended_password_hash is not null)::text from public.events where id = '${e.event.id}'`)).toBe('true/true');
+  });
+
+  it('a reopen while another event is being given that password: never two running events with one password', async () => {
+    const lead = await leadCookie();
+    const a = await makeEvent();
+    const b = await makeEvent({ practice: true });
+    archivedAtEnd.push(a.event.id, b.event.id);
+    expect((await api(`/api/events/${a.event.id}/end`, { json: {}, cookie: lead })).status).toBe(200);
+    // B is refused A's password while A holds it.
+    expect((await api(`/api/events/${b.event.id}/password`, { json: { password: a.password }, cookie: lead })).status).toBe(422);
+    // A write whose check did not see A's hash (it ran when A's was not in force) is refused under the lock: the app
+    // server then checks again. Here: B's check list leaves A's held hash out.
+    const bcrypt = (await import('bcryptjs')).default;
+    const hashOfA = await bcrypt.hash(a.password, 4);
+    const aHash = psql(`select staff_password_hash from public.events where id = '${a.event.id}'`);
+    const others = psql(`select coalesce(string_agg(quote_literal(h), ','), '') from (
+                           select o.lead_passcode_hash h from public.lp_org o where o.id
+                           union all select e.staff_password_hash from public.events e
+                            where e.id not in ('${a.event.id}', '${b.event.id}') and e.staff_password_hash is not null
+                              and (e.stage <> 'archived' or public.lp_event_held(e, clock_timestamp()))) x`);
+    const stale = `array[${others}]::text[]`;
+    expect(() => psql(`select public.lp_event_set_password('${b.event.id}', '${hashOfA}', ${stale})`)).toThrow(/secrets_changed/);
+    // Reopen holds the lock while it decides: a write racing it waits, then sees A running with its password.
+    const reopen = psqlAsync(`begin; select public.lp_event_reopen('${a.event.id}'); select pg_sleep(1.5); commit;`);
+    await new Promise((r) => setTimeout(r, 400));
+    const t0 = Date.now();
+    const racing = psqlAsync(`select public.lp_event_set_password('${b.event.id}', '${hashOfA}', ${stale})`);
+    const [r1, r2] = await Promise.all([reopen.done, racing.done]);
+    expect(r1.code).toBe(0);
+    expect(r2.code).not.toBe(0);
+    expect(r2.out).toMatch(/secrets_changed/);
+    expect(Date.now() - t0).toBeGreaterThan(700);
+    // A is live with its own password; B kept its own; sign-in with A's lands in A.
+    expect(psql(`select stage || '/' || (staff_password_hash = '${aHash}')::text from public.events where id = '${a.event.id}'`)).toBe('live/true');
+    expect(await bcrypt.compare(a.password, psql(`select staff_password_hash from public.events where id = '${b.event.id}'`))).toBe(false);
+    expect((await signIn(newStaff('Site Ops'), a.password)).info.eventId).toBe(a.event.id);
+    // Through the route (check, then the locked write), B is still refused: A is running with it.
+    expect((await api(`/api/events/${b.event.id}/password`, { json: { password: a.password }, cookie: lead })).status).toBe(422);
   });
 });
 

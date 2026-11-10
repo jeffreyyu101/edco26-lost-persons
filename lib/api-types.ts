@@ -569,6 +569,11 @@ export interface EventAdmin extends EventConfig {
   hasStaffPassword: boolean;
   /** When the current join link stops working, or null when there is none. */
   joinLinkExpiresAt: IsoDateTime | null;
+  /**
+   * (Grace period) Archived events only: until when a Reopen keeps the staff password and join link (24 h after the
+   * end); null outside that window (a Reopen then needs a new password and join link).
+   */
+  holdUntil: IsoDateTime | null;
   /** The last LP number handed out (0 = none yet). */
   caseSeq: number;
   recordsDeleteAt: IsoDateTime | null;

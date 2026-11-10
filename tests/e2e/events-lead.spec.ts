@@ -215,15 +215,14 @@ test('the whole journey with no developer: create, set up, practice, go live, en
   // End event: staff are refused from then on; nothing is deleted.
   await page.getByTestId('stage-end').click();
   const end = page.getByRole('dialog', { name: 'End event' });
-  await expect(end).toContainText('Staff are signed out; the password and join link are cleared. Nothing is deleted; open requests are frozen as they are.');
+  await expect(end).toContainText('Staff are signed out and nothing is deleted; within 24 hours it can be reopened with the same password and join link.');
   await end.getByTestId('stage-confirm').click();
   await expect(end).toHaveCount(0);
   await expect(page.getByTestId('event-stage')).toHaveText('Archived');
   expect((await staff.request.get('/api/sync')).status()).toBe(410);
-  // (Phase 3) The end cleared the staff password and join link: the old password is a wrong password; the old link
-  // (its slug) still reaches the Ended screen.
+  // (Grace period) For 24 h the end keeps the staff password and join link: both answer Ended (410), nobody signs in.
   const late = await browser.newContext({ serviceWorkers: 'block' });
-  expect(await staffSignIn(late, password)).toBe(401);
+  expect(await staffSignIn(late, password)).toBe(410);
   expect(await staffJoin(late, joinLink)).toBe(410);
   await late.close();
   const leadRows = await page.request.get(`/api/events`);
@@ -234,22 +233,29 @@ test('the whole journey with no developer: create, set up, practice, go live, en
   await expect(page.getByTestId('setup-posts-add')).toHaveCount(0);
   await expect(page.getByTestId('password-set')).toHaveCount(0);
 
-  // Reopen clears the password and the join link; the lead sets a new one; the old one no longer works.
+  // Reopen right away (inside the 24 h): the password and join link are kept; staff sign in with them again. Then the
+  // lead changes the password; the old one no longer works.
   await page.getByTestId('stage-reopen').click();
   const reopen = page.getByRole('dialog', { name: 'Reopen' });
-  await expect(reopen).toContainText('The staff password and join link must be set again.');
+  await expect(reopen).toContainText('Open requests resume as they were; staff sign in again.');
+  await expect(reopen.getByTestId('reopen-password')).toContainText('Kept');
+  await expect(reopen.getByTestId('reopen-join-link')).toContainText('Kept');
   await reopen.getByTestId('stage-confirm').click();
   await expect(reopen).toHaveCount(0);
   await expect(page.getByTestId('event-stage')).toHaveText('Live');
-  await expect(page.getByTestId('password-state')).toContainText('—');
-  await expect(page.getByTestId('join-link-state')).toContainText('—');
-  expect(await staffSignIn(staff, password)).toBe(401);
+  await expect(page.getByTestId('password-state')).toContainText('••••••••');
+  await expect(page.getByTestId('join-link-state')).not.toContainText('—');
+  expect(await staffSignIn(staff, password)).toBe(200);
+  expect(await staffJoin(staff, joinLink)).toBe(200);
   await page.getByTestId('password-set').click();
   const second = secret('again');
   await page.getByTestId('secret-input').fill(second);
   await page.getByTestId('secret-save').click();
+  // The sheet closes once the change is saved (the row showed dots before it too).
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByTestId('password-state')).toContainText('••••••••');
   expect(await staffSignIn(staff, second)).toBe(200);
+  expect(await staffSignIn(staff, password)).toBe(401);
 
   await staff.close();
   await page.context().close();

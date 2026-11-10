@@ -36,7 +36,7 @@ message.
 | `SESSION_SECRET` | yes | 32 characters or more. Changing it signs everyone out. |
 | `APP_SHARED_PASSWORD_HASH_B64` or `APP_SHARED_PASSWORD` | bootstrap only | Read once by `scripts/bootstrap-events.mjs` (the EDC staff password, kept as retired: never a way in, never allowed as the lead passcode). Keep it for a rollback to the pre-events build. Since the events migration, every staff password, the lead passcode and every join link live in the database and are set by a lead in the app. |
 | `EVENT_TIMEZONE` | no | Defaults to `America/New_York`. Every displayed time uses it. |
-| `INVITE_CODE_SHA256` | rollback only | No longer read (an archived event keeps no join link). Keep it for a rollback to the pre-events build. New links: `POST /api/events/:id/join-link`. |
+| `INVITE_CODE_SHA256` | rollback only | No longer read (join links live in the database; an archived event keeps its link only for 24 h after its end). Keep it for a rollback to the pre-events build. New links: `POST /api/events/:id/join-link`. |
 | `INVITE_EXPIRES_AT` | with the one above | Its expiry (rollback only, like the one above). |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | for lock-screen alerts | Web Push (already set in production). All three switch it on; `VAPID_SUBJECT` is `mailto:` or `https:`. Missing or invalid: push is off, silently (no alerts banner, no pushes; Activity and in-app alerts still work). A new pair makes every device subscribe again on its next open. |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | no | The same public key at build time. The app reads the key from the server anyway (`POST /api/push/prefs`). |
@@ -66,7 +66,7 @@ and `.env.test`, which holds local-only values that work against `127.0.0.1` and
 | `20261108120000_companion.sql` | Companion: `friend_in_medical*` and `swap_*` columns, statuses `Found – Accompanied` / `Closed – Friend Informed`, `lp_swap`, the new Activity kinds, and every status list (transitions, involved, stats, inactive close) updated. Additive. | Paste it **alone** (after dashboard v4) **before** deploying the companion build: `node scripts/companion-sql.mjs` writes `migration.sql` and `dry-run.sql`. |
 | `20261108190000_companion_cancel.sql` | Companion follow-up: `lp_swap` action `cancel` (swap requested → cleared; swap approved → back to `Found – Accompanied`), Activity kind `swap_cancelled`. Additive, same signatures. | Paste it **alone** (after companion) **before** deploying the cancel build. |
 | `20261109120000_companion_post_event.sql` | Companion fixes after the event: new nullable `patients.swap_closed` (+ CHECK, added only when missing) returned by `lp_row`; `lp_swap` (approve needs an open request, except an older app's Undo of its own Cancel swap; `restore`, the Undo of Cancel swap / Decline / Swap at …, keeps the original requester; withdraw tells the answerer; Undo / Reopen no longer count as "who answered"); `lp_set_status` (Reopen of an Accompanied request closed as inactive or discharged returns to Accompanied; Friend informed over an open swap request is a conflict; Undo of a change brings back the swap request it ended); `lp_stats()` / `lp_stats(text)` (a swap approval or Change answer out of Accompanied restarts the friend's clock). Additive, same signatures, no row rewritten, nothing dropped; safe to run twice. | Paste it **alone** (after the cancel file) **before** deploying this build. |
-| `20261110000000_events.sql` | Multi-event foundation (phase 1): tables `events` and `lp_org`; `event_id` on requests and the staff/device tables; every existing request becomes the archived `edco26` event (case numbers kept, nothing else changed); per-event LP numbers; the write guard (`lp_require_writable` + a patients trigger: an archived event answers 410 `event_ended`); every RPC takes the event; `lp_stats(p_event, p_range)`; lead RPCs. Additive except the retired RPC signatures (dropped or made internal). Safe to run twice. | Paste it **alone** (after the post-event file), then deploy this build at once and run `scripts/bootstrap-events.mjs` once (lead passcode; EDC's old staff password from the env, kept as retired). Full runbook: `docs/RELEASE-events.md`. |
+| `20261110000000_events.sql` | Multi-event foundation (phase 1): tables `events` and `lp_org`; `event_id` on requests and the staff/device tables; every existing request becomes the archived `edco26` event (case numbers kept, nothing else changed); per-event LP numbers; the write guard (`lp_require_writable` + a patients trigger: an archived event answers 410 `event_ended`); every RPC takes the event; `lp_stats(p_event, p_range)`; lead RPCs. End keeps the staff password and join link for 24 h (a Reopen within them keeps both; while held they answer Ended and the password stays taken), then clears them at the next sign-in, Reopen or `lp-close-inactive` run. Additive except the retired RPC signatures (dropped or made internal). Safe to run twice. | Paste it **alone** (after the post-event file), then deploy this build at once and run `scripts/bootstrap-events.mjs` once (lead passcode; EDC's old staff password from the env, kept as retired). Full runbook: `docs/RELEASE-events.md`. |
 
 Without `20261106000000_rework.sql`, every API route fails, because each one calls an `lp_*` function. The
 file is one transaction, is safe to run twice (also on a database that already has every `lp_*` function),
@@ -147,7 +147,8 @@ npm run test:e2e:lanes -- -- --grep "dashboard"     # after a second `--`: passe
 ```
 
 It needs `~/.config/lp-stacks` (`claim.sh`, `make.sh`, `release.sh`) and at least three unclaimed stacks in
-`~/.lp-stacks`. Each lane's stack is rebuilt from this checkout's migrations (`supabase db reset`), seeded as
+`~/.lp-stacks`. It claims a stack the way `claim.sh` does, but a stopped one first: a stack that is running without
+a claim is taken only when no stopped one is free, and the log says so. Each lane's stack is rebuilt from this checkout's migrations (`supabase db reset`), seeded as
 `npm run db:reset` does, and has the `lp-close-inactive` job paused; the unused auth container is stopped. Before
 starting it checks free memory (this Mac and the Docker VM) and disk and refuses, naming the shortfall, when there
 is not enough. Plan on about 0.7 GB of Docker memory per lane.
@@ -162,7 +163,8 @@ is not enough. Plan on about 0.7 GB of Docker memory per lane.
 - **Logs:** per-lane logs, server logs, Playwright's JSON and `results.json` are in a `lp-e2e-lanes-<time>` folder in
   the temp directory (printed at the start and the end); a failing lane's traces and screenshots are copied there.
 - **Cleanup:** on exit, Ctrl-C or error, every server it started is stopped, every stack it claimed is released and
-  stopped (`--keep-stacks` leaves them running), and the lane copies are deleted.
+  left as it was found: one that was running stays running (its auth container started again), one that was stopped
+  is stopped (`--keep-stacks` leaves it running too), and the lane copies are deleted.
 - **Trade-off:** a spec that depended on another spec file's leftovers would behave differently here, because lanes
   start from a fresh seed and run files in a different order. None is known; if one fails only in lanes, run it
   alone with `npm run test:e2e`.

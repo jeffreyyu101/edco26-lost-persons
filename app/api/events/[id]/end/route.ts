@@ -1,4 +1,5 @@
 // (Events) POST /api/events/:id/end: live → archived: staff are locked out (every write answers 410 event_ended), nothing is deleted; open requests stay as they are. 409 unless live. Leads only.
+// (Grace period) The staff password and join link are held for 24 h (`holdUntil`): meanwhile they answer Ended at sign-in, and a Reopen keeps them.
 import { eventAdmin, type EventRow } from '@/lib/server/events';
 import { idParam, json } from '@/lib/server/http';
 import { authedRoute } from '@/lib/server/route';

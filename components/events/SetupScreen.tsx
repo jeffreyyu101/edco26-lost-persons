@@ -3,7 +3,8 @@
 // event takes its settings and is created (stage practice); the same screen then edits it and adds the logo, the staff
 // password, the join link and the stage actions. Saving sends only what changed (PATCH). Server field errors show
 // next to their field. An archived event shows the settings its records were made with read-only (the server
-// would refuse them: bad_stage) and offers Reopen instead of the password and join link (End clears both; an archived event takes neither).
+// would refuse them: bad_stage) and offers Reopen instead of the password and join link (an archived event takes
+// neither; End holds both for 24 h, so a Reopen inside them keeps them, and the Reopen sheet says which).
 import { Button, IconButton, TextField, VisuallyHidden } from '@radix-ui/themes';
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Link2, Plus, Trash2, Upload, X } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';

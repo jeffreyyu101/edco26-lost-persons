@@ -3,10 +3,11 @@
 //
 // (Events) A password is checked against the Ground Control lead passcode first (→ role lead, no event open), then
 // against each running event's staff password (live and practice → staff of that event). A join link "<slug>.<code>"
-// opens its event the same way. (Phase 3) An ended event keeps neither (lp_event_end clears both): its old password is
-// a wrong password, and its old join link answers 410 event_ended with what the Ended screen shows, found by the
-// link's slug. Every attempt goes through the same rate limit as before; an Ended answer from a slug alone verified
-// no credential, so it counts as a failed attempt (it never resets the counter).
+// opens its event the same way. (Grace period) For 24 h after End an event keeps both, and either answers 410
+// event_ended with what the Ended screen shows (nobody is signed in). After that both are cleared: its old password is
+// a wrong password, and its old join link still answers 410 event_ended, found by the link's slug. Every attempt goes
+// through the same rate limit as before; an Ended answer from a slug alone verified no credential, so it counts as a
+// failed attempt (it never resets the counter).
 import { serverEnv } from '@/lib/server/env';
 import { ApiFailure, mapDbError } from '@/lib/server/errors';
 import { eventEndedFailure, eventTeamLabel, isEventTeam, loadEvent, matchEndedSlug, matchInvite, matchPassword, sessionBody, type EventRow } from '@/lib/server/events';

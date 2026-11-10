@@ -27,6 +27,8 @@ export interface EventRow {
   lastSeen: unknown[];
   hasStaffPassword: boolean;
   joinLinkExpiresAt: string | null;
+  /** (Grace period) Until when a Reopen keeps the staff password and join link; null outside it. */
+  holdUntil?: string | null;
   caseSeq: number;
   wentLiveAt: string | null;
   endedAt: string | null;
@@ -95,6 +97,7 @@ export function eventAdmin(row: EventRow): EventAdmin {
     ...eventConfig(row),
     hasStaffPassword: row.hasStaffPassword,
     joinLinkExpiresAt: row.joinLinkExpiresAt,
+    holdUntil: row.holdUntil ?? null,
     caseSeq: Number(row.caseSeq),
     recordsDeleteAt: row.recordsDeleteAt,
     recordsDeletedAt: row.recordsDeletedAt,
@@ -221,7 +224,10 @@ interface AuthSecrets {
   lead: string | null;
   /** lp_org.lead_passcode_version: what a lead's token carries (pv). */
   leadVersion?: number;
-  /** Running (practice / live) events only: an ended event keeps no staff password (lp_event_end). */
+  /**
+   * Running (practice / live) events, and archived ones inside their 24 h grace period after End (stage archived:
+   * a match is the Ended answer). An event that ended longer ago is never listed (lp_auth_secrets).
+   */
   events: Array<{ id: string; stage: EventStage; hash: string }>;
   /** (Phase 3) The hashes ended events had: read by the lead passcode check only, never at sign-in. */
   retired?: string[];
@@ -230,38 +236,63 @@ interface AuthSecrets {
 export type PasswordMatch = { kind: 'lead'; version: number } | { kind: 'event'; eventId: string; stage: EventStage } | null;
 
 /**
- * Sign-in with a password (spec "Server"): the lead passcode first; then each running event's staff password.
- * (Phase 3) An ended event keeps no password (lp_event_end clears it), so a wrong password costs one bcrypt compare
- * per running event, not per event ever held, and an ended event's old password is just a wrong password. Its staff
- * reach the Ended screen through the old join link (matchEndedSlug) or an old session.
+ * Sign-in with a password (spec "Server"): the lead passcode first; then each running event's staff password, and
+ * each password an ended event still holds inside its 24 h grace period (stage archived: the caller answers Ended;
+ * the uniqueness rule keeps a held password from being any other event's, so the order cannot matter).
+ * A wrong password costs one bcrypt compare per running or held event, never per event ever ended: once the grace
+ * period is over the hash is cleared, and that old password is just a wrong password. Its staff reach the Ended
+ * screen through the old join link (matchEndedSlug) or an old session.
  */
 export async function matchPassword(plain: string): Promise<PasswordMatch> {
   const secrets = await rpc<AuthSecrets>('lp_auth_secrets', {});
   if (await matches(plain, secrets?.lead)) return { kind: 'lead', version: Number(secrets?.leadVersion ?? 0) };
   for (const e of secrets?.events ?? []) {
-    if (e.stage === 'archived') continue;
     if (await matches(plain, e.hash)) return { kind: 'event', eventId: e.id, stage: e.stage };
   }
   return null;
 }
 
 /**
- * The uniqueness rule (spec "Server"): a staff password may not equal the lead passcode or another non-archived
- * event's staff password. The lead passcode may not equal ANY event's staff password, ended ones included (their old
- * hashes, `retired`): the lead passcode is checked first at sign-in, so an old event's password would otherwise sign
- * its staff in as lead. Throws 422 invalid (field `password` / `passcode`).
+ * The uniqueness rule (spec "Server"): a staff password may not equal the lead passcode or another event's staff
+ * password while that event runs or holds it (24 h after its End). The lead passcode may not equal ANY event's staff
+ * password, ended ones included (their old hashes, `retired`): the lead passcode is checked first at sign-in, so an
+ * old event's password would otherwise sign its staff in as lead. Throws 422 invalid (field `password` / `passcode`).
+ * Returns the hashes it compared against: lp_event_set_password checks again, under a lock, that no other is in force.
  */
-export async function assertSecretUnique(plain: string, target: { kind: 'event'; eventId: string } | { kind: 'lead' }): Promise<void> {
+export async function assertSecretUnique(plain: string, target: { kind: 'event'; eventId: string } | { kind: 'lead' }): Promise<string[]> {
   const secrets = await rpc<AuthSecrets>('lp_auth_secrets', {});
   const field = target.kind === 'lead' ? 'passcode' : 'password';
   const clash = () => new ApiFailure('invalid', 'Choose a different password', { extra: { field } });
-  if (target.kind === 'event' && (await matches(plain, secrets?.lead))) throw clash();
+  const checked: string[] = [];
+  if (target.kind === 'event') {
+    if (secrets?.lead) checked.push(secrets.lead);
+    if (await matches(plain, secrets?.lead)) throw clash();
+  }
   for (const e of secrets?.events ?? []) {
-    if (target.kind === 'event' && (e.stage === 'archived' || e.id === target.eventId)) continue;
+    if (target.kind === 'event' && e.id === target.eventId) continue;
+    checked.push(e.hash);
     if (await matches(plain, e.hash)) throw clash();
   }
   if (target.kind === 'lead') {
     for (const hash of secrets?.retired ?? []) if (await matches(plain, hash)) throw clash();
+  }
+  return checked;
+}
+
+/**
+ * Sets an event's staff password under the uniqueness rule. If another event's password came into force between the
+ * check and the write (a reopen kept its password, a lead changed one at that moment), the database refuses the write
+ * (secrets_changed) and the check runs again with what is in force now. Three rounds at most.
+ */
+export async function setStaffPassword(eventId: string, plain: string): Promise<EventRow> {
+  const hash = await hashSecret(plain);
+  for (let round = 1; ; round++) {
+    const checked = await assertSecretUnique(plain, { kind: 'event', eventId });
+    try {
+      return await rpc<EventRow>('lp_event_set_password', { p_event: eventId, p_hash: hash, p_checked: checked });
+    } catch (e) {
+      if (round >= 3 || !(e instanceof ApiFailure) || e.extra.currentStatus !== 'secrets_changed') throw e;
+    }
   }
 }
 
@@ -315,7 +346,7 @@ export type InviteMatch = { eventId: string; stage: EventStage } | null;
 /**
  * The event a join link opens: the slug's event (or, for a link without one, any event) whose code matches, in
  * constant time per candidate. A live or practice event's link must not have expired; an archived event's link
- * matches whatever its expiry, so an old link still reaches the Ended screen.
+ * (listed only inside its 24 h grace period) matches whatever its expiry, so it reaches the Ended screen.
  */
 export async function matchInvite(raw: string, nowMs: number = Date.now()): Promise<InviteMatch> {
   const { slug, code } = parseJoinToken(raw);
@@ -329,9 +360,9 @@ export async function matchInvite(raw: string, nowMs: number = Date.now()): Prom
 }
 
 /**
- * (Phase 3) A join link that matched no running event, whose slug names an archived event: its staff get the Ended
- * screen. An ended event keeps no join code (lp_event_end), so the slug is all there is to go on; that tells nobody
- * more than the event's name and logo, which its own logo route already serves. Null for anything else.
+ * (Phase 3) A join link that matched no running or held event, whose slug names an archived event: its staff get the
+ * Ended screen. After the grace period an ended event keeps no join code, so the slug is all there is to go on; that
+ * tells nobody more than the event's name and logo, which its own logo route already serves. Null for anything else.
  */
 export async function matchEndedSlug(raw: string): Promise<EventRow | null> {
   const { slug } = parseJoinToken(raw);

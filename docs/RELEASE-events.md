@@ -82,7 +82,7 @@ minutes). Run steps 2, 3 and 4 back to back.
 
 The bootstrap sets the lead passcode and records EDC's old staff password (from the env) as **retired**: it is never a
 way in, and only stops anyone from choosing it as the lead passcode, now or later in the app. An archived event keeps no
-staff password and no join link (see "Ended" below).
+staff password and no join link once 24 hours have passed since its end (EDC ended long before; see "Ended" below).
 
 ## 4. Verify
 
@@ -134,8 +134,10 @@ shown as uploaded), posts, teams (mark the medical team), "Last seen" chips, mai
 staff password and **Create** the join link (shown once: Copy it). The event starts in practice: every screen shows the
 amber Practice chip. **Go live** on the morning of the show deletes every practice request (rows, messages, photos) and
 restarts numbering at LP-0001; phones already open drop the practice rows at their next sync. **End event** signs staff
-out to the Ended screen and clears the staff password and join link; nothing is deleted. **Reopen** brings an archived
-event back to live; set a new password and link then.
+out to the Ended screen; nothing is deleted. **Reopen** brings an archived event back to live. Within 24 hours of the end
+it keeps the same staff password and join link (staff sign in again with what they have); after that, set a new
+password and link. The Reopen sheet shows which: Password and Join link, each **Kept** or **New one needed**, and the
+time left.
 
 ## 6. Roll back
 
@@ -159,18 +161,31 @@ functions and the `event-logos` bucket. Requests the old build creates meanwhile
 again later puts them in `edco26` with the rest. To go forward again, start this runbook from 2 (the file is safe to
 run twice and on a rolled-back database).
 
-## Ended, sign-in and passwords (what changed in phase 3)
+## Ended, sign-in and passwords
 
-- **End clears the staff password and join link** (as Reopen already did). Every failed sign-in compares the password
-  with each running event's bcrypt hash (≈ 70 ms each); an archived event no longer adds one.
-- **An old password of an ended event is a wrong password** ("Incorrect password").
-- **An old join link of an ended event** (`#join=<slug>.<code>`) reaches the Ended screen through its slug (410
-  `event_ended`). That answer verified no credential, so it counts as a failed attempt in the sign-in rate limit.
-  EDC's own old links have no slug: they are simply not accepted (the sign-in goes on to the password step).
+- **24-hour grace period after End.** For 24 hours after `ended_at` the event keeps its staff password hash and join
+  link, so an accidental End can be undone: **Reopen** within them brings the event back live with the same password
+  and link working again (staff were signed out at End and sign in again with what they already have).
+- **While held**, sign-in with that password or that join link answers 410 `event_ended` with the event (the Ended
+  screen) and signs nobody in. No other event may be given that password and the lead passcode may not equal it (the
+  uniqueness rule counts a held hash like a running event's).
+- **After 24 hours** both are cleared: lazily at the next sign-in or join-link attempt and at Reopen (correctness never
+  waits for a job), and by the `lp-close-inactive` job every 5 minutes so stale hashes do not linger. Then an old
+  password is a wrong password ("Incorrect password"); an old join link (`#join=<slug>.<code>`) still reaches the Ended
+  screen through its slug (410 `event_ended`; it verified no credential, so it counts as a failed attempt in the
+  sign-in rate limit); Reopen needs a new password and link. EDC's own old links have no slug: they are simply not
+  accepted (the sign-in goes on to the password step).
+- **Sign-in cost stays bounded:** a failed sign-in compares the password with the bcrypt hash (≈ 70 ms each) of every
+  practice or live event and of every event that ended under 24 hours ago; never with older ended events.
+- **Never two running events with one password:** setting a staff password re-checks, under the `lp_org` row lock that
+  Reopen also takes, that no hash came into force after the app server compared (`p_checked`); if one did (a Reopen
+  kept its password at that moment), the write is refused and the server checks again.
 - Staff still signed in when the event ends get the Ended screen at their next sync or write (unchanged).
 - An archived event refuses a new staff password or join link (409); Reopen first.
-- The hash an event had when it ended is kept apart (`events.ended_password_hash`) for one purpose: the lead passcode
-  may never equal it. Sign-in never reads it.
+- Once cleared, the hash is kept apart (`events.ended_password_hash`) for one purpose: the lead passcode may never
+  equal it. Sign-in never reads it.
+- Check (SQL Editor): `select slug, stage, ended_at, staff_password_hash is not null as held_pw, invite_code_sha256 is not null as held_link from public.events where stage = 'archived';`
+  → `held_*` true only where `ended_at` is under 24 hours ago.
 
 ## For builders
 

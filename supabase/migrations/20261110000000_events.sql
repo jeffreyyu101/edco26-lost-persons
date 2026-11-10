@@ -43,7 +43,8 @@
 --      event's reopen. Telemetry is on while any event is practice or live (the fixed off_at no longer applies).
 --   I. Lead RPCs (events list/create/update, staff password, join link, logo, go live, end, reopen, lead passcode;
 --      an ended event's setup is frozen, a renamed post takes its requests along, a post or team in use cannot go;
---      reopen clears the staff password and join link), lp_session_state (what the route wrapper checks)
+--      End keeps the staff password and join link for 24 h, so a Reopen inside them restores both; afterwards they
+--      are cleared, lazily at sign-in / reopen and by the lp-close-inactive job), lp_session_state (what the route wrapper checks)
 --      and lp_stats(p_event, p_range): '1h' | '2h' | '6h' | 'today' | 'event' | 'day:N', in the event's time
 --      zone and show day (day_start_hour), post breakdowns as arrays ordered by count (top 4 + 'Other').
 --   J. Storage bucket 'event-logos' (private; the app serves logos through its own route).
@@ -94,9 +95,9 @@ create table if not exists public.events (
   -- Ordered [label]: the "Last seen" chips.
   last_seen jsonb not null default '[]'::jsonb check (pg_catalog.jsonb_typeof(last_seen) = 'array'),
   staff_password_hash text,
-  -- (Phase 3) The staff password hash the event had when it ended. Sign-in never reads it (an ended event's old
-  -- password is simply a wrong password, and sign-in compares only running events' hashes); only the lead passcode
-  -- check does (lp_auth_secrets `retired`), so an ended event's old password can never become the lead passcode.
+  -- (Phase 3) The staff password hash an ended event had, once its 24 h grace period is over (lp_event_release_held).
+  -- Sign-in never reads it (that old password is then simply a wrong password); only the lead passcode check does
+  -- (lp_auth_secrets `retired`), so an ended event's old password can never become the lead passcode.
   ended_password_hash text,
   invite_code_sha256 text check (invite_code_sha256 is null or invite_code_sha256 ~ '^[0-9a-f]{64}$'),
   invite_expires_at timestamptz,
@@ -256,13 +257,16 @@ begin
 end
 $backfill$;
 
--- (Phase 3) An archived event keeps no staff password and no join link (lp_event_end): EDC included, and any event an
+-- (Phase 3) An archived event keeps no staff password and no join link once its 24 h grace period after the end is
+-- over (lp_event_release_held, section I): EDC included (it ended 2026-11-09 06:00 New York time), and any event an
 -- earlier version of this file or its bootstrap left with one. The hash moves to ended_password_hash (the lead
--- passcode check only). Touches no row when there is nothing to clear, so a re-run changes nothing.
+-- passcode check only). An event that ended under 24 h ago keeps both (a re-run never cuts its grace period short).
+-- Touches no row when there is nothing to clear, so a re-run changes nothing.
 update public.events
    set ended_password_hash = coalesce(staff_password_hash, ended_password_hash), staff_password_hash = null,
        invite_code_sha256 = null, invite_expires_at = null
- where stage = 'archived' and (staff_password_hash is not null or invite_code_sha256 is not null or invite_expires_at is not null);
+ where stage = 'archived' and (staff_password_hash is not null or invite_code_sha256 is not null or invite_expires_at is not null)
+   and (ended_at is null or ended_at <= pg_catalog.now() - interval '24 hours');
 
 alter table public.patients alter column event_id set not null;
 
@@ -1505,6 +1509,10 @@ declare
                                              else v_minutes::text || ' min' end;
   v_count integer;
 begin
+  -- (Grace period) The job also clears the staff password and join link of events ended over 24 h ago, so stale
+  -- hashes never linger (sign-in and reopen clear them too, and never depend on this).
+  perform public.lp_event_release_held();
+
   with eligible as (
     select p.id, p.status, p.found_at, p.reunion_started_at, p.closed_at, p.recheck_at, p.not_found_checks,
            -- (Events) Idle since the later of its last activity and the event's last reopen: a request that sat
@@ -1959,6 +1967,62 @@ $fn$;
 -- I1. Events: config, list, create, update, secrets, stage changes (lead routes; service_role only)
 -- -----------------------------------------------------------------------------------------------------
 -- lp_event_json: an event as the app server reads it. Never a hash or a join code.
+-- (Grace period) For 24 hours after End an event keeps its staff password hash and join link, so an accidental End
+-- can be undone with Reopen and nothing new to hand out. While held, both reach only the Ended answer at sign-in, and
+-- the held password stays taken (the uniqueness rule counts the event as running). Afterwards both are cleared:
+-- lazily (lp_auth_secrets, lp_invite_candidates, lp_event_reopen) and by the lp-close-inactive job.
+create or replace function public.lp_end_grace()
+returns interval
+language sql
+immutable
+security invoker
+set search_path = public, pg_temp
+as $fn$
+  select interval '24 hours'
+$fn$;
+
+-- True while an archived event is inside its grace period at p_at.
+create or replace function public.lp_event_held(e public.events, p_at timestamptz)
+returns boolean
+language sql
+stable
+security invoker
+set search_path = public, pg_temp
+as $fn$
+  select e.stage = 'archived' and e.ended_at is not null and e.ended_at > p_at - public.lp_end_grace()
+$fn$;
+
+-- Clears the staff password and join link of archived events whose grace period is over (one event, or all when
+-- p_event is null); the hash moves to ended_password_hash. Rows another transaction holds (a reopen deciding) are
+-- skipped, never waited for: the next caller clears them, and every reader filters by lp_event_held anyway.
+-- Returns how many events it cleared.
+create or replace function public.lp_event_release_held(p_event uuid default null)
+returns integer
+language plpgsql
+volatile
+security invoker
+set search_path = public, pg_temp
+as $fn$
+declare
+  v_n integer;
+begin
+  with due as (
+    select e.id from public.events e
+     where e.stage = 'archived'
+       and (e.staff_password_hash is not null or e.invite_code_sha256 is not null or e.invite_expires_at is not null)
+       and not public.lp_event_held(e, pg_catalog.clock_timestamp())
+       and (p_event is null or e.id = p_event)
+       for update skip locked
+  )
+  update public.events e
+     set ended_password_hash = coalesce(e.staff_password_hash, e.ended_password_hash), staff_password_hash = null,
+         invite_code_sha256 = null, invite_expires_at = null
+    from due where e.id = due.id;
+  get diagnostics v_n = row_count;
+  return v_n;
+end
+$fn$;
+
 create or replace function public.lp_event_json(e public.events)
 returns jsonb
 language sql
@@ -1970,8 +2034,12 @@ as $fn$
     'id', e.id, 'slug', e.slug, 'name', e.name, 'startsOn', e.starts_on, 'endsOn', e.ends_on,
     'timezone', e.timezone, 'dayStartHour', e.day_start_hour, 'stage', e.stage, 'logoPath', e.logo_path,
     'posts', e.posts, 'mainMedical', e.main_medical, 'teams', e.teams, 'lastSeen', e.last_seen,
-    'hasStaffPassword', e.staff_password_hash is not null,
-    'joinLinkExpiresAt', case when e.invite_code_sha256 is not null then e.invite_expires_at end,
+    -- An archived event's are reported only inside the grace period (after it they are cleared, or about to be).
+    'hasStaffPassword', e.staff_password_hash is not null and (e.stage <> 'archived' or public.lp_event_held(e, pg_catalog.now())),
+    'joinLinkExpiresAt', case when e.invite_code_sha256 is not null and (e.stage <> 'archived' or public.lp_event_held(e, pg_catalog.now()))
+                              then e.invite_expires_at end,
+    -- (Grace period) Until when a Reopen keeps the staff password and join link; null outside the grace period.
+    'holdUntil', case when public.lp_event_held(e, pg_catalog.now()) then e.ended_at + public.lp_end_grace() end,
     'caseSeq', e.case_seq, 'wentLiveAt', e.went_live_at, 'endedAt', e.ended_at, 'reopenedAt', e.reopened_at,
     'recordsDeleteAt', e.records_delete_at, 'recordsDeletedAt', e.records_deleted_at,
     'department', e.department, 'staffing', e.staffing, 'preparedBy', e.prepared_by,
@@ -2322,8 +2390,14 @@ end
 $fn$;
 
 -- Staff password: the app server hashes it (bcrypt) and checks it against the lead passcode and every other
--- non-archived event's password first (only it has the plain text). Null turns password sign-in off.
-create or replace function public.lp_event_set_password(p_event uuid, p_hash text)
+-- running or held event's password first (only it has the plain text). Null turns password sign-in off.
+-- (Grace period) p_checked: the hashes that check compared against (lp_auth_secrets). Under the lp_org row lock, which
+-- lp_event_reopen also takes, the hashes that may not be matched now are listed again; one the check did not see (a
+-- reopen kept its event's password, another event's password changed in between) raises P0409 secrets_changed and
+-- the app server checks again. So two running events never share a password, whatever runs at the same moment.
+-- Null skips that recheck (direct SQL callers only; the app always passes it).
+drop function if exists public.lp_event_set_password(uuid, text);
+create or replace function public.lp_event_set_password(p_event uuid, p_hash text, p_checked text[] default null)
 returns jsonb
 language plpgsql
 volatile
@@ -2341,6 +2415,20 @@ begin
   -- (Phase 3) An archived event takes no password (it would cost every failed sign-in a compare); Reopen first.
   if p_hash is not null and exists (select 1 from public.events e where e.id = p_event and e.stage = 'archived') then
     raise exception using errcode = 'P0409', message = 'bad_stage', hint = 'archived', detail = 'field:password';
+  end if;
+  if p_hash is not null and p_checked is not null then
+    perform 1 from public.lp_org o where o.id for update;
+    if exists (
+      select 1
+        from (select o.lead_passcode_hash as h from public.lp_org o where o.id
+              union all
+              select e.staff_password_hash from public.events e
+               where e.id <> p_event and e.staff_password_hash is not null
+                 and (e.stage <> 'archived' or public.lp_event_held(e, pg_catalog.clock_timestamp()))) x
+       where x.h is not null and not (x.h = any (p_checked))
+    ) then
+      raise exception using errcode = 'P0409', message = 'secrets_changed', hint = 'secrets_changed', detail = 'field:password';
+    end if;
   end if;
   update public.events set staff_password_hash = p_hash, updated_at = pg_catalog.now() where id = p_event returning * into v_row;
   if v_row.id is null then
@@ -2510,23 +2598,23 @@ begin
   if v_row.stage <> 'live' then
     raise exception using errcode = 'P0409', message = 'bad_stage', hint = v_row.stage;
   end if;
-  -- (Phase 3) Its staff password and join link go (as at Reopen): every failed sign-in compares the password with each
-  -- running event's hash (bcrypt, about 70 ms each), so an ended event keeps none. The hash is kept apart for the lead
-  -- passcode check only (ended_password_hash). Staff arriving with the old join link still get the Ended screen: its
-  -- slug names the event (POST /api/session); the old password is just a wrong password.
+  -- (Grace period) Its staff password and join link stay for 24 hours (lp_end_grace): a Reopen inside them restores
+  -- the event with both working again. Meanwhile they reach only the Ended answer at sign-in. Afterwards they are
+  -- cleared (lp_event_release_held), since every failed sign-in compares the password with each running or held
+  -- event's hash (bcrypt, about 70 ms each); the hash is then kept apart for the lead passcode check only.
   update public.events
-     set stage = 'archived', ended_at = pg_catalog.now(), updated_at = pg_catalog.now(),
-         ended_password_hash = coalesce(staff_password_hash, ended_password_hash), staff_password_hash = null,
-         invite_code_sha256 = null, invite_expires_at = null
+     set stage = 'archived', ended_at = pg_catalog.now(), updated_at = pg_catalog.now()
    where id = p_event returning * into v_row;
   return public.lp_event_json(v_row);
 end
 $fn$;
 
--- Reopen: archived → live, while its records still exist. Its staff password and join link are cleared: while it was
--- archived another event may have taken that password (the rule only guards running events), and the older event
--- would then win at sign-in. A lead sets new ones through the checked routes; until then no staff can sign in to it
--- (sessions still open carry on). reopened_at restarts the auto-close clock of requests that sat frozen.
+-- Reopen: archived → live, while its records still exist. (Grace period) Inside the 24 h after End it keeps its staff
+-- password and join link: while held, no other event could take that password (lp_event_set_password's recheck runs
+-- under the same lp_org lock, judged by the same clock). After them both are cleared: another event may have taken
+-- that password since, and the older event would then win at sign-in. A lead then sets new ones through the checked
+-- routes; until then no staff can sign in to it (sessions still open carry on). reopened_at restarts the auto-close
+-- clock of requests that sat frozen.
 create or replace function public.lp_event_reopen(p_event uuid)
 returns jsonb
 language plpgsql
@@ -2538,7 +2626,10 @@ set lock_timeout = '5s'
 as $fn$
 declare
   v_row public.events;
+  v_keep boolean;
 begin
+  -- lp_org first, then the event (the order lp_event_set_password takes them in).
+  perform 1 from public.lp_org o where o.id for update;
   select * into v_row from public.events where id = p_event for update;
   if v_row.id is null then
     raise exception using errcode = 'P0002', message = 'not_found';
@@ -2546,9 +2637,14 @@ begin
   if v_row.stage <> 'archived' or v_row.records_deleted_at is not null then
     raise exception using errcode = 'P0409', message = 'bad_stage', hint = v_row.stage;
   end if;
+  -- Judged now, with both locks held (not at the start of the transaction).
+  v_keep := public.lp_event_held(v_row, pg_catalog.clock_timestamp());
   update public.events
-     set stage = 'live', ended_at = null, reopened_at = pg_catalog.now(), staff_password_hash = null,
-         invite_code_sha256 = null, invite_expires_at = null, updated_at = pg_catalog.now()
+     set stage = 'live', ended_at = null, reopened_at = pg_catalog.now(), updated_at = pg_catalog.now(),
+         ended_password_hash = case when v_keep then ended_password_hash else coalesce(staff_password_hash, ended_password_hash) end,
+         staff_password_hash = case when v_keep then staff_password_hash end,
+         invite_code_sha256 = case when v_keep then invite_code_sha256 end,
+         invite_expires_at = case when v_keep then invite_expires_at end
    where id = p_event returning * into v_row;
   return public.lp_event_json(v_row);
 end
@@ -2570,42 +2666,63 @@ as $fn$
     'event', (select public.lp_event_json(e) from public.events e where e.id = p_event))
 $fn$;
 
--- Sign-in: the lead passcode hash and every running event's staff password hash (the app server compares; bcrypt).
--- (Phase 3) Archived events have none (lp_event_end clears it; the `where` is a backstop). `retired`: the hashes
--- ended events had, read only by the lead passcode check (an old staff password must never become the lead passcode).
+-- Sign-in: the lead passcode hash and the staff password hash of every running event and of every event inside its
+-- grace period (the app server compares; bcrypt). A held event's match is the Ended answer (its stage is archived).
+-- (Grace period) Expired holds are cleared first (lp_event_release_held), and the list is filtered by the same rule
+-- either way, so an event that ended long ago never costs a compare and correctness never waits for the job.
+-- `retired`: the hashes ended events had, read only by the lead passcode check (an old staff password must never
+-- become the lead passcode).
 create or replace function public.lp_auth_secrets()
 returns jsonb
-language sql
-stable
+language plpgsql
+volatile
 security invoker
 set search_path = public, pg_temp
+set statement_timeout = '4s'
 as $fn$
-  select pg_catalog.jsonb_build_object(
+declare
+  v_at timestamptz;
+begin
+  perform public.lp_event_release_held();
+  v_at := pg_catalog.clock_timestamp();
+  return pg_catalog.jsonb_build_object(
     'lead', (select o.lead_passcode_hash from public.lp_org o where o.id),
     'leadVersion', coalesce((select o.lead_passcode_version from public.lp_org o where o.id), 0),
     'events', coalesce((
       select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('id', e.id, 'stage', e.stage, 'hash', e.staff_password_hash)
                order by e.created_at)
-      from public.events e where e.staff_password_hash is not null and e.stage <> 'archived'), '[]'::jsonb),
+      from public.events e
+      where e.staff_password_hash is not null and (e.stage <> 'archived' or public.lp_event_held(e, v_at))), '[]'::jsonb),
     'retired', coalesce((
       select pg_catalog.jsonb_agg(e.ended_password_hash order by e.created_at)
-      from public.events e where e.ended_password_hash is not null), '[]'::jsonb))
+      from public.events e where e.ended_password_hash is not null), '[]'::jsonb));
+end
 $fn$;
 
--- Join links: the events with a link (one slug, or all when p_slug is null), their code hash and expiry.
+-- Join links: the events with a link (one slug, or all when p_slug is null), their code hash and expiry. An archived
+-- event's link counts only inside its grace period (a match is the Ended answer); expired holds are cleared first.
 create or replace function public.lp_invite_candidates(p_slug text)
 returns jsonb
-language sql
-stable
+language plpgsql
+volatile
 security invoker
 set search_path = public, pg_temp
+set statement_timeout = '4s'
 as $fn$
-  select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
-           'id', e.id, 'stage', e.stage, 'sha256', e.invite_code_sha256, 'expiresAt', e.invite_expires_at)
-           order by case e.stage when 'archived' then 1 else 0 end, e.created_at), '[]'::jsonb)
-  from public.events e
-  where e.invite_code_sha256 is not null
-    and (p_slug is null or e.slug = pg_catalog.lower(pg_catalog.btrim(p_slug)))
+declare
+  v_at timestamptz;
+begin
+  perform public.lp_event_release_held();
+  v_at := pg_catalog.clock_timestamp();
+  return (
+    select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+             'id', e.id, 'stage', e.stage, 'sha256', e.invite_code_sha256, 'expiresAt', e.invite_expires_at)
+             order by case e.stage when 'archived' then 1 else 0 end, e.created_at), '[]'::jsonb)
+    from public.events e
+    where e.invite_code_sha256 is not null
+      and (e.stage <> 'archived' or public.lp_event_held(e, v_at))
+      and (p_slug is null or e.slug = pg_catalog.lower(pg_catalog.btrim(p_slug))));
+end
 $fn$;
 
 drop function if exists public.lp_org_set_lead_passcode(text);
@@ -3233,11 +3350,12 @@ begin
     'public.lp_tel_server_events(uuid, jsonb)', 'public.lp_tel_health(uuid, text, timestamptz, integer)',
     'public.lp_event_json(public.events)', 'public.lp_event_get(uuid)', 'public.lp_event_by_slug(text)', 'public.lp_events_list()',
     'public.lp_event_check(public.events)', 'public.lp_event_apply(public.events, jsonb)', 'public.lp_event_create(jsonb)',
-    'public.lp_event_update(uuid, jsonb)', 'public.lp_event_set_password(uuid, text)', 'public.lp_event_retire_password(uuid, text)',
+    'public.lp_event_update(uuid, jsonb)', 'public.lp_event_set_password(uuid, text, text[])', 'public.lp_event_retire_password(uuid, text)',
     'public.lp_event_set_invite(uuid, text, timestamptz)', 'public.lp_event_set_logo(uuid, text)', 'public.lp_event_go_live(uuid)',
     'public.lp_event_end(uuid)', 'public.lp_event_reopen(uuid)', 'public.lp_session_state(uuid)', 'public.lp_auth_secrets()', 'public.lp_invite_candidates(text)',
     'public.lp_org_set_lead_passcode(text)', 'public.lp_post_short(jsonb, text, text)', 'public.lp_stats_base(uuid, boolean)',
-    'public.lp_stats(uuid, text)', 'public.lp_team_named(jsonb, text, boolean)'
+    'public.lp_stats(uuid, text)', 'public.lp_team_named(jsonb, text, boolean)',
+    'public.lp_end_grace()', 'public.lp_event_held(public.events, timestamptz)', 'public.lp_event_release_held(uuid)'
   ] loop
     execute pg_catalog.format('revoke all on function %s from public, anon, authenticated', v_sig);
     execute pg_catalog.format('grant execute on function %s to service_role', v_sig);

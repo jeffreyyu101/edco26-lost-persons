@@ -4,7 +4,8 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import { expect, request, type APIRequestContext, type BrowserContext } from '@playwright/test';
 import type { EventAdmin, EventPost, EventTeam } from '@/lib/api-types';
-import { loadTestEnv, testBaseUrl } from '../../../scripts/test-env.mjs';
+import { execFileSync } from 'node:child_process';
+import { loadTestEnv, localDbUrl, testBaseUrl } from '../../../scripts/test-env.mjs';
 
 export const BASE = testBaseUrl();
 
@@ -114,9 +115,18 @@ export async function endEvent(id: string): Promise<void> {
   if (after.ok()) expect(((await after.json()) as { event: EventAdmin }).event.stage, `event ${id} still running`).toBe('archived');
 }
 
-/** Ends every event this file made (afterAll). */
+/**
+ * Ends every event this file made (afterAll), and drops their staff passwords and join links: an ended event holds
+ * both for 24 h (the End grace period), and each held hash is one more bcrypt compare at every later sign-in of the
+ * run.
+ */
 export async function endAll(): Promise<void> {
-  for (const id of made.splice(0)) await endEvent(id).catch(() => undefined);
+  for (const id of made.splice(0)) {
+    await endEvent(id).catch(() => undefined);
+    const ctx = await lead();
+    await ctx.delete(`/api/events/${id}/password`).catch(() => undefined);
+    await ctx.delete(`/api/events/${id}/join-link`).catch(() => undefined);
+  }
   if (leadCtx) await (await leadCtx).dispose();
   leadCtx = null;
 }
@@ -175,4 +185,12 @@ export async function eventDatesShown(api: APIRequestContext): Promise<{ short: 
     return (form === 'long' ? `${range}, ${y2}` : range).toUpperCase();
   };
   return { short: fmt('short'), long: fmt('long') };
+}
+
+/**
+ * (Grace period) Moves an ended event's end `hours` back in time, the way these tests move the server's clock (the
+ * row's time goes back; nothing in the app changes). 25 → the 24 h after End are over.
+ */
+export function moveEndBack(id: string, hours: number): void {
+  execFileSync('psql', [localDbUrl(), '-v', 'ON_ERROR_STOP=1', '-q', '-At', '-c', `update public.events set ended_at = ended_at - interval '${hours} hours' where id = '${id}' and stage = 'archived'`], { encoding: 'utf8' });
 }

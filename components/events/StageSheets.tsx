@@ -2,11 +2,14 @@
 // (Events, lead screens) The confirmation sheets of the stage actions: Go live (design/screens/events-v2-h), End event
 // (events-v1-e) and Reopen. Each shows the event, the stage it moves from and to, the numbers it acts on, and one
 // line of fact: these actions delete, lock out or clear, so here a full sentence is right.
+// (Grace period) Reopen also shows what it keeps: Password and Join link, each Kept or New one needed, and the time
+// left while inside the 24 h after End.
 import { Button, VisuallyHidden } from '@radix-ui/themes';
-import { Archive, ArrowRight, RotateCcw } from 'lucide-react';
-import { useState } from 'react';
+import { Archive, ArrowRight, Check, RefreshCw, RotateCcw } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import type { EventAdmin, EventStage } from '@/lib/api-types';
 import { Sheet, SheetDescription, SheetTitle } from '@/components/ui/Sheet';
+import { formatLeft, reopenKeeps, spokenLeft } from './format';
 import { EventLogo, FieldError, STAGE_LABEL, StageChip } from './parts';
 import { canGoLive, lpNumber } from './setup-model';
 import s from './events.module.css';
@@ -18,9 +21,58 @@ const TO: Readonly<Record<StageAction, EventStage>> = { goLive: 'live', end: 'ar
 
 export const FACT: Readonly<Record<StageAction, string>> = {
   goLive: 'Practice requests are deleted and numbering restarts at LP-0001.',
-  end: 'Staff are signed out; the password and join link are cleared. Nothing is deleted; open requests are frozen as they are.',
-  reopen: 'The staff password and join link must be set again.',
+  end: 'Staff are signed out and nothing is deleted; within 24 hours it can be reopened with the same password and join link.',
+  reopen: 'Open requests resume as they were; staff sign in again.',
 };
+
+/** One row of what a Reopen keeps: the label, then a chip (✓ Kept / ↻ New one needed). */
+function KeepRow({ label, kept, testId, spoken }: { label: string; kept: boolean; testId: string; spoken: string }) {
+  return (
+    <div className={s.r}>
+      <span className={s.k}>{label}</span>
+      <span className={s.keep} data-kept={kept} data-testid={testId}>
+        {kept ? <Check size={13} strokeWidth={2.25} aria-hidden /> : <RefreshCw size={12} strokeWidth={2.25} aria-hidden />}
+        <span aria-hidden>{kept ? 'Kept' : 'New one needed'}</span>
+        <VisuallyHidden>{spoken}</VisuallyHidden>
+      </span>
+    </div>
+  );
+}
+
+/** Reopen: what it keeps, judged by the clock while the sheet is open (the server decides again at Reopen). */
+function ReopenKeeps({ event }: { event: EventAdmin }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 15_000);
+    return () => window.clearInterval(t);
+  }, []);
+  const k = reopenKeeps(event, now);
+  return (
+    <div className={`${s.grp} ${s.keeps}`} data-testid="reopen-keeps" data-held={k.held}>
+      <KeepRow
+        label="Password"
+        kept={k.password}
+        testId="reopen-password"
+        spoken={k.password ? 'The staff password is kept.' : 'A new staff password is needed after reopening.'}
+      />
+      <KeepRow
+        label="Join link"
+        kept={k.joinLink}
+        testId="reopen-join-link"
+        spoken={k.joinLink ? 'The join link is kept.' : 'A new join link is needed after reopening.'}
+      />
+      {k.held ? (
+        <div className={s.r}>
+          <span className={s.k}>Time left</span>
+          <span className={`${s.v} ${s.left}`} data-testid="reopen-left">
+            <span aria-hidden>{formatLeft(k.leftMs)}</span>
+            <VisuallyHidden>Reopen within {spokenLeft(k.leftMs)} to keep them.</VisuallyHidden>
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 interface StageSheetProps {
   action: StageAction;
@@ -88,6 +140,7 @@ export function StageSheet({ action, event, counts, onClose, onConfirm }: StageS
           </>
         )}
       </div>
+      {action === 'reopen' ? <ReopenKeeps event={event} /> : null}
       <SheetDescription className={s.fact}>{blocked ? 'Add at least one post and one team first.' : FACT[action]}</SheetDescription>
       {error ? <FieldError id="stage-error">{error}</FieldError> : null}
       <div className={s.sheetActs} style={{ marginTop: error ? 12 : 0 }}>

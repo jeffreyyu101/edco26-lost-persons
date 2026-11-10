@@ -48,6 +48,7 @@ function event(over: Partial<EventAdmin> = {}): EventAdmin {
     updatedAt: '2026-11-10T10:00:00Z',
     hasStaffPassword: false,
     joinLinkExpiresAt: null,
+    holdUntil: null,
     caseSeq: 0,
     recordsDeleteAt: null,
     recordsDeletedAt: null,

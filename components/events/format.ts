@@ -99,3 +99,38 @@ export function shortDate(iso: string, timeZone: string): string {
     return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date(iso));
   }
 }
+
+/** (Grace period) Time left in a window: "23 h 12 m", "42 m", "<1 m"; "" once it is over. */
+export function formatLeft(ms: number): string {
+  if (!(ms > 0)) return '';
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return '<1 m';
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h ? `${h} h ${m} m` : `${m} m`;
+}
+
+/** The same, spoken: "23 hours 12 minutes", "1 hour", "less than a minute". */
+export function spokenLeft(ms: number): string {
+  const minutes = Math.floor(Math.max(0, ms) / 60_000);
+  if (minutes < 1) return 'less than a minute';
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  const part = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
+  return [h ? part(h, 'hour') : '', m ? part(m, 'minute') : ''].filter(Boolean).join(' ');
+}
+
+/**
+ * (Grace period) What a Reopen of an archived event keeps at `nowMs`: its staff password and join link while inside
+ * the 24 h after End (holdUntil), each only if it had one (a join link only while it has not expired).
+ */
+export function reopenKeeps(
+  event: { holdUntil: string | null; hasStaffPassword: boolean; joinLinkExpiresAt: string | null },
+  nowMs: number,
+): { held: boolean; leftMs: number; password: boolean; joinLink: boolean } {
+  const until = event.holdUntil ? Date.parse(event.holdUntil) : Number.NaN;
+  const leftMs = Number.isFinite(until) ? Math.max(0, until - nowMs) : 0;
+  const held = leftMs > 0;
+  const linkUntil = event.joinLinkExpiresAt ? Date.parse(event.joinLinkExpiresAt) : Number.NaN;
+  return { held, leftMs, password: held && event.hasStaffPassword, joinLink: held && Number.isFinite(linkUntil) && linkUntil > nowMs };
+}
