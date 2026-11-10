@@ -28,7 +28,7 @@ export function changeAnswerChoices(status: string): ChangeChoice[] {
       { to: STATUS.inMedical, label: STATUS_META[STATUS.inMedical].label, kind: 'change' as const },
       { to: STATUS.notInMedical, label: ANSWER_LABEL.notFound, kind: 'change' as const },
       { to: STATUS.waiting, label: BACK_TO_WAITING, kind: 'change' as const },
-    ].filter((c) => canTransition(status, c.to));
+    ].filter((c) => canTransition(status, c.to, c.kind));
   }
   const other: SettableStatus | null = isInMedical(status) ? STATUS.notInMedical : status === STATUS.notInMedical ? STATUS.inMedical : null;
   if (other === null) return [];
@@ -38,5 +38,5 @@ export function changeAnswerChoices(status: string): ChangeChoice[] {
     ...(status === STATUS.inMedical ? [{ to: STATUS.accompanied, label: STATUS_META[STATUS.accompanied].label, kind: 'change' as const }] : []),
     { to: STATUS.waiting, label: BACK_TO_WAITING, kind: 'change' },
   ];
-  return choices.filter((c) => canTransition(status, c.to));
+  return choices.filter((c) => canTransition(status, c.to, c.kind));
 }

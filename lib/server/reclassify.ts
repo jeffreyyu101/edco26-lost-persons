@@ -6,12 +6,12 @@
 //   lp_cancel:        status not Added → P0422 illegal_transition (checked first), else version → P0409
 // Anything that does not fit stays a 503 (the client retries). Server only.
 import 'server-only';
-import { STATUS, canTransition, isInMedical } from '../domain';
+import { STATUS, canTransition, isInMedical, type StatusKind } from '../domain';
 import { ApiFailure } from './errors';
 import { OPAQUE_DB_ERROR, db } from './supabase';
 
 export type MutationKind =
-  | { fn: 'status'; expectedVersion: number; target: string }
+  | { fn: 'status'; expectedVersion: number; target: string; kind?: StatusKind }
   | { fn: 'update'; expectedVersion: number }
   | { fn: 'cancel'; expectedVersion: number }
   // (Companion) lp_swap: version mismatch → P0409, else (not Accompanied) → P0422 illegal_transition. (Post-event)
@@ -43,7 +43,10 @@ export async function reclassify(failure: unknown, id: string, kind: MutationKin
   switch (kind.fn) {
     case 'status':
       if (row.row_version !== kind.expectedVersion) return conflict(row.status);
-      if (row.status !== kind.target && !canTransition(row.status, kind.target)) return illegal(row.status);
+      if (row.status !== kind.target && !canTransition(row.status, kind.target, kind.kind)) return illegal(row.status);
+      // (Post-event) A Reopen to Accompanied passes the table, but lp_set_status also refuses it for a request closed
+      // from Located; with the version matching, that is the only raise left.
+      if (row.status === STATUS.inactive && kind.target === STATUS.accompanied) return illegal(row.status);
       return failure;
     case 'update':
       return row.row_version !== kind.expectedVersion ? conflict(row.status) : failure;

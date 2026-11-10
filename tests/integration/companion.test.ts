@@ -439,6 +439,35 @@ describe('post-event fixes', () => {
     expect((await setStatus(OTHER, closedPlain, STATUS.inMedical, 'reopen')).body.request.status).toBe(STATUS.inMedical);
   });
 
+  it('Closed · inactive → Accompanied is a Reopen of a request closed while Accompanied, nothing else', async () => {
+    const closeInactive = async (row: RequestSummary): Promise<RequestDetail> => {
+      psql(
+        `update public.audit_events set occurred_at = occurred_at - interval '61 minutes' where patient_id = ${lit(row.id)};` +
+          ` update public.patients set created_at = created_at - interval '61 minutes' where id = ${lit(row.id)};`,
+      );
+      expect(Number(psql(`select public.lp_close_inactive(array[${lit(row.id)}]::uuid[])`))).toBe(1);
+      return (await api(`/api/requests/${row.id}`, { cookie: await cookieFor(FOH) })).body as RequestDetail;
+    };
+    // Closed from Located · friend coming: no kind takes it to Accompanied, a Reopen included.
+    const plain = await createRequest(FOH);
+    const located = (await setStatus(ANSWERER, plain, STATUS.inMedical)).body.request as RequestSummary;
+    const closed = await closeInactive(located);
+    for (const kind of ['change', 'answer', 'undo', 'reopen']) {
+      const res = await setStatus(OTHER, closed, STATUS.accompanied, kind);
+      expect(res.status, `${kind}: ${res.text}`).toBe(422);
+    }
+    expect(psql(`select status from public.patients where id = ${lit(closed.id)}`)).toBe(STATUS.inactive);
+    // Closed from Accompanied: still only a Reopen (asked as Located, or as Accompanied).
+    const acc = await closeInactive(await accompanied());
+    for (const kind of ['change', 'answer', 'undo']) {
+      const res = await setStatus(OTHER, acc, STATUS.accompanied, kind);
+      expect(res.status, `${kind}: ${res.text}`).toBe(422);
+    }
+    const reopened = await setStatus(OTHER, acc, STATUS.accompanied, 'reopen');
+    expect(reopened.status, reopened.text).toBe(200);
+    expect(reopened.body.request.status).toBe(STATUS.accompanied);
+  });
+
   it('Needs attention times an approved swap from the approval, not from the Accompanied answer', async () => {
     const r = await accompanied();
     psql(`update public.audit_events set occurred_at = occurred_at - interval '40 minutes' where patient_id = ${lit(r.id)};`);

@@ -7,10 +7,10 @@
 --   lp_swap: 'approve' needs an open request; new 'restore' (the Undo of Cancel swap / Decline / Swap at …, keeping
 --     the original requester); 'withdraw' resolves the answerer; the answerer skips Undo / Reopen status changes.
 --   lp_set_status: Reopen of a request closed (inactive or discharged) while Accompanied goes back to Accompanied
---     ('Closed – Inactive' → 'Found – Accompanied' allowed); Friend informed while a swap request is open → P0409;
+--     ('Closed – Inactive' → 'Found – Accompanied' allowed for that Reopen only); Friend informed while a swap request is open → P0409;
 --     an Undo back to Accompanied brings back the swap request the undone change ended.
 --   lp_stats() / lp_stats(text): Accompanied → Located (a swap approved, or Change answer) restarts the friend's
---     clock (Needs attention "located" since, Time to reunite).
+--     clock (Needs attention "located" since, Time to reunite); a restore or an Undo back to Located does not.
 --
 -- PRODUCTION: paste THIS FILE ALONE into the SQL Editor after 20261108190000_companion_cancel.sql. Additive only:
 -- one nullable column with a CHECK (added only when missing), and create or replace of five functions with the
@@ -18,6 +18,9 @@
 -- =====================================================================================================
 
 begin;
+-- The ALTER TABLE below needs a brief ACCESS EXCLUSIVE lock on patients: give up after 5 s (and roll back, nothing
+-- half-applied) rather than queue behind a stuck transaction with every app request queued behind it. Run again later.
+set local lock_timeout = '5s';
 
 do $pre$
 begin
@@ -198,7 +201,8 @@ begin
 
   -- (Post-event) Reopen of a request closed while Located · already accompanied (inactive, discharged) goes back
   -- to Accompanied, never to Located · friend coming (which tells front of house to send the friend).
-  if p_kind = 'reopen' and p_status = 'Found – Awaiting Reunion' and v_row.status in ('Closed – Inactive', 'Found – Discharged') then
+  if p_kind = 'reopen' and p_status in ('Found – Awaiting Reunion', 'Found – Accompanied')
+     and v_row.status in ('Closed – Inactive', 'Found – Discharged') then
     select e.previous_value ->> 'status' into v_closed_from
       from public.audit_events e
      where e.patient_id = p_id and e.action_type = 'status_changed' and e.new_value ->> 'status' = v_row.status
@@ -228,6 +232,12 @@ begin
   if v_row.status = 'Added' and p_status = 'Added' and v_held then
     v_allowed := p_kind in ('undo', 'change');
   end if;
+  -- (Post-event) Moves allowed for one kind only (keep identical to KIND_ONLY_TRANSITIONS in lib/domain.ts).
+  -- KIND_ONLY:BEGIN
+  if v_row.status = 'Closed – Inactive' and p_status = 'Found – Accompanied' then
+    v_allowed := p_kind = 'reopen' and v_closed_from is not distinct from 'Found – Accompanied';
+  end if;
+  -- KIND_ONLY:END
   if not coalesce(v_allowed, false) then
     raise exception using errcode = 'P0422', message = 'illegal_transition', hint = v_row.status;
   end if;
@@ -735,11 +745,13 @@ begin
          and e.previous_value ->> 'status' in ('Added', 'Checked – Not Found')
          and e.new_value ->> 'status' in ('Found – Awaiting Reunion', 'Bring friend to medical', 'Found – Accompanied'))
         -- (Post-event) Accompanied → Located (a swap approved, or Change answer): the friend is sent from then.
-        -- A restore (the Undo of Cancel swap) puts the earlier clock back: not a new start.
+        -- A restore (the Undo of Cancel swap) or an Undo (of Located → Accompanied) puts the earlier clock back:
+        -- not a new start.
         or (e.action_type = 'status_changed'
             and e.previous_value ->> 'status' = 'Found – Accompanied'
             and e.new_value ->> 'status' in ('Found – Awaiting Reunion', 'Bring friend to medical')
-            and coalesce(e.new_value ->> 'restore', '') <> 'true')
+            and coalesce(e.new_value ->> 'restore', '') <> 'true'
+            and coalesce(e.new_value ->> 'kind', '') <> 'undo')
         or e.action_type = 'medical_search_found'
       )
     order by e.occurred_at desc
@@ -875,11 +887,12 @@ begin
              and e.previous_value ->> 'status' in ('Added', 'Checked – Not Found')
              and e.new_value ->> 'status' in ('Found – Awaiting Reunion', 'Bring friend to medical', 'Found – Accompanied'))
             -- (Post-event) Accompanied → Located (a swap approved, or Change answer): Needs attention times it from then.
-            -- A restore (the Undo of Cancel swap) keeps the earlier start.
+            -- A restore (the Undo of Cancel swap) or an Undo (of Located → Accompanied) keeps the earlier start.
             or (e.action_type = 'status_changed'
                 and e.previous_value ->> 'status' = 'Found – Accompanied'
                 and e.new_value ->> 'status' in ('Found – Awaiting Reunion', 'Bring friend to medical')
-                and coalesce(e.new_value ->> 'restore', '') <> 'true')
+                and coalesce(e.new_value ->> 'restore', '') <> 'true'
+                and coalesce(e.new_value ->> 'kind', '') <> 'undo')
             or e.action_type = 'medical_search_found') as is_located,
            (e.action_type = 'status_changed' and e.new_value ->> 'status' = 'Reunited – Closed') as is_reunited,
            (e.action_type = 'status_changed' and e.new_value ->> 'status' = 'Checked – Not Found') as is_not_located

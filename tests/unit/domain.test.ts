@@ -8,6 +8,8 @@ import {
   STATUSES,
   STATUS_META,
   TEAM_ALIASES,
+  KIND_ONLY_TRANSITIONS,
+  STATUS_KINDS,
   TRANSITIONS,
   ageGender,
   alertName,
@@ -105,6 +107,22 @@ describe('transitions', () => {
     }
     const fromTs = Object.fromEntries(Object.entries(TRANSITIONS).map(([k, v]) => [k, [...v].sort()]));
     expect(fromSql).toEqual(fromTs);
+  });
+
+  it('(post-event) the kind-only moves match lp_set_status\'s KIND_ONLY block, and need their kind', () => {
+    const block = sqlBlock('KIND_ONLY', POST_EVENT);
+    const fromSql = [...block.matchAll(/if v_row\.status = '([^']+)' and p_status = '([^']+)' then\s+v_allowed := p_kind = '([^']+)'/g)].map((m) => ({ from: m[1], to: m[2], kind: m[3] }));
+    expect(fromSql).toEqual([...KIND_ONLY_TRANSITIONS]);
+    // Each is also in the table (the CASE lets it through; the block narrows it).
+    for (const t of KIND_ONLY_TRANSITIONS) expect(TRANSITIONS[t.from]).toContain(t.to);
+    // Closed · inactive → Accompanied: a Reopen only, never a change, an answer or an Undo (or no kind at all).
+    expect(canTransition(STATUS.inactive, STATUS.accompanied, 'reopen')).toBe(true);
+    for (const kind of STATUS_KINDS.filter((k) => k !== 'reopen')) expect(canTransition(STATUS.inactive, STATUS.accompanied, kind), kind).toBe(false);
+    expect(canTransition(STATUS.inactive, STATUS.accompanied)).toBe(false);
+    // Every other move ignores the kind.
+    expect(canTransition(STATUS.inactive, STATUS.inMedical, 'reopen')).toBe(true);
+    expect(canTransition(STATUS.discharged, STATUS.accompanied, 'undo')).toBe(true);
+    expect(canTransition(STATUS.inMedical, STATUS.accompanied, 'change')).toBe(true);
   });
 
   it('allows the spec table and rejects everything else', () => {

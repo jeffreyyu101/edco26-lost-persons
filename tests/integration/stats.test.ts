@@ -453,6 +453,35 @@ describe('lp_stats avgReuniteMinutes and loggedLastHour: exact values on a scrat
     // (71 + 12.333… + 6) / 7 = 12.76… → 12.8.
     expect(scratchStats()).toMatchObject({ total: 13, avgReuniteMinutes: 12.8 });
   });
+
+  it('(post-event) an Undo of Located → Accompanied puts the friend\'s clock back: Time to reunite and Needs attention', () => {
+    insertNight(
+      [
+        ['TEST-core-14', S.reunited, 60],
+        ['TEST-core-15', S.inMedical, 45],
+      ],
+      [
+        // 14: Located 50, changed to Accompanied 30, Undo 28, reunited 14 → 36 min (from the answer), not 14.
+        change('TEST-core-14', S.waiting, S.inMedical, 'answer', 50),
+        change('TEST-core-14', S.inMedical, S.accompanied, 'change', 30),
+        change('TEST-core-14', S.accompanied, S.inMedical, 'undo', 28),
+        change('TEST-core-14', S.inMedical, S.reunited, 'reunite', 14),
+        // 15 (still Located): Located 40, changed to Accompanied 20, Undo 18 → waiting on the friend for 40 min.
+        change('TEST-core-15', S.waiting, S.inMedical, 'answer', 40),
+        change('TEST-core-15', S.inMedical, S.accompanied, 'change', 20),
+        change('TEST-core-15', S.accompanied, S.inMedical, 'undo', 18),
+      ],
+    );
+    // (71 + 12.333… + 6 + 36) / 8 = 15.66… → 15.7 (with the Undo as a new start it would be 12.9).
+    expect(scratchStats()).toMatchObject({ total: 15, avgReuniteMinutes: 15.7 });
+    const id = scratch(['-c', "select id from public.patients where first_name = 'TEST-core-15'"]);
+    const since = scratch([
+      '-c',
+      `set role service_role; select x ->> 'kind', round(extract(epoch from now() - (x ->> 'since')::timestamptz) / 60)
+       from public.lp_stats('event') s, jsonb_array_elements(s #> '{attention,items}') x where x ->> 'id' = '${id}';`,
+    ]);
+    expect(since).toBe('located|40');
+  });
 });
 
 // ---------------------------------------------------------------------------------------------------
