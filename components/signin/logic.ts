@@ -1,7 +1,7 @@
 // Pure sign-in logic (spec §8 Sign-in, §6 POST /api/session, A27/A28/A29). No React, no fetch, no zod:
 // /signin stays light. tests/unit/signin-logic.test.ts checks these rules against lib/validation's
 // signInSchema so the client never enables Continue for something the server would refuse.
-import type { SessionInfo } from '@/lib/api-types';
+import type { EndedEvent, SessionInfo } from '@/lib/api-types';
 import {
   OTHER_TEAM,
   OTHER_TEAM_MAX,
@@ -9,9 +9,6 @@ import {
   STAFF_FORBIDDEN_CHARS,
   STAFF_NAME_MAX,
   STAFF_NAME_MIN,
-  TEAMS,
-  canonicalTeam,
-  type TeamValue,
 } from '@/lib/domain';
 import type { Prefs } from '@/lib/client/prefs';
 import type { SignInBody } from '@/lib/validation';
@@ -22,10 +19,20 @@ export interface Identity {
   team: string;
 }
 
-/** Step 1 as typed. `team` is the chosen card; `otherTeam` the free text (they are mutually exclusive). */
+/**
+ * (Events) A sign-in card: one team of the events running now (the server page reads them; no event is known before a
+ * password or join link signs in). `label` is what the session stores.
+ */
+export interface SignInTeam {
+  label: string;
+  short: string;
+  medical: boolean;
+}
+
+/** Step 1 as typed. `team` is the chosen card's label; `otherTeam` the free text (they are mutually exclusive). */
 export interface WhoDraft {
   name: string;
-  team: TeamValue | null;
+  team: string | null;
   otherTeam: string;
 }
 
@@ -63,20 +70,23 @@ export function checkWho(draft: WhoDraft): WhoCheck {
   let team: string | null = null;
   if (draft.team) team = draft.team;
   else if (!otherTeamError && codePoints(other) >= OTHER_TEAM_MIN && codePoints(other) <= OTHER_TEAM_MAX) {
-    team = canonicalTeam(other);
+    // (Events) As typed: the server spells it as the event does when it is one of its teams, else it stays Other.
+    team = other;
   }
   return { identity: nameOk && team ? { name, team } : null, nameError, otherTeamError };
 }
 
 /** Step 1 prefilled from an identity (after "Change"): a card when the team is one, else the Other text. */
-export function draftFromIdentity(identity: Identity | null): WhoDraft {
+export function draftFromIdentity(identity: Identity | null, teams: readonly SignInTeam[] = []): WhoDraft {
   if (!identity) return { ...EMPTY_DRAFT };
-  const card = cardFor(identity.team);
+  const card = cardFor(identity.team, teams);
   return { name: identity.name, team: card, otherTeam: card ? '' : identity.team };
 }
 
-function cardFor(team: string): TeamValue | null {
-  return TEAMS.find((t) => t.value === team)?.value ?? null;
+/** The card a team is (by label, case-insensitive), or null. */
+export function cardFor(team: string, teams: readonly SignInTeam[]): string | null {
+  const t = team.trim().toLowerCase();
+  return teams.find((x) => x.label.toLowerCase() === t)?.label ?? null;
 }
 
 /** Remembered name and team (both or neither) skip straight to step 2 (spec §8, A29). */
@@ -84,20 +94,20 @@ export function rememberedIdentity(prefs: Pick<Prefs, 'rememberedName' | 'rememb
   return prefs.rememberedName && prefs.rememberedTeam ? { name: prefs.rememberedName, team: prefs.rememberedTeam } : null;
 }
 
-/** The identity part of a POST /api/session body: a card value as `team`, anything else as Other + `otherTeam`. */
-function identityBody(identity: Identity): Pick<SignInBody, 'staffName' | 'team' | 'otherTeam'> {
-  const card = cardFor(identity.team);
+/** The identity part of a POST /api/session body: a card label as `team`, anything else as Other + `otherTeam`. */
+function identityBody(identity: Identity, teams: readonly SignInTeam[]): Pick<SignInBody, 'staffName' | 'team' | 'otherTeam'> {
+  const card = cardFor(identity.team, teams);
   return card ? { staffName: identity.name, team: card } : { staffName: identity.name, team: OTHER_TEAM, otherTeam: identity.team };
 }
 
 /** The POST /api/session body with the event password. */
-export function signInBody(identity: Identity, password: string): SignInBody {
-  return { ...identityBody(identity), password };
+export function signInBody(identity: Identity, password: string, teams: readonly SignInTeam[] = []): SignInBody {
+  return { ...identityBody(identity, teams), password };
 }
 
 /** The POST /api/session body with a team join link's code instead of the password (J1). */
-export function inviteSignInBody(identity: Identity, invite: string): SignInBody {
-  return { ...identityBody(identity), invite };
+export function inviteSignInBody(identity: Identity, invite: string, teams: readonly SignInTeam[] = []): SignInBody {
+  return { ...identityBody(identity, teams), invite };
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -118,6 +128,8 @@ export type SignInOutcome =
   | { kind: 'invalid'; message: string }
   /** 403 (Origin check) — a stale or proxied page. */
   | { kind: 'forbidden' }
+  /** (Events) 410 event_ended: the password or link is an archived event's. `event`: what the Ended screen shows. */
+  | { kind: 'ended'; event: EndedEvent | null }
   /** 5xx or anything unexpected. */
   | { kind: 'server' }
   /** No response (offline, timeout, DNS…). */
@@ -140,6 +152,12 @@ function readSession(body: unknown): SessionInfo | null {
     staff: typeof staff === 'string' ? staff : `${staffName} · ${team}`,
     expiresAt: typeof expiresAt === 'string' ? expiresAt : '',
   };
+}
+
+/** The ended event an `event_ended` answer carries (name, logo), or null. */
+export function readEnded(value: unknown): EndedEvent | null {
+  if (!isRecord(value) || typeof value.name !== 'string') return null;
+  return { name: value.name, logoUrl: typeof value.logoUrl === 'string' ? value.logoUrl : null, stage: 'archived' };
 }
 
 function errorField(body: unknown): Record<string, unknown> | null {
@@ -172,6 +190,7 @@ export function interpretSignInResponse(status: number, body: unknown, retryAfte
     return { kind: 'invalid', message: message && message.length <= MAX_SHOWN_MESSAGE ? message : 'Check your name and team' };
   }
   if (status === 403) return { kind: 'forbidden' };
+  if (status === 410 && error?.code === 'event_ended') return { kind: 'ended', event: readEnded(error.event) };
   return { kind: 'server' };
 }
 

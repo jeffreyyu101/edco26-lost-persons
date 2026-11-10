@@ -8,6 +8,7 @@ import { involvedStaff } from '@/lib/server/involved';
 import { mapRow } from '@/lib/server/mappers';
 import { notifyLater } from '@/lib/server/notify';
 import { withReclassify } from '@/lib/server/reclassify';
+import { postNames } from '@/lib/server/events';
 import { authedRoute } from '@/lib/server/route';
 import { rpc } from '@/lib/server/supabase';
 import { cancelSchema } from '@/lib/validation';
@@ -15,7 +16,7 @@ import { cancelSchema } from '@/lib/validation';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/cancel', {}, async ({ request, params, session, eventId }) => {
+export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/cancel', {}, async ({ request, params, session, eventId, event }) => {
   const id = idParam(params);
   const body = await readJson(request, cancelSchema);
   const data = await withReclassify(eventId, id, { fn: 'cancel', expectedVersion: body.expectedVersion }, () =>
@@ -26,7 +27,7 @@ export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/cancel'
       p_staff: session.staff,
     }),
   );
-  const out: ChangeResponse = { changed: data.changed === true, request: mapRow(data.row) };
+  const out: ChangeResponse = { changed: data.changed === true, request: mapRow(data.row, postNames(event)) };
   if (out.changed) {
     await notifyLater(eventId, () => involvedStaff(eventId, id), () => ({ requestId: id, kind: 'cancelled', actor: session.staff, detail: closedDetail('cancelled') }));
   }

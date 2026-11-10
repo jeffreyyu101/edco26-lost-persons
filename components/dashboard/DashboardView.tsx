@@ -7,10 +7,14 @@
 //              walk ETA), timers ticking each second, colour always with a glyph. A row opens the request.
 //   speed      Medians from logged to First check / Located / Reunited against 10 / 15 / 30 min; details (p90, per
 //              tent, sparkline) in a hover card.
-//   calls      Calls per 15 min (Total / By tent / Heatmap, or a table), the night before as a dashed line, then
+//   calls      Calls per 15 min (Total / By post / Heatmap, or a table), the show day before as a dashed line, then
 //              the recap (reunited, not located, fastest, last reunion).
 // Desk (≥ 768 px): status across, Needs attention + Speed beside Calls; who's on and the range sit in the shell's
 // top bar (portalled into its slot). Phone: ‹ Dashboard with who's on, the range under it, one column.
+// (Events) Every post, team, day and time is the event's (lib/client/event-config.ts): any number of posts (the four
+// busiest of the range and Other, one fixed colour order), its teams in who's on, its time zone and show day ("Today").
+// An archived event (a lead reading it; staff never get here): day tabs All + one per show day, four tiles and one
+// chart (design/screens/events-v2-c/-d), no live timers, no Needs attention.
 import { DataList, HoverCard, SegmentedControl, Skeleton, VisuallyHidden } from '@radix-ui/themes';
 import { ArrowUp, Check, ChevronLeft, ChevronRight, Clock, History, Table2 } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -19,32 +23,37 @@ import { WalkIcon } from '@/components/messages/WalkIcon';
 import { useInDesk } from '@/components/desk/desk-context';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { EventStageChip } from '@/components/ui/EventStageChip';
+import { StageChip } from '@/components/ui/StageChip';
 import { StatusGlyph, SwapGlyph } from '@/components/ui/StatusGlyph';
-import type { SpeedStat, Stats, StatsRange } from '@/lib/api-types';
+import type { EventConfig, EventStats, EventStatsRange, SpeedStat } from '@/lib/api-types';
+import { eventZone, useEventConfig } from '@/lib/client/event-config';
 import { goBack, navigate } from '@/lib/client/nav';
 import { useLiveStatus } from '@/lib/client/use-live-status';
 import { STATUS } from '@/lib/domain';
-import { DEFAULT_STATS_RANGE, STATS_RANGES, STATS_RANGE_LABEL, isStatsRange } from '@/lib/stats-range';
-import { CallsChart, HeatChart, Spark, TENT_VAR } from './charts';
+import { DEFAULT_STATS_RANGE, STATS_RANGES, STATS_RANGE_LABEL, isStatsRange, rangeLabel, type LiveRange } from '@/lib/stats-range';
+import { CallsChart, HeatChart, Spark } from './charts';
 import {
   NO_VALUE,
   SPEED_LABEL,
-  TEAM_LABEL,
-  TENTS,
-  TENT_KEY,
   attentionPhrase,
   attentionRows,
   boundaries,
-  bucketTotal,
+  countOf,
   delta,
   fmtM,
   heatLabel,
   mmss,
-  prevNightName,
+  postSeries,
+  prevDayName,
+  showDays,
   speedBadge,
   statusParts,
+  teamName,
+  teamOrder,
   teamTotal,
   timerText,
+  type Series,
   type Sev,
   type StatusPart,
 } from './dashboard-model';
@@ -53,7 +62,8 @@ import { useDashboardStats } from './use-dashboard-stats';
 import s from './dashboard.module.css';
 
 export type DashboardViewProps = Record<string, never>;
-type CallsView = 'total' | 'tent' | 'heat';
+type CallsView = 'total' | 'post' | 'heat';
+type Stats = EventStats;
 
 const RANGE_KEY = 'lp-dash-range';
 const VIEW_KEY = 'lp-dash-view';
@@ -72,7 +82,7 @@ function remember(key: string, v: string) {
     // Private mode: the choice lasts this visit only.
   }
 }
-const isView = (v: unknown): v is CallsView => v === 'total' || v === 'tent' || v === 'heat';
+const isView = (v: unknown): v is CallsView => v === 'total' || v === 'post' || v === 'heat';
 
 export function DashboardView(_props: DashboardViewProps) {
   // "Try again" remounts the poller, which fetches at once.
@@ -84,21 +94,31 @@ export function DashboardView(_props: DashboardViewProps) {
 }
 
 function Dashboard({ onRetry }: { onRetry: () => void }) {
-  const [range, setRangeState] = useState<StatsRange>(() => remembered(RANGE_KEY, isStatsRange, DEFAULT_STATS_RANGE));
+  const event = useEventConfig();
+  return event?.stage === 'archived' ? <ArchivedDashboard event={event} onRetry={onRetry} /> : <LiveDashboard event={event} onRetry={onRetry} />;
+}
+
+function useCallsView(): [CallsView, (v: CallsView) => void] {
   const [view, setViewState] = useState<CallsView>(() => remembered(VIEW_KEY, isView, 'total'));
-  const setRange = (r: StatsRange) => {
-    setRangeState(r);
-    remember(RANGE_KEY, r);
-  };
   const setView = (v: CallsView) => {
     setViewState(v);
     remember(VIEW_KEY, v);
+  };
+  return [view, setView];
+}
+
+function LiveDashboard({ event, onRetry }: { event: EventConfig | null; onRetry: () => void }) {
+  const [range, setRangeState] = useState<LiveRange>(() => remembered(RANGE_KEY, isStatsRange, DEFAULT_STATS_RANGE));
+  const [view, setView] = useCallsView();
+  const setRange = (r: LiveRange) => {
+    setRangeState(r);
+    remember(RANGE_KEY, r);
   };
   const { stats, error, failing, updatedAt, skew } = useDashboardStats(range);
   const inDesk = useInDesk();
   const slot = useDashboardSlot();
   const live = useLiveStatus({ syncedAt: updatedAt, failing, subject: 'Dashboard' });
-  const who = <Who team={stats?.team} />;
+  const who = <Who team={stats?.team} event={event} />;
   const rangeCtl = <RangeControl value={range} onChange={setRange} />;
 
   return (
@@ -112,6 +132,7 @@ function Dashboard({ onRetry }: { onRetry: () => void }) {
               <ChevronLeft size={24} strokeWidth={2} aria-hidden />
             </button>
             <h1 className={s.title}>Dashboard</h1>
+            <EventStageChip practiceOnly />
             <span className={s.sp} />
             {who}
           </header>
@@ -122,7 +143,7 @@ function Dashboard({ onRetry }: { onRetry: () => void }) {
         <ConnectionBanner status={live} />
       </div>
       {stats ? (
-        <DashboardContent stats={stats} range={range} view={view} onView={setView} phone={!inDesk} skew={skew} />
+        <DashboardContent stats={stats} range={range} view={view} onView={setView} phone={!inDesk} skew={skew} tz={eventZone(event)} />
       ) : error ? (
         <EmptyState icon="plug" title="Can't reach the log" action={{ label: 'Try again', onClick: onRetry, icon: 'refresh' }} />
       ) : (
@@ -132,7 +153,7 @@ function Dashboard({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-function RangeControl({ value, onChange }: { value: StatsRange; onChange: (r: StatsRange) => void }) {
+function RangeControl({ value, onChange }: { value: LiveRange; onChange: (r: LiveRange) => void }) {
   return (
     <SegmentedControl.Root
       size="1"
@@ -167,11 +188,11 @@ function Pop({ trigger, children, label }: { trigger: (open: boolean) => ReactNo
   );
 }
 
-const TEAM_ORDER = ['medical', 'dispatch', 'base', 'transpo', 'other'];
-function Who({ team }: { team: Stats['team'] }) {
-  const rows = [...(team ?? [])].sort((a, b) => TEAM_ORDER.indexOf(a.team) - TEAM_ORDER.indexOf(b.team));
+function Who({ team, event }: { team: Stats['team']; event: EventConfig | null }) {
+  const order = teamOrder(event);
+  const rows = [...(team ?? [])].sort((a, b) => order.indexOf(a.team) - order.indexOf(b.team));
   const n = teamTotal(rows);
-  const sr = rows.map((t) => `${TEAM_LABEL[t.team] ?? t.team} ${t.on || 'none'}`).join(', ');
+  const sr = rows.map((t) => `${teamName(t.team, event)} ${t.on || 'none'}`).join(', ');
   if (!team) return null;
   return (
     <Pop
@@ -195,7 +216,7 @@ function Who({ team }: { team: Stats['team'] }) {
           <span key={t.team} className={s.tlr}>
             <i className={t.on ? s.tdot : `${s.tdot} ${s.off}`} />
             <b className={t.on ? undefined : s.offv}>{t.on || '–'}</b>
-            <span>{TEAM_LABEL[t.team] ?? t.team}</span>
+            <span>{teamName(t.team, event)}</span>
           </span>
         ))}
       </div>
@@ -215,22 +236,152 @@ function useServerNow(skew: number, everyMs = 1000): number {
 
 export interface DashboardContentProps {
   stats: Stats;
-  range: StatsRange;
+  range: EventStatsRange;
   view?: CallsView;
   onView?: (v: CallsView) => void;
   phone?: boolean;
   skew?: number;
+  /** The event's time zone (EventConfig.timezone). */
+  tz?: string;
 }
 
-/** Everything under the controls, for a loaded Stats (exported for the server-render unit tests). */
-export function DashboardContent({ stats, range, view = 'total', onView = () => {}, phone = false, skew = 0 }: DashboardContentProps) {
+/** Everything under the controls, for loaded stats (exported for the server-render unit tests). */
+export function DashboardContent({ stats, range, view = 'total', onView = () => {}, phone = false, skew = 0, tz = 'UTC' }: DashboardContentProps) {
   return (
     <main className={phone ? `${s.dash} ${s.phone}` : `${s.dash} ${s.desk}`} data-range={stats.range?.key ?? range}>
       <StatusCard stats={stats} />
       <Attention stats={stats} skew={skew} />
       <Speed stats={stats} range={range} skew={skew} />
-      <Calls stats={stats} range={range} view={view} onView={onView} phone={phone} skew={skew} />
+      <Calls stats={stats} range={range} view={view} onView={onView} phone={phone} skew={skew} tz={tz} recap />
     </main>
+  );
+}
+
+// ---- an archived event (a lead reading it) ------------------------------------------------------------------------
+
+function ArchivedDashboard({ event, onRetry }: { event: EventConfig; onRetry: () => void }) {
+  const days = showDays(event);
+  const [range, setRange] = useState<EventStatsRange>('event');
+  const [view, setView] = useCallsView();
+  const { stats, error, failing, updatedAt } = useDashboardStats(range);
+  const inDesk = useInDesk();
+  const slot = useDashboardSlot();
+  const live = useLiveStatus({ syncedAt: updatedAt, failing, subject: 'Dashboard' });
+  const tabs = <DayTabs days={days} value={range} onChange={setRange} />;
+  return (
+    <div className={s.app} data-testid="dashboard" data-archived="" data-desk={inDesk ? '' : undefined}>
+      {inDesk ? (
+        slot ? createPortal(<><span className={s.vsep} aria-hidden /><StageChip stage="archived" /><span className={s.sp} />{tabs}</>, slot) : null
+      ) : (
+        <>
+          <header className={s.nav}>
+            <button type="button" className={s.back} aria-label="Back to requests" onClick={() => goBack({})}>
+              <ChevronLeft size={24} strokeWidth={2} aria-hidden />
+            </button>
+            <h1 className={s.title}>{event.name}</h1>
+            <span className={s.sp} />
+            <StageChip stage="archived" />
+          </header>
+          <div className={s.pctl}>{tabs}</div>
+        </>
+      )}
+      <div className={s.banner}>
+        <ConnectionBanner status={live} />
+      </div>
+      {stats ? (
+        <ArchivedContent stats={stats} range={range} view={view} onView={setView} phone={!inDesk} tz={eventZone(event)} dayNames={days.map((d) => d.name)} />
+      ) : error ? (
+        <EmptyState icon="plug" title="Can't reach the log" action={{ label: 'Try again', onClick: onRetry, icon: 'refresh' }} />
+      ) : (
+        <Loading phone={!inDesk} archived />
+      )}
+    </div>
+  );
+}
+
+/** All, then one tab per show day ("Fri", "Sat", "Sun"). */
+function DayTabs({ days, value, onChange }: { days: ReadonlyArray<{ n: number; name: string }>; value: EventStatsRange; onChange: (r: EventStatsRange) => void }) {
+  return (
+    <SegmentedControl.Root size="1" radius="full" className={s.seg} value={value} onValueChange={(v) => onChange(v as EventStatsRange)} aria-label="Show day" data-testid="day-tabs">
+      <SegmentedControl.Item value="event">All</SegmentedControl.Item>
+      {days.map((d) => (
+        <SegmentedControl.Item key={d.n} value={`day:${d.n}`}>
+          {d.name}
+        </SegmentedControl.Item>
+      ))}
+    </SegmentedControl.Root>
+  );
+}
+
+export interface ArchivedContentProps {
+  stats: Stats;
+  range: EventStatsRange;
+  view?: CallsView;
+  onView?: (v: CallsView) => void;
+  phone?: boolean;
+  tz?: string;
+  dayNames?: readonly string[];
+}
+
+/** An archived event's day: four tiles and the calls chart (exported for the server-render unit tests). */
+export function ArchivedContent({ stats, range, view = 'total', onView = () => {}, phone = false, tz = 'UTC', dayNames = [] }: ArchivedContentProps) {
+  return (
+    <main className={phone ? `${s.dash} ${s.phone}` : `${s.dash} ${s.desk} ${s.archived}`} data-range={stats.range?.key ?? range}>
+      <Tiles stats={stats} label={rangeLabel(range, dayNames)} />
+      <Calls stats={stats} range={range} view={view} onView={onView} phone={phone} skew={0} tz={tz} recap={false} />
+    </main>
+  );
+}
+
+/** Requests, Located (%), First check (median, with its target badge), Reunited: the range's, never a live count. */
+function Tiles({ stats, label }: { stats: Stats; label: string }) {
+  const requests = stats.calls?.total ?? 0;
+  const located = stats.speed?.find((x) => x.key === 'located')?.n ?? 0;
+  const pct = requests > 0 ? Math.min(100, Math.round((located / requests) * 100)) : null;
+  const first = stats.speed?.find((x) => x.key === 'firstCheck');
+  const badge = first ? speedBadge(first) : null;
+  const reunited = stats.recap?.reunited ?? 0;
+  return (
+    <section className={`${s.card} ${s.zSpd} ${s.tiles}`} aria-label={`${label}: ${requests} requests, ${pct === null ? 'none' : `${pct}%`} located, first check median ${fmtM(first?.median)} minutes, ${reunited} reunited`} data-testid="tiles">
+      <div className={s.spd} aria-hidden>
+        <div className={s.sp3} data-testid="tile-requests">
+          <span className={s.l}>Requests</span>
+          <span className={s.v}>
+            <span className={s.n}>{requests}</span>
+          </span>
+        </div>
+        <div className={s.sp3} data-testid="tile-located">
+          <span className={s.l}>Located</span>
+          <span className={s.v}>
+            <span className={s.n}>
+              {pct === null ? NO_VALUE : pct}
+              {pct === null ? null : <small>%</small>}
+            </span>
+          </span>
+        </div>
+        <div className={s.sp3} data-testid="tile-first-check">
+          <span className={s.l}>First check</span>
+          {badge ? (
+            <span className={s.tb} data-sev={badge.sev}>
+              {badge.sev === 'ok' ? <Check size={12} strokeWidth={2.5} /> : <ArrowUp size={12} strokeWidth={2.5} />}
+              <span className={s.d}>{badge.delta}</span>
+            </span>
+          ) : null}
+          <span className={s.v}>
+            <span className={s.n}>
+              {fmtM(first?.median)}
+              {typeof first?.median === 'number' ? <small>m</small> : null}
+            </span>
+          </span>
+        </div>
+        <div className={s.sp3} data-testid="tile-reunited">
+          <span className={s.l}>Reunited</span>
+          <span className={s.v}>
+            <span className={s.n}>{reunited}</span>
+          </span>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -333,7 +484,7 @@ function Attention({ stats, skew }: { stats: Stats; skew: number }) {
                   {r.caseNumber}
                 </span>
                 <span className={s.tchip} aria-hidden>
-                  {r.tent}
+                  {r.post}
                 </span>
                 <span />
                 {r.enroute ? (
@@ -370,7 +521,7 @@ function Attention({ stats, skew }: { stats: Stats; skew: number }) {
 
 // ---- speed --------------------------------------------------------------------------------------------------------
 
-function Speed({ stats, range, skew }: { stats: Stats; range: StatsRange; skew: number }) {
+function Speed({ stats, range, skew }: { stats: Stats; range: EventStatsRange; skew: number }) {
   const speed = stats.speed ?? [];
   return (
     <section className={`${s.card} ${s.zSpd}`} aria-label="Speed: median minutes from logged to each step" data-testid="speed">
@@ -380,14 +531,14 @@ function Speed({ stats, range, skew }: { stats: Stats; range: StatsRange; skew: 
       <div className={s.spd}>
         {(['firstCheck', 'located', 'reunited'] as const).map((k) => {
           const st = speed.find((x) => x.key === k);
-          return <SpeedCol key={k} k={k} stat={st} range={range} skew={skew} />;
+          return <SpeedCol key={k} k={k} stat={st} range={range} skew={skew} series={postSeries(stats.range?.posts)} />;
         })}
       </div>
     </section>
   );
 }
 
-function SpeedCol({ k, stat, range, skew }: { k: SpeedStat['key']; stat: SpeedStat | undefined; range: StatsRange; skew: number }) {
+function SpeedCol({ k, stat, range, skew, series }: { k: SpeedStat['key']; stat: SpeedStat | undefined; range: EventStatsRange; skew: number; series: readonly Series[] }) {
   const label = SPEED_LABEL[k];
   const badge = stat ? speedBadge(stat) : null;
   const sr = !stat || stat.median === null ? `${label}: no data in range` : `${label}: median ${fmtM(stat.median)} minutes, ${badge?.sev === 'ok' ? 'under' : 'over'} the ${stat.target} minute target. Details`;
@@ -414,18 +565,20 @@ function SpeedCol({ k, stat, range, skew }: { k: SpeedStat['key']; stat: SpeedSt
   if (!stat) return col(false);
   return (
     <Pop label={`${label} details`} trigger={col}>
-      <SpeedDetails stat={stat} label={label} range={range} skew={skew} />
+      <SpeedDetails stat={stat} label={label} range={range} skew={skew} series={series} />
     </Pop>
   );
 }
 
-function SpeedDetails({ stat, label, range, skew }: { stat: SpeedStat; label: string; range: StatsRange; skew: number }) {
+function SpeedDetails({ stat, label, range, skew, series }: { stat: SpeedStat; label: string; range: EventStatsRange; skew: number; series: readonly Series[] }) {
   const now = useServerNow(skew, 60_000);
+  // Each post's median in the range's order (the four busiest, then Other).
+  const byPost = series.map((t) => ({ ...t, median: stat.byPost.find((p) => p.post === t.post)?.median ?? null }));
   return (
     <>
       <div className={s.ph}>
         <div>{label}</div>
-        <span>{STATS_RANGE_LABEL[range]}</span>
+        <span>{rangeLabel(range)}</span>
       </div>
       <DataList.Root size="1" className={s.dl}>
         <DataList.Item>
@@ -436,13 +589,13 @@ function SpeedDetails({ stat, label, range, skew }: { stat: SpeedStat; label: st
           <DataList.Label minWidth="0">Target</DataList.Label>
           <DataList.Value>{stat.target}m</DataList.Value>
         </DataList.Item>
-        {(['FA 4', 'FA 3'] as const).map((t) => (
-          <DataList.Item key={t}>
+        {byPost.map((t) => (
+          <DataList.Item key={t.post}>
             <DataList.Label minWidth="0">
-              <i className={s.tw} style={{ background: TENT_VAR[t] }} />
-              {t}
+              <i className={s.tw} style={{ background: t.color }} />
+              {t.post}
             </DataList.Label>
-            <DataList.Value>{`${fmtM(stat.byTent[t])}m`}</DataList.Value>
+            <DataList.Value>{`${fmtM(t.median)}m`}</DataList.Value>
           </DataList.Item>
         ))}
       </DataList.Root>
@@ -457,19 +610,32 @@ function SpeedDetails({ stat, label, range, skew }: { stat: SpeedStat; label: st
 
 const VIEWS: ReadonlyArray<[CallsView, string]> = [
   ['total', 'Total'],
-  ['tent', 'By tent'],
+  ['post', 'By post'],
   ['heat', 'Heatmap'],
 ];
 
-function Calls({ stats, range, view, onView, phone, skew }: { stats: Stats; range: StatsRange; view: CallsView; onView: (v: CallsView) => void; phone: boolean; skew: number }) {
+interface CallsProps {
+  stats: Stats;
+  range: EventStatsRange;
+  view: CallsView;
+  onView: (v: CallsView) => void;
+  phone: boolean;
+  skew: number;
+  tz: string;
+  /** The live dashboard's recap row under the chart (not an archived event's). */
+  recap: boolean;
+}
+
+function Calls({ stats, range, view, onView, phone, skew, tz, recap }: CallsProps) {
   const [table, setTable] = useState(false);
   const now = useServerNow(skew, 15_000);
   const calls = stats.calls ?? { total: stats.loggedLastHour, prevTotal: null, buckets: [] };
   const heat = stats.heat ?? { step: 60, cols: [] };
   const step = stats.range?.step ?? 15;
   const compare = !!stats.range?.compare;
-  const prevName = stats.range ? prevNightName(stats.range.from) : '';
-  const max = Math.max(1, ...heat.cols.flatMap((c) => [c.fa4, c.fa3, c.other]));
+  const prevName = stats.range ? prevDayName(stats.range.from, tz) : '';
+  const series = postSeries(stats.range?.posts);
+  const max = Math.max(1, ...heat.cols.flatMap((c) => series.map((t) => countOf(c.posts, t.post))));
   return (
     <section className={`${s.card} ${s.calls} ${s.zCalls}`} aria-label="Calls" data-testid="calls">
       <div className={s.zh}>
@@ -487,11 +653,11 @@ function Calls({ stats, range, view, onView, phone, skew }: { stats: Stats; rang
           </span>
         ) : (
           <span className={s.legend} aria-hidden>
-            {view === 'tent'
-              ? TENTS.map((t) => (
-                  <span key={t}>
-                    <i className={s.tw} style={{ background: TENT_VAR[t] }} />
-                    {t}
+            {view === 'post'
+              ? series.map((t) => (
+                  <span key={t.post}>
+                    <i className={s.tw} style={{ background: t.color }} />
+                    {t.post}
                   </span>
                 ))
               : null}
@@ -516,18 +682,18 @@ function Calls({ stats, range, view, onView, phone, skew }: { stats: Stats; rang
         </button>
       </div>
       {table ? (
-        <CallsTable stats={stats} view={view} range={range} />
+        <CallsTable stats={stats} view={view} range={range} series={series} tz={tz} />
       ) : view === 'heat' ? (
-        <HeatChart cols={heat.cols} step={heat.step} phone={phone} event={range === 'event'} />
+        <HeatChart cols={heat.cols} step={heat.step} phone={phone} event={range === 'event'} series={series} tz={tz} />
       ) : (
-        <CallsChart range={range} buckets={calls.buckets} step={step} compare={compare} prevName={prevName} byTent={view === 'tent'} phone={phone} now={now} />
+        <CallsChart range={range} buckets={calls.buckets} step={step} compare={compare} prevName={prevName} byPost={view === 'post'} series={series} phone={phone} now={now} tz={tz} />
       )}
-      <Recap stats={stats} compare={compare} prevName={prevName} skew={skew} />
+      {recap ? <Recap stats={stats} compare={compare} prevName={prevName} skew={skew} /> : null}
     </section>
   );
 }
 
-function CallsTable({ stats, view, range }: { stats: Stats; view: CallsView; range: StatsRange }) {
+function CallsTable({ stats, view, range, series, tz }: { stats: Stats; view: CallsView; range: EventStatsRange; series: readonly Series[]; tz: string }) {
   const step = stats.range?.step ?? 15;
   if (view === 'heat') {
     const heat = stats.heat ?? { step: 60, cols: [] };
@@ -536,18 +702,18 @@ function CallsTable({ stats, view, range }: { stats: Stats; view: CallsView; ran
         <table>
           <thead>
             <tr>
-              <th>Tent</th>
+              <th>Post</th>
               {heat.cols.map((c, i) => (
-                <th key={i}>{heatLabel(c, heat.step)}</th>
+                <th key={i}>{heatLabel(c, heat.step, tz)}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {TENTS.map((t) => (
-              <tr key={t}>
-                <td>{t}</td>
+            {series.map((t) => (
+              <tr key={t.post}>
+                <td>{t.post}</td>
                 {heat.cols.map((c, i) => (
-                  <td key={i}>{c[TENT_KEY[t]]}</td>
+                  <td key={i}>{countOf(c.posts, t.post)}</td>
                 ))}
               </tr>
             ))}
@@ -563,22 +729,22 @@ function CallsTable({ stats, view, range }: { stats: Stats; view: CallsView; ran
         <thead>
           <tr>
             <th>Time</th>
-            {TENTS.map((t) => (
-              <th key={t}>{t}</th>
+            {series.map((t) => (
+              <th key={t.post}>{t.post}</th>
             ))}
             <th>Total</th>
-            {compare ? <th>{prevNightName(stats.range!.from)}</th> : null}
+            {compare ? <th>{prevDayName(stats.range!.from, tz)}</th> : null}
           </tr>
         </thead>
         <tbody>
           {(stats.calls?.buckets ?? []).map((b) => (
             <tr key={b.at}>
-              <td>{heatLabel({ ...b, at: b.at }, range === 'event' ? 60 : step === 15 ? 15 : 60)}</td>
-              <td>{b.fa4}</td>
-              <td>{b.fa3}</td>
-              <td>{b.other}</td>
+              <td>{heatLabel({ at: b.at }, range === 'event' ? 60 : step === 15 ? 15 : 60, tz)}</td>
+              {series.map((t) => (
+                <td key={t.post}>{countOf(b.posts, t.post)}</td>
+              ))}
               <td>
-                <b>{bucketTotal(b)}</b>
+                <b>{b.n}</b>
               </td>
               {compare ? <td>{b.prev ?? ''}</td> : null}
             </tr>
@@ -636,7 +802,15 @@ function Recap({ stats, compare, prevName, skew }: { stats: Stats; compare: bool
 
 // ---- loading ------------------------------------------------------------------------------------------------------
 
-function Loading({ phone }: { phone: boolean }) {
+function Loading({ phone, archived = false }: { phone: boolean; archived?: boolean }) {
+  if (archived) {
+    return (
+      <div className={phone ? `${s.dash} ${s.phone}` : `${s.dash} ${s.desk} ${s.archived}`} aria-busy="true" data-testid="dashboard-loading">
+        <Skeleton className={`${s.card} ${s.zSpd}`} height="120px" />
+        <Skeleton className={`${s.card} ${s.zCalls}`} height="360px" />
+      </div>
+    );
+  }
   return (
     <div className={phone ? `${s.dash} ${s.phone}` : `${s.dash} ${s.desk}`} aria-busy="true" data-testid="dashboard-loading">
       <Skeleton className={`${s.card} ${s.zStatus}`} height="64px" />

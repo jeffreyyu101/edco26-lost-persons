@@ -292,3 +292,24 @@
     inset: min(0px, calc((100% - 44px) / 2));
   }
 }
+
+/* (Events) The Ended screen: the logos, the event's name, the Archived chip and one line, centred in the column. */
+.ended {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  text-align: center;
+}
+.ended .logos {
+  margin-bottom: 10px;
+}
+.endedName {
+  margin: 0;
+  text-wrap: balance;
+}
+.endedLine {
+  margin: 4px 0 0;
+  max-width: 300px;
+  text-wrap: balance;
+}

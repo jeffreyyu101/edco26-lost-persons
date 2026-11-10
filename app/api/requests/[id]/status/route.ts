@@ -12,6 +12,7 @@ import { involvedStaff } from '@/lib/server/involved';
 import { mapRow } from '@/lib/server/mappers';
 import { notifyLater } from '@/lib/server/notify';
 import { withReclassify } from '@/lib/server/reclassify';
+import { mainMedicalOf, postNames } from '@/lib/server/events';
 import { authedRoute } from '@/lib/server/route';
 import { notifyNotFound } from '@/lib/server/stage-notify';
 import { rpc } from '@/lib/server/supabase';
@@ -21,7 +22,7 @@ import { setStatusSchema } from '@/lib/validation';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/status', {}, async ({ request, params, session, eventId }) => {
+export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/status', {}, async ({ request, params, session, eventId, event }) => {
   const id = idParam(params);
   const body = await readJson(request, setStatusSchema);
   const data = await withReclassify(eventId, id, { fn: 'status', expectedVersion: body.expectedVersion, target: body.status, kind: body.kind }, () =>
@@ -34,7 +35,7 @@ export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/status'
       p_kind: body.kind,
     }),
   );
-  const out: ChangeResponse = { changed: data.changed === true, request: mapRow(data.row) };
+  const out: ChangeResponse = { changed: data.changed === true, request: mapRow(data.row, postNames(event)) };
   // (F5) Not found tells everyone involved: the first answer (the "Not found yet" hold: the row comes back
   // still Waiting for check) and the final one. Decided by the target asked for, not the row's status. After
   // the response (next/server `after`), so it never holds the answer up.
@@ -44,8 +45,12 @@ export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/status'
   } else if (out.changed) {
     // (F4) Every other real change. Decided by the target too: a hold's row is still Waiting for check, which
     // must never read as "Back to Waiting for check".
-    const event = statusChangeEvent(out.request.status, out.request.medicalLocation ?? null, { place: out.request.swapPlace, post: out.request.postShort });
-    if (event) await notifyLater(eventId, () => involvedStaff(eventId, id), () => ({ requestId: id, actor: session.staff, ...event }));
+    const change = statusChangeEvent(out.request.status, out.request.medicalLocation ?? null, {
+      place: out.request.swapPlace,
+      post: out.request.postShort,
+      mainMedical: mainMedicalOf(event),
+    });
+    if (change) await notifyLater(eventId, () => involvedStaff(eventId, id), () => ({ requestId: id, actor: session.staff, ...change }));
   }
   return json(out);
 });

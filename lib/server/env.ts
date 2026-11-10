@@ -6,7 +6,6 @@
 // env and which must stay server-side.
 import 'server-only';
 import { z } from 'zod';
-import { DEFAULT_EVENT_TIMEZONE } from '../format';
 import { sessionSecretFromEnv } from './session-token';
 
 /**
@@ -40,9 +39,8 @@ export interface ServerEnv {
   supabaseKey: string;
   sessionSecret: string;
   // (Events) The staff password, the lead passcode and the join links live in the database (lib/server/events.ts).
-  // APP_SHARED_PASSWORD(_HASH_B64) / INVITE_* are read only by scripts/bootstrap-events.mjs, once.
-  /** PHASE2: the fallback display time zone until every screen reads the event's (EventConfig.timezone). */
-  eventTimezone: string;
+  // APP_SHARED_PASSWORD(_HASH_B64) / INVITE_* are read only by scripts/bootstrap-events.mjs, once. The display time zone
+  // is each event's (EventConfig.timezone): EVENT_TIMEZONE is no longer read.
 }
 
 export function isValidTimeZone(timeZone: string): boolean {
@@ -75,9 +73,6 @@ export function serverEnv(): ServerEnv {
   if (!sessionSecret) problems.push('SESSION_SECRET is missing');
   else if (sessionSecret.length < 32) problems.push('SESSION_SECRET must be at least 32 characters');
 
-  const eventTimezone = readEnv('EVENT_TIMEZONE') ?? DEFAULT_EVENT_TIMEZONE;
-  if (!isValidTimeZone(eventTimezone)) problems.push('EVENT_TIMEZONE is not a valid IANA time zone');
-
   if (problems.length > 0 || !supabaseUrl || !supabaseKey || !sessionSecret) {
     throw new EnvError(`Server environment is not configured: ${problems.join('; ')}.`);
   }
@@ -87,7 +82,6 @@ export function serverEnv(): ServerEnv {
     supabaseOrigin: new URL(supabaseUrl).origin,
     supabaseKey,
     sessionSecret,
-    eventTimezone,
   };
   return cached;
 }
@@ -97,8 +91,3 @@ export function resetServerEnvCache(): void {
   cached = null;
 }
 
-/** Event timezone without requiring the rest of the environment (layout, page). */
-export function eventTimezone(): string {
-  const tz = readEnv('EVENT_TIMEZONE');
-  return tz && isValidTimeZone(tz) ? tz : DEFAULT_EVENT_TIMEZONE;
-}

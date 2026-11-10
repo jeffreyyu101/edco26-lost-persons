@@ -48,6 +48,7 @@ import {
   type TableColumnKey,
 } from './table-model';
 import t from './table.module.css';
+import { useEventConfig } from '@/lib/client/event-config';
 
 const COLUMN_CLASS: Readonly<Record<TableColumnKey, string | undefined>> = {
   number: t.cNum,
@@ -304,7 +305,10 @@ export interface TableRowProps {
 /** One request. Closed rows are greyed in place. A click opens it (beside the list on the desk). */
 export const TableRow = memo(function TableRow({ row, times, selected, stage, timeZone, now = 0 }: TableRowProps) {
   const closed = isClosed(row.status);
-  const look = stage ?? stageLook(row, now);
+  const event = useEventConfig();
+  const mainMedical = event?.mainMedical;
+  const teams = event?.teams;
+  const look = stage ?? stageLook(row, now, mainMedical);
   const friend = friendCell(row);
   return (
     <button
@@ -316,7 +320,7 @@ export const TableRow = memo(function TableRow({ row, times, selected, stage, ti
       aria-current={selected ? 'true' : undefined}
       onClick={(e) => openRowAt(row.id, e.target)}
     >
-      <Vh>{withMessages(tableRowLabel(row, times, timeZone, now), row)}</Vh>
+      <Vh>{withMessages(tableRowLabel(row, times, timeZone, now, teams), row)}</Vh>
       <Cells
         lane={<MessageMark row={row} className={t.lane} />}
         number={logNumber(row.caseNumber)}
@@ -333,8 +337,8 @@ export const TableRow = memo(function TableRow({ row, times, selected, stage, ti
         createdTitle={times.createdTitle}
         updated={times.updated}
         updatedTitle={times.updatedTitle}
-        by={loggedByShort(row.createdBy)}
-        byTitle={loggedByPhrase(row.createdBy)}
+        by={loggedByShort(row.createdBy, teams)}
+        byTitle={loggedByPhrase(row.createdBy, teams)}
       />
     </button>
   );
@@ -368,7 +372,10 @@ export interface SearchRowProps extends Omit<TableRowProps, 'row'> {
 export const SearchRow = memo(function SearchRow({ hit, times, selected, stage, timeZone, now = 0, nameRanges, caseRanges, line, lineRanges }: SearchRowProps) {
   const { row } = hit;
   const closed = isClosed(row.status);
-  const look = stage ?? stageLook(row, now);
+  const event = useEventConfig();
+  const mainMedical = event?.mainMedical;
+  const teams = event?.teams;
+  const look = stage ?? stageLook(row, now, mainMedical);
   const friend = friendCell(row);
   // A number hit: docked under 1320 px, # goes, so the LP number shows highlighted under the name (as on the phone's
   // SearchLogRow).
@@ -383,7 +390,7 @@ export const SearchRow = memo(function SearchRow({ hit, times, selected, stage, 
       aria-current={selected ? 'true' : undefined}
       onClick={(e) => openRowAt(row.id, e.target)}
     >
-      <Vh>{withMessages(searchRowLabel(row, times, line, timeZone, now), row)}</Vh>
+      <Vh>{withMessages(searchRowLabel(row, times, line, timeZone, now, teams), row)}</Vh>
       <Cells
         lane={<MessageMark row={row} className={t.lane} />}
         number={<Highlight text={logNumber(row.caseNumber)} ranges={logNumberRanges(row.caseNumber, caseRanges)} />}
@@ -402,8 +409,8 @@ export const SearchRow = memo(function SearchRow({ hit, times, selected, stage, 
         createdTitle={times.createdTitle}
         updated={times.updated}
         updatedTitle={times.updatedTitle}
-        by={loggedByShort(row.createdBy)}
-        byTitle={loggedByPhrase(row.createdBy)}
+        by={loggedByShort(row.createdBy, teams)}
+        byTitle={loggedByPhrase(row.createdBy, teams)}
       />
     </button>
   );
@@ -414,7 +421,7 @@ export const SearchRow = memo(function SearchRow({ hit, times, selected, stage, 
  * send", no number and nothing updated. "Needs attention" opens its editor; a waiting one is not a control.
  */
 export function OutboxRow({ item, created }: { item: OutboxItem; created: string }) {
-  const m = outboxRow(item, created);
+  const m = outboxRow(item, created, useEventConfig()?.teams);
   const cells = (
     <Cells
       number={m.number}

@@ -23,14 +23,16 @@
 // the address bar) and opens step 1, from step 2 too.
 import { VisuallyHidden } from '@radix-ui/themes';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { SessionInfo } from '@/lib/api-types';
+import type { EndedEvent, SessionInfo } from '@/lib/api-types';
+import { ENDED_PATH, markEventDrop, readEnded, rememberEnded } from '@/lib/client/ended';
 import { clearRememberedIdentity, forgetBellForOtherStaff, readPrefs, writeRememberedIdentity } from '@/lib/client/prefs';
 import { announceSignIn } from '@/lib/client/session-signals';
 import { markSignedIn } from '@/lib/client/signed-in-at';
 import { captureJoinCode, forgetJoinCode } from '@/lib/join-link';
 import { safeNextPath } from '@/lib/safe-next';
 import { isWide } from './desktop';
-import { MESSAGES, draftFromIdentity, inviteSignInBody, rememberedIdentity, retryMinutes, type Identity, type WhoDraft } from './logic';
+import { EndedScreen } from './Ended';
+import { MESSAGES, draftFromIdentity, inviteSignInBody, rememberedIdentity, retryMinutes, type Identity, type SignInTeam, type WhoDraft } from './logic';
 import { Credit, ThemeToggle } from './parts';
 import { PasswordStep } from './PasswordStep';
 import { postSession } from './session-api';
@@ -46,36 +48,60 @@ const LOCK_TICK_MS = 5_000;
 export interface SignInFlowProps {
   /** Safe same-origin path to return to after sign-in (lib/safe-next), or null for "/". */
   next: string | null;
+  /** (Events) The team cards: every running event's teams (the server page reads them). */
+  teams?: readonly SignInTeam[];
+  /** (Events) /signin?ended=1: the Ended screen (lib/client/ended.ts keeps what it shows). */
+  ended?: boolean;
 }
 
 const subscribeNothing = () => () => {};
 const onClient = () => true;
 const onServer = () => false;
 
-export function SignInFlow({ next }: SignInFlowProps) {
+export function SignInFlow({ next, teams = [], ended = false }: SignInFlowProps) {
   const mounted = useSyncExternalStore(subscribeNothing, onClient, onServer);
+  // (Events) The Ended screen: arrived at /signin?ended=1, or a password / join link of an archived event below.
+  const [endedEvent, setEndedEvent] = useState<EndedEvent | null | undefined>(undefined);
+  const showEnded = mounted && (endedEvent !== undefined || ended);
+  const onEnded = (event: EndedEvent | null) => {
+    rememberEnded(event);
+    if (event?.id) markEventDrop(event.id);
+    forgetJoinCode();
+    window.history.replaceState(window.history.state, '', ENDED_PATH);
+    setEndedEvent(event);
+  };
   return (
     <main className={styles.screen} data-testid="signin">
       <ThemeToggle />
       <span className={styles.growTop} />
-      <div className={styles.column}>{mounted ? <Steps next={next} /> : null}</div>
+      <div className={styles.column}>
+        {showEnded ? <EndedScreen event={endedEvent ?? readEnded()} /> : mounted ? <Steps next={next} teams={teams} onEnded={onEnded} /> : null}
+      </div>
       <span className={styles.grow} />
-      <Credit />
+      {showEnded ? null : <Credit />}
     </main>
   );
+}
+
+/** The event a join link names ("<slug>.<code>"), for its logo; null for an older link without one. */
+function linkSlug(code: string | null): string | null {
+  const dot = code ? code.indexOf('.') : -1;
+  if (!code || dot <= 0) return null;
+  const slug = code.slice(0, dot).toLowerCase();
+  return /^[a-z0-9][a-z0-9-]{1,39}$/.test(slug) ? slug : null;
 }
 
 type StepState =
   | { step: 1; draft: WhoDraft; focus: boolean }
   | { step: 2; identity: Identity; focus: boolean };
 
-function initialState(withLink: boolean): StepState {
+function initialState(withLink: boolean, teams: readonly SignInTeam[]): StepState {
   const remembered = rememberedIdentity(readPrefs());
   // From 768 px the step's first field is focused on load (desktop-sign-in.html); the phone waits for a tap.
   const focus = isWide();
   // A team join link signs in from step 1, so a remembered identity prefills it instead of skipping it.
-  if (withLink) return { step: 1, draft: draftFromIdentity(remembered), focus };
-  return remembered ? { step: 2, identity: remembered, focus } : { step: 1, draft: draftFromIdentity(null), focus };
+  if (withLink) return { step: 1, draft: draftFromIdentity(remembered, teams), focus };
+  return remembered ? { step: 2, identity: remembered, focus } : { step: 1, draft: draftFromIdentity(null, teams), focus };
 }
 
 /** After a successful POST /api/session with the link (PasswordStep does the same after the password). */
@@ -91,10 +117,13 @@ function openApp(session: SessionInfo | null, identity: Identity, next: string |
   window.location.replace(safeNextPath(next) ?? '/');
 }
 
-function Steps({ next }: SignInFlowProps) {
+function Steps({ next, teams, onEnded }: { next: string | null; teams: readonly SignInTeam[]; onEnded: (event: EndedEvent | null) => void }) {
   // The code a team join link left for this tab (and out of the address bar), or null.
   const [joinCode, setJoinCode] = useState<string | null>(() => captureJoinCode());
-  const [state, setState] = useState<StepState>(() => initialState(joinCode !== null));
+  const [state, setState] = useState<StepState>(() => initialState(joinCode !== null, teams));
+  // (Events) A join link names its event: its logo beside Ground Control's (a password: Ground Control alone).
+  const slug = linkSlug(joinCode);
+  const eventLogo = slug ? `/api/events/logo/${slug}` : null;
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState('');
@@ -118,11 +147,11 @@ function Steps({ next }: SignInFlowProps) {
       if (!code || busy.current) return;
       setJoinCode(code);
       setMessage(null);
-      setState((s) => (s.step === 1 ? s : { step: 1, draft: draftFromIdentity(s.identity), focus: isWide() }));
+      setState((s) => (s.step === 1 ? s : { step: 1, draft: draftFromIdentity(s.identity, teams), focus: isWide() }));
     };
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
-  }, []);
+  }, [teams]);
 
   // Count the rate-limit lock down; when it passes, Continue comes back.
   useEffect(() => {
@@ -140,13 +169,17 @@ function Steps({ next }: SignInFlowProps) {
     busy.current = true;
     setSubmitting(true);
     setMessage(null);
-    const outcome = await postSession(inviteSignInBody(identity, code));
+    const outcome = await postSession(inviteSignInBody(identity, code, teams));
     if (!alive.current) return;
     if (outcome.kind === 'ok') {
       forgetJoinCode();
       setAnnouncement(LINK_DONE);
       openApp(outcome.session, identity, next);
       return; // Stay busy while the app loads.
+    }
+    if (outcome.kind === 'ended') {
+      onEnded(outcome.event);
+      return;
     }
     busy.current = false;
     setSubmitting(false);
@@ -172,6 +205,8 @@ function Steps({ next }: SignInFlowProps) {
     return (
       <>
         <WhoStep
+          teams={teams}
+          eventLogo={eventLogo}
           draft={state.draft}
           onDraft={(draft) => {
             setState({ step: 1, draft, focus: false });
@@ -195,11 +230,13 @@ function Steps({ next }: SignInFlowProps) {
     <PasswordStep
       key={`${state.identity.name}\u0000${state.identity.team}`}
       identity={state.identity}
+      teams={teams}
       next={next}
       autoFocus={state.focus}
+      onEnded={onEnded}
       onChange={() => {
         clearRememberedIdentity();
-        setState({ step: 1, draft: draftFromIdentity(state.identity), focus: true });
+        setState({ step: 1, draft: draftFromIdentity(state.identity, teams), focus: true });
       }}
     />
   );

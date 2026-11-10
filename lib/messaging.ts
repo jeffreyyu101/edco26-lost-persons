@@ -28,19 +28,21 @@ export const THREAD_PAGE = 100;
 // Staff and sides
 // ---------------------------------------------------------------------------------------------------
 
-/** The Medical team's canonical value (contract E: medical side = the Medical team, everyone else = front of house). */
-export const MEDICAL_TEAM = 'Medical';
-
 export type Side = 'medical' | 'foh';
 
-/** Which side a team is on: the Medical team is medical, every other team is front of house. */
-export function sideOfTeam(team: string | null | undefined): Side {
-  return canonicalTeam(team ?? '').toLowerCase() === MEDICAL_TEAM.toLowerCase() ? 'medical' : 'foh';
+/**
+ * Which side a team is on (contract E): the event's medical team (`medical`: its label, EventTeam.medical) is medical,
+ * every other team is front of house. Case-insensitive, as the server matches a team to the event's.
+ */
+export function sideOfTeam(team: string | null | undefined, medical: string | readonly string[] | null | undefined): Side {
+  const t = canonicalTeam(team ?? '').toLowerCase();
+  const names = typeof medical === 'string' ? [medical] : (medical ?? []);
+  return t && names.some((m) => m.trim().toLowerCase() === t) ? 'medical' : 'foh';
 }
 
 /** Which side an attribution string ("Rae Chen · Medical") is on. */
-export function sideOfStaff(staff: string | null | undefined): Side {
-  return sideOfTeam(parseStaff(staff).team);
+export function sideOfStaff(staff: string | null | undefined, medical: string | readonly string[] | null | undefined): Side {
+  return sideOfTeam(parseStaff(staff).team, medical);
 }
 
 /**

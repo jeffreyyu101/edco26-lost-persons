@@ -9,6 +9,7 @@ import {
   OTHER_POST,
   appendChip,
   isPostValue,
+  type PostName,
   postFull,
   statusBucket,
   type EditSection,
@@ -145,8 +146,8 @@ const SECTION_KEYS: Readonly<Record<EditSection, ReadonlySet<string>>> = {
 const blankToNull = (s: string): string | null => (s.trim() === '' ? null : s.trim());
 
 /** A post value the form can't express (legacy 'FA 3', …), shown as it is until another post is picked. */
-export function legacyPostOf(row: Pick<RequestSummary, 'reportingLocation' | 'otherLocation'>): string | null {
-  return row.reportingLocation && !isPostValue(row.reportingLocation) ? postFull(row.reportingLocation, row.otherLocation) : null;
+export function legacyPostOf(row: Pick<RequestSummary, 'reportingLocation' | 'otherLocation'>, posts: readonly PostName[]): string | null {
+  return row.reportingLocation && !isPostValue(row.reportingLocation, posts) ? postFull(row.reportingLocation, row.otherLocation) : null;
 }
 
 /**
@@ -160,9 +161,10 @@ export function onlyOutsideFormChanged(
   base: RequestFormValues,
   baseLegacyPost: string | null,
   latest: RequestSummary,
+  posts: readonly PostName[],
 ): boolean {
-  if (legacyPostOf(latest) !== baseLegacyPost) return false;
-  const now = formValuesFromRequest(latest);
+  if (legacyPostOf(latest, posts) !== baseLegacyPost) return false;
+  const now = formValuesFromRequest(latest, posts);
   return (Object.keys(base) as FormKey[]).every((key) => base[key] === now[key]);
 }
 

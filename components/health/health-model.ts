@@ -118,6 +118,10 @@ export interface ErrorRow {
 export interface HealthData {
   generatedAt: string;
   window: HealthWindow;
+  /** (Events) The event's teams: telemetry keys a team by its id. */
+  teams?: Array<{ id: string; short: string }>;
+  /** (Events) The event's time zone. */
+  timeZone?: string | null;
   config: HealthConfig | null;
   kpis: Kpis | null;
   problems: Problem[] | null;
@@ -185,16 +189,20 @@ export function sayAgo(iso: string | null | undefined, ref: number): string {
   return `${n} ${unit}${n === '1' ? '' : 's'} ago`;
 }
 
-export const TEAM_LABEL: Readonly<Record<TeamKey, string>> = {
-  medical: 'Medical',
-  dispatch: 'Dispatch',
-  base: 'GCHX Base',
-  transpo: 'GCHX Med Transpo',
-  other: 'Other',
-};
+/**
+ * (Events) The page's event: its team names (telemetry keys a team by EventTeam.id; 'other' is anyone outside them) and
+ * time zone, from the last answer (applyHealthEvent sets them before the panels render).
+ */
+let healthTeams: ReadonlyArray<{ id: string; short: string }> = [];
+let healthZone: string | undefined;
+export function applyHealthEvent(data: Pick<HealthData, 'teams' | 'timeZone'>): void {
+  healthTeams = data.teams ?? [];
+  healthZone = data.timeZone ?? undefined;
+}
 
-export function teamLabel(team: string): string {
-  return TEAM_LABEL[team as TeamKey] ?? 'Other';
+export function teamLabel(team: TeamKey): string {
+  if (team === 'other') return 'Other';
+  return healthTeams.find((t) => t.id === team)?.short ?? team;
 }
 
 /** "Medical and Dispatch", "Medical, Dispatch and Other". */
@@ -341,13 +349,8 @@ export function fmtDt(dt: number): string {
   return `−${(Math.abs(dt) / 1000).toFixed(1)} s`;
 }
 
-/** The Mon 6:00 AM the collection runs until, in the event's zone. */
-export function fmtUntil(until: number, timeZone = 'America/New_York'): string {
-  if (!until) return DASH;
-  return new Intl.DateTimeFormat('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZone }).format(new Date(until));
-}
-
-export function fmtClock(iso: string, timeZone = 'America/New_York'): string {
+/** A clock time in the event's zone ("10:42 PM"). */
+export function fmtClock(iso: string, timeZone: string | undefined = healthZone): string {
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return DASH;
   return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', timeZone }).format(new Date(t));

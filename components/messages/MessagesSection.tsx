@@ -37,6 +37,7 @@ import { keyboardBox } from '@/lib/client/visual-viewport';
 import { DESK_QUERY } from '@/components/desk/breakpoints';
 import { useEnrouteControl } from './Enroute';
 import s from './messages.module.css';
+import { medicalLabel, useEventConfig } from '@/lib/client/event-config';
 
 export interface MessagesSectionProps {
   row: RequestSummary;
@@ -78,13 +79,14 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
   const api = useMessaging();
   const actions = useActions();
   const session = useSession();
+  const event = useEventConfig();
   const timeZone = useEventTimezone();
   const now = useNow();
   const headingId = useId();
   useOpenThread(row.id);
   const thread = useThread(row.id);
   const jobs = useRequestJobs(row.id);
-  const me = useMemo(() => meFor(session.staff), [session.staff]);
+  const me = useMemo(() => meFor(session.staff, event?.teams), [session.staff, event?.teams]);
   const messages = useMemo(() => thread?.messages ?? [], [thread?.messages]);
   const bubbles = useMemo(() => buildBubbles(messages, jobs, me), [messages, jobs, me]);
   const receipt = receiptFor(messages, thread?.receipt ?? null);
@@ -351,7 +353,7 @@ function Section({ row, panel }: { row: RequestSummary; panel: boolean }) {
     };
   }, [row.id, panel, scrollToEnd, landSection]);
 
-  const side = sideOfTeam(session.team);
+  const side = sideOfTeam(session.team, medicalLabel(event));
   const lines = quickLines(quickStage(row), side, enroute.mine, enroute.enroute?.state === 'arrived');
 
   const copy = (text: string) => {

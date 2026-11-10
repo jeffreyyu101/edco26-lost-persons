@@ -24,7 +24,7 @@
   color-scheme: dark;
 }
 
-/* EDC Orlando (black artwork, made white here) | Ground Control (its own colours). */
+/* (Events) The event's logo (BrandEvent.tsx; a single-colour one made white) | Ground Control (its own colours). */
 .logos {
   flex: none;
   display: flex;
@@ -36,7 +36,6 @@
   display: block;
   width: auto;
   height: 19px;
-  filter: brightness(0) invert(1);
 }
 
 .gc {

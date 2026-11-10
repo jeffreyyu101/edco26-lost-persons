@@ -133,7 +133,7 @@ export function stubRows(now: number = Date.now()): RequestSummary[] {
     firstPhotoId: s.photos ? stubPhotoId(s.n, 1) : null,
     photoCount: s.photos ?? 0,
     name: joinName(s.first, s.last ?? null),
-    postShort: postShort(s.post, s.other ?? null),
+    postShort: postShort(s.post, s.other ?? null, STUB_EVENT.posts),
   }));
 }
 

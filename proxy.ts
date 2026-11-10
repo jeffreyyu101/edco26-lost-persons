@@ -1,6 +1,6 @@
 // Proxy (spec §6 Proxy): per-request CSP nonce, security headers and the auth redirects for page routes.
 //   * `/` without a valid session cookie → /signin?next=<path+query>
-//   * `/signin` with a valid session cookie → the safe `next`, else `/`
+//   * `/signin` with a valid session cookie → the safe `next`, else `/` (not `/signin?ended=1`, the Ended screen)
 //   * `/health` (the telemetry dashboard) without a valid session cookie → /signin?next=/health
 // API routes, static assets, the service worker, the manifest, icons, logos and fonts never run through
 // here (see `config.matcher`). Runs on the Node.js runtime (the Next.js 16 default for proxy).
@@ -81,7 +81,9 @@ export async function proxy(request: NextRequest) {
       return withHeaders(response, csp);
     }
 
-    if (pathname === '/signin' && claims) {
+    // (Events) /signin?ended=1 is the Ended screen: a cookie that still verifies belongs to an ended event's session
+    // (every API call answers it 410), so it must not bounce back to the app.
+    if (pathname === '/signin' && claims && request.nextUrl.searchParams.get('ended') !== '1') {
       const next = safeNextPath(request.nextUrl.searchParams.get('next')) ?? '/';
       const response = NextResponse.redirect(new URL(next, request.url), 307);
       response.headers.set('Cache-Control', 'no-store');

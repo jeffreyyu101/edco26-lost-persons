@@ -35,6 +35,8 @@ export interface MessageJob {
   attempts: number;
   nextAttemptAt: number | null;
   error: { code: string; message: string } | null;
+  /** (Events) The event it was queued in: it is only ever sent to that event (absent: before events, 'none'). */
+  eventId?: string;
 }
 
 /** Network / timeout / 5xx failures while online before a message shows "Not delivered · Retry". */

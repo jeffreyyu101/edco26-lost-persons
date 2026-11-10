@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { EventAdmin, EventStats, RequestSummary, SessionInfo, SyncResponse } from '@/lib/api-types';
 import { STATUS } from '@/lib/domain';
 import { ROOT, ensureTestEvent, loadTestEnv } from '../../scripts/test-env.mjs';
-import { EVENT_ID, PASSWORD, admin, api, clearAttempts, cookieFor, createBody, freshIp, newStaff, pii, psql, randomUUID, setCookies, uniq, withTestServer, type Staff } from './harness';
+import { BASE, EVENT_ID, PASSWORD, admin, api, clearAttempts, cookieFor, createBody, freshIp, newStaff, pii, psql, randomUUID, setCookies, uniq, withTestServer, type Staff } from './harness';
 
 withTestServer();
 
@@ -922,7 +922,7 @@ describe('scripts/bootstrap-events.mjs (the one-time bootstrap, run here against
 });
 
 describe('event logo', () => {
-  it('a lead uploads a PNG / WebP / JPEG logo; the public logo route redirects to it; replacing or removing it deletes the old object', async () => {
+  it('a lead uploads a PNG / WebP / JPEG logo; the public logo route serves its bytes from this origin; replacing or removing it deletes the old object', async () => {
     const lead = await leadCookie();
     const made = await makeEvent({ practice: true });
     archivedAtEnd.push(made.event.id);
@@ -938,9 +938,11 @@ describe('event logo', () => {
     expect(first.status, first.text).toBe(200);
     expect(first.body.event.logoUrl).toMatch(new RegExp(`^/api/events/logo/${made.event.slug}\\?v=`));
     expect(await objects()).toHaveLength(1);
-    const served = await api(first.body.event.logoUrl!);
-    expect(served.status).toBe(302);
-    expect(served.headers.get('location')).toContain('/storage/v1/object/sign/event-logos/');
+    // (Phase 2) Same-origin bytes, not a redirect: the client reads the logo's pixels and masks the rainbow with it.
+    const served = await fetch(new URL(first.body.event.logoUrl!, BASE), { redirect: 'manual' });
+    expect(served.status).toBe(200);
+    expect(served.headers.get('content-type')).toBe('image/png');
+    expect(Buffer.from(await served.arrayBuffer()).equals(syntheticPng(32, 32))).toBe(true);
     // Staff see it in their config too.
     expect((await signIn(newStaff('Site Ops'), made.password)).info.event?.logoUrl).toBe(first.body.event.logoUrl);
 

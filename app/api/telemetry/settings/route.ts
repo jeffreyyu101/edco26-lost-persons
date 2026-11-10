@@ -17,9 +17,9 @@ export const dynamic = 'force-dynamic';
 
 const bodySchema = z.object({ enabled: z.boolean() }).strict();
 
-export const POST = authedRoute('POST /api/telemetry/settings', { event: 'optional', lead: true }, async ({ request, session }) => {
+export const POST = authedRoute('POST /api/telemetry/settings', { event: 'optional', lead: true }, async ({ request, session, event }) => {
   const { enabled } = await readJson(request, bodySchema);
-  if (!enabled && session.eventId) await recordServerEvents(session.eventId, [{ n: 'tel_switch', team: teamKey(session.claims.team), ok: false }]);
+  if (!enabled && session.eventId) await recordServerEvents(session.eventId, [{ n: 'tel_switch', team: teamKey(session.claims.team, event?.teams), ok: false }]);
   const raw = await rpc<unknown>('lp_tel_set', { p_enabled: enabled });
   invalidateTelemetryConfig();
   return json(parseTelemetryConfig(raw));

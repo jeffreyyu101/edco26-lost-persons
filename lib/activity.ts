@@ -313,9 +313,9 @@ export function swapRequestedDetail(post: string): string {
   return [SWAP_REQUESTED_LABEL, post.trim(), 'decide where'].filter(Boolean).join(' · ');
 }
 
-/** (Companion) swap_approved: "Swap at Main Med" / "Swap at FA 4". */
-export function swapApprovedDetail(place: SwapPlace, post: string): string {
-  return swapLabel(place, post);
+/** (Companion) swap_approved: "Swap at Main Med" / "Swap at FA 4" (`mainMedical`: the event's, EventConfig.mainMedical). */
+export function swapApprovedDetail(place: SwapPlace, post: string, mainMedical: string): string {
+  return swapLabel(place, post, mainMedical);
 }
 
 /** (Companion) swap_declined. */
@@ -340,11 +340,11 @@ export const FRIEND_MAY_BE_WITH_THEM = 'friend may be with them';
 export function statusChangeEvent(
   status: string,
   medicalLocation: string | null | undefined,
-  swap?: { place: SwapPlace | null | undefined; post: string },
+  swap?: { place: SwapPlace | null | undefined; post: string; mainMedical: string },
 ): { kind: ActivityKind; detail: string } | null {
   // (Post-event) Back to an approved swap (the Undo of Swap done): "Swap at FA 4", never "Located".
   if ((status === STATUS.inMedical || status === STATUS.legacyBringFriend) && (swap?.place === 'fa' || swap?.place === 'mm')) {
-    return { kind: 'swap_approved', detail: swapApprovedDetail(swap.place, swap.post) };
+    return { kind: 'swap_approved', detail: swapApprovedDetail(swap.place, swap.post, swap.mainMedical) };
   }
   if (status === STATUS.inMedical || status === STATUS.legacyBringFriend) return { kind: 'in_medical', detail: inMedicalDetail(medicalLocation) };
   if (status === STATUS.waiting) return { kind: 'back_to_waiting', detail: backToWaitingDetail() };

@@ -1,30 +1,35 @@
 'use client';
-// Step 1 (design/screens/sign-in.html `Who`): name with a person icon, "Your team" 2×2 cards in the spec §4
-// order, the "Other team" field, Continue (disabled until valid). A card and the Other text are mutually
+// Step 1 (design/screens/sign-in.html `Who`): name with a person icon, "Your team" cards (two columns: the teams of
+// the events running now, in setup order, from the server page), the "Other team" field, Continue (disabled until valid). A card and the Other text are mutually
 // exclusive: picking a card clears the text, typing a team clears the card.
 // From 768 px (desktop-sign-in.html): ↵ on Continue and Enter continues from anywhere but a text field or
 // another button; 1–4 pick a team (cap in each card's corner) unless focus is in a text field.
 // With a team join link (J1) the screen is the same; Continue signs in itself (`submitting`, `message`,
 // `locked` after a 429), and only screen readers hear that it uses the link.
 import { Button, Flex, RadioCards, Text, TextField, VisuallyHidden } from '@radix-ui/themes';
-import { Ambulance, Cross, House, Radio, UserRound, type LucideIcon } from 'lucide-react';
+import { Ambulance, Cross, House, Radio, UserRound, UsersRound, type LucideIcon } from 'lucide-react';
 import { useId, useRef, type FormEvent, type KeyboardEvent } from 'react';
-import { OTHER_TEAM_MAX, STAFF_NAME_MAX, TEAMS, type TeamValue } from '@/lib/domain';
+import { OTHER_TEAM_MAX, STAFF_NAME_MAX } from '@/lib/domain';
 import { isEnterControl, isTextEntry, useStepKeys, useWide } from './desktop';
-import { checkWho, type Identity, type WhoDraft } from './logic';
+import { checkWho, type Identity, type SignInTeam, type WhoDraft } from './logic';
 import { ErrorLine, Kbd, StepCard } from './parts';
 import styles from './signin.module.css';
 
-const TEAM_ICONS: Record<(typeof TEAMS)[number]['icon'], LucideIcon> = {
-  transpo: Ambulance,
-  dispatch: Radio,
-  base: House,
-  medical: Cross,
-};
-
-const isTeamValue = (value: string): value is TeamValue => TEAMS.some((t) => t.value === value);
+/** A card's icon: the medical team's cross; otherwise one that matches the team's words, else people. */
+function teamIcon(team: SignInTeam): LucideIcon {
+  if (team.medical) return Cross;
+  const words = `${team.label} ${team.short}`.toLowerCase();
+  if (/transpo|transport|ambulance/.test(words)) return Ambulance;
+  if (/dispatch|radio|comms/.test(words)) return Radio;
+  if (/\bbase\b/.test(words)) return House;
+  return UsersRound;
+}
 
 export interface WhoStepProps {
+  /** (Events) The cards: every running event's teams (none: the Other field alone). */
+  teams: readonly SignInTeam[];
+  /** (Events) The event logo beside Ground Control's (a join link names its event), or null. */
+  eventLogo?: string | null;
   draft: WhoDraft;
   onDraft: (draft: WhoDraft) => void;
   onContinue: (identity: Identity) => void;
@@ -40,7 +45,7 @@ export interface WhoStepProps {
   continueHint?: string | null;
 }
 
-export function WhoStep({ draft, onDraft, onContinue, autoFocus, submitting = false, message = null, locked = false, continueHint = null }: WhoStepProps) {
+export function WhoStep({ teams, eventLogo = null, draft, onDraft, onContinue, autoFocus, submitting = false, message = null, locked = false, continueHint = null }: WhoStepProps) {
   const check = checkWho(draft);
   const teamLabelId = useId();
   const nameErrorId = useId();
@@ -56,7 +61,8 @@ export function WhoStep({ draft, onDraft, onContinue, autoFocus, submitting = fa
     if (check.identity && !submitting && !locked) onContinue(check.identity);
   };
 
-  const pickTeam = (value: TeamValue) => onDraft({ ...draft, team: value, otherTeam: '' });
+  const pickTeam = (value: string) => onDraft({ ...draft, team: value, otherTeam: '' });
+  const isTeamValue = (value: string) => teams.some((t) => t.label === value);
 
   useStepKeys(wide, (event) => {
     if (event.key === 'Enter') {
@@ -68,14 +74,14 @@ export function WhoStep({ draft, onDraft, onContinue, autoFocus, submitting = fa
       return;
     }
     const index = ['1', '2', '3', '4'].indexOf(event.key);
-    const team = TEAMS[index];
+    const team = teams[index];
     if (!team || event.defaultPrevented || isTextEntry(event.target)) return;
     event.preventDefault();
-    pickTeam(team.value);
+    pickTeam(team.label);
     // Keep keyboard focus with the choice when it was already on the cards (Radix's roving focus).
     const group = teamsRef.current;
     if (group && document.activeElement && group.contains(document.activeElement)) {
-      group.querySelector<HTMLElement>(`[role="radio"][value="${CSS.escape(team.value)}"]`)?.focus();
+      group.querySelector<HTMLElement>(`[role="radio"][value="${CSS.escape(team.label)}"]`)?.focus();
     }
   });
 
@@ -88,7 +94,7 @@ export function WhoStep({ draft, onDraft, onContinue, autoFocus, submitting = fa
   };
 
   return (
-    <StepCard title="Staff sign-in" appLine>
+    <StepCard title="Staff sign-in" appLine eventLogo={eventLogo}>
       <form ref={formRef} method="post" noValidate onSubmit={submit}>
         <Flex direction="column" gap="3">
           <TextField.Root
@@ -115,6 +121,8 @@ export function WhoStep({ draft, onDraft, onContinue, autoFocus, submitting = fa
           </TextField.Root>
           {check.nameError ? <ErrorLine id={nameErrorId}>{check.nameError}</ErrorLine> : null}
 
+          {teams.length > 0 ? (
+          <>
           <Text as="div" size="2" color="gray" mt="1" id={teamLabelId}>
             Your team
           </Text>
@@ -130,29 +138,32 @@ export function WhoStep({ draft, onDraft, onContinue, autoFocus, submitting = fa
             }}
             aria-labelledby={teamLabelId}
           >
-            {TEAMS.map((team, i) => {
-              const Icon = TEAM_ICONS[team.icon];
-              const key = String(i + 1);
+            {teams.map((team, i) => {
+              const Icon = teamIcon(team);
+              // 1–4 pick the first four teams from the keyboard.
+              const key = i < 4 ? String(i + 1) : null;
               return (
-                <RadioCards.Item key={team.value} value={team.value} aria-keyshortcuts={wide ? key : undefined}>
+                <RadioCards.Item key={team.label} value={team.label} aria-keyshortcuts={wide && key ? key : undefined}>
                   <Flex direction="column" align="start" gap="2" width="100%" py="1">
                     <Flex width="100%" align="center">
                       <Icon size={18} strokeWidth={1.75} className={styles.ti} aria-hidden />
-                      <Kbd k={key} variant="corner" />
+                      {key ? <Kbd k={key} variant="corner" /> : null}
                     </Flex>
                     <Text size="2" className={styles.cardLabel}>
-                      {team.label}
+                      {team.short}
                     </Text>
                   </Flex>
                 </RadioCards.Item>
               );
             })}
           </RadioCards.Root>
+          </>
+          ) : null}
 
           <TextField.Root
             size="3"
-            placeholder="Other team"
-            aria-label="Other team"
+            placeholder={teams.length > 0 ? 'Other team' : 'Your team'}
+            aria-label={teams.length > 0 ? 'Other team' : 'Your team'}
             value={draft.otherTeam}
             onChange={(e) => {
               const otherTeam = e.target.value;

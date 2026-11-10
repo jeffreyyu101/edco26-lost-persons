@@ -96,7 +96,6 @@ const CORE = [
   '/icons/icon-512.png',
   '/icons/apple-touch-icon.png',
   '/icons/favicon-32.png',
-  '/logos/edc-orlando.png',
   '/logos/ground-control.png',
 ];
 const STATIC_PREFIXES = [HASHED_PREFIX, '/icons/', '/logos/', '/fonts/'];

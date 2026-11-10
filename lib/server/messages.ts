@@ -15,7 +15,7 @@ import type {
   ThreadMessage,
   ThreadPage,
 } from '../api-types';
-import { parseStaff } from '../domain';
+import { parseStaff, type TeamName } from '../domain';
 import { DETAIL, EMPTY_ACTIVITY, enrouteDetail, messageDetail, senderShort, truncateText, MESSAGE_PREVIEW_MAX } from '../messaging';
 import { mapRow } from './mappers';
 import { notifyStaff, type ActivityEvent, type ActivityKind } from './notify';
@@ -77,10 +77,11 @@ export function mapActivity(raw: unknown): RequestActivityDto {
 }
 
 /** lp_messages_json → ThreadMessage. */
-export function mapMessage(raw: unknown): ThreadMessage {
+export function mapMessage(raw: unknown, teams: readonly TeamName[] = []): ThreadMessage {
   const m = isObject(raw) ? raw : {};
   const staff = reqStr(m.staff);
-  const parsed = parseStaff(staff);
+  // (Events) The team's short name is the event's (EventConfig.teams).
+  const parsed = parseStaff(staff, teams);
   return {
     id: reqStr(m.id),
     staff,
@@ -94,13 +95,13 @@ export function mapMessage(raw: unknown): ThreadMessage {
 }
 
 /** lp_messages_thread JSON → ThreadPage. */
-export function mapThread(raw: unknown): ThreadPage {
+export function mapThread(raw: unknown, teams: readonly TeamName[] = []): ThreadPage {
   const t = isObject(raw) ? raw : {};
   const receipt = isObject(t.receipt) && typeof t.receipt.message_id === 'string'
     ? { messageId: t.receipt.message_id, readAt: str(t.receipt.read_at) }
     : null;
   return {
-    messages: Array.isArray(t.messages) ? t.messages.map(mapMessage) : [],
+    messages: Array.isArray(t.messages) ? t.messages.map((m) => mapMessage(m, teams)) : [],
     hasEarlier: t.has_earlier === true,
     receipt,
     activity: mapActivity(t.activity),
@@ -129,6 +130,8 @@ export interface DecorateOptions {
   since: string | null;
   /** Add changed threads (the first page of a delta poll only). */
   changed: boolean;
+  /** (Events) The event's posts (postShort of the added rows). */
+  posts?: ReadonlyArray<{ label: string; short: string }>;
 }
 
 /**
@@ -157,15 +160,15 @@ export async function decorateSync(sync: SyncResponse, opts: DecorateOptions): P
     if (isObject(t) && typeof t.id === 'string') byId.set(t.id, mapActivity(t));
   }
   const seen = new Set(ids);
-  const extra = (Array.isArray(d.rows) ? d.rows : []).map(mapRow).filter((r) => r.id && !seen.has(r.id));
+  const extra = (Array.isArray(d.rows) ? d.rows : []).map((r) => mapRow(r, opts.posts)).filter((r) => r.id && !seen.has(r.id));
   const rows = [...sync.rows, ...extra].map((r) => withActivity(r, byId.get(r.id) ?? EMPTY_ACTIVITY));
   return { ...sync, rows };
 }
 
 /** The thread's first page, or null when it can't be read (the detail then goes out without it). */
-export async function readThread(eventId: string, requestId: string, staff: string): Promise<ThreadPage | null> {
+export async function readThread(eventId: string, requestId: string, staff: string, teams: readonly TeamName[] = []): Promise<ThreadPage | null> {
   try {
-    return mapThread(await rpc<unknown>('lp_messages_thread', { p_event: eventId, p_request: requestId, p_staff: staff }));
+    return mapThread(await rpc<unknown>('lp_messages_thread', { p_event: eventId, p_request: requestId, p_staff: staff }), teams);
   } catch (error) {
     logSoft((error as { dbCode?: string } | null)?.dbCode ?? 'thread_failed');
     return null;

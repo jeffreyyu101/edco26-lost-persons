@@ -1843,3 +1843,8 @@ button.qheadBtn:focus-visible {
   flex-direction: column;
   gap: 12px;
 }
+
+/* (Events) The event's stage chip between the view menu and the icons. */
+.stage {
+  flex: none;
+}

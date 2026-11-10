@@ -14,18 +14,18 @@
 //
 // Privacy: nothing here logs (no console use at all); errors carry codes, never request data.
 import type {
+  ApiError,
   ChangeResponse,
   CreateRequestBody,
   CreateResponse,
   EventStats,
+  EventStatsRange,
   OutboxItem,
   PhotoResponse,
   RequestDetail,
   RequestPatch,
   RequestSummary,
   SessionInfo,
-  Stats,
-  StatsRange,
   SyncResponse,
 } from '../api-types';
 import {
@@ -76,6 +76,7 @@ import {
 } from './outbox-logic';
 import {
   K,
+  NO_EVENT,
   draftToStored,
   jobToStored,
   openKv,
@@ -86,8 +87,11 @@ import {
   type Kv,
   type StoredCursor,
   type StoredDraft,
+  type StoredEventMeta,
+  type StoredJob,
   type StoredStaff,
 } from './persist';
+import { ENDED_PATH, clearEventDrops, readEventDrops, rememberEnded } from './ended';
 import { forgetBell, readPrefs, subscribePrefs, writePref } from './prefs';
 import { dropBrowserPush, provideApi, publishSyncExtras, pushHooks } from './f4-bridge';
 import { SESSION_CHANNEL, clearLogoutPending, readLogoutPending, writeLogoutPending, type LogoutPending } from './session-signals';
@@ -280,6 +284,8 @@ export const COPY = {
   signOutFailed: "Couldn't sign out — check signal and try again",
   /** A write found the tab's staff was out of date (another tab signed in as someone else): not sent. */
   sessionChanged: 'Session changed — try again',
+  /** (Events) A lead's write to an archived event (staff are signed out to the Ended screen instead). */
+  eventArchived: 'Event archived',
 } as const;
 
 const UNDOABLE_KINDS: ReadonlySet<StatusKind> = new Set(['answer', 'change', 'reunite', 'inform']);
@@ -400,6 +406,15 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   let cursorAt = 0;
   /** Canonical staff whose cache is loaded / written. */
   let cacheStaff: string | null = null;
+  /** (Events) The event whose cache is loaded / written (with cacheStaff). */
+  let cacheEvent: string | null = null;
+  /**
+   * (Events) The event this tab works: the confirmed session's (or, before that, the one this device last had). Queued
+   * creates, messages and the draft are stamped with it and only ever go to it.
+   */
+  let eventKey: string = state.event?.id ?? NO_EVENT;
+  /** (Events) The event ended (a 410 event_ended): this tab is leaving for the Ended screen; nothing more is sent. */
+  let ending = false;
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let pollInFlight = false;
   let pollRerun = false;
@@ -526,8 +541,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const isLive = (id: number) => running && runId === id;
   const ownerGen = () => state.generation;
   const peerSigningOut = () => peerSignOutUntil > now();
-  /** A sign-out is pending, in this tab or another: nothing goes to the API meanwhile. */
-  const networkHeld = () => signingOut || peerSigningOut();
+  /** A sign-out is pending, in this tab or another (or the event ended): nothing goes to the API meanwhile. */
+  const networkHeld = () => signingOut || peerSigningOut() || ending;
 
   // ---- persistence queue (writes are serialised so a logout clear always lands last) ----
   const enqueue = <T>(op: (store: Kv) => Promise<T>): Promise<T | undefined> => {
@@ -553,6 +568,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 
   const showToast = (toast: Omit<ToastItem, 'id'>): string => {
     const id = uuid();
+    // (Events) Leaving for the Ended screen: no failure toast for what can no longer be sent.
+    if (ending) return id;
     // The same message twice replaces the older one; at most MAX_TOASTS stay.
     const kept = state.toasts.filter((x) => !(x.title === toast.title && x.subtitle === toast.subtitle));
     for (const x of state.toasts) if (!kept.includes(x)) dismissTimers(x.id);
@@ -650,10 +667,16 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     if (outer?.aborted) controller.abort();
     else outer?.addEventListener('abort', onOuter, { once: true });
     inflight.add(controller);
-    return apiRequest<T>(e.fetch, path, { ...opts, signal: controller.signal }).finally(() => {
-      inflight.delete(controller);
-      outer?.removeEventListener('abort', onOuter);
-    });
+    return apiRequest<T>(e.fetch, path, { ...opts, signal: controller.signal })
+      .then((res) => {
+        // (Events) Any answer saying the event ended (a poll, a write, the session check, the messages engine, F4).
+        if (!res.ok && res.kind === 'http' && res.status === 410 && res.error?.code === 'event_ended') eventEnded(res.error);
+        return res;
+      })
+      .finally(() => {
+        inflight.delete(controller);
+        outer?.removeEventListener('abort', onOuter);
+      });
   };
 
   const abortInflight = () => {
@@ -670,6 +693,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     bell: state.prefs.bell,
     seen,
     timeZone: state.eventTimezone,
+    mainMedical: state.event?.mainMedical ?? '',
   });
 
   /** Closes the alert toasts of one request (a newer alert for it replaces them). */
@@ -890,35 +914,38 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const flushRows = async () => {
     if (rowsTimer) clearTimeout(rowsTimer);
     rowsTimer = undefined;
-    if (!rowsDirty || !cacheStaff) return;
+    if (!rowsDirty || !cacheStaff || !cacheEvent) return;
     rowsDirty = false;
     rowsWrittenOnce = true;
     const staffKey = cacheStaff;
+    const eventId = cacheEvent;
     const rows = [...state.confirmed.values()];
     const gen = ownerGen();
     await enqueue(async (store) => {
       if (gen !== state.generation) return;
-      await store.set(K.rows(staffKey), rows);
+      await store.set(K.rows(eventId, staffKey), rows);
     });
   };
 
   const writeCursor = (value: string) => {
-    if (!cacheStaff) return;
+    if (!cacheStaff || !cacheEvent) return;
     const staffKey = cacheStaff;
+    const eventId = cacheEvent;
     const record: StoredCursor = { cursor: value, at: cursorAt };
     const gen = ownerGen();
     void enqueue(async (store) => {
       if (gen !== state.generation) return;
-      await store.set(K.cursor(staffKey), record);
+      await store.set(K.cursor(eventId, staffKey), record);
     });
   };
 
-  /** Load the cache of one staff (after hydrate or a session for someone else). */
-  const loadCache = async (staffCanon: string) => {
+  /** Load the cache of one staff at one event (after hydrate or a session for someone else or another event). */
+  const loadCache = async (eventId: string, staffCanon: string) => {
     if (!kv) return;
     try {
-      const [rows, cur] = await Promise.all([readRows(kv, staffCanon), kv.get<StoredCursor>(K.cursor(staffCanon))]);
+      const [rows, cur] = await Promise.all([readRows(kv, eventId, staffCanon), kv.get<StoredCursor>(K.cursor(eventId, staffCanon))]);
       cacheStaff = staffCanon;
+      cacheEvent = eventId;
       if (rows) {
         const merged = mergeRows(state.confirmed, rows.filter(isRow));
         set({ confirmed: merged ?? state.confirmed, hasData: true });
@@ -973,22 +1000,130 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     if (state.role !== role || state.event !== event) set({ role, event, ...(event?.timezone ? { eventTimezone: event.timezone } : {}) });
   };
 
+  /**
+   * (Events) A call answered 410 event_ended. Staff: the event is over for them (spec "Ended"): nothing more is sent,
+   * the session is cleared, this event's cache, outbox, queued messages and draft leave the phone (queued items fail
+   * for good: no retry, no toast), the other tabs are told, and the Ended screen opens. A lead keeps reading an ended
+   * event: only the write failed (its toast says so) and the config is read again.
+   */
+  const eventEnded = (error: ApiError['error'] | null) => {
+    if (ending || signingOut) return;
+    if (state.role === 'lead') {
+      sessionMayHaveChanged();
+      triggerSync();
+      return;
+    }
+    const event = error?.event ?? null;
+    const eventId = event?.id ?? state.event?.id ?? eventKey;
+    ending = true;
+    rememberEnded(event ? { ...event, id: eventId } : state.event ? { id: eventId, name: state.event.name, logoUrl: state.event.logoUrl, stage: 'archived' } : null);
+    broadcast({ type: 'ended', eventId });
+    void leaveEndedEvent(eventId);
+  };
+
+  const leaveEndedEvent = async (eventId: string) => {
+    const e = env;
+    haltRuntime();
+    abortInflight();
+    if (snackTimer) clearTimeout(snackTimer);
+    set({ generation: state.generation + 1, session: { status: 'signed_out', staffName: null, team: null, staff: null, expiresAt: null }, toasts: [], snackbar: null, outboxPrompt: null });
+    for (const t of toastTimers.values()) clearTimeout(t);
+    toastTimers.clear();
+    alertToasts.clear();
+    closeSystemAlerts();
+    // Unsent requests and messages of an ended event can never be sent: they go with its data, silently.
+    await dropEventData(eventId).catch(() => undefined);
+    set({ outbox: [], confirmed: new Map(), pending: new Map(), hasData: false });
+    writeStoredEvent(null);
+    // The session cookie: DELETE /api/session still answers after the end (bounded; the cookie of an ended event opens
+    // nothing anyway, and /signin?ended=1 is never redirected back to the app).
+    if (e) await apiRequest(e.fetch, '/api/session', { method: 'DELETE', timeoutMs: SIGN_OUT_TIMEOUT_MS }).catch(() => undefined);
+    await (pushHooks()?.afterSignOut(true) ?? dropBrowserPush());
+    e?.redirect(ENDED_PATH);
+  };
+
+  /**
+   * (Events) The event went live since this phone cached it (practice → live deletes every practice request on the
+   * server, and a delta sync never removes a row): its cache goes, for every staff, and so do the creates queued while
+   * it was in practice. Remembers when the cache's event went live (K.meta). True when it dropped the cache.
+   */
+  const checkWentLive = async (eventId: string, wentLiveAt: string | null): Promise<boolean> => {
+    if (!kv || eventId === NO_EVENT) return false;
+    const meta = await enqueue((store) => store.get<StoredEventMeta>(K.meta(eventId)));
+    const changed = !!meta && (meta.wentLiveAt ?? null) !== wentLiveAt;
+    if (changed) await dropEventData(eventId, { practiceOnly: wentLiveAt });
+    if (!meta || changed) {
+      const record: StoredEventMeta = { wentLiveAt };
+      await enqueue((store) => store.set(K.meta(eventId), record));
+    }
+    return changed;
+  };
+
+  /**
+   * (Events) Deletes one event's data on this phone: its cache (every staff's rows, cursors, threads), and its queued
+   * creates, messages and draft. `practiceOnly` (go-live): only the creates queued in practice (stamped with an
+   * earlier wentLiveAt) go; the rest of the outbox stays. When it is the loaded event, the screen empties too.
+   */
+  const dropEventData = async (eventId: string, opts: { practiceOnly?: string | null } = {}) => {
+    const practice = opts.practiceOnly !== undefined;
+    const dropsJob = (job: Pick<StoredJob, 'eventId' | 'wentLiveAt'> | null | undefined) =>
+      !!job && (job.eventId ?? NO_EVENT) === eventId && (!practice || (job.wentLiveAt !== undefined && (job.wentLiveAt ?? null) !== opts.practiceOnly));
+    if (cacheEvent === eventId) {
+      staffEpoch += 1; // a sync begun before this applies nothing
+      rowsDirty = false;
+      if (rowsTimer) clearTimeout(rowsTimer);
+      rowsTimer = undefined;
+      cursor = null;
+      cursorAt = 0;
+      setArmed(false);
+      alertBacklog = [];
+      set({ confirmed: new Map(), pending: new Map(), hasData: false });
+    }
+    if (eventKey === eventId) {
+      const left = state.outbox.filter((j) => !dropsJob(j));
+      if (left.length !== state.outbox.length) setJobs(left);
+    }
+    await enqueue(async (store) => {
+      for (const k of await store.keys()) {
+        if (k.startsWith(K.eventCache(eventId))) await store.del(k);
+        else if (k.startsWith('outbox:') && dropsJob(await store.get<StoredJob>(k))) await store.del(k);
+        else if (!practice && k.startsWith('mjob:') && ((await store.get<{ eventId?: string }>(k))?.eventId ?? NO_EVENT) === eventId) await store.del(k);
+        else if (!practice && k === K.draft && ((await store.get<StoredDraft>(k))?.eventId ?? NO_EVENT) === eventId) await store.del(k);
+      }
+    });
+    await gcBlobs();
+    broadcast({ type: 'outbox' });
+    refreshPrompt();
+  };
+
   /** False when a sign-out overtook it (nothing applied then). */
   const applySession = async (info: SessionInfo): Promise<boolean> => {
     const gen = ownerGen();
     const canon = canonStaff(info.staff) ?? '';
-    if (cacheStaff !== canon) {
-      // Someone else's (or no) cache was loaded: start clean for this staff.
-      if (cacheStaff !== null) await resetForOtherStaff();
-      await loadCache(canon);
-      if (gen !== state.generation || signingOut) return false;
+    const event = info.eventId ?? NO_EVENT;
+    // (Events) Practice → live since this phone cached the event: its cache and practice creates go first.
+    if (info.event) await checkWentLive(event, info.event.wentLiveAt ?? null);
+    if (gen !== state.generation || signingOut || ending) return false;
+    const otherEvent = event !== eventKey;
+    if (cacheStaff !== canon || cacheEvent !== event) {
+      // Someone else's (or no) cache, or another event's, was loaded: start clean for this staff at this event.
+      if (cacheStaff !== null && (cacheStaff !== canon || cacheEvent !== event)) await resetForOtherStaff();
+      await loadCache(event, canon);
+      if (gen !== state.generation || signingOut || ending) return false;
       cacheStaff = canon;
+      cacheEvent = event;
+    }
+    if (otherEvent) {
+      // (Events) Another event than this tab knew: its own outbox and messages (another event's are never sent here).
+      eventKey = event;
+      if (kv) setJobs(await readJobs(kv, event).catch(() => []));
+      void messaging.reload();
     }
     set({ session: { status: 'active', staffName: info.staffName, team: info.team, staff: info.staff, expiresAt: info.expiresAt } });
     applyEvent(info);
     if (sessionEndedToastId) dismissToast(sessionEndedToastId);
     sessionEndedToastId = null;
-    const last: StoredStaff = { staffName: info.staffName, team: info.team, staff: info.staff };
+    const last: StoredStaff = { staffName: info.staffName, team: info.team, staff: info.staff, eventId: event };
     void enqueue((store) => store.set(K.lastStaff, last));
     refreshPrompt();
     kickOutbox();
@@ -1232,11 +1367,13 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     const since = full ? null : cursor;
     touchedDuringPoll.clear();
     const fullRows: RequestSummary[] = [];
+    let eventMoved = false;
     let versions: Array<[string, number]> | undefined;
     let firstServerTime: string | null = null;
     let after: SyncResponse['next'] = null;
     for (let page = 0; page < MAX_SYNC_PAGES; page += 1) {
-      const path = syncPathFor(since, page === 0 && reconcile, after);
+      // (Events) The first page says which config version this tab holds: the answer then carries `event` if it moved.
+      const path = syncPathFor(since, page === 0 && reconcile, after, page === 0 && after === null ? (state.event?.updatedAt ?? '') : undefined);
       const res = await call<SyncResponse>(path, { timeoutMs: SYNC.requestTimeoutMs, signal: pollAbort?.signal });
       if (check && (await check) !== 'ok') return check;
       if (stale()) return 'stale';
@@ -1247,6 +1384,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         firstServerTime = body.serverTime;
         // F4: the Activity unread count rides on the first page (lib/client/f4-bridge.ts).
         publishSyncExtras(body);
+        // (Events) The event's settings or stage moved: read the config again (GET /api/session) after this sync.
+        if (body.event && body.event.version !== state.event?.updatedAt) eventMoved = true;
       }
       if (Array.isArray(body.versions)) versions = [...(versions ?? []), ...body.versions];
       if (full) fullRows.push(...body.rows.filter(isRow));
@@ -1279,6 +1418,13 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     }
     // The first sync after load is the baseline: it alerts nothing (runSync shows what later ones raise).
     setArmed(true);
+    if (eventMoved) {
+      // Practice → live drops this event's cache (applySession → checkWentLive); the next sync then starts full.
+      sessionMayHaveChanged();
+      void confirmSession().then((o) => {
+        if (o === 'ok' && running) schedulePoll(0);
+      });
+    }
     if (state.outbox.length) kickOutbox();
     messaging.kick();
     return 'ok';
@@ -1345,6 +1491,10 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         case 404:
           toast(COPY.notFound, 'amber');
           return fail('not_found', COPY.notFound);
+        case 410:
+          // (Events) The event is archived: a lead's write is refused (staff are on their way to the Ended screen).
+          toast(COPY.eventArchived, 'amber');
+          return fail('failed', COPY.eventArchived);
         case 422: {
           const latest = await fetchRow(id);
           toast(COPY.invalid, 'amber');
@@ -1519,7 +1669,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 
   /** The job record, and with `withBlobs` its photo bytes, committed in one transaction (persist.ts). */
   const persistJob = async (job: OutboxItem, withBlobs: boolean): Promise<boolean> => {
-    if (!kv || !state.durableStorage) return false;
+    if (!kv || !state.durableStorage || ending) return false;
     const gen = ownerGen();
     const ok = await enqueue(async (store) => {
       if (gen !== state.generation) return false;
@@ -1833,7 +1983,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       | { type: 'outbox' }
       | { type: 'myids' }
       | { type: 'outbox-idle' }
-      | { type: 'mjobs' },
+      | { type: 'mjobs' }
+      | { type: 'ended'; eventId: string },
   ) => {
     try {
       channel?.postMessage(message);
@@ -1846,7 +1997,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const reloadOutbox = async () => {
     if (!kv) return;
     try {
-      const jobs = await readJobs(kv);
+      const jobs = await readJobs(kv, eventKey);
       const sending = new Set(state.outbox.filter((j) => j.state === 'sending').map((j) => j.mutationId));
       setJobs(jobs.map((j) => (sending.has(j.mutationId) ? { ...j, state: 'sending' } : j)));
       refreshPrompt();
@@ -1869,6 +2020,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   // ---- draft ----
   /** New photo bytes and the draft record that references them, in one transaction (persist.ts). */
   const writeDraft = async (d: RequestDraft) => {
+    if (ending) return;
     const gen = ownerGen();
     await enqueue(async (store) => {
       if (gen !== state.generation) return;
@@ -1879,7 +2031,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         entries.push(await photoBlobsEntry(p.photoId, p.blob, p.thumbBlob));
         added.push(p.photoId);
       }
-      entries.push([K.draft, draftToStored(d)]);
+      entries.push([K.draft, draftToStored(d, eventKey)]);
       await store.setMany(entries);
       for (const id of added) draftSavedPhotos.add(id);
     });
@@ -1891,7 +2043,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       if (!store) return null;
       try {
         await kvQueue;
-        const d = await readDraft(store);
+        const d = await readDraft(store, eventKey);
         if (d) {
           for (const p of d.photos) draftSavedPhotos.add(p.photoId);
           draftHas = hasAnyDetail(d.values, d.photos.length);
@@ -2009,6 +2161,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
           operator: operatorNow(),
           createdAt: now(),
           source: 'app',
+          // (Events) It only ever goes to this event; saved in practice, it goes when the event goes live.
+          eventId: eventKey,
+          wentLiveAt: state.event?.wentLiveAt ?? null,
         };
 
     const durable = await persistJob(job, true);
@@ -2346,6 +2501,18 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         // Another tab queued, sent or retried a message / en route tap.
         void messaging.reload().then(() => messaging.kick());
         return;
+      case 'ended': {
+        // (Events) Another tab learned this event ended (it signs out and drops the event's data): leave for the
+        // Ended screen too.
+        const ended = (data as { eventId?: unknown }).eventId;
+        if (ending || typeof ended !== 'string' || ended !== eventKey) return;
+        ending = true;
+        haltRuntime();
+        abortInflight();
+        set({ generation: state.generation + 1, session: { status: 'signed_out', staffName: null, team: null, staff: null, expiresAt: null }, outbox: [], confirmed: new Map(), pending: new Map(), hasData: false });
+        env?.redirect(ENDED_PATH);
+        return;
+      }
     }
   };
 
@@ -2375,11 +2542,12 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     },
     sessionExpired,
     staff: () => state.session.staff,
-    cacheStaff: () => cacheStaff,
+    cacheStaff: () => (cacheStaff !== null && cacheEvent !== null ? `${cacheEvent}:${cacheStaff}` : null),
+    eventId: () => eventKey,
     generation: () => state.generation,
     kv: () => kv,
     enqueue,
-    durable: () => state.durableStorage,
+    durable: () => state.durableStorage && !ending,
     row: (id) => state.confirmed.get(id),
     patchActivity,
     markLive,
@@ -2557,7 +2725,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
           commitOwn(request, id);
           markLive();
           if (res.data.changed && !quiet) {
-            const title = swapToastTitle(swapAction, swapAction.action === 'cancel' ? row : request);
+            const title = swapToastTitle(swapAction, swapAction.action === 'cancel' ? row : request, state.event?.mainMedical ?? '');
             // (Post-event) Every step has its Undo: the request's is withdraw; Cancel swap, Decline and Swap at …
             // 'restore' exactly what they replaced (the original requester kept). Quiet, but a failed Undo says so.
             showCustomUndo(title, UNDO_MS, () =>
@@ -2635,18 +2803,15 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       throw new FetchError(res.kind === 'http' ? 'failed' : e.online() ? 'failed' : 'offline');
     },
 
-    async fetchStats(range?: StatsRange): Promise<Stats> {
+    async fetchStats(range?: EventStatsRange): Promise<EventStats> {
       requireEnv();
       if (networkHeld()) throw new FetchError('failed');
       const gen = ownerGen();
-      // PHASE2: the dashboard's range and Stats shape over the events server's (lib/client/stats-shim.ts), loaded
-      // with the dashboard only, so it costs the first load nothing.
-      const { legacyStats, serverRange } = await import('./stats-shim');
-      const res = await call<EventStats>(range ? `/api/stats?range=${serverRange(range)}` : '/api/stats', { timeoutMs: SYNC.requestTimeoutMs });
+      const res = await call<EventStats>(range ? `/api/stats?range=${encodeURIComponent(range)}` : '/api/stats', { timeoutMs: SYNC.requestTimeoutMs });
       if (gen !== state.generation) throw new FetchError('failed');
       if (res.ok) {
         markLive();
-        return legacyStats(res.data);
+        return res.data;
       }
       if (res.kind === 'http' && res.status === 401) {
         sessionExpired();
@@ -2657,6 +2822,12 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 
     outbox: outboxApi,
     draft: draftApi,
+
+    async refreshSession() {
+      if (!running || networkHeld()) return;
+      sessionMayHaveChanged();
+      await confirmSession();
+    },
 
     async signOut(opts) {
       const unsent = state.outbox.length;
@@ -2721,11 +2892,19 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     }
     if (!isLive(id)) return;
     if (durable && kv) {
+      // (Events) Ended events this phone learned of at sign-in (lib/client/ended.ts): their data goes first.
+      const drops = readEventDrops();
+      for (const eventId of drops) await dropEventData(eventId).catch(() => undefined);
+      if (drops.length) clearEventDrops(drops);
+      if (!isLive(id)) return;
       try {
-        const [last, ids, jobs] = await Promise.all([kv.get<StoredStaff>(K.lastStaff), kv.get<string[]>(K.myIds), readJobs(kv)]);
+        const last = await kv.get<StoredStaff>(K.lastStaff);
+        // (Events) The event this phone last worked (its cache and outbox), until GET /api/session confirms one.
+        if (last && typeof last.eventId === 'string' && eventKey === NO_EVENT) eventKey = last.eventId;
+        const [ids, jobs] = await Promise.all([kv.get<string[]>(K.myIds), readJobs(kv, eventKey)]);
         if (!isLive(id)) return;
         if (last && typeof last.staff === 'string' && cacheStaff === null) {
-          await loadCache(canonStaff(last.staff) ?? '');
+          await loadCache(eventKey, canonStaff(last.staff) ?? '');
           // Offline reload: show who was signed in (avatar, My requests, alerts) until GET /api/session
           // confirms it. The status stays 'unknown', so nothing is sent on this identity's behalf.
           if (state.session.status === 'unknown' && !state.session.staff && typeof last.staffName === 'string' && typeof last.team === 'string') {
@@ -2737,7 +2916,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         setJobs([...state.outbox, ...jobs.filter((j) => !known.has(j.mutationId))]);
         set({ myIds });
         const saved = await kv.get<StoredDraft>(K.draft);
-        if (saved?.values && !draftPending) draftHas = hasAnyDetail(saved.values, saved.photos?.length ?? 0);
+        if (saved?.values && !draftPending && (saved.eventId ?? NO_EVENT) === eventKey) draftHas = hasAnyDetail(saved.values, saved.photos?.length ?? 0);
       } catch {
         // An unreadable store behaves as empty.
       }
@@ -2926,5 +3105,6 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   };
 }
 
-const syncPathFor = (since: string | null, reconcile: boolean, after: SyncResponse['next']) => syncPath({ since, reconcile, after });
+const syncPathFor = (since: string | null, reconcile: boolean, after: SyncResponse['next'], ev?: string) =>
+  syncPath({ since, reconcile, after, ...(ev !== undefined ? { ev } : {}) });
 const syncPathIds = (ids: readonly string[]) => syncPath({ ids });

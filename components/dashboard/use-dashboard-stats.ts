@@ -4,7 +4,7 @@
 // fetch is the store's (session-safe: held during a sign-out, stale answers dropped, a 401 ends the session).
 // Loaded with the dashboard, never on the first load.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Stats, StatsRange } from '@/lib/api-types';
+import type { EventStats, EventStatsRange } from '@/lib/api-types';
 import { STATS_POLL_MS } from '@/lib/client/constants';
 import { readVisibility, subscribeVisibility } from '@/lib/client/live-status';
 import type { StatsState } from '@/lib/client/stats-poller';
@@ -19,7 +19,7 @@ export interface DashboardStats extends StatsState {
 const EMPTY: Omit<DashboardStats, 'refresh'> = { stats: null, updatedAt: null, error: false, failing: false, skew: 0 };
 const idle = () => Promise.resolve();
 
-export function useDashboardStats(range: StatsRange): DashboardStats {
+export function useDashboardStats(range: EventStatsRange): DashboardStats {
   const store = useAppStore();
   const [state, setState] = useState(EMPTY);
   const runRef = useRef<() => Promise<void>>(idle);
@@ -32,7 +32,7 @@ export function useDashboardStats(range: StatsRange): DashboardStats {
 
     // Through the store, like every other request: nothing goes out while a sign-out is pending, an answer for a
     // previous staff is dropped, and a 401 ends the session ('unauthorized').
-    const fetchStats = async (): Promise<Stats> => {
+    const fetchStats = async (): Promise<EventStats> => {
       const data = await store.actions.fetchStats(range);
       const server = Date.parse(data.serverTime);
       skew = Number.isFinite(server) ? server - Date.now() : 0;

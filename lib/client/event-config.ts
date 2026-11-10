@@ -49,9 +49,13 @@ export function medicalTeam(event: Pick<EventConfig, 'teams'> | null | undefined
   return event?.teams.find((t) => t.medical) ?? null;
 }
 
-/** The medical team's label ('' when the event has none, so nothing matches it). */
-export function medicalLabel(event: Pick<EventConfig, 'teams'> | null | undefined): string {
-  return medicalTeam(event)?.label ?? '';
+/**
+ * Every name the medical team goes by: its label, then (phase 2) the labels it had before a rename, which sessions
+ * signed in earlier still carry. [] when the event has none, so nothing matches.
+ */
+export function medicalLabel(event: Pick<EventConfig, 'teams'> | null | undefined): string[] {
+  const t = medicalTeam(event);
+  return t ? [t.label, ...(t.aliases ?? [])] : [];
 }
 
 /** What a swap place 'mm' is called at this event ("Main Med"). */
@@ -63,7 +67,7 @@ export function mainMedicalLabel(event: Pick<EventConfig, 'mainMedical'> | null 
 export function teamOf(event: Pick<EventConfig, 'teams'> | null | undefined, team: string | null | undefined): EventTeam | null {
   const t = (team ?? '').trim().toLowerCase();
   if (!t) return null;
-  return event?.teams.find((x) => x.label.toLowerCase() === t) ?? null;
+  return event?.teams.find((x) => x.label.toLowerCase() === t || (x.aliases ?? []).some((a) => a.toLowerCase() === t)) ?? null;
 }
 
 /** The short form of a team for display: the event's short name, else the team text itself. */
@@ -83,6 +87,24 @@ export function deviceZone(): string {
   } catch {
     return 'UTC';
   }
+}
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+/**
+ * The event's dates in words: short "Nov 14–15" (or "Nov 30–Dec 1"), long "November 14–15, 2026". '' when unknown.
+ * Calendar dates (YYYY-MM-DD): no time zone involved.
+ */
+export function eventDates(event: Pick<EventConfig, 'startsOn' | 'endsOn'> | null | undefined, form: 'short' | 'long'): string {
+  const a = /^(\d{4})-(\d{2})-(\d{2})$/.exec(event?.startsOn ?? '');
+  const b = /^(\d{4})-(\d{2})-(\d{2})$/.exec(event?.endsOn ?? '');
+  if (!a || !b) return '';
+  const [, y1, m1, d1] = a.map(Number) as [number, number, number, number];
+  const [, y2, m2, d2] = b.map(Number) as [number, number, number, number];
+  const month = (m: number) => (form === 'short' ? (MONTHS[m - 1] ?? '').slice(0, 3) : (MONTHS[m - 1] ?? ''));
+  const same = y1 === y2 && m1 === m2;
+  const range = same ? (d1 === d2 ? `${month(m1)} ${d1}` : `${month(m1)} ${d1}–${d2}`) : `${month(m1)} ${d1}–${month(m2)} ${d2}`;
+  return form === 'long' ? `${range}, ${y2}` : range;
 }
 
 // ---------------------------------------------------------------------------------------------------

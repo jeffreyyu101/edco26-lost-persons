@@ -241,7 +241,7 @@ export function createStubStore(options: StubOptions): AppStore {
         firstPhotoId: input.photos[0]?.photoId ?? null,
         photoCount: input.photos.length,
         name: joinName(firstName, lastName),
-        postShort: postShort(body.reportingLocation, body.otherLocation ?? null),
+        postShort: postShort(body.reportingLocation, body.otherLocation ?? null, state.event?.posts),
       };
       putRow(row);
       set({ myIds: new Set([...state.myIds, row.id]) });
@@ -257,7 +257,7 @@ export function createStubStore(options: StubOptions): AppStore {
       for (const [key, value] of Object.entries(patch)) {
         if (key !== 'name') (next as unknown as Record<string, unknown>)[key] = value ?? null;
       }
-      next.postShort = postShort(next.reportingLocation, next.otherLocation);
+      next.postShort = postShort(next.reportingLocation, next.otherLocation, state.event?.posts);
       next.updatedBy = staff();
       next.updatedAt = stamp();
       next.rowVersion = row.rowVersion + 1;
@@ -318,7 +318,8 @@ export function createStubStore(options: StubOptions): AppStore {
       const all = [...state.confirmed.values()];
       const open = all.filter((r) => r.status === STATUS.waiting || isInMedical(r.status));
       const oldest = all.filter((r) => r.status === STATUS.waiting).sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
-      const fixed = ['FA 3 – Kinetic', 'FA 4 – Oasis', 'Command', 'Base'];
+      const posts = state.event?.posts ?? [];
+      const fixed = posts.map((p) => p.label);
       return {
         open: { waiting: all.filter((r) => r.status === STATUS.waiting).length, inMedical: all.filter((r) => isInMedical(r.status)).length },
         notInMedical: all.filter((r) => r.status === STATUS.notInMedical).length,
@@ -333,7 +334,7 @@ export function createStubStore(options: StubOptions): AppStore {
         avgReuniteMinutes: 18,
         loggedLastHour: 6,
         byPost: [
-          ...fixed.map((loc) => ({ reportingLocation: loc, otherLocation: null, postShort: postShort(loc), count: open.filter((r) => r.reportingLocation === loc).length })),
+          ...fixed.map((loc) => ({ reportingLocation: loc, otherLocation: null, postShort: postShort(loc, null, posts), count: open.filter((r) => r.reportingLocation === loc).length })),
           ...otherPosts(open.filter((r) => !fixed.includes(r.reportingLocation))),
         ],
         recent: [...all]

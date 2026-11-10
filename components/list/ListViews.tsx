@@ -73,11 +73,13 @@ import { AllSkeleton, MineSkeleton, PendingSkeleton } from './ListSkeletons';
 import { ArchivedFold, ArchivedRows, ColumnHeader, GroupDivider, LogGrid, LogRow, OutboxLogRow, SearchLogRow } from './rows';
 import type { ListViewName } from './ViewSwitcher';
 import s from './list.module.css';
+import { useEventConfig } from '@/lib/client/event-config';
 
 const selectHydrated = (state: StoreState) => state.hydrated;
 
-/** "New request": the 50 px capsule floating over the list (polish-v7.html .fab). */
+/** "New request": the 50 px capsule floating over the list (polish-v7.html .fab). (Events) None in an archived event. */
 function NewRequestButton() {
+  if (useEventConfig()?.stage === 'archived') return null;
   return (
     <button type="button" className={s.fab} onClick={() => navigate({ new: true })}>
       <Plus size={18} strokeWidth={2.25} aria-hidden />

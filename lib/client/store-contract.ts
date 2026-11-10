@@ -18,8 +18,8 @@ import type {
   RequestPatch,
   RequestSummary,
   SessionRole,
-  Stats,
-  StatsRange,
+  EventStats,
+  EventStatsRange,
 } from '../api-types';
 import type { SwapAction } from './swap';
 import type { PhotoTiming, SettableStatus, StatusKind } from '../domain';
@@ -305,8 +305,8 @@ export interface StoreActions {
 
   /** GET /api/requests/:id (use the useDetail hook in components). */
   fetchDetail(id: string): Promise<RequestDetail>;
-  /** GET /api/stats (use the useStats hook in components); Dashboard v4 passes its range (?range=…). */
-  fetchStats(range?: StatsRange): Promise<Stats>;
+  /** GET /api/stats?range=… (use the useStats hook in components): lp_stats(event, range), the events shape. */
+  fetchStats(range?: EventStatsRange): Promise<EventStats>;
 
   /**
    * (Events) Re-read GET /api/session now (the event's config and stage). A lead screen calls it after changing the

@@ -1,8 +1,9 @@
 // The brand row over All requests (design/screens/brand-compact.html option A + brand-compact-1.png, approved
 // by Brian 2026-11-06 ~14:30). It replaces the tall brand card of the morning release in one row: Jeffrey's
-// gradient (his original header, git show 1f4580b:app/ui.tsx .topbar), the EDC Orlando (white) and Ground
-// Control logos with a thin divider, "Is my friend in medical?" with the event dates under it ("Nov 6–8"; on
-// a wide screen "November 6–8, 2026" beside the title), and an X that hides it on this device
+// gradient (his original header, git show 1f4580b:app/ui.tsx .topbar), (events) the event's logo (white when it is a
+// single-colour transparent logo) and the permanent Ground Control logo with a thin divider, "Is my friend in
+// medical?" with the event's dates under it ("Nov 14–15"; on a wide screen "November 14–15, 2026" beside the title;
+// BrandEvent.tsx reads both from the event config on the client), and an X that hides it on this device
 // (prefs.brandHidden). The avatar menu's "Show header" brings it back. Always dark, in both themes.
 //
 // All requests only: Pending and My requests start at their title. It scrolls away with the page; the sticky
@@ -18,11 +19,9 @@
 // row from showing before hydration (lib/brand-pref.ts).
 import { X } from 'lucide-react';
 import { memo } from 'react';
+import { BrandEventDates, BrandEventLogo } from './BrandEvent';
 import b from './brand.module.css';
 
-/** The dates, written in sentence case (CSS sets the capitals, so screen readers read words, not letters). */
-export const BRAND_DATES_SHORT = 'Nov 6–8';
-export const BRAND_DATES_LONG = 'November 6–8, 2026';
 /** The X's accessible name; the avatar menu item that undoes it is "Show header". */
 export const HIDE_HEADER_LABEL = 'Hide header';
 
@@ -41,8 +40,7 @@ export const BrandCard = memo(function BrandCard({ onHide, logoLoading }: BrandC
   return (
     <div className={b.brand} data-testid="brand-card">
       <div className={b.logos}>
-        <img className={b.edc} src="/logos/edc-orlando.png" alt="EDC Orlando" width={194} height={132} decoding="async" loading={logoLoading} />
-        <span className={b.div} aria-hidden="true" />
+        <BrandEventLogo loading={logoLoading} />
         <img className={b.gc} src="/logos/ground-control.png" alt="Ground Control" width={313} height={120} decoding="async" loading={logoLoading} />
       </div>
       <span className={`${b.div} ${b.wideOnly}`} aria-hidden="true" />
@@ -50,8 +48,7 @@ export const BrandCard = memo(function BrandCard({ onHide, logoLoading }: BrandC
         <p className={b.title}>
           Is my friend <span className={b.accent}>in medical?</span>
         </p>
-        <p className={`${b.dates} ${b.datesShort}`}>{BRAND_DATES_SHORT}</p>
-        <p className={`${b.dates} ${b.datesLong}`}>{BRAND_DATES_LONG}</p>
+        <BrandEventDates />
       </div>
       <button
         type="button"

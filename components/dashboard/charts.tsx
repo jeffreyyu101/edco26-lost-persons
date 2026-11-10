@@ -1,25 +1,23 @@
 'use client';
 // Dashboard v4 charts in plain SVG (design/screens/dashboard-v4.html callsSVG / heatSVG / sparkSVG): calls per bucket
-// (one neutral colour, or stacked by tent) with the night before as a dashed line, hour × tent heat cells, and the
-// speed sparkline. Values lead in the tooltip; each chart has a full-sentence aria-label.
+// (one neutral colour, or stacked by post) with the show day before as a dashed line, hour × post heat cells, and the
+// speed sparkline. Any number of posts: the range's series (dashboard-model postSeries, the four busiest and Other).
+// Values lead in the tooltip; each chart has a full-sentence aria-label.
 import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
-import type { CallsBucket, HeatCol, SpeedStat, StatsRange } from '@/lib/api-types';
+import type { CallsBucket, EventStatsRange, HeatCol, SpeedStat } from '@/lib/api-types';
 import {
-  TENTS,
-  TENT_KEY,
   axisLabel,
   bucketHead,
   bucketTotal,
   heatBin,
   heatLabel,
   isCurrent,
+  countOf,
   peakIndex,
   sparseStep,
-  type Tent,
+  type Series,
 } from './dashboard-model';
 import s from './dashboard.module.css';
-
-export const TENT_VAR: Readonly<Record<Tent, string>> = { 'FA 4': 'var(--dv-tent-fa4)', 'FA 3': 'var(--dv-tent-fa3)', Other: 'var(--dv-tent-other)' };
 
 /** The element's content box, kept current. */
 function useSize<T extends HTMLElement>(): [React.RefObject<T | null>, { w: number; h: number }] {
@@ -81,17 +79,21 @@ function Tooltip({ tip, w }: { tip: Tip | null; w: number }) {
 }
 
 export interface CallsChartProps {
-  range: StatsRange;
+  range: EventStatsRange;
   buckets: readonly CallsBucket[];
   step: number;
   compare: boolean;
   prevName: string;
-  byTent: boolean;
+  /** Stacked by post (the range's series), else one neutral colour. */
+  byPost: boolean;
+  series: readonly Series[];
   phone: boolean;
   now: number;
+  /** The event's time zone (axis labels, tooltips). */
+  tz: string;
 }
 
-export function CallsChart({ range, buckets: bs, step, compare, prevName, byTent, phone, now }: CallsChartProps) {
+export function CallsChart({ range, buckets: bs, step, compare, prevName, byPost, series, phone, now, tz }: CallsChartProps) {
   const [ref, { w: W, h: H }] = useSize<HTMLDivElement>();
   const [tip, setTip] = useState<Tip | null>(null);
   const [hover, setHover] = useState(-1);
@@ -100,12 +102,12 @@ export function CallsChart({ range, buckets: bs, step, compare, prevName, byTent
   const plotH = Math.max(10, H - padT - padB);
   const base = padT + plotH;
   const gap = ev ? 1.2 : 0;
-  const nights = ev ? new Set(bs.map((b) => b.night)).size : 1;
-  const slot = (W - padL - padR) / Math.max(1, bs.length + (nights - 1) * gap);
+  const days = ev ? new Set(bs.map((b) => b.day)).size : 1;
+  const slot = (W - padL - padR) / Math.max(1, bs.length + (days - 1) * gap);
   const xs: number[] = [];
   let x = padL;
   bs.forEach((b, i) => {
-    if (ev && i > 0 && b.night !== bs[i - 1]!.night) x += gap * slot;
+    if (ev && i > 0 && b.day !== bs[i - 1]!.day) x += gap * slot;
     xs.push(x);
     x += slot;
   });
@@ -122,11 +124,11 @@ export function CallsChart({ range, buckets: bs, step, compare, prevName, byTent
   const move = (i: number) => (e: PointerEvent<SVGRectElement>) => {
     const b = bs[i]!;
     const box = ref.current!.getBoundingClientRect();
-    const head = bucketHead(range, b, step) + (isCurrent(b, step, now) ? ' · so far' : '');
-    const rows: TipRow[] = byTent ? TENTS.map((t) => ({ v: b[TENT_KEY[t]], name: t, color: TENT_VAR[t] })) : [{ v: totals[i]!, name: 'Calls', color: 'var(--dv-bar)' }];
+    const head = bucketHead(range, b, step, tz) + (isCurrent(b, step, now) ? ' · so far' : '');
+    const rows: TipRow[] = byPost ? series.map((t) => ({ v: countOf(b.posts, t.post), name: t.post, color: t.color })) : [{ v: totals[i]!, name: 'Calls', color: 'var(--dv-bar)' }];
     if (compare) rows.push({ v: b.prev ?? 0, name: prevName, color: '', dash: true });
     setHover(i);
-    setTip({ x: e.clientX - box.left, y: e.clientY - box.top, head, rows, total: byTent ? totals[i] : undefined });
+    setTip({ x: e.clientX - box.left, y: e.clientY - box.top, head, rows, total: byPost ? totals[i] : undefined });
   };
   const leave = () => {
     setHover(-1);
@@ -134,7 +136,7 @@ export function CallsChart({ range, buckets: bs, step, compare, prevName, byTent
   };
 
   const pb = peak >= 0 ? bs[peak]! : null;
-  const label = `Calls per ${ev ? 'hour' : `${step} minutes`}${byTent ? ', stacked by tent' : ''}${compare ? `, ${prevName} as a dashed line` : ''}. ${totals.reduce((a, b) => a + b, 0)} in range.${pb ? ` Peak ${totals[peak]} at ${bucketHead(range, pb, step)}.` : ''}`;
+  const label = `Calls per ${ev ? 'hour' : `${step} minutes`}${byPost ? ', stacked by post' : ''}${compare ? `, ${prevName} as a dashed line` : ''}. ${totals.reduce((a, b) => a + b, 0)} in range.${pb ? ` Peak ${totals[peak]} at ${bucketHead(range, pb, step, tz)}.` : ''}`;
 
   return (
     <div ref={ref} className={s.chart} data-testid="calls-chart">
@@ -165,7 +167,7 @@ export function CallsChart({ range, buckets: bs, step, compare, prevName, byTent
             if (!totals[i]) return null;
             const bx = xs[i]! + (slot - bw) / 2;
             const cur = isCurrent(b, step, now);
-            if (!byTent) {
+            if (!byPost) {
               const top = y(totals[i]!);
               const d = topRound(bx, top, bw, base - top, 4);
               return cur ? (
@@ -175,19 +177,19 @@ export function CallsChart({ range, buckets: bs, step, compare, prevName, byTent
               );
             }
             let yb = base;
-            const segs = TENTS.filter((t) => b[TENT_KEY[t]] > 0);
+            const segs = series.filter((t) => countOf(b.posts, t.post) > 0);
             return (
               <g key={b.at}>
                 {segs.map((t, si) => {
-                  const h = (b[TENT_KEY[t]] / ymax) * plotH;
+                  const h = (countOf(b.posts, t.post) / ymax) * plotH;
                   const top = yb - h;
                   const hh = Math.max(1, (si === 0 ? yb : yb - 2) - top);
                   const d = si === segs.length - 1 ? topRound(bx, top, bw, hh, 4) : `M${bx},${top}H${bx + bw}V${top + hh}H${bx}Z`;
                   yb = top;
                   return cur ? (
-                    <path key={t} d={d} fill={TENT_VAR[t]} fillOpacity=".28" stroke={TENT_VAR[t]} strokeWidth="1.25" strokeDasharray="3 2" />
+                    <path key={t.post} d={d} fill={t.color} fillOpacity=".28" stroke={t.color} strokeWidth="1.25" strokeDasharray="3 2" />
                   ) : (
-                    <path key={t} d={d} fill={TENT_VAR[t]} />
+                    <path key={t.post} d={d} fill={t.color} />
                   );
                 })}
               </g>
@@ -202,7 +204,7 @@ export function CallsChart({ range, buckets: bs, step, compare, prevName, byTent
             </g>
           ) : null}
           {bs.map((b, i) => {
-            const text = axisLabel(range, b, i, bs, phone);
+            const text = axisLabel(range, b, i, bs, phone, tz);
             if (text === null) return null;
             const short = range === '1h' || range === '2h';
             const lx = short ? xs[i]! + slot / 2 : xs[i]!;
@@ -230,39 +232,47 @@ export interface HeatChartProps {
   step: number;
   phone: boolean;
   event: boolean;
+  series: readonly Series[];
+  tz: string;
 }
 
-export function HeatChart({ cols, step, phone, event }: HeatChartProps) {
+export function HeatChart({ cols, step, phone, event, series, tz }: HeatChartProps) {
   const [ref, { w: W, h: fitH }] = useSize<HTMLDivElement>();
   const [tip, setTip] = useState<Tip | null>(null);
   const [hover, setHover] = useState('');
   const n = Math.max(1, cols.length);
   const labelW = phone ? 48 : 60;
   const gap = 2;
-  const cellH = phone ? 24 : Math.max(22, Math.min(64, Math.floor((fitH - 38 - 3 * gap) / 3)));
+  const rowsN = Math.max(1, series.length);
+  const cellH = phone ? 24 : Math.max(22, Math.min(64, Math.floor((fitH - 38 - rowsN * gap) / rowsN)));
   const cw = (W - labelW) / n;
-  const totalY = 3 * (cellH + gap) + 2;
+  const totalY = rowsN * (cellH + gap) + 2;
   const axisY = totalY + 32;
   const H = axisY + 4;
-  const max = Math.max(1, ...cols.flatMap((c) => TENTS.map((t) => c[TENT_KEY[t]])));
+  const max = Math.max(1, ...cols.flatMap((c) => series.map((t) => countOf(c.posts, t.post))));
   let peak = { v: -1, ci: -1, ri: -1 };
-  cols.forEach((c, ci) => TENTS.forEach((t, ri) => (c[TENT_KEY[t]] > peak.v ? (peak = { v: c[TENT_KEY[t]], ci, ri }) : null)));
+  cols.forEach((c, ci) =>
+    series.forEach((t, ri) => {
+      const v = countOf(c.posts, t.post);
+      if (v > peak.v) peak = { v, ci, ri };
+    }),
+  );
   const every = cw < 30 ? 2 : 1;
-  const label = `Calls by ${step === 15 ? '15 minutes' : 'hour'} and tent${event ? ', every night together' : ''}. Busiest cell ${Math.max(0, peak.v)}.`;
+  const label = `Calls by ${step === 15 ? '15 minutes' : 'hour'} and post${event ? ', every show day together' : ''}. Busiest cell ${Math.max(0, peak.v)}.`;
   return (
     <div ref={ref} className={`${s.chart} ${s.heat}`} data-testid="heat-chart">
       {W > 0 ? (
         <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label}>
-          {TENTS.map((t, ri) => {
+          {series.map((t, ri) => {
             const ry = ri * (cellH + gap);
             return (
-              <g key={t}>
-                <rect x="0" y={ry + cellH / 2 - 4} width="8" height="8" rx="2" fill={TENT_VAR[t]} />
+              <g key={t.post}>
+                <rect x="0" y={ry + cellH / 2 - 4} width="8" height="8" rx="2" fill={t.color} />
                 <text x="13" y={ry + cellH / 2 + 4} fontSize="12" fill="var(--gray-11)">
-                  {t}
+                  {t.post.length > 7 && phone ? `${t.post.slice(0, 6)}…` : t.post}
                 </text>
                 {cols.map((c, ci) => {
-                  const v = c[TENT_KEY[t]];
+                  const v = countOf(c.posts, t.post);
                   const k = heatBin(v, max);
                   const cx = labelW + ci * cw + gap / 2;
                   const id = `${ri}:${ci}`;
@@ -281,7 +291,7 @@ export function HeatChart({ cols, step, phone, event }: HeatChartProps) {
                         onPointerEnter={(e) => {
                           const box = ref.current!.getBoundingClientRect();
                           setHover(id);
-                          setTip({ x: e.clientX - box.left, y: e.clientY - box.top, head: `${t} · ${heatLabel(c, step)}${event ? ' · every night' : ''}`, rows: [{ v, name: t, color: `var(--dv-heat-${Math.max(1, k)})` }] });
+                          setTip({ x: e.clientX - box.left, y: e.clientY - box.top, head: `${t.post} · ${heatLabel(c, step, tz)}${event ? ' · every show day' : ''}`, rows: [{ v, name: t.post, color: `var(--dv-heat-${Math.max(1, k)})` }] });
                         }}
                         onPointerLeave={() => {
                           setHover('');
@@ -305,7 +315,7 @@ export function HeatChart({ cols, step, phone, event }: HeatChartProps) {
           <line x1={labelW} x2={W} y1={totalY} y2={totalY} stroke="var(--gray-a4)" shapeRendering="crispEdges" />
           {cols.map((c, ci) => {
             const cx = labelW + ci * cw + cw / 2;
-            const t = bucketTotal(c);
+            const t = c.n;
             return (
               <g key={`t${ci}`}>
                 <text x={cx} y={totalY + 14} textAnchor="middle" fontSize="12" fontWeight="600" fill={t ? 'var(--gray-12)' : 'var(--gray-11)'} className={s.num}>
@@ -313,7 +323,7 @@ export function HeatChart({ cols, step, phone, event }: HeatChartProps) {
                 </text>
                 {ci % every === 0 ? (
                   <text x={cx} y={axisY} textAnchor="middle" fontSize="10.5" fill="var(--gray-11)">
-                    {heatLabel(c, step)}
+                    {heatLabel(c, step, tz)}
                   </text>
                 ) : null}
               </g>
@@ -340,7 +350,7 @@ export function Spark({ stat, w = 200, h = 24, now }: { stat: SpeedStat; w?: num
   const runs: number[][] = [];
   let run: number[] = [];
   pts.forEach((p, i) => {
-    if (p.median === null || (i > 0 && pts[i - 1]!.night !== p.night)) {
+    if (p.median === null || (i > 0 && pts[i - 1]!.day !== p.day)) {
       if (run.length) runs.push(run);
       run = [];
     }
@@ -348,7 +358,7 @@ export function Spark({ stat, w = 200, h = 24, now }: { stat: SpeedStat; w?: num
   });
   if (run.length) runs.push(run);
   const stepMs = n > 1 ? Date.parse(pts[1]!.at) - Date.parse(pts[0]!.at) : 3_600_000;
-  const cur = n > 1 && Date.parse(pts[n - 1]!.at) + stepMs > now && pts[n - 1]!.median !== null && pts[n - 2]!.median !== null && pts[n - 2]!.night === pts[n - 1]!.night;
+  const cur = n > 1 && Date.parse(pts[n - 1]!.at) + stepMs > now && pts[n - 1]!.median !== null && pts[n - 2]!.median !== null && pts[n - 2]!.day === pts[n - 1]!.day;
   const last = runs.length ? runs[runs.length - 1]!.at(-1)! : -1;
   return (
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} role="img" aria-label={`Median by ${stepMs <= 900_000 ? '15 minutes' : 'hour'} against the ${stat.target} minute target`}>

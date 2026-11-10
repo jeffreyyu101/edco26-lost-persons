@@ -33,7 +33,7 @@ export const dynamic = 'force-dynamic';
 
 const off = () => new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
 
-export const POST = authedRoute('POST /api/telemetry', { refresh: false, sameOrigin: false }, async ({ request, session, eventId }) => {
+export const POST = authedRoute('POST /api/telemetry', { refresh: false, sameOrigin: false }, async ({ request, session, eventId, event }) => {
   assertTelemetryOrigin(request);
   const cfg = await telemetryConfig();
   if (!cfg.on) return off();
@@ -48,7 +48,7 @@ export const POST = authedRoute('POST /api/telemetry', { refresh: false, sameOri
     p_batch: batch.b,
     p_device: batch.d,
     p_session: batch.s,
-    p_team: teamKey(session.claims.team),
+    p_team: teamKey(session.claims.team, event?.teams),
     p_skew_ms: clampSkew(Date.now() - batch.sent),
     p_ctx: batch.ctx,
     p_events: batch.ev,

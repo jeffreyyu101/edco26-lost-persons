@@ -9,7 +9,7 @@
 // Post and Logged by show only with nothing docked beside the table, Post at every desk width and Logged by
 // on a table 1040 px or wider (the CSS decides); the row's sentence always says them. Times reuse F1's log helpers (lib/format.ts), so the desk and the phone never disagree.
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
-import { ageGender, canonicalTeam, parseStaff, postFilterLabel, teamShort, type TeamValue } from '@/lib/domain';
+import { ageGender, canonicalTeam, parseStaff, postFilterLabel, teamShort, type TeamName } from '@/lib/domain';
 import { stagePhrase } from '@/lib/stages';
 import { formatAuditTime, formatCaseNumber, formatCreatedTime, formatUpdatedAgo, updatedPhrase, wasUpdated } from '@/lib/format';
 import { displayName, outboxDisplay, outboxRowLabel, updatedSince, whoPhrase } from '@/components/list/list-helpers';
@@ -27,13 +27,6 @@ export const TABLE_COLUMNS = [
 
 export type TableColumnKey = (typeof TABLE_COLUMNS)[number]['key'];
 
-/** The mockup's short team names for the Logged by column ("Dana K. · Transpo"). */
-export const TEAM_COMPACT: Readonly<Record<TeamValue, string>> = {
-  'GC/HX - Special Operations/Med Transpo': 'Transpo',
-  'GC/HX - Dispatch': 'Dispatch',
-  'GC/HX - Base': 'Base',
-  Medical: 'Medical',
-};
 
 /** "Dana Kim" → "Dana K.", "Rae" → "Rae", "Dani V." → "Dani V.". A last word with no letter keeps the name. */
 export function compactStaffName(name: string): string {
@@ -43,23 +36,25 @@ export function compactStaffName(name: string): string {
   return initial ? `${words[0]} ${initial.toUpperCase()}.` : words.join(' ');
 }
 
-/** The team as the Logged by column shows it: a known team's short name, any other team as typed. */
-export function compactTeam(team: string): string {
-  const canonical = canonicalTeam(team);
-  return (TEAM_COMPACT as Readonly<Record<string, string>>)[canonical] ?? canonical;
+/**
+ * The team as the Logged by column shows it: (events) the event's short name for one of its teams (EventTeam.short),
+ * any other team as typed.
+ */
+export function compactTeam(team: string, teams: readonly TeamName[] = []): string {
+  return teamShort(canonicalTeam(team), teams);
 }
 
-/** The Logged by cell: "Dana K. · Transpo" from "Dana Kim · GC/HX - Special Operations/Med Transpo". */
-export function loggedByShort(createdBy: string | null | undefined): string {
-  const staff = parseStaff(createdBy);
+/** The Logged by cell: "Dana K. · Dispatch" from "Dana Kim · GC/HX - Dispatch" (the event's short team name). */
+export function loggedByShort(createdBy: string | null | undefined, teams: readonly TeamName[] = []): string {
+  const staff = parseStaff(createdBy, teams);
   const name = compactStaffName(staff.name);
-  return staff.team ? `${name} · ${compactTeam(staff.team)}` : name;
+  return staff.team ? `${name} · ${compactTeam(staff.team, teams)}` : name;
 }
 
 /** Logged by in full, as a tooltip and a screen reader say it: "Dana Kim, GCHX Med Transpo". */
-export function loggedByPhrase(createdBy: string | null | undefined): string {
-  const staff = parseStaff(createdBy);
-  return staff.team ? `${staff.name}, ${teamShort(staff.team)}` : staff.name;
+export function loggedByPhrase(createdBy: string | null | undefined, teams: readonly TeamName[] = []): string {
+  const staff = parseStaff(createdBy, teams);
+  return staff.team ? `${staff.name}, ${staff.teamShort}` : staff.name;
 }
 
 /** The Post cell: the post's full name, an Other location as "Other · Gate 9" (never mistaken for a post). */
@@ -98,8 +93,8 @@ export function rowTimes(row: RequestSummary, now: number, timeZone: string): Ro
  * Park, GCHX Base". It starts like the phone log's sentence (number, name, status), then says the columns a
  * desk adds.
  */
-export function tableRowLabel(row: RequestSummary, times: Pick<RowTimes, 'created' | 'updatedSaid'>, timeZone?: string, now = 0): string {
-  const by = loggedByPhrase(row.createdBy);
+export function tableRowLabel(row: RequestSummary, times: Pick<RowTimes, 'created' | 'updatedSaid'>, timeZone?: string, now = 0, teams: readonly TeamName[] = []): string {
+  const by = loggedByPhrase(row.createdBy, teams);
   return [
     formatCaseNumber(row.caseNumber),
     whoPhrase(row),
@@ -115,8 +110,8 @@ export function tableRowLabel(row: RequestSummary, times: Pick<RowTimes, 'create
 }
 
 /** A search result's sentence: the row's, then the matched text when the match is not the name or number. */
-export function searchRowLabel(row: RequestSummary, times: Pick<RowTimes, 'created' | 'updatedSaid'>, line: string, timeZone?: string, now = 0): string {
-  return `${tableRowLabel(row, times, timeZone, now)}.${line ? ` ${line}` : ''}`;
+export function searchRowLabel(row: RequestSummary, times: Pick<RowTimes, 'created' | 'updatedSaid'>, line: string, timeZone?: string, now = 0, teams: readonly TeamName[] = []): string {
+  return `${tableRowLabel(row, times, timeZone, now, teams)}.${line ? ` ${line}` : ''}`;
 }
 
 export interface OutboxRowModel {
@@ -133,7 +128,7 @@ export interface OutboxRowModel {
 }
 
 /** A request saved on this device and not sent yet, as a table row. */
-export function outboxRow(item: OutboxItem, created: string): OutboxRowModel {
+export function outboxRow(item: OutboxItem, created: string, teams: readonly TeamName[] = []): OutboxRowModel {
   const d = outboxDisplay(item);
   const p = item.payload;
   return {
@@ -141,7 +136,7 @@ export function outboxRow(item: OutboxItem, created: string): OutboxRowModel {
     name: d.name,
     ageGender: d.ageGender,
     post: postFilterLabel(p.reportingLocation, p.otherLocation ?? null),
-    by: loggedByShort(item.operator.staff),
+    by: loggedByShort(item.operator.staff, teams),
     needsAttention: d.needsAttention,
     label: d.label,
     said: outboxRowLabel(d, created),

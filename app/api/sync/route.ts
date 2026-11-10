@@ -14,6 +14,7 @@ import { json, parseQuery } from '@/lib/server/http';
 import { inactiveCandidates, notifyInactiveCloses } from '@/lib/server/inactive-notify';
 import { mapSync } from '@/lib/server/mappers';
 import { decorateSync } from '@/lib/server/messages';
+import { postNames } from '@/lib/server/events';
 import { authedRoute } from '@/lib/server/route';
 import { rpc } from '@/lib/server/supabase';
 import { syncQuerySchema } from '@/lib/validation';
@@ -37,7 +38,7 @@ async function unreadActivity(eventId: string, staff: string): Promise<ActivityP
   }
 }
 
-export const GET = authedRoute('GET /api/sync', {}, async ({ request, session, eventId }) => {
+export const GET = authedRoute('GET /api/sync', {}, async ({ request, session, eventId, event: eventRow }) => {
   const q = parseQuery(new URL(request.url).searchParams, syncQuerySchema);
   const args = q.ids
     ? { p_event: eventId, p_since: null, p_ids: q.ids, p_reconcile: false, p_after_at: null, p_after_id: null, p_limit: DEFAULT_PAGE }
@@ -52,12 +53,13 @@ export const GET = authedRoute('GET /api/sync', {}, async ({ request, session, e
       };
   const firstPage = !q.ids && !q.afterAt;
   const [raw, activity] = await Promise.all([rpc<unknown>('lp_sync', args), firstPage ? unreadActivity(eventId, session.staff) : Promise.resolve<ActivityPart>({})]);
-  const { event, ...sync } = mapSync(raw);
+  const posts = postNames(eventRow);
+  const { event, ...sync } = mapSync(raw, posts);
   const firstDeltaPage = !q.ids && !!q.since && !q.afterAt;
   // (Events) The event's stage and config version, only to a client that sends the version it holds (ev) and only
   // when it differs: the client then re-reads GET /api/session (and sees an ended event).
   const eventPart = q.ev !== undefined && event && event.version !== q.ev ? { event } : {};
-  const out = { ...(await decorateSync(sync, { eventId, staff: session.staff, since: q.since ?? null, changed: firstDeltaPage })), ...activity, ...eventPart };
+  const out = { ...(await decorateSync(sync, { eventId, staff: session.staff, since: q.since ?? null, changed: firstDeltaPage, posts })), ...activity, ...eventPart };
   const closed = inactiveCandidates(out.rows);
   if (closed.length > 0) after(() => notifyInactiveCloses(eventId, closed));
   return json(out);

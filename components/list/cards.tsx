@@ -33,6 +33,7 @@ import {
   type StepperModel,
 } from './list-helpers';
 import s from './list.module.css';
+import { useEventConfig } from '@/lib/client/event-config';
 
 /** (F5) A stage label's Radix colour on the card's solid panel: its tone (step 11), grey inherits the card's. */
 function stageTextColor(tone: StageTone): Exclude<StageTone, 'gray'> | undefined {
@@ -358,7 +359,8 @@ export const ComingCard = memo(function ComingCard({ row, now, offline, onReunit
   const ag = ageGender(row.age, row.gender);
   const location = (row.medicalLocation ?? '').trim();
   // (Post-event) An approved swap says where ("Swap at FA 4"), not a plain Located.
-  const swapAt = isSwapApproved(row) && row.swapPlace ? swapApprovedLabel(row.swapPlace, row) : null;
+  const mainMedical = useEventConfig()?.mainMedical ?? '';
+  const swapAt = isSwapApproved(row) && row.swapPlace ? swapApprovedLabel(row.swapPlace, row, mainMedical) : null;
   const label = `${whoPhrase(row)}. ${swapAt ?? statusMeta(STATUS.inMedical).shortLabel}${location ? `, ${location}` : ''}, ${minutesPhrase(minutes)} ago. ${row.postShort} · ${formatCaseNumber(row.caseNumber)}.`;
   const describedBy = offline ? `${nameId} ${reasonId}` : nameId;
   const messages = useHasMessages();
@@ -450,7 +452,8 @@ export const MineCard = memo(function MineCard({
   const sub = `${formatCaseNumber(row.caseNumber)} · ${row.postShort}`;
   // (F5) The stage: a chip in the corner for Needs info, the stage's glyph and label otherwise. (Pending v9.1) A
   // hold keeps the wait in the corner and says "Not found yet" / "Recheck due" in a chip row: no recheck time.
-  const stage = displayStage(row, { now, ...(timeZone ? { timeZone } : {}) });
+  const mainMedical = useEventConfig()?.mainMedical ?? '';
+  const stage = displayStage(row, { now, mainMedical, ...(timeZone ? { timeZone } : {}) });
   const chip = hasStageChip(stage);
   const hold = holdState(row, now);
   const holdSaid = hold === 'due' ? `${NOT_FOUND_YET_LABEL.toLowerCase()}, recheck due` : hold === 'held' ? NOT_FOUND_YET_LABEL.toLowerCase() : '';

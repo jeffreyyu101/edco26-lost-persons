@@ -7,6 +7,8 @@ import { useActions, useAllRows, useCounts, useIsLoading } from '@/lib/client/st
 import { useLiveStatus } from '@/lib/client/use-live-status';
 import type { MainView } from './views';
 import d from './desk.module.css';
+import { EventLogo } from '@/components/ui/EventLogo';
+import { useEventConfig } from '@/lib/client/event-config';
 
 /** A link that changes the view in place (like the phone's view switcher: it replaces the entry). */
 export function ViewLink({
@@ -68,13 +70,14 @@ const MARK_STATE: Readonly<Record<LiveState, string>> = { healthy: 'live', recon
 const MARK_TIP: Readonly<Record<string, string>> = { live: 'Live', off: 'Reconnecting', offline: 'Offline', loading: 'Syncing' };
 
 /**
- * The logo lockup at the top of the sidebar (EDC Orlando | Ground Control on the brand card's dark gradient; the
- * EDC logo alone on a 32 px tile while the sidebar is collapsed), with a live dot on its corner. It reads the same
+ * The logo lockup at the top of the sidebar ((events) the event's logo | Ground Control on the brand card's dark
+ * gradient; the event's logo alone on a 32 px tile while the sidebar is collapsed), with a live dot on its corner. It reads the same
  * live status as the top bar's line and the banner (useLiveStatus, F1.2), so they never disagree: green while
  * healthy, amber while reconnecting, grey offline and while loading. Tap to sync now. The logos are decoration
  * here: the button is named by the live state.
  */
 export function LiveMark() {
+  const logo = useEventConfig()?.logoUrl ?? null;
   const actions = useActions();
   const live = useLiveStatus();
   const loading = useIsLoading();
@@ -87,14 +90,15 @@ export function LiveMark() {
       aria-label={state === 'loading' ? 'Syncing' : LIVE_LABEL[live.state]}
       data-testid="desk-live"
     >
-      <span className={d.lockArt}>
-        {/* Easter egg (Brian, 2026-11-08): on hover with a mouse, a rainbow runs left to right through the white
-            EDC Orlando logo, clipped to the logo's own shape (desk.module.css .lockRainbow). */}
-        <span className={d.lockEdcWrap}>
-          <img className={d.lockEdc} src="/logos/edc-orlando.png" alt="" width={194} height={132} decoding="async" draggable={false} />
-          <span className={d.lockRainbow} aria-hidden data-testid="desk-live-rainbow" />
-        </span>
-        <span className={d.lockDiv} aria-hidden />
+      <span className={d.lockArt} data-event-logo={logo ? '' : undefined}>
+        {/* Easter egg (Brian, 2026-11-08): on hover with a mouse, a rainbow runs left to right through a white
+            (single-colour) event logo, clipped to the logo's own shape (desk.module.css .lockRainbow). */}
+        {logo ? (
+          <>
+            <EventLogo src={logo} surface="dark" className={d.lockEdc} rainbowClassName={d.lockRainbow} height={24} />
+            <span className={d.lockDiv} aria-hidden />
+          </>
+        ) : null}
         <img className={d.lockGc} src="/logos/ground-control.png" alt="" width={313} height={120} decoding="async" draggable={false} />
       </span>
       <span className={d.live} data-state={state} />

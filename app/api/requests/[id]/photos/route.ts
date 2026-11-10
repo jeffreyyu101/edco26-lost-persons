@@ -19,6 +19,7 @@ import { ApiFailure, isDefinitiveRejection } from '@/lib/server/errors';
 import { idParam, invalidFromZod, json, readBodyLimited } from '@/lib/server/http';
 import { mapPhoto, mapRow } from '@/lib/server/mappers';
 import { isObjectAlreadyExists, photoPaths, sniffImage, type ImageType, type StorageErrorLike } from '@/lib/server/photos';
+import { postNames } from '@/lib/server/events';
 import { authedRoute } from '@/lib/server/route';
 import { PHOTO_BUCKET, db, rpc } from '@/lib/server/supabase';
 import { photoFieldsSchema } from '@/lib/validation';
@@ -92,7 +93,7 @@ async function removeObjects(paths: string[]): Promise<void> {
   }
 }
 
-export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/photos', {}, async ({ request, params, session, eventId }) => {
+export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/photos', {}, async ({ request, params, session, eventId, event }) => {
   const id = idParam(params);
   const contentType = request.headers.get('content-type') ?? '';
   if (!/^multipart\/form-data\s*;/i.test(contentType)) throw new ApiFailure('unsupported_media', 'Send the photo as multipart/form-data');
@@ -151,6 +152,6 @@ export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/photos'
     data = await record(uploads);
   }
 
-  const out: PhotoResponse = { created: data.created === true, photo: mapPhoto(data.photo), request: mapRow(data.row) };
+  const out: PhotoResponse = { created: data.created === true, photo: mapPhoto(data.photo), request: mapRow(data.row, postNames(event)) };
   return json(out, out.created ? 201 : 200);
 });

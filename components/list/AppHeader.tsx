@@ -9,6 +9,7 @@
 import { CloudOff, RefreshCw, Search } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { ActivityBellSlot } from '@/components/activity/slots';
+import { EventStageChip } from '@/components/ui/EventStageChip';
 import { stateCue, type LiveState } from '@/lib/client/live-status';
 import type { ViewCounts } from '@/lib/client/selectors';
 import { ViewSwitcher, type ListViewName } from './ViewSwitcher';
@@ -43,6 +44,7 @@ export function AppHeader({ view, counts, onSelect, state, onOpenSearch, account
   return (
     <header className={s.top}>
       <ViewSwitcher view={view} counts={counts} onSelect={onSelect} />
+      <EventStageChip className={s.stage} />
       <div className={s.icons}>
         <button type="button" className={s.ib} aria-label="Search" onClick={onOpenSearch}>
           <Search size={20} strokeWidth={1.75} aria-hidden />

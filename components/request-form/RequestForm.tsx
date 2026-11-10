@@ -25,11 +25,12 @@ import {
   type ReactNode,
   type TextareaHTMLAttributes,
 } from 'react';
+import { useEventConfig } from '@/lib/client/event-config';
 import { navigate } from '@/lib/client/nav';
 import { visibleOutbox } from '@/lib/client/selectors';
 import { useStoreSelector, type DraftPhoto, type StoreState } from '@/lib/client/store-contract';
 import type { RequestFormValues } from '@/lib/client/form-values';
-import { LIMITS, OTHER_POST, STAGE_CHIPS, isValidPhone, postFull, type EditSection, type PhotoTiming } from '@/lib/domain';
+import { LIMITS, OTHER_POST, isValidPhone, postFull, type EditSection, type PhotoTiming } from '@/lib/domain';
 import { formatCaseNumber } from '@/lib/format';
 import { FormSurface } from './FormSurface';
 import { GENDER_CHIPS, genderAfterChip, genderChipFor, lastSeenWithChip, moreFieldsFor, type MoreField } from './form-logic';
@@ -147,6 +148,8 @@ export function RequestForm(props: RequestFormProps) {
   const id = (key: string) => `${uid}-${key}`;
   const [pickerOpen, setPickerOpen] = useState(false);
   const [lastSeenFocus, setLastSeenFocus] = useState(false);
+  // (Events) The "Last seen" chips are the event's (EventConfig.lastSeen), in setup order.
+  const lastSeenChips = useEventConfig()?.lastSeen ?? [];
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastSeenRef = useRef<HTMLInputElement>(null);
@@ -441,9 +444,9 @@ export function RequestForm(props: RequestFormProps) {
               />
             </div>
             {errLine('lastSeen')}
-            {(lastSeenFocus || desk) && !readOnly ? (
+            {(lastSeenFocus || desk) && !readOnly && lastSeenChips.length > 0 ? (
               <div className="lp-rf-sugg" role="group" aria-label="Add a place to Last seen">
-                {STAGE_CHIPS.map((chip) => (
+                {lastSeenChips.map((chip) => (
                   <Button
                     key={chip}
                     type="button"

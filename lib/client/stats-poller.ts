@@ -7,12 +7,12 @@
 //     poll up to 15 s later. Like the store, 'online' forgets the network failures counted while offline.
 //   - (Dashboard v4) While the page is hidden no poll goes out; it fetches at once when the page shows again.
 // A plain module, not a hook, so the unit tests drive it with fake timers.
-import type { Stats } from '../api-types';
+import type { EventStats } from '../api-types';
 import { CONNECTION_FAILURES } from './constants';
 import type { Connection } from './store-contract';
 
 export interface StatsState {
-  stats: Stats | null;
+  stats: EventStats | null;
   /** This phone's clock (epoch ms) when the last fetch succeeded. */
   updatedAt: number | null;
   /** The last fetch failed (the empty "Can't reach the log" state while nothing has loaded). */
@@ -24,7 +24,7 @@ export interface StatsState {
 export const INITIAL_STATS_STATE: StatsState = { stats: null, updatedAt: null, error: false, failing: false };
 
 export interface StatsPollerOptions {
-  fetchStats: () => Promise<Stats>;
+  fetchStats: () => Promise<EventStats>;
   /** Every change of the state (not called after stop()). */
   onChange: (state: StatsState) => void;
   /** Calls back when the connection comes back (subscribeReconnect below). */

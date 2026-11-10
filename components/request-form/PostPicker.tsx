@@ -1,6 +1,6 @@
 'use client';
-// "Reporting from" picker sheet (states.html PostPicker): FA 3 – Kinetic, FA 4 – Oasis, Command, Base and
-// Other; Other shows a "Where?" field (other_location, 1–80 characters). The last pick is remembered by
+// "Reporting from" picker sheet (states.html PostPicker): the event's posts in setup order (EventConfig.posts, any
+// number of them) and Other; Other shows a "Where?" field (other_location, 1–80 characters). The last pick is remembered by
 // the caller (store prefs.lastPost). Real radio inputs (visually hidden) give arrow-key navigation and
 // correct semantics; each option row is its label. On the phone it is a bottom sheet; on tablet and
 // desktop (PostPickerPopover) the same body drops from the Reporting-from chip in the form's header.
@@ -8,7 +8,8 @@ import { Button, Popover } from '@radix-ui/themes';
 import { Check, MapPin } from 'lucide-react';
 import { useId, useRef, useState, type ReactElement } from 'react';
 import { Sheet } from '@/components/ui/Sheet';
-import { LIMITS, OTHER_POST, POSTS, type PostValue } from '@/lib/domain';
+import { eventPosts, useEventConfig } from '@/lib/client/event-config';
+import { LIMITS, OTHER_POST, type PostValue } from '@/lib/domain';
 import './request-form.css';
 
 export interface PostChoice {
@@ -96,6 +97,7 @@ function PostPickerBody({ value, onDone }: { value: PostChoice | null; onDone: (
   const [other, setOther] = useState(value?.otherLocation ?? '');
   const name = useId();
   const choice = postChoiceFrom(post, other);
+  const options = [...eventPosts(useEventConfig()).map((p) => p.label), OTHER_POST];
   const done = () => {
     if (choice) onDone(choice);
   };
@@ -108,20 +110,20 @@ function PostPickerBody({ value, onDone }: { value: PostChoice | null; onDone: (
       }}
     >
       <div className="lp-rf-grp lp-rf-opts" role="radiogroup" aria-label="Reporting from">
-        {POSTS.map((p) => {
-          const checked = post === p.value;
+        {options.map((label) => {
+          const checked = post === label;
           return (
-            <label key={p.value} className="lp-rf-opt">
+            <label key={label} className="lp-rf-opt">
               <input
                 className="lp-rf-radio"
                 type="radio"
                 name={name}
-                value={p.value}
+                value={label}
                 checked={checked}
-                onChange={() => setPost(p.value)}
+                onChange={() => setPost(label)}
               />
               <MapPin size={17} strokeWidth={1.75} aria-hidden />
-              <span className="lp-rf-sp">{p.value}</span>
+              <span className="lp-rf-sp">{label}</span>
               {checked ? (
                 <span className="lp-rf-ck">
                   <Check size={17} strokeWidth={1.75} aria-hidden />

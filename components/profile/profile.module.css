@@ -728,3 +728,11 @@ button.portrait {
 :global(body):has(.foot) :global(.lp-snack) {
   bottom: calc(max(26px, calc(env(safe-area-inset-bottom) + 8px)) + 52px + 12px);
 }
+
+/* (Events) The request number and, in practice, the stage chip beside it. */
+.navMid {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}

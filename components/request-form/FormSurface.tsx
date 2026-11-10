@@ -11,6 +11,7 @@ import { X } from 'lucide-react';
 import { useRef, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { isOverlay, isSendShortcut, type FormPresentation } from './presentation';
 import './request-form.css';
+import { EventStageChip } from '@/components/ui/EventStageChip';
 
 export interface FormSurfaceProps {
   presentation: FormPresentation;
@@ -49,7 +50,10 @@ export function FormSurface({ rootRef, ...props }: FormSurfaceProps) {
           <Heading as="h1" size="3" weight="medium" className="lp-rf-title">
             {title}
           </Heading>
-          <span aria-hidden />
+          {/* (Events) Practice: the chip, so nobody logs a real request into practice. */}
+          <span className="lp-rf-stage">
+            <EventStageChip practiceOnly />
+          </span>
         </header>
         {children}
       </div>
@@ -100,6 +104,7 @@ export function FormSurface({ rootRef, ...props }: FormSurfaceProps) {
           <Dialog.Title as="h2" size="3" mb="0" trim="normal" className="lp-rf-dtitle">
             {title}
           </Dialog.Title>
+          <EventStageChip practiceOnly className="lp-rf-dstage" />
           <span className="lp-rf-sp" />
           {props.headerExtra}
           <IconButton

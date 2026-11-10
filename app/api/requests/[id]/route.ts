@@ -12,6 +12,7 @@ import { mapDetail, mapRow, patchPayload } from '@/lib/server/mappers';
 import { readThread, withActivity } from '@/lib/server/messages';
 import { notifyLater } from '@/lib/server/notify';
 import { withReclassify } from '@/lib/server/reclassify';
+import { postNames, teamNames } from '@/lib/server/events';
 import { authedRoute } from '@/lib/server/route';
 import { rpc } from '@/lib/server/supabase';
 import { updateRequestSchema } from '@/lib/validation';
@@ -21,15 +22,15 @@ export const dynamic = 'force-dynamic';
 
 type P = { id: string };
 
-export const GET = authedRoute<P>('GET /api/requests/[id]', {}, async ({ params, session, eventId }) => {
+export const GET = authedRoute<P>('GET /api/requests/[id]', {}, async ({ params, session, eventId, event }) => {
   const id = idParam(params);
-  const [raw, thread] = await Promise.all([rpc<unknown>('lp_detail', { p_event: eventId, p_id: id }), readThread(eventId, id, session.staff)]);
-  const base = mapDetail(raw);
+  const [raw, thread] = await Promise.all([rpc<unknown>('lp_detail', { p_event: eventId, p_id: id }), readThread(eventId, id, session.staff, teamNames(event))]);
+  const base = mapDetail(raw, postNames(event));
   const detail: RequestDetail = thread ? { ...(withActivity(base, thread.activity) as RequestDetail), thread } : base;
   return json(detail);
 });
 
-export const PATCH = authedRoute<P>('PATCH /api/requests/[id]', {}, async ({ request, params, session, eventId }) => {
+export const PATCH = authedRoute<P>('PATCH /api/requests/[id]', {}, async ({ request, params, session, eventId, event }) => {
   const id = idParam(params);
   const body = await readJson(request, updateRequestSchema);
   const data = await withReclassify(eventId, id, { fn: 'update', expectedVersion: body.expectedVersion }, () =>
@@ -41,7 +42,7 @@ export const PATCH = authedRoute<P>('PATCH /api/requests/[id]', {}, async ({ req
       p_staff: session.staff,
     }),
   );
-  const out: ChangeResponse = { changed: data.changed === true, request: mapRow(data.row) };
+  const out: ChangeResponse = { changed: data.changed === true, request: mapRow(data.row, postNames(event)) };
   if (out.changed) {
     const status = out.request.status;
     await notifyLater(eventId, () => involvedStaff(eventId, id), () => editEventFor(id, session.staff, status));
