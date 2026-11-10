@@ -71,5 +71,9 @@ To go forward again: the same cut-over from step 1 (the file is safe to run twic
 - `~/.config/lp-stacks/use.sh N <worktree>` does it for you: on a worktree that has the events file it applies the
   rework file twice and then every later migration in order, the events file last. On a branch without the events file
   it does what it always did.
+- A stack that has had the events file is not fit for a branch without it (`main`, `e2e-lanes`), even after `use.sh`:
+  the rework file alone does not bring back the later files' functions. Paste
+  `supabase/rollback/20261110000000_events_down.sql` into it first (it refuses while an event is live or has requests,
+  so end the test events and remove their rows), or give that branch a stack that never had the events file.
 - New migrations go after the events file and must keep its guards: every write RPC calls `lp_require_writable(event)`
   first; requests and their audit, messages, photos and en route rows of an archived event are refused by triggers.

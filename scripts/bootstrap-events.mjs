@@ -30,6 +30,8 @@ function die(message) {
   console.error(`bootstrap-events: ${message}`);
   process.exit(1);
 }
+// Anything else on the command line is refused, unnamed: it may be a passcode typed where it must never go.
+if ([...args].some((a) => a !== '--dry-run' && a !== '--force')) die('only --dry-run and --force are accepted; the lead passcode is typed at the prompt or piped on stdin.');
 const env = (name) => {
   const v = process.env[name];
   return v === undefined || v.trim() === '' ? undefined : v.trim();

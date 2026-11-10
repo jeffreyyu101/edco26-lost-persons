@@ -426,6 +426,11 @@ describe('end → event_ended at every layer; staff are locked out, leads keep r
       ['message read', `/api/requests/${r.id}/messages/read`, { method: 'POST', json: {} }],
       ['activity read', '/api/activity/read', { method: 'POST', json: { all: true } }],
       ['push prefs', '/api/push/prefs', { method: 'POST', json: { newRequests: true } }],
+      // The rest of the signed-in routes: the wrapper answers before the body is read.
+      ['activity unread mark', '/api/activity/unread', { method: 'POST', json: {} }],
+      ['push subscribe', '/api/push/subscribe', { method: 'POST', json: {} }],
+      ['push test', '/api/push/test', { method: 'POST', json: {} }],
+      ['telemetry', '/api/telemetry', { method: 'POST', json: {} }],
       // GET /api/session reports the end (the Ended screen), not a bare 401.
       ['session', '/api/session', {}],
     ];
@@ -874,6 +879,11 @@ describe('scripts/bootstrap-events.mjs (the one-time bootstrap, run here against
     const fromEnv = await run({ ...env, LP_LEAD_PASSCODE: lead }, ['--force'], lead);
     expect(fromEnv.status).toBe(1);
     expect(fromEnv.stderr).toContain('LP_LEAD_PASSCODE is not read');
+    // Nor from the command line: any other argument is refused without being echoed.
+    const fromArgv = await run(env, ['--force', lead], lead);
+    expect(fromArgv.status).toBe(1);
+    expect(fromArgv.stderr).toContain('only --dry-run and --force');
+    expect(fromArgv.stdout + fromArgv.stderr).not.toContain(lead);
     const empty = await run(env, ['--force']);
     expect(empty.status).toBe(1);
     expect(empty.stderr).toContain('at least 8 characters');
