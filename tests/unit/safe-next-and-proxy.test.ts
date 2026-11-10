@@ -117,6 +117,19 @@ describe('proxy auth redirects', () => {
     expect((await proxy(request('/health', signed!.token))).headers.get('x-middleware-next')).toBe('1');
   });
 
+  it('(events) sends a lead with no event open from / to the Events list; a lead with one open gets the log', async () => {
+    process.env.SESSION_SECRET = SECRET;
+    const noEvent = await signSessionToken({ staffName: 'Dana Kim', team: 'GC/HX - Dispatch', eventId: null, role: 'lead', pv: 1 }, SECRET);
+    const home = await proxy(request('/?r=x', noEvent!.token));
+    expect(home.status).toBe(307);
+    expect(new URL(home.headers.get('location') ?? '').pathname).toBe('/events');
+    expect(home.headers.get('cache-control')).toBe('no-store');
+    expect((await proxy(request('/events', noEvent!.token))).headers.get('x-middleware-next')).toBe('1');
+    expect(safeNextPath('/events')).toBe('/events');
+    const withEvent = await signSessionToken({ staffName: 'Dana Kim', team: 'GC/HX - Dispatch', eventId: '10ca1000-0000-4000-8000-000000000001', role: 'lead', pv: 1 }, SECRET);
+    expect((await proxy(request('/', withEvent!.token))).headers.get('x-middleware-next')).toBe('1');
+  });
+
   it('rejects a cookie signed with a different secret', async () => {
     process.env.SESSION_SECRET = SECRET;
     const signed = await signSessionToken({ staffName: 'Dana Kim', team: 'Medical', eventId: '10ca1000-0000-4000-8000-000000000001', role: 'staff' }, `${SECRET}-other`);
