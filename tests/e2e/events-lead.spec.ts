@@ -194,7 +194,8 @@ test('the whole journey with no developer: create, set up, practice, go live, en
   // restarts at LP-0001.
   await page.getByTestId('stage-go-live').click();
   const sheet = page.getByRole('dialog', { name: 'Go live' });
-  await expect(sheet).toContainText('Practice requests are deleted and numbering restarts at LP-0001.');
+  await expect(sheet).toHaveAccessibleDescription('Practice requests are deleted and numbering restarts at LP-0001.');
+  await expect(sheet.getByTestId('sheet-practice-deleted')).toHaveText('Deleted');
   await expect(sheet.getByTestId('sheet-practice-count')).toHaveText('2');
   await expect(sheet).toContainText('LP-0001');
   await sheet.getByTestId('stage-confirm').click();
@@ -215,7 +216,11 @@ test('the whole journey with no developer: create, set up, practice, go live, en
   // End event: staff are refused from then on; nothing is deleted.
   await page.getByTestId('stage-end').click();
   const end = page.getByRole('dialog', { name: 'End event' });
-  await expect(end).toContainText('Staff are signed out and nothing is deleted; within 24 hours it can be reopened with the same password and join link.');
+  // No sentence on screen: rows and chips; the sentence is the sheet's description.
+  await expect(end).toHaveAccessibleDescription('Staff are signed out and nothing is deleted; within 24 hours it can be reopened with the same password and join link.');
+  await expect(end.getByTestId('end-staff')).toContainText('Signed out');
+  await expect(end.getByTestId('end-records')).toContainText('Kept');
+  await expect(end.getByTestId('end-hold')).toContainText('Kept 24 h');
   await end.getByTestId('stage-confirm').click();
   await expect(end).toHaveCount(0);
   await expect(page.getByTestId('event-stage')).toHaveText('Archived');
@@ -237,7 +242,9 @@ test('the whole journey with no developer: create, set up, practice, go live, en
   // lead changes the password; the old one no longer works.
   await page.getByTestId('stage-reopen').click();
   const reopen = page.getByRole('dialog', { name: 'Reopen' });
-  await expect(reopen).toContainText('Open requests resume as they were; staff sign in again.');
+  await expect(reopen).toHaveAccessibleDescription('Open requests resume as they were; staff sign in again.');
+  await expect(reopen.getByTestId('reopen-staff')).toContainText('Sign in again');
+  await expect(reopen.getByTestId('reopen-open')).toContainText(/^\d+$/);
   await expect(reopen.getByTestId('reopen-password')).toContainText('Kept');
   await expect(reopen.getByTestId('reopen-join-link')).toContainText('Kept');
   await reopen.getByTestId('stage-confirm').click();

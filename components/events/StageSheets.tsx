@@ -1,12 +1,13 @@
 'use client';
 // (Events, lead screens) The confirmation sheets of the stage actions: Go live (design/screens/events-v2-h), End event
-// (events-v1-e) and Reopen. Each shows the event, the stage it moves from and to, the numbers it acts on, and one
-// line of fact: these actions delete, lock out or clear, so here a full sentence is right.
+// (events-v1-e) and Reopen. Each shows the event, the stage it moves from and to, the numbers it acts on, and what
+// happens as tiles, rows and chips (design/screens/events-v2-sheet-1: no sentences on screen). The full sentence of
+// fact is the sheet's screen-reader description (visually hidden; Radix wires aria-describedby to it).
 // (Grace period) Reopen also shows what it keeps: Password and Join link, each Kept or New one needed, and the time
-// left while inside the 24 h after End.
+// left while inside the 24 h after End; then Open requests and Staff.
 import { Button, VisuallyHidden } from '@radix-ui/themes';
-import { Archive, ArrowRight, Check, RefreshCw, RotateCcw } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Archive, ArrowRight, Check, RefreshCw, RotateCcw, Trash2 } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { EventAdmin, EventStage } from '@/lib/api-types';
 import { Sheet, SheetDescription, SheetTitle } from '@/components/ui/Sheet';
 import { formatLeft, reopenKeeps, spokenLeft } from './format';
@@ -39,8 +40,39 @@ function KeepRow({ label, kept, testId, spoken }: { label: string; kept: boolean
   );
 }
 
+/** A row of the sheet's rows card: the label, then the value (text or a chip). */
+function FactRow({ label, children, testId }: { label: string; children: ReactNode; testId?: string }) {
+  return (
+    <div className={s.r} data-testid={testId}>
+      <span className={s.k}>{label}</span>
+      <span className={`${s.v} ${s.left}`}>{children}</span>
+    </div>
+  );
+}
+
+/** End: what happens to staff, records, and the password and join link. */
+function EndFacts() {
+  return (
+    <div className={`${s.grp} ${s.keeps}`} data-testid="end-facts">
+      <FactRow label="Staff" testId="end-staff">
+        Signed out
+      </FactRow>
+      <div className={s.r} data-testid="end-records">
+        <span className={s.k}>Records</span>
+        <span className={s.keep} data-kept="true">
+          <Check size={13} strokeWidth={2.25} aria-hidden />
+          Kept
+        </span>
+      </div>
+      <FactRow label="Password and link" testId="end-hold">
+        Kept 24 h
+      </FactRow>
+    </div>
+  );
+}
+
 /** Reopen: what it keeps, judged by the clock while the sheet is open (the server decides again at Reopen). */
-function ReopenKeeps({ event }: { event: EventAdmin }) {
+function ReopenKeeps({ event, open }: { event: EventAdmin; open: string }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = window.setInterval(() => setNow(Date.now()), 15_000);
@@ -70,6 +102,12 @@ function ReopenKeeps({ event }: { event: EventAdmin }) {
           </span>
         </div>
       ) : null}
+      <FactRow label="Open requests" testId="reopen-open">
+        {open}
+      </FactRow>
+      <FactRow label="Staff" testId="reopen-staff">
+        Sign in again
+      </FactRow>
     </div>
   );
 }
@@ -118,8 +156,16 @@ export function StageSheet({ action, event, counts, onClose, onConfirm }: StageS
           <>
             <div>
               <div className={s.tileK}>Practice requests</div>
-              <div className={s.tileV} data-testid="sheet-practice-count">
-                {n(counts?.requests)}
+              <div className={s.tileRow}>
+                <span className={s.tileV} data-testid="sheet-practice-count">
+                  {n(counts?.requests)}
+                </span>
+                {counts && counts.requests > 0 ? (
+                  <span className={s.keep} data-kept="false" data-testid="sheet-practice-deleted">
+                    <Trash2 size={12} strokeWidth={2.25} aria-hidden />
+                    Deleted
+                  </span>
+                ) : null}
               </div>
             </div>
             <div>
@@ -140,8 +186,15 @@ export function StageSheet({ action, event, counts, onClose, onConfirm }: StageS
           </>
         )}
       </div>
-      {action === 'reopen' ? <ReopenKeeps event={event} /> : null}
-      <SheetDescription className={s.fact}>{blocked ? 'Add at least one post and one team first.' : FACT[action]}</SheetDescription>
+      {action === 'end' ? <EndFacts /> : null}
+      {action === 'reopen' ? <ReopenKeeps event={event} open={n(counts?.open)} /> : null}
+      {blocked ? (
+        <SheetDescription className={s.fact}>Add at least one post and one team first.</SheetDescription>
+      ) : (
+        <VisuallyHidden>
+          <SheetDescription>{FACT[action]}</SheetDescription>
+        </VisuallyHidden>
+      )}
       {error ? <FieldError id="stage-error">{error}</FieldError> : null}
       <div className={s.sheetActs} style={{ marginTop: error ? 12 : 0 }}>
         <Button size="4" variant="soft" color="gray" onClick={onClose} disabled={busy}>

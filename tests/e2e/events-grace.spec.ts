@@ -92,7 +92,11 @@ test('End by mistake, Reopen inside 24 h: staff see Ended, then sign back in wit
   await openSetup(leadPage, event);
   await leadPage.getByTestId('stage-end').click();
   const end = leadPage.getByRole('dialog', { name: 'End event' });
-  await expect(end).toContainText('Staff are signed out and nothing is deleted; within 24 hours it can be reopened with the same password and join link.');
+  // No sentence on screen: rows and chips; the sentence is the sheet's description.
+  await expect(end).toHaveAccessibleDescription('Staff are signed out and nothing is deleted; within 24 hours it can be reopened with the same password and join link.');
+  await expect(end.getByTestId('end-staff')).toContainText('Signed out');
+  await expect(end.getByTestId('end-records')).toContainText('Kept');
+  await expect(end.getByTestId('end-hold')).toContainText('Kept 24 h');
   await end.getByTestId('stage-confirm').click();
   await expect(end).toHaveCount(0);
   await expect(leadPage.getByTestId('event-stage')).toHaveText('Archived');
@@ -112,7 +116,9 @@ test('End by mistake, Reopen inside 24 h: staff see Ended, then sign back in wit
   await expect(reopen.getByTestId('reopen-password')).toContainText('Kept');
   await expect(reopen.getByTestId('reopen-join-link')).toHaveAttribute('data-kept', 'true');
   await expect(reopen.getByTestId('reopen-left')).toContainText(/^(23 h [0-5]?\d m|24 h 0 m)/);
-  await expect(reopen).toContainText('Open requests resume as they were; staff sign in again.');
+  await expect(reopen).toHaveAccessibleDescription('Open requests resume as they were; staff sign in again.');
+  await expect(reopen.getByTestId('reopen-staff')).toContainText('Sign in again');
+  await expect(reopen.getByTestId('reopen-open')).toContainText(/^\d+$/);
   await reopen.getByTestId('stage-confirm').click();
   await expect(reopen).toHaveCount(0);
   await expect(leadPage.getByTestId('event-stage')).toHaveText('Live');
