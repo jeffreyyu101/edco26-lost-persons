@@ -15,6 +15,7 @@
 // Privacy: nothing here logs (no console use at all); errors carry codes, never request data.
 import type {
   ApiError,
+  EndedEvent,
   ChangeResponse,
   CreateRequestBody,
   CreateResponse,
@@ -87,11 +88,12 @@ import {
   type Kv,
   type StoredCursor,
   type StoredDraft,
-  type StoredEventMeta,
-  type StoredJob,
   type StoredStaff,
 } from './persist';
-import { ENDED_PATH, clearEventDrops, readEventDrops, rememberEnded } from './ended';
+import type * as LifecycleModuleNs from './event-lifecycle';
+import type { LifecycleHost } from './event-lifecycle';
+
+type LifecycleModule = typeof LifecycleModuleNs;
 import { forgetBell, readPrefs, subscribePrefs, writePref } from './prefs';
 import { dropBrowserPush, provideApi, publishSyncExtras, pushHooks } from './f4-bridge';
 import { SESSION_CHANNEL, clearLogoutPending, readLogoutPending, writeLogoutPending, type LogoutPending } from './session-signals';
@@ -117,7 +119,7 @@ import {
 import { chunk, isRow, mergeRows, overlayForPatch, replaceAll, sameRow, staleIds, summaryOf } from './sync-merge';
 import type { HoldFields, HoldRules } from './hold-rules';
 import { uuid } from './uuid';
-import { readStoredEvent, writeStoredEvent } from './event-config';
+import { readStoredEvent, writeStoredEvent } from './event-store';
 
 // ---------------------------------------------------------------------------------------------------
 // Environment (injectable for tests; the browser default is built lazily in start())
@@ -1016,13 +1018,15 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     const event = error?.event ?? null;
     const eventId = event?.id ?? state.event?.id ?? eventKey;
     ending = true;
-    rememberEnded(event ? { ...event, id: eventId } : state.event ? { id: eventId, name: state.event.name, logoUrl: state.event.logoUrl, stage: 'archived' } : null, env?.sessionStorage() ?? null);
+    const shown = event ? { ...event, id: eventId } : state.event ? { id: eventId, name: state.event.name, logoUrl: state.event.logoUrl, stage: 'archived' as const } : null;
     broadcast({ type: 'ended', eventId });
-    void leaveEndedEvent(eventId);
+    void leaveEndedEvent(eventId, shown);
   };
 
-  const leaveEndedEvent = async (eventId: string) => {
+  const leaveEndedEvent = async (eventId: string, shown: EndedEvent | null) => {
     const e = env;
+    // What the Ended screen shows (this tab's sessionStorage).
+    void lifecycle().then((m) => m.rememberEnded(shown, e?.sessionStorage() ?? null), () => undefined);
     haltRuntime();
     abortInflight();
     if (snackTimer) clearTimeout(snackTimer);
@@ -1042,33 +1046,19 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     e?.redirect(ENDED_PATH);
   };
 
-  /**
-   * (Events) The event went live since this phone cached it (practice → live deletes every practice request on the
-   * server, and a delta sync never removes a row): its cache goes, for every staff, and so do the creates queued while
-   * it was in practice. Remembers when the cache's event went live (K.meta). True when it dropped the cache.
-   */
-  const checkWentLive = async (eventId: string, wentLiveAt: string | null): Promise<boolean> => {
-    if (!kv || eventId === NO_EVENT) return false;
-    const meta = await enqueue((store) => store.get<StoredEventMeta>(K.meta(eventId)));
-    const changed = !!meta && (meta.wentLiveAt ?? null) !== wentLiveAt;
-    if (changed) await dropEventData(eventId, { practiceOnly: wentLiveAt });
-    if (!meta || changed) {
-      const record: StoredEventMeta = { wentLiveAt };
-      await enqueue((store) => store.set(K.meta(eventId), record));
-    }
-    return changed;
-  };
-
-  /**
-   * (Events) Deletes one event's data on this phone: its cache (every staff's rows, cursors, threads), and its queued
-   * creates, messages and draft. `practiceOnly` (go-live): only the creates queued in practice (stamped with an
-   * earlier wentLiveAt) go; the rest of the outbox stays. When it is the loaded event, the screen empties too.
-   */
-  const dropEventData = async (eventId: string, opts: { practiceOnly?: string | null } = {}) => {
-    const practice = opts.practiceOnly !== undefined;
-    const dropsJob = (job: Pick<StoredJob, 'eventId' | 'wentLiveAt'> | null | undefined) =>
-      !!job && (job.eventId ?? NO_EVENT) === eventId && (!practice || (job.wentLiveAt !== undefined && (job.wentLiveAt ?? null) !== opts.practiceOnly));
-    if (cacheEvent === eventId) {
+  // (Events) The event lifecycle on this phone (lib/client/event-lifecycle.ts): loaded with import(), off the first load.
+  let lifecycleLoad: Promise<LifecycleModule> | null = null;
+  const lifecycle = () =>
+    (lifecycleLoad ??= import('./event-lifecycle').catch((error: unknown) => {
+      lifecycleLoad = null;
+      throw error;
+    }));
+  const lifecycleHost: LifecycleHost = {
+    kv: () => kv,
+    enqueue,
+    cacheEvent: () => cacheEvent,
+    eventKey: () => eventKey,
+    clearLoaded: () => {
       staffEpoch += 1; // a sync begun before this applies nothing
       rowsDirty = false;
       if (rowsTimer) clearTimeout(rowsTimer);
@@ -1078,23 +1068,19 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       setArmed(false);
       alertBacklog = [];
       set({ confirmed: new Map(), pending: new Map(), hasData: false });
-    }
-    if (eventKey === eventId) {
-      const left = state.outbox.filter((j) => !dropsJob(j));
-      if (left.length !== state.outbox.length) setJobs(left);
-    }
-    await enqueue(async (store) => {
-      for (const k of await store.keys()) {
-        if (k.startsWith(K.eventCache(eventId))) await store.del(k);
-        else if (k.startsWith('outbox:') && dropsJob(await store.get<StoredJob>(k))) await store.del(k);
-        else if (!practice && k.startsWith('mjob:') && ((await store.get<{ eventId?: string }>(k))?.eventId ?? NO_EVENT) === eventId) await store.del(k);
-        else if (!practice && k === K.draft && ((await store.get<StoredDraft>(k))?.eventId ?? NO_EVENT) === eventId) await store.del(k);
-      }
-    });
-    await gcBlobs();
-    broadcast({ type: 'outbox' });
-    refreshPrompt();
+    },
+    outbox: () => state.outbox,
+    setJobs: (jobs) => setJobs(jobs),
+    afterDrop: async () => {
+      await gcBlobs();
+      broadcast({ type: 'outbox' });
+      refreshPrompt();
+    },
   };
+  /** Practice → live since this phone cached the event: its cache and practice creates go (event-lifecycle.ts). */
+  const checkWentLive = async (eventId: string, wentLiveAt: string | null) => (await lifecycle()).checkWentLive(lifecycleHost, eventId, wentLiveAt);
+  /** One event's data leaves this phone (event-lifecycle.ts). */
+  const dropEventData = async (eventId: string) => (await lifecycle()).dropEventData(lifecycleHost, eventId);
 
   /** False when a sign-out overtook it (nothing applied then). */
   const applySession = async (info: SessionInfo): Promise<boolean> => {
@@ -1102,7 +1088,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     const canon = canonStaff(info.staff) ?? '';
     const event = info.eventId ?? NO_EVENT;
     // (Events) Practice → live since this phone cached the event: its cache and practice creates go first.
-    if (info.event) await checkWentLive(event, info.event.wentLiveAt ?? null);
+    if (info.event) await checkWentLive(event, info.event.wentLiveAt ?? null).catch(() => false);
     if (gen !== state.generation || signingOut || ending) return false;
     const otherEvent = event !== eventKey;
     if (cacheStaff !== canon || cacheEvent !== event) {
@@ -2899,9 +2885,13 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     if (!isLive(id)) return;
     if (durable && kv) {
       // (Events) Ended events this phone learned of at sign-in (lib/client/ended.ts): their data goes first.
-      const drops = readEventDrops(e.localStorage());
-      for (const eventId of drops) await dropEventData(eventId).catch(() => undefined);
-      if (drops.length) clearEventDrops(drops, e.localStorage());
+      // (Events) Ended events this phone learned of at sign-in (lib/client/ended.ts DROP_KEY): their data goes first.
+      if (e.localStorage()?.getItem(DROP_EVENTS_KEY)) {
+        const m = await lifecycle().catch(() => null);
+        const drops = m?.readEventDrops(e.localStorage()) ?? [];
+        for (const eventId of drops) await dropEventData(eventId).catch(() => undefined);
+        if (m && drops.length) m.clearEventDrops(drops, e.localStorage());
+      }
       if (!isLive(id)) return;
       try {
         const last = await kv.get<StoredStaff>(K.lastStaff);
@@ -3110,6 +3100,11 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     start,
   };
 }
+
+/** /signin?ended=1, the Ended screen (lib/client/ended.ts ENDED_PATH; a literal here, so the store needs no import). */
+const ENDED_PATH = '/signin?ended=1';
+/** lib/client/ended.ts DROP_KEY. */
+const DROP_EVENTS_KEY = 'lp-drop-events';
 
 const syncPathFor = (since: string | null, reconcile: boolean, after: SyncResponse['next'], ev?: string) =>
   syncPath({ since, reconcile, after, ...(ev !== undefined ? { ev } : {}) });

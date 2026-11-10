@@ -19,7 +19,7 @@
 // row from showing before hydration (lib/brand-pref.ts).
 import { X } from 'lucide-react';
 import { memo } from 'react';
-import { BrandEventDates, BrandEventLogo } from './BrandEvent';
+import { BrandEventDatesSlot, BrandEventLogoSlot } from './BrandEventSlot';
 import b from './brand.module.css';
 
 /** The X's accessible name; the avatar menu item that undoes it is "Show header". */
@@ -40,7 +40,7 @@ export const BrandCard = memo(function BrandCard({ onHide, logoLoading }: BrandC
   return (
     <div className={b.brand} data-testid="brand-card">
       <div className={b.logos}>
-        <BrandEventLogo loading={logoLoading} />
+        <BrandEventLogoSlot loading={logoLoading} />
         <img className={b.gc} src="/logos/ground-control.png" alt="Ground Control" width={313} height={120} decoding="async" loading={logoLoading} />
       </div>
       <span className={`${b.div} ${b.wideOnly}`} aria-hidden="true" />
@@ -48,7 +48,7 @@ export const BrandCard = memo(function BrandCard({ onHide, logoLoading }: BrandC
         <p className={b.title}>
           Is my friend <span className={b.accent}>in medical?</span>
         </p>
-        <BrandEventDates />
+        <BrandEventDatesSlot />
       </div>
       <button
         type="button"
