@@ -299,9 +299,14 @@
   letter-spacing: -0.02em;
 }
 
+.tile > span {
+  max-width: 100%;
+}
+
 .tile img {
   width: 100%;
   height: 100%;
+  max-width: 100%;
   object-fit: contain;
 }
 
@@ -788,6 +793,13 @@
 .tileK {
   font-size: 14px;
   color: var(--gray-11);
+}
+
+.tileRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
 }
 
 .tileV {

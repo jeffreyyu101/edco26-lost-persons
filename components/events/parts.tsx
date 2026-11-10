@@ -4,6 +4,7 @@
 import { Archive, CircleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { EventStage } from '@/lib/api-types';
+import { EventLogo as ThemedLogo } from '@/components/ui/EventLogo';
 import { initials } from './format';
 import s from './events.module.css';
 
@@ -34,11 +35,15 @@ export function StageChip({ stage }: { stage: EventStage }) {
   );
 }
 
-/** The event's logo on a tile, or its initials. Decoration: the name is always next to it. */
+/**
+ * The event's logo on a tile, or its initials. Decoration: the name is always next to it. A single-colour transparent
+ * logo is drawn in the theme's ink (dark on light, white on dark), as on sign-in (components/ui/EventLogo.tsx); any
+ * other logo as uploaded.
+ */
 export function EventLogo({ name, logoUrl, size = 44 }: { name: string; logoUrl: string | null; size?: number }) {
   return (
     <span className={s.tile} style={{ width: size, height: size, borderRadius: Math.round(size * 0.23), fontSize: Math.round(size * 0.38) }} aria-hidden>
-      {logoUrl ? <img src={logoUrl} alt="" width={size} height={size} decoding="async" draggable={false} /> : initials(name)}
+      {logoUrl ? <ThemedLogo src={logoUrl} surface="theme" height={size} /> : initials(name)}
     </span>
   );
 }
