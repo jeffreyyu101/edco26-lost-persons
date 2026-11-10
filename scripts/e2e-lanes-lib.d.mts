@@ -71,3 +71,11 @@ export declare function resourceProblems(
   r: ResourceSnapshot,
   limits?: { perLaneHost?: number; hostReserve?: number; perStackVm?: number; vmReserve?: number; minDisk?: number },
 ): string[];
+export interface StackSeen {
+  n: number;
+  running: boolean;
+  /** When its claim was made (ms), or null when unclaimed. */
+  claimedAtMs: number | null;
+}
+export declare function stackClaimOrder(stacks: StackSeen[], nowMs: number, staleMs?: number): Array<{ n: number; running: boolean; stale: boolean }>;
+export declare function stackAfterRun(foundRunning: boolean, keepStacks: boolean): 'leave-running' | 'stop';

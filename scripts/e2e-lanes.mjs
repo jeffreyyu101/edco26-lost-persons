@@ -10,7 +10,9 @@
 //   npm run test:e2e:lanes -- -- --grep "dashboard"   # everything after a second `--` goes to Playwright
 //
 // How a lane is isolated (docs: README "Parallel lanes"):
-//   * Stack: claimed with ~/.config/lp-stacks/claim.sh, created/started with make.sh, then `supabase db reset`,
+//   * Stack: claimed the way ~/.config/lp-stacks/claim.sh does (an atomic /tmp/lp-stack-sN.claim directory), but a
+//     stopped free stack first: a free stack that is running is claimed only when no other is free, and the log says
+//     so. Created/started with make.sh, then `supabase db reset`,
 //     the synthetic seed and its photos (what `npm run db:reset` does, against that stack) and the auto-close job
 //     paused. The scripts in ~/.config/lp-stacks are used as they are; use.sh is NOT used, because it rewrites
 //     .env.test inside the worktree (and the test tooling reads that one file through a path fixed at ROOT).
@@ -26,7 +28,8 @@
 // with `playwright test --list`; any test missing, duplicated or unexpected fails the run.
 //
 // On exit (normal, error, Ctrl-C, SIGTERM) every server and Playwright process it started is stopped, every stack it
-// claimed is released (and stopped, unless --keep-stacks), and the lane copies are deleted.
+// claimed is released and left as it was found (a stack that was running stays running, with its auth container
+// started again; one that was stopped is stopped, unless --keep-stacks), and the lane copies are deleted.
 import { execFile, spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statfsSync, writeFileSync, createWriteStream } from 'node:fs';
 import { createServer } from 'node:net';
@@ -44,6 +47,8 @@ import {
   parseMeminfo,
   partition,
   resourceProblems,
+  stackAfterRun,
+  stackClaimOrder,
   tally,
   unitsFrom,
   updateTimings,
@@ -113,6 +118,8 @@ const say = (msg) => console.log(`[${((Date.now() - startedAt) / 1000).toFixed(0
 const tracked = new Set();
 const claimed = []; // stack numbers
 const startedStacks = new Set();
+/** The claimed stacks that were already running when claimed: they are left running. */
+const foundRunning = new Set();
 let cleaning = null;
 
 function run(cmd, args, { cwd = ROOT, env = process.env, log, input, timeoutMs = 10 * 60_000, track = true } = {}) {
@@ -201,18 +208,17 @@ async function cleanup(reason) {
     const until = Date.now() + 8_000;
     while (tracked.size && Date.now() < until) await sleep(200);
     for (const child of tracked) killGroup(child, 'SIGKILL');
-    if (opt.keepStacks && !opt.keepAuth) {
-      for (const n of startedStacks) await run('docker', ['start', `supabase_auth_lp-s${n}`], { track: false });
+    const after = (n) => stackAfterRun(foundRunning.has(n), opt.keepStacks);
+    if (!opt.keepAuth) {
+      for (const n of startedStacks) if (after(n) === 'leave-running') await run('docker', ['start', `supabase_auth_lp-s${n}`], { track: false });
     }
-    if (!opt.keepStacks) {
-      // One at a time, and checked: two `supabase` processes finishing together race on ~/.supabase/telemetry.json
-      // and one of them dies before it has stopped anything.
-      for (const n of startedStacks) {
-        for (let attempt = 1; attempt <= 3; attempt++) {
-          await run('supabase', ['stop', '--workdir', join(STACKS_HOME, `s${n}`)], { log: join(logDir, `stack-s${n}-stop.log`), timeoutMs: 120_000, track: false });
-          const up = (await capture('docker', ['ps', '--format', '{{.Names}}'])) ?? '';
-          if (!up.split('\n').includes(`supabase_db_lp-s${n}`)) break;
-        }
+    // One at a time, and checked: two `supabase` processes finishing together race on ~/.supabase/telemetry.json
+    // and one of them dies before it has stopped anything.
+    for (const n of [...startedStacks].filter((x) => after(x) === 'stop')) {
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        await run('supabase', ['stop', '--workdir', join(STACKS_HOME, `s${n}`)], { log: join(logDir, `stack-s${n}-stop.log`), timeoutMs: 120_000, track: false });
+        const up = (await capture('docker', ['ps', '--format', '{{.Names}}'])) ?? '';
+        if (!up.split('\n').includes(`supabase_db_lp-s${n}`)) break;
       }
     }
     for (const n of claimed.splice(0)) await run('zsh', [join(STACKS_DIR, 'release.sh'), String(n)], { track: false });
@@ -283,6 +289,60 @@ async function preflight(newStacks) {
   return snapshot;
 }
 
+// --- claiming a stack -----------------------------------------------------------------------------------------
+
+/** Every stack in ~/.lp-stacks: whether its database container runs, and when its claim (if any) was made. */
+async function seeStacks() {
+  const up = new Set(((await capture('docker', ['ps', '--format', '{{.Names}}'])) ?? '').split('\n').map((x) => x.trim()));
+  const out = [];
+  let dirs = [];
+  try {
+    dirs = readdirSync(STACKS_HOME).filter((d) => /^s\d+$/.test(d));
+  } catch {
+    // No stacks at all.
+  }
+  for (const d of dirs) {
+    const n = Number(d.slice(1));
+    const claimDir = `/tmp/lp-stack-s${n}.claim`;
+    let claimedAtMs = null;
+    if (existsSync(claimDir)) {
+      try {
+        claimedAtMs = Number(readFileSync(join(claimDir, 'owner'), 'utf8').trim().split(/\s+/)[1]) * 1000 || Date.now();
+      } catch {
+        claimedAtMs = Date.now(); // Being written right now: taken.
+      }
+    }
+    out.push({ n, running: up.has(`supabase_db_lp-s${n}`), claimedAtMs });
+  }
+  return out;
+}
+
+/**
+ * Claims a stack as claim.sh does (mkdir is the lock; owner file "<owner> <epoch s>"; a claim over 3 h old is stale),
+ * preferring a stopped free stack; a running free one only when no stopped one is free, said in the log. Waits like
+ * claim.sh (15 s polls, 30 min at most).
+ */
+async function claimStack(owner, laneNo) {
+  for (let attempt = 0; attempt < 120; attempt++) {
+    const seen = await seeStacks();
+    for (const c of stackClaimOrder(seen, Date.now())) {
+      const dir = `/tmp/lp-stack-s${c.n}.claim`;
+      if (c.stale) rmSync(dir, { recursive: true, force: true });
+      try {
+        mkdirSync(dir);
+      } catch {
+        continue; // Someone else got it first.
+      }
+      writeFileSync(join(dir, 'owner'), `${owner} ${Math.floor(Date.now() / 1000)}\n`);
+      if (c.running) say(`lane ${laneNo}: no stopped stack is free; claiming s${c.n}, which is running without a claim (it is left running afterwards)`);
+      return c;
+    }
+    if (attempt === 0) say(`lane ${laneNo}: no free stack; waiting for one (15 s polls, 30 min at most)`);
+    await sleep(15_000);
+  }
+  throw new Error('no free stack after 30 min');
+}
+
 // --- lane preparation -----------------------------------------------------------------------------------------
 
 async function cloneCheckout(dest, log) {
@@ -337,8 +397,8 @@ async function prepareStack(lane) {
   const { n, log } = lane;
   const workdir = join(STACKS_HOME, `s${n}`);
   say(`lane ${lane.index + 1}: starting stack s${n}`);
-  // Every stack this run claimed is stopped on exit, whether or not it was up when claimed: make.sh on a stack whose
-  // auth container this run stopped would fail for the next user.
+  // Every stack this run claimed is left on exit as it was found: stopped if it was stopped, else running with its
+  // auth container started again (make.sh on a stack whose auth container this run stopped would fail for the next user).
   startedStacks.add(n);
   // Starting a stack can fail while Docker is busy (a half-started db container); stop what is there and try again.
   for (let attempt = 1; ; attempt++) {
@@ -538,12 +598,12 @@ async function main() {
   const ports = await pickPorts(active.length, opt.basePort);
   for (const [i, lane] of active.entries()) {
     lane.port = ports[i];
-    const claim = await run('zsh', [join(STACKS_DIR, 'claim.sh'), `e2e-lanes-${process.pid}-lane${lane.index + 1}`], { log: lane.log, timeoutMs: 31 * 60_000 });
-    const n = Number(claim.stdout.trim().split('\n').pop());
-    if (!Number.isInteger(n) || n < 1) throw new Error('claim.sh gave no stack');
+    const got = await claimStack(`e2e-lanes-${process.pid}-lane${lane.index + 1}`, lane.index + 1);
+    const n = got.n;
     claimed.push(n);
+    if (got.running) foundRunning.add(n);
     lane.n = n;
-    say(`lane ${lane.index + 1}: claimed stack s${n}, app port ${lane.port}`);
+    say(`lane ${lane.index + 1}: claimed stack s${n}${got.running ? ' (was running; stays running)' : ''}, app port ${lane.port}`);
   }
   await Promise.all(
     active.map((lane) =>

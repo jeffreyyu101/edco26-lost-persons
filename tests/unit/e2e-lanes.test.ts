@@ -14,6 +14,8 @@ import {
   parseSize,
   partition,
   resourceProblems,
+  stackAfterRun,
+  stackClaimOrder,
   tally,
   testKey,
   unitsFrom,
@@ -223,5 +225,38 @@ describe('fmtDuration', () => {
   it('formats seconds and minutes', () => {
     expect(fmtDuration(45_200)).toBe('45.2s');
     expect(fmtDuration(723_000)).toBe('12m 03s');
+  });
+});
+
+describe('stackClaimOrder and stackAfterRun (a stack is left as it was found)', () => {
+  const now = 1_800_000_000_000;
+  it('tries free stopped stacks first, then free running ones; claimed ones never, unless the claim is over 3 h old', () => {
+    const order = stackClaimOrder(
+      [
+        { n: 5, running: true, claimedAtMs: null },
+        { n: 2, running: true, claimedAtMs: now - 60_000 },
+        { n: 7, running: false, claimedAtMs: null },
+        { n: 3, running: false, claimedAtMs: null },
+        { n: 4, running: false, claimedAtMs: now - 4 * 3600_000 },
+        { n: 6, running: true, claimedAtMs: now - 3600_000 },
+      ],
+      now,
+    );
+    expect(order).toEqual([
+      { n: 3, running: false, stale: false },
+      { n: 4, running: false, stale: true },
+      { n: 7, running: false, stale: false },
+      { n: 5, running: true, stale: false },
+    ]);
+  });
+  it('offers a running unclaimed stack when it is the only free one', () => {
+    expect(stackClaimOrder([{ n: 5, running: true, claimedAtMs: null }, { n: 2, running: false, claimedAtMs: now }], now)).toEqual([{ n: 5, running: true, stale: false }]);
+    expect(stackClaimOrder([{ n: 2, running: false, claimedAtMs: now }], now)).toEqual([]);
+  });
+  it('a stack that was running stays running; one that was stopped is stopped unless --keep-stacks', () => {
+    expect(stackAfterRun(true, false)).toBe('leave-running');
+    expect(stackAfterRun(true, true)).toBe('leave-running');
+    expect(stackAfterRun(false, false)).toBe('stop');
+    expect(stackAfterRun(false, true)).toBe('leave-running');
   });
 });

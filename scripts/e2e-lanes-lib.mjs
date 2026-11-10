@@ -254,3 +254,24 @@ export function resourceProblems(r, limits = {}) {
   }
   return problems;
 }
+
+/**
+ * The stacks a lane may claim, in the order to try them: free (unclaimed) and stopped first, then free but running
+ * (someone may be using it without a claim: only when nothing else is free). A claim older than `staleMs` counts as
+ * free, as in ~/.config/lp-stacks/claim.sh. Each entry says whether the stack was running when found, so the run can
+ * leave it that way.
+ */
+export function stackClaimOrder(stacks, nowMs, staleMs = 3 * 3600_000) {
+  const free = stacks.filter((s) => s.claimedAtMs === null || nowMs - s.claimedAtMs > staleMs);
+  const byN = (a, b) => a.n - b.n;
+  return [...free.filter((s) => !s.running).sort(byN), ...free.filter((s) => s.running).sort(byN)].map((s) => ({
+    n: s.n,
+    running: s.running,
+    stale: s.claimedAtMs !== null,
+  }));
+}
+
+/** What to do with a claimed stack at the end of a run: leave it as it was found (running stays running). */
+export function stackAfterRun(foundRunning, keepStacks) {
+  return foundRunning || keepStacks ? 'leave-running' : 'stop';
+}
