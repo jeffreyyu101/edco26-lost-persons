@@ -1,12 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
-import { BASE, apiCreate, endAll, endEvent, goLive, makeEvent, rowNames, signInContext, staffCookie, type TestEvent } from './helpers/events';
+import { BASE, apiCreate, endAll, endEvent, goLive, joinToken, makeEvent, rowNames, signInContext, staffCookie, type TestEvent } from './helpers/events';
 
 // (Events, phase 2) The client across events, against real events made through the lead routes:
 //   * config as data: a 1-post practice event and a 6-post live one (another time zone, the show day from 9 AM): the
 //     Reporting from picker, the Last seen chips, the dashboard's posts, the stage chips, the time zone;
 //   * one browser profile, two events: no cached row or queued request of one reaches the other;
 //   * practice → live drops the practice rows from the phone;
-//   * the Ended screen from a poll, a write and sign-in.
+//   * the Ended screen from a poll, a write and an old join link (an old password is a wrong password).
 // Every event is ended in afterAll. Synthetic names only. Runs in both browsers (chromium and webkit projects).
 
 test.describe.configure({ mode: 'serial' });
@@ -194,9 +194,11 @@ test('Ended from a write (a status tap), polls held: the Ended screen, no "only 
   await expect(page.getByText('Only the person who logged it can do that')).toHaveCount(0);
 });
 
-test("Ended from sign-in: the archived event's password opens the Ended screen, no password field", async ({ page }) => {
+test("Ended from sign-in: the archived event's old join link opens the Ended screen; its old password is a wrong password", async ({ page }) => {
   const event = await makeEvent({ name: uniq('Ended before'), posts: [{ id: 'p', label: 'Main Post', short: 'Main' }], teams: TEAMS });
+  const token = await joinToken(event.id);
   await endEvent(event.id);
+  // (Phase 3) The end cleared its password: the old one is just refused, like any wrong password.
   await page.goto('/signin');
   await expect(page.locator('html')).toHaveAttribute('data-hydrated', 'true');
   await page.getByRole('textbox', { name: 'Your name' }).fill(uniq('Late'));
@@ -204,5 +206,13 @@ test("Ended from sign-in: the archived event's password opens the Ended screen, 
   await page.getByRole('button', { name: 'Continue' }).click();
   await page.getByLabel('Event password').fill(event.password);
   await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByTestId('signin').getByRole('alert')).toContainText('Incorrect password');
+  await expect(page.getByTestId('ended')).toHaveCount(0);
+  // The join link its staff were given: its slug names the ended event.
+  await page.goto(`/signin#join=${token}`);
+  await expect(page.locator('html')).toHaveAttribute('data-hydrated', 'true');
+  await page.getByRole('textbox', { name: 'Your name' }).fill(uniq('Late'));
+  await page.getByRole('textbox', { name: 'Other team' }).fill('Gate Crew');
+  await page.getByRole('button', { name: 'Continue' }).click();
   await expectEnded(page, event);
 });

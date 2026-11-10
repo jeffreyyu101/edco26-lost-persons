@@ -4,8 +4,9 @@
 //   * practice → go live deletes every practice request (rows, audit, messages, photos with their objects) and
 //     numbering restarts at LP-0001;
 //   * end → every write path answers event_ended at all three guard layers (route 410, lp_require_writable P0410, the
-//     patients trigger) while reads still work; sign-in with its password or link → 410 with the Ended screen's
-//     event; reopen → writable again, numbering continues;
+//     patients trigger) while reads still work; (phase 3) the end clears its staff password and join link: the old
+//     password is a wrong password (401), the old link (its slug) → 410 with the Ended screen's event; reopen →
+//     writable again, numbering continues;
 //   * a staff session never reaches another event by passing its ids;
 //   * lead vs staff route access; a lead opens an event with a re-issued cookie;
 //   * the password rule (lead passcode first; a password names one way in).
@@ -15,7 +16,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { EventAdmin, EventStats, RequestSummary, SessionInfo, SyncResponse } from '@/lib/api-types';
 import { STATUS } from '@/lib/domain';
-import { ROOT, ensureTestEvent, loadTestEnv } from '../../scripts/test-env.mjs';
+import { ROOT, TEST_EVENT_SLUG, ensureTestEvent, loadTestEnv } from '../../scripts/test-env.mjs';
 import { BASE, EVENT_ID, PASSWORD, admin, api, clearAttempts, cookieFor, createBody, freshIp, newStaff, pii, psql, randomUUID, setCookies, uniq, withTestServer, type Staff } from './harness';
 
 withTestServer();
@@ -106,10 +107,10 @@ afterAll(async () => {
   // Leave nothing of this file running: its events end (their requests stay frozen, as at a real event's end).
   const lead = await leadCookie();
   for (const id of archivedAtEnd) await api(`/api/events/${id}/end`, { json: {}, cookie: lead });
-  // And sign-in stops looking at them: every staff password is a bcrypt compare on every sign-in, so test events
-  // that keep theirs make each later run's sign-ins slower (login-limits times out after a few runs on one stack).
+  // The end clears their staff passwords and links (phase 3); their retired hashes go too, or every later lead
+  // passcode change in this stack would compare against each of them (bcrypt, ≈ 70 ms).
   if (archivedAtEnd.length) {
-    psql(`update public.events set staff_password_hash = null, invite_code_sha256 = null, invite_expires_at = null
+    psql(`update public.events set staff_password_hash = null, ended_password_hash = null, invite_code_sha256 = null, invite_expires_at = null
           where id = any (array[${archivedAtEnd.map((id) => `'${id}'`).join(', ')}]::uuid[])`);
   }
   await ensureTestEvent();
@@ -365,11 +366,17 @@ describe('end → event_ended at every layer; staff are locked out, leads keep r
   let r: RequestSummary;
   let msgId: string;
   let photoId: string;
+  let oldLink: string;
   const staff = newStaff('Site Ops');
 
   beforeAll(async () => {
     e = await makeEvent();
     archivedAtEnd.push(e.event.id);
+    // The join link its staff were given while it ran.
+    const link = await api<{ link: string }>(`/api/events/${e.event.id}/join-link`, { json: {}, cookie: await leadCookie() });
+    expect(link.status).toBe(201);
+    expect(link.body.link).toMatch(new RegExp(`/signin#join=${e.event.slug}\\.[A-Za-z0-9_-]{43}$`));
+    oldLink = decodeURIComponent(new URL(link.body.link).hash.slice('#join='.length));
     cookie = (await signIn(staff, e.password)).cookie;
     r = await create(cookie);
     const m = await api(`/api/requests/${r.id}/messages`, { json: { body: 'TEST-S before the end', clientMutationId: randomUUID() }, cookie });
@@ -537,19 +544,37 @@ describe('end → event_ended at every layer; staff are locked out, leads keep r
     expect(psql(`select public.lp_close_inactive(array['${r.id}']::uuid[])`)).toBe('0');
   });
 
-  it('sign-in with the ended event\'s password or link → 410 event_ended with the event for the Ended screen; no cookie', async () => {
+  it('(phase 3) the end clears its staff password and join link; the hash is kept apart for the lead passcode check only', async () => {
+    expect(psql(`select (staff_password_hash is null)::text || '/' || (ended_password_hash is not null)::text || '/' || (invite_code_sha256 is null)::text || '/' || (invite_expires_at is null)::text from public.events where id = '${e.event.id}'`)).toBe('true/true/true/true');
+    // Sign-in compares running events' hashes only.
+    const secrets = JSON.parse(psql('select public.lp_auth_secrets()::text')) as { events: Array<{ id: string; stage: string }> };
+    expect(secrets.events.some((x) => x.id === e.event.id || x.stage === 'archived')).toBe(false);
+    // And an archived event takes neither back (Reopen first).
+    const lead = await leadCookie();
+    const pw = await api(`/api/events/${e.event.id}/password`, { json: { password: `pw-${uniq()}-${uniq()}` }, cookie: lead });
+    expect(pw.status).toBe(409);
+    expect(pw.body.error).toMatchObject({ code: 'conflict', field: 'password' });
+    const link = await api(`/api/events/${e.event.id}/join-link`, { json: {}, cookie: lead });
+    expect(link.status).toBe(409);
+    expect(link.body.error).toMatchObject({ code: 'conflict', field: 'invite' });
+  });
+
+  it('sign-in with the ended event\'s old password is a wrong password (401); its old join link → 410 event_ended with the event for the Ended screen; no cookie', async () => {
     const res = await api('/api/session', { json: { staffName: pii(`TEST-S Late ${uniq()}`), team: 'Site Ops', password: e.password }, headers: { 'x-real-ip': await ip() } });
-    expect(res.status).toBe(410);
-    expect(res.body.error).toMatchObject({ code: 'event_ended', event: { name: e.event.name, stage: 'archived', logoUrl: null } });
+    expect(res.status).toBe(401);
+    expect(res.body.error).toMatchObject({ code: 'unauthorized', field: 'password' });
     expect(setCookies(res.headers)).toEqual([]);
-    // The event's join link (a lead may rotate it at any stage): an archived event's link reaches the Ended screen.
-    const link = await api<{ link: string }>(`/api/events/${e.event.id}/join-link`, { json: {}, cookie: await leadCookie() });
-    expect(link.status).toBe(201);
-    expect(link.body.link).toMatch(new RegExp(`/signin#join=${e.event.slug}\\.[A-Za-z0-9_-]{43}$`));
-    const token = decodeURIComponent(new URL(link.body.link).hash.slice('#join='.length));
-    const viaLink = await api('/api/session', { json: { staffName: pii(`TEST-S Late ${uniq()}`), team: 'Site Ops', invite: token }, headers: { 'x-real-ip': await ip() } });
+    // The old join link: its code is gone, its slug names the event.
+    const viaIp = await ip();
+    const viaLink = await api('/api/session', { json: { staffName: pii(`TEST-S Late ${uniq()}`), team: 'Site Ops', invite: oldLink }, headers: { 'x-real-ip': viaIp } });
     expect(viaLink.status).toBe(410);
-    expect(viaLink.body.error.code).toBe('event_ended');
+    expect(viaLink.body.error).toMatchObject({ code: 'event_ended', event: { name: e.event.name, stage: 'archived', logoUrl: null } });
+    expect(setCookies(viaLink.headers)).toEqual([]);
+    // No credential was verified: it counts as a failed attempt (it can never reset the rate limit).
+    expect(psql(`select string_agg(coalesce(ok::text, 'pending'), ',') from public.lp_login_attempts where ip = '${viaIp}'`)).toBe('false');
+    // A link of a running event's slug with a wrong code is still just refused.
+    const running = await api('/api/session', { json: { staffName: pii(`TEST-S Late ${uniq()}`), team: 'Site Ops', invite: `${TEST_EVENT_SLUG}.${'A'.repeat(43)}` }, headers: { 'x-real-ip': await ip() } });
+    expect(running.status).toBe(401);
   });
 
   it('reopen: archived → live, writable again, numbering continues; its password and join link are cleared; only from archived', async () => {
@@ -925,11 +950,11 @@ describe('scripts/bootstrap-events.mjs (the one-time bootstrap, run here against
   const bcrypt = async () => (await import('bcryptjs')).default;
 
   afterAll(async () => {
-    psql(`update public.events set staff_password_hash = null, invite_code_sha256 = null, invite_expires_at = null where slug = 'edco26'`);
+    psql(`update public.events set staff_password_hash = null, ended_password_hash = null, invite_code_sha256 = null, invite_expires_at = null where slug = 'edco26'`);
     await ensureTestEvent();
   });
 
-  it('sets the lead passcode and copies the EDC staff password and join link from the env, printing neither', async () => {
+  it('sets the lead passcode and records the EDC staff password as retired (never a way in), printing neither', async () => {
     const lead = pii(`boot-lead-${uniq()}-${uniq()}`);
     const edcPassword = pii(`boot-edc-${uniq()}-${uniq()}`);
     const code = pii(`boot-code-${uniq()}`);
@@ -943,7 +968,7 @@ describe('scripts/bootstrap-events.mjs (the one-time bootstrap, run here against
     expect(refused.stderr).toContain('already set');
     const dry = await run(env, ['--dry-run', '--force'], lead);
     expect(dry.status, dry.stderr).toBe(0);
-    expect(psql(`select staff_password_hash is null from public.events where slug = 'edco26'`)).toBe('t');
+    expect(psql(`select staff_password_hash is null and ended_password_hash is null from public.events where slug = 'edco26'`)).toBe('t');
     // Never from the environment (it would sit in shell history and process listings), nor an empty stdin.
     const fromEnv = await run({ ...env, LP_LEAD_PASSCODE: lead }, ['--force'], lead);
     expect(fromEnv.status).toBe(1);
@@ -956,7 +981,7 @@ describe('scripts/bootstrap-events.mjs (the one-time bootstrap, run here against
     const empty = await run(env, ['--force']);
     expect(empty.status).toBe(1);
     expect(empty.stderr).toContain('at least 8 characters');
-    expect(psql(`select staff_password_hash is null from public.events where slug = 'edco26'`)).toBe('t');
+    expect(psql(`select staff_password_hash is null and ended_password_hash is null from public.events where slug = 'edco26'`)).toBe('t');
 
     const res = await run(env, ['--force'], lead);
     expect(res.status, res.stderr).toBe(0);
@@ -965,22 +990,30 @@ describe('scripts/bootstrap-events.mjs (the one-time bootstrap, run here against
     expect(printed).not.toMatch(/\$2[aby]\$/);
     const b = await bcrypt();
     expect(await b.compare(lead, psql('select lead_passcode_hash from public.lp_org'))).toBe(true);
-    expect(await b.compare(edcPassword, psql(`select staff_password_hash from public.events where slug = 'edco26'`))).toBe(true);
-    expect(psql(`select invite_code_sha256 || '|' || invite_expires_at from public.events where slug = 'edco26'`)).toBe(`${sha}|2026-11-09 12:00:00+00`);
+    // (Phase 3) Archived EDC keeps no staff password or join link: the old password is kept apart (ended_password_hash),
+    // for the lead passcode check only. INVITE_* are no longer read.
+    expect(psql(`select (staff_password_hash is null)::text || '/' || (invite_code_sha256 is null)::text from public.events where slug = 'edco26'`)).toBe('true/true');
+    expect(await b.compare(edcPassword, psql(`select ended_password_hash from public.events where slug = 'edco26'`))).toBe(true);
 
-    // The old EDC password and link now reach the Ended screen; the lead passcode signs in as lead.
+    // The old EDC password is a wrong password; an old EDC link (no slug: made before events) is not accepted; a link
+    // with EDC's slug reaches the Ended screen; the lead passcode signs in as lead.
     const old = await api('/api/session', { json: { staffName: pii(`TEST-S Old ${uniq()}`), team: 'Medical', password: edcPassword }, headers: { 'x-real-ip': await ip() } });
-    expect(old.status).toBe(410);
-    expect(old.body.error.event).toMatchObject({ name: 'EDC Orlando', stage: 'archived' });
+    expect(old.status).toBe(401);
     const oldLink = await api('/api/session', { json: { staffName: pii(`TEST-S Old ${uniq()}`), team: 'Medical', invite: code }, headers: { 'x-real-ip': await ip() } });
-    expect(oldLink.status).toBe(410);
+    expect(oldLink.status).toBe(401);
+    const slugLink = await api('/api/session', { json: { staffName: pii(`TEST-S Old ${uniq()}`), team: 'Medical', invite: `edco26.${code}` }, headers: { 'x-real-ip': await ip() } });
+    expect(slugLink.status).toBe(410);
+    expect(slugLink.body.error.event).toMatchObject({ name: 'EDC Orlando', stage: 'archived' });
     const asLead = await api('/api/session', { json: { staffName: pii(`TEST-S Boss ${uniq()}`), team: 'Medical', password: lead }, headers: { 'x-real-ip': await ip() } });
     expect(asLead.body).toMatchObject({ role: 'lead' });
 
-    // A lead passcode equal to the EDC password is refused.
+    // A lead passcode equal to the EDC password is refused, by the bootstrap and by the app's passcode change.
     const same = await run(env, ['--force'], edcPassword);
     expect(same.status).toBe(1);
     expect(same.stderr).toContain('choose another');
+    const inApp = await api('/api/org/lead-passcode', { json: { passcode: edcPassword }, cookie: await leadCookie() });
+    expect(inApp.status).toBe(422);
+    expect(inApp.body.error).toMatchObject({ field: 'passcode' });
   });
 });
 

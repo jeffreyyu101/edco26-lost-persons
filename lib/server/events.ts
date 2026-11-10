@@ -221,19 +221,25 @@ interface AuthSecrets {
   lead: string | null;
   /** lp_org.lead_passcode_version: what a lead's token carries (pv). */
   leadVersion?: number;
+  /** Running (practice / live) events only: an ended event keeps no staff password (lp_event_end). */
   events: Array<{ id: string; stage: EventStage; hash: string }>;
+  /** (Phase 3) The hashes ended events had: read by the lead passcode check only, never at sign-in. */
+  retired?: string[];
 }
 
 export type PasswordMatch = { kind: 'lead'; version: number } | { kind: 'event'; eventId: string; stage: EventStage } | null;
 
 /**
- * Sign-in with a password (spec "Server"): the lead passcode first; then each event's staff password, live and
- * practice events before archived ones (an archived event's old password never shadows a running one).
+ * Sign-in with a password (spec "Server"): the lead passcode first; then each running event's staff password.
+ * (Phase 3) An ended event keeps no password (lp_event_end clears it), so a wrong password costs one bcrypt compare
+ * per running event, not per event ever held, and an ended event's old password is just a wrong password. Its staff
+ * reach the Ended screen through the old join link (matchEndedSlug) or an old session.
  */
 export async function matchPassword(plain: string): Promise<PasswordMatch> {
   const secrets = await rpc<AuthSecrets>('lp_auth_secrets', {});
   if (await matches(plain, secrets?.lead)) return { kind: 'lead', version: Number(secrets?.leadVersion ?? 0) };
   for (const e of secrets?.events ?? []) {
+    if (e.stage === 'archived') continue;
     if (await matches(plain, e.hash)) return { kind: 'event', eventId: e.id, stage: e.stage };
   }
   return null;
@@ -241,9 +247,9 @@ export async function matchPassword(plain: string): Promise<PasswordMatch> {
 
 /**
  * The uniqueness rule (spec "Server"): a staff password may not equal the lead passcode or another non-archived
- * event's staff password. The lead passcode may not equal ANY event's staff password, archived ones included: the
- * lead passcode is checked first at sign-in, so an old event's password would otherwise sign its staff in as lead.
- * Throws 422 invalid (field `password` / `passcode`).
+ * event's staff password. The lead passcode may not equal ANY event's staff password, ended ones included (their old
+ * hashes, `retired`): the lead passcode is checked first at sign-in, so an old event's password would otherwise sign
+ * its staff in as lead. Throws 422 invalid (field `password` / `passcode`).
  */
 export async function assertSecretUnique(plain: string, target: { kind: 'event'; eventId: string } | { kind: 'lead' }): Promise<void> {
   const secrets = await rpc<AuthSecrets>('lp_auth_secrets', {});
@@ -253,6 +259,9 @@ export async function assertSecretUnique(plain: string, target: { kind: 'event';
   for (const e of secrets?.events ?? []) {
     if (target.kind === 'event' && (e.stage === 'archived' || e.id === target.eventId)) continue;
     if (await matches(plain, e.hash)) throw clash();
+  }
+  if (target.kind === 'lead') {
+    for (const hash of secrets?.retired ?? []) if (await matches(plain, hash)) throw clash();
   }
 }
 
@@ -317,6 +326,18 @@ export async function matchInvite(raw: string, nowMs: number = Date.now()): Prom
     return pickInvite(candidates, raw.trim(), nowMs);
   }
   return pickInvite(candidates, code, nowMs);
+}
+
+/**
+ * (Phase 3) A join link that matched no running event, whose slug names an archived event: its staff get the Ended
+ * screen. An ended event keeps no join code (lp_event_end), so the slug is all there is to go on; that tells nobody
+ * more than the event's name and logo, which its own logo route already serves. Null for anything else.
+ */
+export async function matchEndedSlug(raw: string): Promise<EventRow | null> {
+  const { slug } = parseJoinToken(raw);
+  if (!slug) return null;
+  const row = await loadEventBySlug(slug);
+  return row?.stage === 'archived' ? row : null;
 }
 
 /** The matching candidate (exported for the unit tests). */

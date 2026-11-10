@@ -589,7 +589,7 @@ export interface EventStaffingRow {
   name: string;
 }
 
-/** What a staff member sees when their event has ended (410 event_ended from sign-in or any write). */
+/** What a staff member sees when their event has ended (410 event_ended from any call, or a sign-in with its old join link). */
 export interface EndedEvent {
   /** (Phase 2, additive) The event's id: the client drops that event's local data (cache, outbox). */
   id?: string;

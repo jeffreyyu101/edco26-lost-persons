@@ -7,7 +7,7 @@
 -- signatures this file retires). One transaction: a failure part-way changes nothing. Safe to run twice.
 --   1. Dry run: paste the whole file, change the LAST line `commit;` to `rollback;`, run it. No error = good.
 --   2. Real run: paste the file again unchanged (ending in `commit;`) and run it.
---   3. Run scripts/bootstrap-events.mjs once (lead passcode at its prompt, EDC staff password + join link from the env).
+--   3. Run scripts/bootstrap-events.mjs once (lead passcode at its prompt; EDC's old staff password, from the env, kept as retired).
 -- Only while no event is live. The full cut-over order, the outage window, checks and the way back
 -- (supabase/rollback/20261110000000_events_down.sql): docs/RELEASE-events.md. This file must stay the LAST migration
 -- applied: an older file pasted after it puts back the fixed post list and the old functions.
@@ -94,6 +94,10 @@ create table if not exists public.events (
   -- Ordered [label]: the "Last seen" chips.
   last_seen jsonb not null default '[]'::jsonb check (pg_catalog.jsonb_typeof(last_seen) = 'array'),
   staff_password_hash text,
+  -- (Phase 3) The staff password hash the event had when it ended. Sign-in never reads it (an ended event's old
+  -- password is simply a wrong password, and sign-in compares only running events' hashes); only the lead passcode
+  -- check does (lp_auth_secrets `retired`), so an ended event's old password can never become the lead passcode.
+  ended_password_hash text,
   invite_code_sha256 text check (invite_code_sha256 is null or invite_code_sha256 ~ '^[0-9a-f]{64}$'),
   invite_expires_at timestamptz,
   report_to jsonb not null default '[]'::jsonb,
@@ -128,6 +132,7 @@ alter table public.events add column if not exists reopened_at timestamptz;
 alter table public.events add column if not exists department text;
 alter table public.events add column if not exists staffing jsonb not null default '[]'::jsonb;
 alter table public.events add column if not exists prepared_by text;
+alter table public.events add column if not exists ended_password_hash text;
 do $chk$
 begin
   if not exists (select 1 from pg_catalog.pg_constraint where conrelid = 'public.events'::regclass and conname = 'events_staffing_check') then
@@ -250,6 +255,14 @@ begin
      and e.case_seq < coalesce((select pg_catalog.max(p.case_number) from public.patients p where p.event_id = e.id), 0);
 end
 $backfill$;
+
+-- (Phase 3) An archived event keeps no staff password and no join link (lp_event_end): EDC included, and any event an
+-- earlier version of this file or its bootstrap left with one. The hash moves to ended_password_hash (the lead
+-- passcode check only). Touches no row when there is nothing to clear, so a re-run changes nothing.
+update public.events
+   set ended_password_hash = coalesce(staff_password_hash, ended_password_hash), staff_password_hash = null,
+       invite_code_sha256 = null, invite_expires_at = null
+ where stage = 'archived' and (staff_password_hash is not null or invite_code_sha256 is not null or invite_expires_at is not null);
 
 alter table public.patients alter column event_id set not null;
 
@@ -2325,6 +2338,10 @@ begin
   if p_hash is not null and p_hash !~ '^\$2[abxy]\$\d{2}\$[./A-Za-z0-9]{53}$' then
     raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:password';
   end if;
+  -- (Phase 3) An archived event takes no password (it would cost every failed sign-in a compare); Reopen first.
+  if p_hash is not null and exists (select 1 from public.events e where e.id = p_event and e.stage = 'archived') then
+    raise exception using errcode = 'P0409', message = 'bad_stage', hint = 'archived', detail = 'field:password';
+  end if;
   update public.events set staff_password_hash = p_hash, updated_at = pg_catalog.now() where id = p_event returning * into v_row;
   if v_row.id is null then
     raise exception using errcode = 'P0002', message = 'not_found';
@@ -2349,6 +2366,10 @@ begin
   if p_sha256 is not null and (p_sha256 !~ '^[0-9a-f]{64}$' or p_expires_at is null) then
     raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:invite';
   end if;
+  -- (Phase 3) Nor a join link (an old link's slug already reaches the Ended screen); Reopen first.
+  if p_sha256 is not null and exists (select 1 from public.events e where e.id = p_event and e.stage = 'archived') then
+    raise exception using errcode = 'P0409', message = 'bad_stage', hint = 'archived', detail = 'field:invite';
+  end if;
   update public.events
      set invite_code_sha256 = p_sha256, invite_expires_at = case when p_sha256 is null then null else p_expires_at end,
          updated_at = pg_catalog.now()
@@ -2357,6 +2378,35 @@ begin
   if v_row.id is null then
     raise exception using errcode = 'P0002', message = 'not_found';
   end if;
+  return public.lp_event_json(v_row);
+end
+$fn$;
+
+-- (Phase 3) The staff password an archived event had (scripts/bootstrap-events.mjs: EDC's, from the old env), kept
+-- for the lead passcode check only (lp_auth_secrets `retired`); sign-in never compares it. Archived events only.
+create or replace function public.lp_event_retire_password(p_event uuid, p_hash text)
+returns jsonb
+language plpgsql
+volatile
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+set lock_timeout = '2s'
+as $fn$
+declare
+  v_row public.events;
+begin
+  if p_hash is null or p_hash !~ '^\$2[abxy]\$\d{2}\$[./A-Za-z0-9]{53}$' then
+    raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:password';
+  end if;
+  select * into v_row from public.events where id = p_event for update;
+  if v_row.id is null then
+    raise exception using errcode = 'P0002', message = 'not_found';
+  end if;
+  if v_row.stage <> 'archived' then
+    raise exception using errcode = 'P0409', message = 'bad_stage', hint = v_row.stage, detail = 'field:password';
+  end if;
+  update public.events set ended_password_hash = p_hash where id = p_event returning * into v_row;
   return public.lp_event_json(v_row);
 end
 $fn$;
@@ -2460,7 +2510,14 @@ begin
   if v_row.stage <> 'live' then
     raise exception using errcode = 'P0409', message = 'bad_stage', hint = v_row.stage;
   end if;
-  update public.events set stage = 'archived', ended_at = pg_catalog.now(), updated_at = pg_catalog.now()
+  -- (Phase 3) Its staff password and join link go (as at Reopen): every failed sign-in compares the password with each
+  -- running event's hash (bcrypt, about 70 ms each), so an ended event keeps none. The hash is kept apart for the lead
+  -- passcode check only (ended_password_hash). Staff arriving with the old join link still get the Ended screen: its
+  -- slug names the event (POST /api/session); the old password is just a wrong password.
+  update public.events
+     set stage = 'archived', ended_at = pg_catalog.now(), updated_at = pg_catalog.now(),
+         ended_password_hash = coalesce(staff_password_hash, ended_password_hash), staff_password_hash = null,
+         invite_code_sha256 = null, invite_expires_at = null
    where id = p_event returning * into v_row;
   return public.lp_event_json(v_row);
 end
@@ -2513,7 +2570,9 @@ as $fn$
     'event', (select public.lp_event_json(e) from public.events e where e.id = p_event))
 $fn$;
 
--- Sign-in: the lead passcode hash and every event's staff password hash (the app server compares; bcrypt).
+-- Sign-in: the lead passcode hash and every running event's staff password hash (the app server compares; bcrypt).
+-- (Phase 3) Archived events have none (lp_event_end clears it; the `where` is a backstop). `retired`: the hashes
+-- ended events had, read only by the lead passcode check (an old staff password must never become the lead passcode).
 create or replace function public.lp_auth_secrets()
 returns jsonb
 language sql
@@ -2526,8 +2585,11 @@ as $fn$
     'leadVersion', coalesce((select o.lead_passcode_version from public.lp_org o where o.id), 0),
     'events', coalesce((
       select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('id', e.id, 'stage', e.stage, 'hash', e.staff_password_hash)
-               order by case e.stage when 'archived' then 1 else 0 end, e.created_at)
-      from public.events e where e.staff_password_hash is not null), '[]'::jsonb))
+               order by e.created_at)
+      from public.events e where e.staff_password_hash is not null and e.stage <> 'archived'), '[]'::jsonb),
+    'retired', coalesce((
+      select pg_catalog.jsonb_agg(e.ended_password_hash order by e.created_at)
+      from public.events e where e.ended_password_hash is not null), '[]'::jsonb))
 $fn$;
 
 -- Join links: the events with a link (one slug, or all when p_slug is null), their code hash and expiry.
@@ -3171,7 +3233,7 @@ begin
     'public.lp_tel_server_events(uuid, jsonb)', 'public.lp_tel_health(uuid, text, timestamptz, integer)',
     'public.lp_event_json(public.events)', 'public.lp_event_get(uuid)', 'public.lp_event_by_slug(text)', 'public.lp_events_list()',
     'public.lp_event_check(public.events)', 'public.lp_event_apply(public.events, jsonb)', 'public.lp_event_create(jsonb)',
-    'public.lp_event_update(uuid, jsonb)', 'public.lp_event_set_password(uuid, text)',
+    'public.lp_event_update(uuid, jsonb)', 'public.lp_event_set_password(uuid, text)', 'public.lp_event_retire_password(uuid, text)',
     'public.lp_event_set_invite(uuid, text, timestamptz)', 'public.lp_event_set_logo(uuid, text)', 'public.lp_event_go_live(uuid)',
     'public.lp_event_end(uuid)', 'public.lp_event_reopen(uuid)', 'public.lp_session_state(uuid)', 'public.lp_auth_secrets()', 'public.lp_invite_candidates(text)',
     'public.lp_org_set_lead_passcode(text)', 'public.lp_post_short(jsonb, text, text)', 'public.lp_stats_base(uuid, boolean)',

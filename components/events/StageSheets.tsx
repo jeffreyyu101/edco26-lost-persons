@@ -18,8 +18,8 @@ const TO: Readonly<Record<StageAction, EventStage>> = { goLive: 'live', end: 'ar
 
 export const FACT: Readonly<Record<StageAction, string>> = {
   goLive: 'Practice requests are deleted and numbering restarts at LP-0001.',
-  end: 'Staff are signed out. Nothing is deleted; open requests are frozen as they are.',
-  reopen: 'The staff password and join link are cleared and must be set again.',
+  end: 'Staff are signed out; the password and join link are cleared. Nothing is deleted; open requests are frozen as they are.',
+  reopen: 'The staff password and join link must be set again.',
 };
 
 interface StageSheetProps {

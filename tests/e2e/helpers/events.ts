@@ -92,6 +92,14 @@ export async function goLive(id: string): Promise<EventAdmin> {
   return ((await res.json()) as { event: EventAdmin }).event;
 }
 
+/** A fresh join link of the event (POST /api/events/:id/join-link): the token after `#join=` ("<slug>.<code>"). */
+export async function joinToken(id: string): Promise<string> {
+  const res = await (await lead()).post(`/api/events/${id}/join-link`, { data: {} });
+  expect(res.status(), await res.text()).toBe(201);
+  const { link } = (await res.json()) as { link: string };
+  return decodeURIComponent(new URL(link).hash.slice('#join='.length));
+}
+
 /** Ends the event (an event still in practice goes live first: only a live event can end). */
 export async function endEvent(id: string): Promise<void> {
   const ctx = await lead();

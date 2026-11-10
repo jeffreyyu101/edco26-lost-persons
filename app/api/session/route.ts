@@ -2,12 +2,14 @@
 // config the client renders from), DELETE /api/session (sign out). Spec §6, A27; Events ("Server").
 //
 // (Events) A password is checked against the Ground Control lead passcode first (→ role lead, no event open), then
-// against each event's staff password (live and practice → staff of that event; archived → 410 event_ended with
-// what the Ended screen shows). A join link "<slug>.<code>" opens its event the same way. Every attempt goes
-// through the same rate limit as before; a correct credential of an archived event counts as a good attempt.
+// against each running event's staff password (live and practice → staff of that event). A join link "<slug>.<code>"
+// opens its event the same way. (Phase 3) An ended event keeps neither (lp_event_end clears both): its old password is
+// a wrong password, and its old join link answers 410 event_ended with what the Ended screen shows, found by the
+// link's slug. Every attempt goes through the same rate limit as before; an Ended answer from a slug alone verified
+// no credential, so it counts as a failed attempt (it never resets the counter).
 import { serverEnv } from '@/lib/server/env';
 import { ApiFailure, mapDbError } from '@/lib/server/errors';
-import { eventEndedFailure, eventTeamLabel, isEventTeam, loadEvent, matchInvite, matchPassword, sessionBody, type EventRow } from '@/lib/server/events';
+import { eventEndedFailure, eventTeamLabel, isEventTeam, loadEvent, matchEndedSlug, matchInvite, matchPassword, sessionBody, type EventRow } from '@/lib/server/events';
 import { clientIp, json, readJson } from '@/lib/server/http';
 import { logRequest, logSignIn } from '@/lib/server/log';
 import { authedRoute, publicRoute } from '@/lib/server/route';
@@ -32,12 +34,16 @@ async function finishAttempt(attemptId: number, ok: boolean): Promise<void> {
   }
 }
 
-type Resolved = { role: 'lead'; pv: number } | { role: 'staff'; event: EventRow } | { role: 'ended'; event: EventRow | null } | null;
+type Resolved = { role: 'lead'; pv: number } | { role: 'staff'; event: EventRow } | { role: 'ended'; event: EventRow | null; verified: boolean } | null;
 
 async function resolve(credential: { password: string } | { invite: string }): Promise<Resolved> {
   let eventId: string | null = null;
   if ('invite' in credential) {
     eventId = (await matchInvite(credential.invite))?.eventId ?? null;
+    if (!eventId) {
+      const ended = await matchEndedSlug(credential.invite);
+      if (ended) return { role: 'ended', event: ended, verified: false };
+    }
   } else {
     const match = await matchPassword(credential.password);
     if (match?.kind === 'lead') return { role: 'lead', pv: match.version };
@@ -46,7 +52,7 @@ async function resolve(credential: { password: string } | { invite: string }): P
   if (!eventId) return null;
   const event = await loadEvent(eventId);
   if (!event) return null;
-  return event.stage === 'archived' ? { role: 'ended', event } : { role: 'staff', event };
+  return event.stage === 'archived' ? { role: 'ended', event, verified: true } : { role: 'staff', event };
 }
 
 export const POST = publicRoute('POST /api/session', { sameOrigin: true }, async ({ request }) => {
@@ -62,7 +68,7 @@ export const POST = publicRoute('POST /api/session', { sameOrigin: true }, async
   try {
     resolved = await resolve('invite' in body ? { invite: body.invite } : { password: body.password });
   } finally {
-    await finishAttempt(Number(attemptId), resolved !== null);
+    await finishAttempt(Number(attemptId), resolved !== null && !(resolved.role === 'ended' && !resolved.verified));
   }
   logSignIn(method, resolved !== null);
   if (!resolved) {

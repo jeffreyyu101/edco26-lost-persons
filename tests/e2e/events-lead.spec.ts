@@ -54,6 +54,16 @@ async function staffSignIn(ctx: BrowserContext | APIRequestContext, password: st
   return res.status();
 }
 
+/** A staff member signs in with a join link token ("<slug>.<code>"): the status. */
+async function staffJoin(ctx: BrowserContext, invite: string): Promise<number> {
+  const ip = fakeIp();
+  const res = await ctx.request.post('/api/session', {
+    headers: { ...ORIGIN, 'x-vercel-forwarded-for': ip, 'x-real-ip': ip },
+    data: { staffName: `TEST-L Staff ${TAG}`, team: 'Dispatch', invite },
+  });
+  return res.status();
+}
+
 async function logRequest(ctx: BrowserContext, post: string, name: string): Promise<RequestSummary & { http: number }> {
   const res = await ctx.request.post('/api/requests', {
     headers: ORIGIN,
@@ -170,6 +180,7 @@ test('the whole journey with no developer: create, set up, practice, go live, en
   await page.getByTestId('join-link-new').click();
   await expect(page.getByTestId('join-link-value')).toHaveValue(new RegExp(`/signin#join=test-l-journey-${TAG}\\.`));
   await expect(page.getByTestId('join-link-copy')).toBeVisible();
+  const joinLink = decodeURIComponent(new URL(await page.getByTestId('join-link-value').inputValue()).hash.slice('#join='.length));
 
   // Staff sign in with the password and log a request in practice.
   const staff = await browser.newContext({ serviceWorkers: 'block' });
@@ -204,13 +215,16 @@ test('the whole journey with no developer: create, set up, practice, go live, en
   // End event: staff are refused from then on; nothing is deleted.
   await page.getByTestId('stage-end').click();
   const end = page.getByRole('dialog', { name: 'End event' });
-  await expect(end).toContainText('Staff are signed out. Nothing is deleted; open requests are frozen as they are.');
+  await expect(end).toContainText('Staff are signed out; the password and join link are cleared. Nothing is deleted; open requests are frozen as they are.');
   await end.getByTestId('stage-confirm').click();
   await expect(end).toHaveCount(0);
   await expect(page.getByTestId('event-stage')).toHaveText('Archived');
   expect((await staff.request.get('/api/sync')).status()).toBe(410);
+  // (Phase 3) The end cleared the staff password and join link: the old password is a wrong password; the old link
+  // (its slug) still reaches the Ended screen.
   const late = await browser.newContext({ serviceWorkers: 'block' });
-  expect(await staffSignIn(late, password)).toBe(410);
+  expect(await staffSignIn(late, password)).toBe(401);
+  expect(await staffJoin(late, joinLink)).toBe(410);
   await late.close();
   const leadRows = await page.request.get(`/api/events`);
   const ended = ((await leadRows.json()) as { events: EventAdmin[] }).events.find((e) => e.id === id)!;
@@ -223,7 +237,7 @@ test('the whole journey with no developer: create, set up, practice, go live, en
   // Reopen clears the password and the join link; the lead sets a new one; the old one no longer works.
   await page.getByTestId('stage-reopen').click();
   const reopen = page.getByRole('dialog', { name: 'Reopen' });
-  await expect(reopen).toContainText('The staff password and join link are cleared and must be set again.');
+  await expect(reopen).toContainText('The staff password and join link must be set again.');
   await reopen.getByTestId('stage-confirm').click();
   await expect(reopen).toHaveCount(0);
   await expect(page.getByTestId('event-stage')).toHaveText('Live');
