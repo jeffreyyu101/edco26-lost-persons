@@ -7,34 +7,43 @@
 -- signatures this file retires). One transaction: a failure part-way changes nothing. Safe to run twice.
 --   1. Dry run: paste the whole file, change the LAST line `commit;` to `rollback;`, run it. No error = good.
 --   2. Real run: paste the file again unchanged (ending in `commit;`) and run it.
---   3. Run scripts/bootstrap-events.mjs once (lead passcode, EDC staff password + join link from the env).
+--   3. Run scripts/bootstrap-events.mjs once (lead passcode at its prompt, EDC staff password + join link from the env).
+-- Only while no event is live. The full cut-over order, the outage window, checks and the way back
+-- (supabase/rollback/20261110000000_events_down.sql): docs/RELEASE-events.md. This file must stay the LAST migration
+-- applied: an older file pasted after it puts back the fixed post list and the old functions.
 --
 -- What it does. Existing rows keep every existing column exactly as it is: only the new event_id columns are
--- filled (with the patients triggers switched off for that one UPDATE, so updated_at / row_version stay put).
---   A. Tables: events (one row per event) and lp_org (one row: the Ground Control lead passcode hash). RLS on, no
+-- filled (with the triggers that would fire switched off by name, and only those that were on, for those UPDATEs, so
+-- updated_at / row_version stay put).
+--   A. Tables: events (one row per event; reopened_at restarts the auto-close clock) and lp_org (one row: the Ground
+--      Control lead passcode hash and its version, which a change moves and every lead session carries). RLS on, no
 --      policies, service_role only.
 --   B. The EDC event: slug 'edco26', "EDC Orlando", 2026-11-06 … 2026-11-08, America/New_York, stage 'archived',
---      case_seq = its highest case number, records_delete_at NULL. Every existing request belongs to it.
+--      ended 2026-11-09 06:00 New York time, case_seq = its highest case number, records_delete_at NULL. Every existing
+--      request belongs to it.
 --   C. event_id on patients (NOT NULL, FK), and on the staff/device-keyed tables: audit_events, lp_activity,
 --      lp_message_reads, lp_inactive_closes, lp_push_subscriptions, lp_tel_devices, lp_tel_events. Existing rows are
 --      backfilled (from their request, else the EDC event), except lp_tel_events: telemetry rows are never rewritten
 --      (30-day retention removes them; their CHECKs are NOT VALID); they stay NULL = before events existed.
 --      Rows inserted from now on get their event from their request (trigger) or from the RPC.
---   D. Numbering: unique (event_id, case_number) replaces the global unique case_number; the column default
+--   D. Numbering: unique (event_id, case_number) replaces the global unique case_number (dropped whatever it is called;
+--      the file stops if one is left); the column default
 --      (the global sequence) is dropped: lp_create_request takes events.case_seq + 1 under the event's row lock.
 --      The sequence itself stays (the rework file's preflight needs it), unused.
 --   E. The fixed reporting_location CHECK is dropped: a post is valid when it is one of the event's posts or
 --      'Other' (lp_clean_fields(event, …)). Team validity is the app server's (sign-in, against events.teams).
 --   F. Write guard: lp_require_writable(event) (stage practice or live, else SQLSTATE P0410 'event_ended'), called
---      first by every write RPC; a BEFORE INSERT/UPDATE/DELETE trigger on patients as the backstop. Read markers,
---      push prefs and telemetry stay writable.
+--      first by every write RPC; BEFORE INSERT/UPDATE/DELETE triggers on patients, audit_events, lp_messages,
+--      patient_photos and lp_enroute as the backstop. Read markers, Activity read state, push and telemetry stay writable.
 --   G. Every RPC the app server calls takes p_event and only reaches that event's rows. The write and detail RPCs
 --      whose bodies needed no change are wrapped (wrapper: guard + "this request is in this event"; the old
 --      signature becomes internal, no longer executable by service_role); the list/sync/stats/push/telemetry
 --      ones are redefined with the event filter. Old signatures that were redefined are dropped.
---   H. lp_close_inactive closes only live events' requests. Telemetry is on while any event is practice or live
---      (the fixed off_at no longer applies).
---   I. Lead RPCs (events list/create/update, staff password, join link, logo, go live, end, reopen, lead passcode)
+--   H. lp_close_inactive closes only live events' requests, idle since the later of their last activity and the
+--      event's reopen. Telemetry is on while any event is practice or live (the fixed off_at no longer applies).
+--   I. Lead RPCs (events list/create/update, staff password, join link, logo, go live, end, reopen, lead passcode;
+--      an ended event's setup is frozen, a renamed post takes its requests along, a post or team in use cannot go;
+--      reopen clears the staff password and join link), lp_session_state (what the route wrapper checks)
 --      and lp_stats(p_event, p_range): '1h' | '2h' | '6h' | 'today' | 'event' | 'day:N', in the event's time
 --      zone and show day (day_start_hour), post breakdowns as arrays ordered by count (top 4 + 'Other').
 --   J. Storage bucket 'event-logos' (private; the app serves logos through its own route).
@@ -91,6 +100,8 @@ create table if not exists public.events (
   case_seq bigint not null default 0 check (case_seq >= 0),
   went_live_at timestamptz,
   ended_at timestamptz,
+  -- The last reopen (archived → live): the auto-close counts inactivity from here at the earliest.
+  reopened_at timestamptz,
   records_delete_at timestamptz,
   records_deleted_at timestamptz,
   created_at timestamptz not null default pg_catalog.now(),
@@ -102,9 +113,35 @@ create table if not exists public.events (
 create table if not exists public.lp_org (
   id boolean primary key default true check (id),
   lead_passcode_hash text,
+  -- Moves whenever the hash changes (trigger below): a lead session carries the version it signed in with, and the
+  -- route wrapper refuses one whose version is not the current one (a passcode change signs every lead out).
+  lead_passcode_version integer not null default 0,
   updated_at timestamptz not null default pg_catalog.now()
 );
+-- Re-run on a database where the first version of this file made the tables.
+alter table public.events add column if not exists reopened_at timestamptz;
+alter table public.lp_org add column if not exists lead_passcode_version integer not null default 0;
 insert into public.lp_org (id) values (true) on conflict (id) do nothing;
+
+create or replace function public.lp_org_passcode_version()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $fn$
+begin
+  if new.lead_passcode_hash is distinct from old.lead_passcode_hash then
+    new.lead_passcode_version := old.lead_passcode_version + 1;
+  else
+    new.lead_passcode_version := old.lead_passcode_version;
+  end if;
+  return new;
+end
+$fn$;
+revoke all on function public.lp_org_passcode_version() from public, anon, authenticated;
+drop trigger if exists lp_org_passcode_version on public.lp_org;
+create trigger lp_org_passcode_version before update on public.lp_org
+  for each row execute function public.lp_org_passcode_version();
 
 alter table public.events enable row level security;
 alter table public.lp_org enable row level security;
@@ -129,7 +166,8 @@ select 'edco26', 'EDC Orlando', date '2026-11-06', date '2026-11-08', 'America/N
          {"id": "medical", "label": "Medical", "short": "Medical", "medical": true}]'::jsonb,
        '["kineticFIELD", "circuitGROUNDS", "neonGARDEN", "stereoBLOOM", "Taken to medical"]'::jsonb,
        (select pg_catalog.min(p.created_at) from public.patients p),
-       pg_catalog.now(),
+       -- The end of its last show day (Sunday's night ran to 06:00 Monday), not the time this file ran.
+       timestamp '2026-11-09 06:00' at time zone 'America/New_York',
        null
 on conflict (slug) do nothing;
 
@@ -149,17 +187,36 @@ do $backfill$
 declare
   v_edc uuid := (select e.id from public.events e where e.slug = 'edco26');
   v_n bigint;
+  v_off text[] := '{}';
+  v_t record;
 begin
-  -- patients: the touch trigger would bump updated_at / row_version, the en route trigger is status-only, and the
-  -- guard (section F, on a re-run) would refuse an archived event: none of them may run for this one UPDATE.
-  alter table public.patients disable trigger user;
+  -- These triggers may not run for the backfill UPDATEs below: the touch trigger would bump updated_at / row_version,
+  -- the en route trigger is status-only, and the guards (section F, on a re-run: rows the pre-events build wrote after
+  -- a rollback have no event yet and go to the archived edco26) would refuse an archived event. Each is switched off
+  -- by name, and only if it is enabled now; exactly those are switched back on. A trigger someone disabled on purpose
+  -- stays disabled, and no other trigger is touched.
+  for v_t in
+    select c.relname, t.tgname
+      from pg_catalog.pg_trigger t join pg_catalog.pg_class c on c.oid = t.tgrelid
+     where c.relnamespace = 'public'::regnamespace and not t.tgisinternal and t.tgenabled <> 'D'
+       and (c.relname, t.tgname) in (('patients', 'lp_patients_touch'), ('patients', 'lp_enroute_clear'),
+                                     ('patients', 'lp_patients_writable'), ('audit_events', 'lp_audit_events_writable'))
+     order by 1, 2
+  loop
+    execute pg_catalog.format('alter table public.%I disable trigger %I', v_t.relname, v_t.tgname);
+    v_off := v_off || pg_catalog.format('alter table public.%I enable trigger %I', v_t.relname, v_t.tgname);
+  end loop;
+
   update public.patients set event_id = v_edc where event_id is null;
   get diagnostics v_n = row_count;
-  alter table public.patients enable trigger user;
   raise notice 'events: % request(s) assigned to edco26', v_n;
 
   update public.audit_events a set event_id = p.event_id from public.patients p where p.id = a.patient_id and a.event_id is null;
   update public.audit_events set event_id = v_edc where event_id is null;
+
+  for i in 1 .. coalesce(pg_catalog.array_length(v_off, 1), 0) loop
+    execute v_off[i];
+  end loop;
   update public.lp_activity a set event_id = p.event_id from public.patients p where p.id = a.request_id and a.event_id is null;
   update public.lp_message_reads r set event_id = p.event_id from public.patients p where p.id = r.request_id and r.event_id is null;
   update public.lp_inactive_closes c set event_id = p.event_id from public.patients p where p.id = c.request_id and c.event_id is null;
@@ -221,7 +278,35 @@ create trigger lp_inactive_closes_event before insert on public.lp_inactive_clos
 -- D. Per-event numbering
 -- -----------------------------------------------------------------------------------------------------
 create unique index if not exists patients_event_case_key on public.patients (event_id, case_number);
-alter table public.patients drop constraint if exists patients_case_number_key;
+-- The global rule goes whatever it is called: every unique constraint, then every unique index (partial ones too)
+-- whose only key column is case_number. If one is still there, nothing commits (a new event's first create would
+-- otherwise fail on LP-0001).
+do $case_unique$
+declare
+  v_att smallint := (select a.attnum from pg_catalog.pg_attribute a
+                      where a.attrelid = 'public.patients'::regclass and a.attname = 'case_number' and not a.attisdropped);
+  v_name text;
+begin
+  for v_name in
+    select c.conname from pg_catalog.pg_constraint c
+     where c.conrelid = 'public.patients'::regclass and c.contype in ('u', 'p') and c.conkey = array[v_att]
+  loop
+    execute pg_catalog.format('alter table public.patients drop constraint %I', v_name);
+    raise notice 'events: dropped the global case-number rule % (constraint)', v_name;
+  end loop;
+  for v_name in
+    select ci.relname from pg_catalog.pg_index i join pg_catalog.pg_class ci on ci.oid = i.indexrelid
+     where i.indrelid = 'public.patients'::regclass and i.indisunique and i.indnkeyatts = 1 and i.indkey[0] = v_att
+  loop
+    execute pg_catalog.format('drop index public.%I', v_name);
+    raise notice 'events: dropped the global case-number rule % (index)', v_name;
+  end loop;
+  if exists (select 1 from pg_catalog.pg_index i
+              where i.indrelid = 'public.patients'::regclass and i.indisunique and i.indnkeyatts = 1 and i.indkey[0] = v_att) then
+    raise exception 'events: a unique rule on patients.case_number alone is still there; per-event numbering would fail.';
+  end if;
+end
+$case_unique$;
 alter table public.patients alter column case_number drop default;
 
 -- -----------------------------------------------------------------------------------------------------
@@ -304,6 +389,47 @@ revoke all on function public.lp_patients_writable() from public, anon, authenti
 drop trigger if exists lp_patients_writable on public.patients;
 create trigger lp_patients_writable before insert or update or delete on public.patients
   for each row execute function public.lp_patients_writable();
+
+-- The same backstop on what hangs off a request: its audit trail, messages, photos and en route rows. Nothing of an
+-- archived event is added, changed or removed there, whoever writes. What the system must still write after an
+-- event ended lives in other tables and stays writable: read markers (lp_message_reads), Activity read state
+-- (lp_activity), push subscriptions and prefs, telemetry. The one exception here is the backfill in section C, which
+-- switches lp_audit_events_writable off by name for its single UPDATE. (Phase 4's deletion of an archived event's
+-- records will need its own, explicit way past this guard.)
+create or replace function public.lp_child_writable()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $fn$
+declare
+  v_row jsonb := pg_catalog.to_jsonb(case when tg_op = 'DELETE' then old else new end);
+  v_request uuid := coalesce(v_row ->> 'patient_id', v_row ->> 'request_id')::uuid;
+  v_event uuid := (v_row ->> 'event_id')::uuid;
+begin
+  if v_request is not null then
+    select p.event_id into v_event from public.patients p where p.id = v_request;
+  end if;
+  if v_event is not null and exists (select 1 from public.events e where e.id = v_event and e.stage = 'archived') then
+    raise exception using errcode = 'P0410', message = 'event_ended';
+  end if;
+  return case when tg_op = 'DELETE' then old else new end;
+end
+$fn$;
+revoke all on function public.lp_child_writable() from public, anon, authenticated;
+
+drop trigger if exists lp_audit_events_writable on public.audit_events;
+create trigger lp_audit_events_writable before insert or update or delete on public.audit_events
+  for each row execute function public.lp_child_writable();
+drop trigger if exists lp_messages_writable on public.lp_messages;
+create trigger lp_messages_writable before insert or update or delete on public.lp_messages
+  for each row execute function public.lp_child_writable();
+drop trigger if exists lp_patient_photos_writable on public.patient_photos;
+create trigger lp_patient_photos_writable before insert or update or delete on public.patient_photos
+  for each row execute function public.lp_child_writable();
+drop trigger if exists lp_enroute_writable on public.lp_enroute;
+create trigger lp_enroute_writable before insert or update or delete on public.lp_enroute
+  for each row execute function public.lp_child_writable();
 
 -- -----------------------------------------------------------------------------------------------------
 -- G0. lp_clean_fields: the fixed post list goes (the event decides)
@@ -851,11 +977,14 @@ drop function if exists public.lp_messages_sync(text, uuid[], timestamptz, boole
 --            lp_sync did not return them).
 -- Requests with neither messages nor en route are left out (the server fills the empty activity).
 -- Returns {threads, rows}.
+-- SECURITY DEFINER: the per-request helpers it calls (lp_messages_activity, lp_involved_staff(uuid),
+-- lp_enroute_summary) take no event and are no longer executable by service_role (section K); this function only
+-- ever hands them requests of p_event.
 create or replace function public.lp_messages_sync(p_event uuid, p_staff text, p_ids uuid[], p_since timestamptz, p_changed boolean)
 returns jsonb
 language plpgsql
 stable
-security invoker
+security definer
 set search_path = public, pg_temp
 set statement_timeout = '4s'
 set lock_timeout = '2s'
@@ -1325,15 +1454,19 @@ declare
 begin
   with eligible as (
     select p.id, p.status, p.found_at, p.reunion_started_at, p.closed_at, p.recheck_at, p.not_found_checks,
-           coalesce((select pg_catalog.max(e.occurred_at) from public.audit_events e where e.patient_id = p.id),
-                    p.created_at) as idle_since
+           -- (Events) Idle since the later of its last activity and the event's last reopen: a request that sat
+           -- frozen while the event was archived starts its hour again when the event is reopened.
+           greatest(coalesce((select pg_catalog.max(e.occurred_at) from public.audit_events e where e.patient_id = p.id),
+                             p.created_at),
+                    coalesce(ev.reopened_at, '-infinity'::timestamptz)) as idle_since
     from public.patients p
+    -- (Events) Live events only: practice rows are deleted at go live, archived ones are frozen.
+    join public.events ev on ev.id = p.event_id and ev.stage = 'live'
     where p.status in ('Found – Awaiting Reunion', 'Bring friend to medical', 'Found – Accompanied')
-      -- (Events) Live events only: practice rows are deleted at go live, archived ones are frozen.
-      and p.event_id in (select e.id from public.events e where e.stage = 'live')
       and (p_only is null or p.id = any (p_only))
-      and coalesce((select pg_catalog.max(e.occurred_at) from public.audit_events e where e.patient_id = p.id),
-                   p.created_at) < v_cutoff
+      and greatest(coalesce((select pg_catalog.max(e.occurred_at) from public.audit_events e where e.patient_id = p.id),
+                            p.created_at),
+                   coalesce(ev.reopened_at, '-infinity'::timestamptz)) < v_cutoff
     for update of p skip locked
   ), closed as (
     update public.patients p
@@ -1786,7 +1919,7 @@ as $fn$
     'posts', e.posts, 'mainMedical', e.main_medical, 'teams', e.teams, 'lastSeen', e.last_seen,
     'hasStaffPassword', e.staff_password_hash is not null,
     'joinLinkExpiresAt', case when e.invite_code_sha256 is not null then e.invite_expires_at end,
-    'caseSeq', e.case_seq, 'wentLiveAt', e.went_live_at, 'endedAt', e.ended_at,
+    'caseSeq', e.case_seq, 'wentLiveAt', e.went_live_at, 'endedAt', e.ended_at, 'reopenedAt', e.reopened_at,
     'recordsDeleteAt', e.records_delete_at, 'recordsDeletedAt', e.records_deleted_at,
     'createdAt', e.created_at, 'updatedAt', e.updated_at)
 $fn$;
@@ -1981,6 +2114,16 @@ begin
 end
 $fn$;
 
+-- Settings of an event. Requests keep what they stored, so:
+--   * archived: only the name and the link name may change (the logo has its own route). Posts, teams, Main Med, the
+--     "Last seen" chips, the time zone, the show-day start and the dates are what its records and stats were made
+--     with: a change is refused (P0409 bad_stage, field:<setting>), sending the same value again is fine;
+--   * a post renamed (same id, new label): the event's requests at the old label move to the new one in the same
+--     transaction (patients.reporting_location is the only column that stores a post's label; audit history keeps what
+--     was true then);
+--   * a post or team removed while the event's requests still use it: refused (P0422 in_use, field:posts / teams). A
+--     post is in use when a request reports from it; a team when a request was logged or last changed by someone of
+--     it, or a message of the event was written by it.
 create or replace function public.lp_event_update(p_event uuid, p jsonb)
 returns jsonb
 language plpgsql
@@ -1991,13 +2134,69 @@ set statement_timeout = '4s'
 set lock_timeout = '2s'
 as $fn$
 declare
+  v_old public.events;
   v_row public.events;
+  v_field text;
+  v_label text;
 begin
-  select * into v_row from public.events where id = p_event for update;
-  if v_row.id is null then
+  select * into v_old from public.events where id = p_event for update;
+  if v_old.id is null then
     raise exception using errcode = 'P0002', message = 'not_found';
   end if;
-  v_row := public.lp_event_apply(v_row, p);
+  v_row := public.lp_event_apply(v_old, p);
+
+  if v_old.stage = 'archived' then
+    v_field := case
+      when v_row.posts is distinct from v_old.posts then 'posts'
+      when v_row.teams is distinct from v_old.teams then 'teams'
+      when v_row.main_medical is distinct from v_old.main_medical then 'main_medical'
+      when v_row.last_seen is distinct from v_old.last_seen then 'last_seen'
+      when v_row.timezone is distinct from v_old.timezone then 'timezone'
+      when v_row.day_start_hour is distinct from v_old.day_start_hour then 'day_start_hour'
+      when v_row.starts_on is distinct from v_old.starts_on then 'starts_on'
+      when v_row.ends_on is distinct from v_old.ends_on then 'ends_on'
+    end;
+    if v_field is not null then
+      raise exception using errcode = 'P0409', message = 'bad_stage', hint = v_old.stage, detail = 'field:' || v_field;
+    end if;
+  end if;
+
+  -- A post that goes (its id and its label are both gone) while a request reports from it.
+  select o.post ->> 'label' into v_label
+    from pg_catalog.jsonb_array_elements(v_old.posts) as o(post)
+   where not exists (select 1 from pg_catalog.jsonb_array_elements(v_row.posts) as n(post)
+                      where n.post ->> 'id' = o.post ->> 'id' or n.post ->> 'label' = o.post ->> 'label')
+     and exists (select 1 from public.patients pt where pt.event_id = p_event and pt.reporting_location = o.post ->> 'label')
+   limit 1;
+  if v_label is not null then
+    raise exception using errcode = 'P0422', message = 'in_use', detail = 'field:posts';
+  end if;
+
+  -- A team that goes (id and label) while the event's requests or messages carry it.
+  select o.team ->> 'label' into v_label
+    from pg_catalog.jsonb_array_elements(v_old.teams) as o(team)
+   where not exists (select 1 from pg_catalog.jsonb_array_elements(v_row.teams) as n(team)
+                      where n.team ->> 'id' = o.team ->> 'id' or pg_catalog.lower(n.team ->> 'label') = pg_catalog.lower(o.team ->> 'label'))
+     and (exists (select 1 from public.patients pt
+                   where pt.event_id = p_event
+                     and (pg_catalog.lower(pg_catalog.right(pt.created_by, pg_catalog.char_length(o.team ->> 'label') + 3)) = ' · ' || pg_catalog.lower(o.team ->> 'label')
+                       or pg_catalog.lower(pg_catalog.right(pt.updated_by, pg_catalog.char_length(o.team ->> 'label') + 3)) = ' · ' || pg_catalog.lower(o.team ->> 'label')))
+       or exists (select 1 from public.lp_messages m join public.patients pt on pt.id = m.request_id
+                   where pt.event_id = p_event and pg_catalog.lower(pg_catalog.btrim(m.team)) = pg_catalog.lower(o.team ->> 'label')))
+   limit 1;
+  if v_label is not null then
+    raise exception using errcode = 'P0422', message = 'in_use', detail = 'field:teams';
+  end if;
+
+  -- Renamed posts: one statement, so two posts that swap labels swap their requests too.
+  update public.patients pt
+     set reporting_location = m.new_label
+    from (select o.post ->> 'label' as old_label, n.post ->> 'label' as new_label
+            from pg_catalog.jsonb_array_elements(v_old.posts) as o(post)
+            join pg_catalog.jsonb_array_elements(v_row.posts) as n(post) on n.post ->> 'id' = o.post ->> 'id'
+           where n.post ->> 'label' is distinct from o.post ->> 'label') as m
+   where pt.event_id = p_event and pt.reporting_location = m.old_label;
+
   begin
     update public.events
        set slug = v_row.slug, name = v_row.name, starts_on = v_row.starts_on, ends_on = v_row.ends_on,
@@ -2171,7 +2370,10 @@ begin
 end
 $fn$;
 
--- Reopen: archived → live, while its records still exist.
+-- Reopen: archived → live, while its records still exist. Its staff password and join link are cleared: while it was
+-- archived another event may have taken that password (the rule only guards running events), and the older event
+-- would then win at sign-in. A lead sets new ones through the checked routes; until then no staff can sign in to it
+-- (sessions still open carry on). reopened_at restarts the auto-close clock of requests that sat frozen.
 create or replace function public.lp_event_reopen(p_event uuid)
 returns jsonb
 language plpgsql
@@ -2191,10 +2393,28 @@ begin
   if v_row.stage <> 'archived' or v_row.records_deleted_at is not null then
     raise exception using errcode = 'P0409', message = 'bad_stage', hint = v_row.stage;
   end if;
-  update public.events set stage = 'live', ended_at = null, updated_at = pg_catalog.now()
+  update public.events
+     set stage = 'live', ended_at = null, reopened_at = pg_catalog.now(), staff_password_hash = null,
+         invite_code_sha256 = null, invite_expires_at = null, updated_at = pg_catalog.now()
    where id = p_event returning * into v_row;
   return public.lp_event_json(v_row);
 end
+$fn$;
+
+-- What the route wrapper checks on every signed-in request, in one call: the lead passcode version (a lead session
+-- signed in with an older one is over) and the session's event (a staff session of an archived event gets the Ended
+-- answer). {leadVersion, event: lp_event_json | null}.
+create or replace function public.lp_session_state(p_event uuid)
+returns jsonb
+language sql
+stable
+security invoker
+set search_path = public, pg_temp
+set statement_timeout = '4s'
+as $fn$
+  select pg_catalog.jsonb_build_object(
+    'leadVersion', coalesce((select o.lead_passcode_version from public.lp_org o where o.id), 0),
+    'event', (select public.lp_event_json(e) from public.events e where e.id = p_event))
 $fn$;
 
 -- Sign-in: the lead passcode hash and every event's staff password hash (the app server compares; bcrypt).
@@ -2207,6 +2427,7 @@ set search_path = public, pg_temp
 as $fn$
   select pg_catalog.jsonb_build_object(
     'lead', (select o.lead_passcode_hash from public.lp_org o where o.id),
+    'leadVersion', coalesce((select o.lead_passcode_version from public.lp_org o where o.id), 0),
     'events', coalesce((
       select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('id', e.id, 'stage', e.stage, 'hash', e.staff_password_hash)
                order by case e.stage when 'archived' then 1 else 0 end, e.created_at)
@@ -2229,8 +2450,10 @@ as $fn$
     and (p_slug is null or e.slug = pg_catalog.lower(pg_catalog.btrim(p_slug)))
 $fn$;
 
+drop function if exists public.lp_org_set_lead_passcode(text);
+-- Returns the new lead passcode version (the route re-issues the changing lead's own cookie with it).
 create or replace function public.lp_org_set_lead_passcode(p_hash text)
-returns void
+returns integer
 language plpgsql
 volatile
 security invoker
@@ -2244,6 +2467,7 @@ begin
   end if;
   insert into public.lp_org as o (id, lead_passcode_hash, updated_at) values (true, p_hash, pg_catalog.now())
   on conflict (id) do update set lead_passcode_hash = excluded.lead_passcode_hash, updated_at = excluded.updated_at;
+  return (select o.lead_passcode_version from public.lp_org o where o.id);
 end
 $fn$;
 
@@ -2842,7 +3066,7 @@ begin
     'public.lp_messages_thread(uuid, uuid, text, timestamptz, uuid, integer)', 'public.lp_mark_read(uuid, uuid, text, timestamptz)',
     'public.lp_involved_staff(uuid, uuid)', 'public.lp_activity_fallback_staff(uuid, uuid)',
     'public.lp_sync(uuid, timestamptz, uuid[], boolean, timestamptz, uuid, integer)',
-    'public.lp_messages_activity(uuid, text, text)', 'public.lp_messages_sync(uuid, text, uuid[], timestamptz, boolean)',
+    'public.lp_messages_sync(uuid, text, uuid[], timestamptz, boolean)',
     'public.lp_activity_list(uuid, text)', 'public.lp_activity_unread(uuid, text)', 'public.lp_activity_mark_read(uuid, text, uuid)',
     'public.lp_activity_unmark(uuid, text, uuid[])', 'public.lp_activity_record(uuid, text[], uuid, text, text, text)',
     'public.lp_push_new_request_staff(uuid)', 'public.lp_push_subscribe(uuid, text, text, text, text, text, text, text, boolean)',
@@ -2853,7 +3077,7 @@ begin
     'public.lp_event_check(public.events)', 'public.lp_event_apply(public.events, jsonb)', 'public.lp_event_create(jsonb)',
     'public.lp_event_update(uuid, jsonb)', 'public.lp_event_set_password(uuid, text)',
     'public.lp_event_set_invite(uuid, text, timestamptz)', 'public.lp_event_set_logo(uuid, text)', 'public.lp_event_go_live(uuid)',
-    'public.lp_event_end(uuid)', 'public.lp_event_reopen(uuid)', 'public.lp_auth_secrets()', 'public.lp_invite_candidates(text)',
+    'public.lp_event_end(uuid)', 'public.lp_event_reopen(uuid)', 'public.lp_session_state(uuid)', 'public.lp_auth_secrets()', 'public.lp_invite_candidates(text)',
     'public.lp_org_set_lead_passcode(text)', 'public.lp_post_short(jsonb, text, text)', 'public.lp_stats_base(uuid, boolean)',
     'public.lp_stats(uuid, text)'
   ] loop
@@ -2868,7 +3092,9 @@ begin
     'public.lp_set_enroute(uuid, text, integer, timestamptz, integer, text)', 'public.lp_add_photo(uuid, uuid, text, text, text, text)',
     'public.lp_post_message(uuid, text, uuid, text, text)', 'public.lp_unsend_message(uuid, uuid, text)', 'public.lp_detail(uuid)',
     'public.lp_messages_thread(uuid, text, timestamptz, uuid, integer)', 'public.lp_mark_read(uuid, text, timestamptz)',
-    'public.lp_activity_fallback_staff(uuid)'
+    'public.lp_activity_fallback_staff(uuid)',
+    -- Per-request helpers with no event: called only from inside functions that already filter by the event.
+    'public.lp_involved_staff(uuid)', 'public.lp_messages_activity(uuid, text, text)', 'public.lp_enroute_summary(uuid, text)'
   ] loop
     execute pg_catalog.format('revoke all on function %s from public, anon, authenticated, service_role', v_sig);
   end loop;
