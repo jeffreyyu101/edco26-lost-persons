@@ -60,8 +60,8 @@ import {
   type AlertContext,
   type RaisedAlert,
 } from './alerts';
-import { CONNECTION_FAILURES, DRAFT_DEBOUNCE_MS, LEGACY_QUEUE_KEY, MUTATION_TIMEOUT_MS, SYNC, UNDO_MS } from './constants';
-import { createBodyFromLegacyQueueItem, hasAnyDetail, toCreateBody } from './form-values';
+import { CONNECTION_FAILURES, DRAFT_DEBOUNCE_MS, MUTATION_TIMEOUT_MS, SYNC, UNDO_MS } from './constants';
+import { hasAnyDetail, toCreateBody } from './form-values';
 import { apiRequest, isDefinitive, isUncertain, type FetchLike, type HttpFailure, type HttpResult, type RequestOptions } from './http';
 import { diffMessageAlerts } from './messages-activity';
 import { createLazyMessaging, type CreateMessaging } from './messages-lazy';
@@ -119,7 +119,6 @@ import {
 import { chunk, isRow, mergeRows, overlayForPatch, replaceAll, sameRow, staleIds, summaryOf } from './sync-merge';
 import type { HoldFields, HoldRules } from './hold-rules';
 import { uuid } from './uuid';
-import { readStoredEvent, writeStoredEvent } from './event-store';
 
 // ---------------------------------------------------------------------------------------------------
 // Environment (injectable for tests; the browser default is built lazily in start())
@@ -145,7 +144,7 @@ export interface StoreEnv {
   locks: LocksLike | null;
   channel(name: string): ChannelLike | null;
   openKv(): Kv | null;
-  /** localStorage (legacy queue import, outbox lease fallback). */
+  /** localStorage (the outbox lease fallback, the ended events to drop). */
   localStorage(): Storage | null;
   /** sessionStorage (401 redirect loop guard). */
   sessionStorage(): Storage | null;
@@ -359,12 +358,7 @@ const isSettable = (s: string): s is SettableStatus => (SETTABLE_STATUSES as rea
 export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const serverState = createServerState(options.eventTimezone);
   // Pure: readPrefs() only reads localStorage (DEFAULT_PREFS on the server).
-  // (Events) The last event config this device had (localStorage): an offline reload renders with it.
-  const stored = readStoredEvent();
-  let state: StoreState = {
-    ...createServerState(stored?.event?.timezone ?? options.eventTimezone, stored?.event ?? null, stored?.role ?? null),
-    prefs: readPrefs(),
-  };
+  let state: StoreState = { ...createServerState(options.eventTimezone), prefs: readPrefs() };
   const listeners = new Set<() => void>();
   const alertListeners = new Set<(alert: AlertEvent) => void>();
 
@@ -998,7 +992,6 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const applyEvent = (info: SessionInfo) => {
     const role = info.role === 'lead' ? 'lead' : 'staff';
     const event = info.event ?? null;
-    writeStoredEvent({ role, event });
     if (state.role !== role || state.event !== event) set({ role, event, ...(event?.timezone ? { eventTimezone: event.timezone } : {}) });
   };
 
@@ -1017,31 +1010,37 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     }
     const event = error?.event ?? null;
     const eventId = event?.id ?? state.event?.id ?? eventKey;
-    ending = true;
-    const shown = event ? { ...event, id: eventId } : state.event ? { id: eventId, name: state.event.name, logoUrl: state.event.logoUrl, stage: 'archived' as const } : null;
     broadcast({ type: 'ended', eventId });
-    void leaveEndedEvent(eventId, shown);
+    void leaveEndedEvent(eventId, event ? { ...event, id: eventId } : state.event && { id: eventId, name: state.event.name, logoUrl: state.event.logoUrl, stage: 'archived' }, true);
   };
 
-  const leaveEndedEvent = async (eventId: string, shown: EndedEvent | null) => {
+  /** `own`: this tab learned it (it clears the cookie and the event's data); else another tab did and only leaves. */
+  const leaveEndedEvent = async (eventId: string, shown: EndedEvent | null, own: boolean) => {
     const e = env;
-    // What the Ended screen shows (this tab's sessionStorage).
-    void lifecycle().then((m) => m.rememberEnded(shown, e?.sessionStorage() ?? null), () => undefined);
+    ending = true;
     haltRuntime();
     abortInflight();
-    if (snackTimer) clearTimeout(snackTimer);
-    set({ generation: state.generation + 1, session: { status: 'signed_out', staffName: null, team: null, staff: null, expiresAt: null }, toasts: [], snackbar: null, outboxPrompt: null });
-    for (const t of toastTimers.values()) clearTimeout(t);
-    toastTimers.clear();
-    alertToasts.clear();
     closeSystemAlerts();
-    // Unsent requests and messages of an ended event can never be sent: they go with its data, silently.
-    await dropEventData(eventId).catch(() => undefined);
-    set({ outbox: [], confirmed: new Map(), pending: new Map(), hasData: false });
-    writeStoredEvent(null);
-    // The session cookie: DELETE /api/session still answers after the end (bounded; the cookie of an ended event opens
-    // nothing anyway, and /signin?ended=1 is never redirected back to the app).
-    if (e) await apiRequest(e.fetch, '/api/session', { method: 'DELETE', timeoutMs: SIGN_OUT_TIMEOUT_MS }).catch(() => undefined);
+    set({
+      generation: state.generation + 1,
+      session: { status: 'signed_out', staffName: null, team: null, staff: null, expiresAt: null },
+      toasts: [],
+      snackbar: null,
+      outboxPrompt: null,
+      outbox: [],
+      confirmed: new Map(),
+      pending: new Map(),
+      hasData: false,
+    });
+    void enqueue((store) => store.del(K.lastStaff));
+    if (own) {
+      // What the Ended screen shows; the event's data (unsent requests and messages can never be sent: they go,
+      // silently); the session cookie (DELETE /api/session still answers after the end).
+      const m = await lifecycle().catch(() => null);
+      m?.rememberEnded(shown, e?.sessionStorage() ?? null);
+      await m?.dropEventData(lifecycleHost, eventId).catch(() => undefined);
+      if (e) await apiRequest(e.fetch, '/api/session', { method: 'DELETE', timeoutMs: SIGN_OUT_TIMEOUT_MS }).catch(() => undefined);
+    }
     await (pushHooks()?.afterSignOut(true) ?? dropBrowserPush());
     e?.redirect(ENDED_PATH);
   };
@@ -1058,17 +1057,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     enqueue,
     cacheEvent: () => cacheEvent,
     eventKey: () => eventKey,
-    clearLoaded: () => {
-      staffEpoch += 1; // a sync begun before this applies nothing
-      rowsDirty = false;
-      if (rowsTimer) clearTimeout(rowsTimer);
-      rowsTimer = undefined;
-      cursor = null;
-      cursorAt = 0;
-      setArmed(false);
-      alertBacklog = [];
-      set({ confirmed: new Map(), pending: new Map(), hasData: false });
-    },
+    // The rows on screen go (their cache keys are deleted right after, in the same queue).
+    clearLoaded: () => void resetForOtherStaff(),
     outbox: () => state.outbox,
     setJobs: (jobs) => setJobs(jobs),
     afterDrop: async () => {
@@ -1109,7 +1099,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     applyEvent(info);
     if (sessionEndedToastId) dismissToast(sessionEndedToastId);
     sessionEndedToastId = null;
-    const last: StoredStaff = { staffName: info.staffName, team: info.team, staff: info.staff, eventId: event };
+    // (Events) With the role and the event config: an offline reload renders the same posts, teams, zone and logo.
+    const last: StoredStaff = { staffName: info.staffName, team: info.team, staff: info.staff, eventId: event, role: info.role, event: info.event ?? null };
     void enqueue((store) => store.set(K.lastStaff, last));
     refreshPrompt();
     kickOutbox();
@@ -2493,18 +2484,10 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         // Another tab queued, sent or retried a message / en route tap.
         void messaging.reload().then(() => messaging.kick());
         return;
-      case 'ended': {
-        // (Events) Another tab learned this event ended (it signs out and drops the event's data): leave for the
-        // Ended screen too.
-        const ended = (data as { eventId?: unknown }).eventId;
-        if (ending || typeof ended !== 'string' || ended !== eventKey) return;
-        ending = true;
-        haltRuntime();
-        abortInflight();
-        set({ generation: state.generation + 1, session: { status: 'signed_out', staffName: null, team: null, staff: null, expiresAt: null }, outbox: [], confirmed: new Map(), pending: new Map(), hasData: false });
-        env?.redirect(ENDED_PATH);
+      case 'ended':
+        // (Events) Another tab learned this event ended (it signs out and drops the event's data): leave too.
+        if (!ending && (data as { eventId?: unknown }).eventId === eventKey) void leaveEndedEvent(eventKey, null, false);
         return;
-      }
     }
   };
 
@@ -2895,8 +2878,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       if (!isLive(id)) return;
       try {
         const last = await kv.get<StoredStaff>(K.lastStaff);
-        // (Events) The event this phone last worked (its cache and outbox), until GET /api/session confirms one.
+        // (Events) The event this phone last worked (its cache, outbox and config), until GET /api/session confirms one.
         if (last && typeof last.eventId === 'string' && eventKey === NO_EVENT) eventKey = last.eventId;
+        if (last?.event && !state.event) set({ event: last.event, role: last.role ?? null, eventTimezone: last.event.timezone || state.eventTimezone });
         const [ids, jobs] = await Promise.all([kv.get<string[]>(K.myIds), readJobs(kv, eventKey)]);
         if (!isLive(id)) return;
         if (last && typeof last.staff === 'string' && cacheStaff === null) {
@@ -2922,7 +2906,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     // Not awaited: the first sync and the request outbox never wait for the messages engine's code (it may
     // still be downloading on a slow network). It reads its saved jobs and kicks them once it is there.
     if (durable) void messaging.hydrate();
-    if (durable) await importLegacyQueue();
+    // (Events) Jeffrey's pre-rework queue (localStorage edc_pending_queue) predates events: its items belong to no event
+    // and could only be replayed into the wrong one, so it is no longer imported (the key is left as it is).
     if (!isLive(id)) return;
     const pendingSignOut = resumeSignOut;
     if (pendingSignOut) {
@@ -2939,58 +2924,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     messaging.kick();
   };
 
-  const importLegacyQueue = async () => {
-    const ls = env?.localStorage();
-    if (!ls || !kv) return;
-    let raw: string | null;
-    try {
-      raw = ls.getItem(LEGACY_QUEUE_KEY);
-    } catch {
-      return;
-    }
-    if (raw === null) return;
-    let items: unknown;
-    try {
-      items = JSON.parse(raw);
-    } catch {
-      return; // Unreadable: leave it untouched rather than lose anything.
-    }
-    if (!Array.isArray(items)) return;
-    const base = now();
-    let index = 0;
-    for (const item of items) {
-      let body = createBodyFromLegacyQueueItem(item);
-      if (!body && item && typeof item === 'object' && !Array.isArray(item)) {
-        body = createBodyFromLegacyQueueItem({ ...(item as Record<string, unknown>), client_mutation_id: uuid() });
-      }
-      if (!body) continue;
-      if (getJob(body.clientMutationId)) continue;
-      const job: OutboxItem = {
-        mutationId: body.clientMutationId,
-        payload: body,
-        photos: [],
-        serverId: null,
-        caseNumber: null,
-        state: 'pending',
-        attempts: 0,
-        nextAttemptAt: null,
-        lastError: null,
-        // Jeffrey's queue never recorded who saved an item: no operator prompt for these.
-        operator: { staffName: '', team: '', staff: '' },
-        createdAt: base + index,
-        source: 'legacy',
-      };
-      index += 1;
-      if (!(await persistJob(job, false))) return; // keep the key: nothing is lost
-      setJobs([...state.outbox, job]);
-    }
-    try {
-      ls.removeItem(LEGACY_QUEUE_KEY);
-    } catch {
-      // best effort
-    }
-    broadcast({ type: 'outbox' });
-  };
+
 
   const start = (): (() => void) => {
     if (running) return stop;

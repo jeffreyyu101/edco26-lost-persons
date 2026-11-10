@@ -1,7 +1,7 @@
 // The durable outbox (spec §7 Outbox, A6, A13): every create is a job persisted in IndexedDB before it is
 // sent; offline / lie-fi queueing; flush after a reload; needs-attention and resend with the same
 // mutationId; photos (checkpoints, definitive rejection, retry); dedupe against confirmed rows; 401 pause;
-// the operator prompt; the legacy edc_pending_queue import; no IndexedDB → nothing kept in memory.
+// the operator prompt; (events) the legacy edc_pending_queue is no longer imported; no IndexedDB → nothing kept in memory.
 import { STUB_EVENT } from '@/lib/client/stub-data';
 import { describe, expect, it } from 'vitest';
 import { openKv, K } from '@/lib/client/persist';
@@ -321,33 +321,19 @@ describe('operator prompt (A13)', () => {
   });
 });
 
-describe('legacy queue import', () => {
-  it("imports Jeffrey's edc_pending_queue keeping client_mutation_id and removes the key; (events) it is from before events, so it is never sent into an event", async () => {
+describe('legacy queue (events: no longer imported)', () => {
+  it("leaves Jeffrey's edc_pending_queue as it is: it predates events, so it belongs to no event and is never imported or sent", async () => {
     const server = new FakeServer([]);
-    const legacy = [
-      { client_mutation_id: CMID(17), first_name: 'Lena', last_name: 'O.', age: 18, gender: 'Female', reporting_location: 'FA 3 – Kinetic', clothing: 'Pink hat' },
-      { first_name: 'No', last_name: 'Id', reporting_location: 'Base' },
-      'garbage',
-    ];
+    const legacy = [{ client_mutation_id: CMID(17), first_name: 'Lena', last_name: 'O.', age: 18, gender: 'Female', reporting_location: 'FA 3 – Kinetic', clothing: 'Pink hat' }];
     const { s, fe } = boot(server, {}, (env) => {
       env.localStorage()?.setItem(LEGACY_QUEUE_KEY, JSON.stringify(legacy));
     });
     await ready();
     await advance(100);
-    expect(fe.local.getItem(LEGACY_QUEUE_KEY)).toBeNull();
-    // Kept on the phone (nothing is lost), with no event: the signed-in event's outbox never shows or sends it.
-    const stored = (await openKv(fe.dbName)?.get<{ payload: { clientMutationId: string; firstName?: string } }>(`outbox:${CMID(17)}`)) ?? null;
-    expect(stored?.payload.clientMutationId).toBe(CMID(17));
+    expect(fe.local.getItem(LEGACY_QUEUE_KEY)).toBe(JSON.stringify(legacy));
     expect(rowsWith(server, CMID(17))).toHaveLength(0);
     expect(creates(server)).toHaveLength(0);
     expect(s().outbox).toHaveLength(0);
-  });
-
-  it('leaves an unreadable queue untouched', async () => {
-    const server = new FakeServer([]);
-    const { fe } = boot(server, {}, (env) => env.localStorage()?.setItem(LEGACY_QUEUE_KEY, '{not json'));
-    await ready();
-    expect(fe.local.getItem(LEGACY_QUEUE_KEY)).toBe('{not json');
   });
 });
 

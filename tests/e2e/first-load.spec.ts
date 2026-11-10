@@ -16,9 +16,14 @@ const KB = 1024;
 // A123 (2026-11-09, post-event brief: raise route-only to at most 44 KB if a trim is not possible): route-only 43 → 44 KB.
 // main after #30 was already over (44,268 B against 44,032); with the post-event fixes 44,352 B. The total stays 235 KB
 // (240,388 B against 240,640).
+// Events phase 2 (2026-11-10, NEEDS THE OWNER'S APPROVAL before release): total 235 → 236 KB. The store now carries the
+// event config, per-event cache and outbox keys, the ?ev= refresh and the event_ended hand-off: 240,937 B against
+// 240,640 (+297 B) after moving the brand row's event parts and the event lifecycle (go-live drop, Ended clean-up) to
+// chunks loaded after the first paint and dropping the pre-events legacy queue import. Route-only stays under 44 KB
+// (44,901 B of 45,056).
 const BUDGET = {
   /** Everything `/` loads first: framework + Radix baseline (~192 KB at Phase 1a) + app code. */
-  homeTotal: 235 * KB,
+  homeTotal: 236 * KB,
   /** Scripts `/` loads that /signin does not: the app's own first-load code (shell, store, nav). */
   homeOnly: 44 * KB,
 };

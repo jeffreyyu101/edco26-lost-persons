@@ -6,8 +6,8 @@
 //
 // Where it comes from: GET /api/session `event` (lib/api-types.ts EventConfig), read by the store when it confirms the
 // session and again whenever a sync answer says the event's version moved (GET /api/sync?ev=<updatedAt>). The last
-// config is kept on this device (localStorage, see readStoredEvent) so an offline reload renders the same posts,
-// teams, time zone and logo before the first answer. Nothing here is baked into the build.
+// config is kept on this device (the store's IndexedDB `last-staff` record) so an offline reload renders the same
+// posts, teams, time zone and logo before the first answer. Nothing here is baked into the build.
 //
 // The pure helpers below take the config (or a part of it) as an argument, so they work in tests and on the server
 // render path, where there is no config.
@@ -107,5 +107,3 @@ export function eventDates(event: Pick<EventConfig, 'startsOn' | 'endsOn'> | nul
   return form === 'long' ? `${range}, ${y2}` : range;
 }
 
-// The last config on this device: lib/client/event-store.ts (no React, so the store's first load carries only that).
-export { EVENT_STORAGE_KEY, readStoredEvent, writeStoredEvent } from './event-store';

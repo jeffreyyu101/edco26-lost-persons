@@ -561,7 +561,6 @@ describe('list views render', () => {
   });
 
   it('All requests opens with the compact brand row, above the sticky bar; Pending, My requests and Search do not (v8)', () => {
-    // (Events) The event's logo and dates come from its config (the stub's event, Nov 6–8 2026, with a logo).
     const store = storeWith((s) => ({ ...s, myIds: new Set([...s.confirmed.keys()]), event: s.event && { ...s.event, logoUrl: '/api/events/logo/local?v=abc' } }));
     // Pending v8 (Brian, 2026-11-06 afternoon): Pending and My requests get just the large title.
     for (const node of [<PendingView key="pending" />, <MineView key="mine" />]) {
@@ -586,18 +585,16 @@ describe('list views render', () => {
       expect(header).toBeLessThan(title);
       const brand = html.slice(html.lastIndexOf('<div', card), header).replace(/<!-- -->/g, '');
       expect(brand).toMatch(/<\/button><\/div><div class="[^"]*sticky[^"]*">$/);
-      // (Events) The event's logo first (decoration: the row names Ground Control; the event's own name is elsewhere), a
-      // divider, then the permanent Ground Control logo, sized up front (no shift when it loads). No event logo is
-      // baked into the build.
-      expect(brand).toMatch(/<img [^>]*src="\/api\/events\/logo\/local\?v=abc" alt=""/);
+      // (Events) The permanent Ground Control logo, sized up front (no shift when it loads). The event's logo and dates
+      // are the event's config, drawn on the client after the first paint (BrandEventSlot): none in the server's HTML,
+      // and no event logo baked into the build.
       expect(brand).toMatch(/<img [^>]*src="\/logos\/ground-control.png" alt="Ground Control" width="313" height="120"/);
-      expect(brand.indexOf('/api/events/logo/local')).toBeLessThan(brand.indexOf('ground-control.png'));
+      expect(brand).not.toContain('/api/events/logo');
       expect(brand).not.toContain('edc-orlando');
+      expect(brand).not.toMatch(/Nov 6/);
       // The title with "in medical?" in its own span, then the dates (capitals come from CSS): short on a
       // phone, long on a wide screen (CSS shows one of them).
       expect(brand).toMatch(/>Is my friend <span class="[^"]*accent[^"]*">in medical\?<\/span><\/p>/);
-      expect(brand).toMatch(new RegExp(`class="[^"]*datesShort[^"]*">Nov 6–8</p>`));
-      expect(brand).toMatch(new RegExp(`class="[^"]*datesLong[^"]*">November 6–8, 2026</p>`));
       // No "event operations" (or "event ops"), no credit line, no orbit rings.
       expect(brand).not.toMatch(/event op/i);
       expect(brand).not.toContain('Built by');

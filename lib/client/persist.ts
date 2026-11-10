@@ -4,7 +4,8 @@
 //   cache:<event id>:<canonical staff>:rows    RequestSummary[]          the data cache is per event and staff
 //   cache:<event id>:<canonical staff>:cursor  {cursor, at}              sync cursor (verbatim) + local time
 //   cache:<event id>:meta                      {wentLiveAt}              (events) when the cache's event went live
-//   last-staff                                 {staffName, team, staff, eventId}  whose cache to open offline
+//   last-staff                                 {staffName, team, staff, eventId, role, event}  whose cache (and
+//                                              event config) to open on an offline reload
 //   myids                                      string[]                  request ids created on this phone
 //   outbox:<mutationId>                        StoredJob                 one per create job, stamped with its event
 //   draft                                      StoredDraft               the new-request draft, stamped with its event
@@ -23,7 +24,7 @@
 // at the same time, across tabs too, so a collection in another tab sees either none of a save or all of
 // it: it can never delete bytes whose reference is about to be written.
 import { createStore, del, get, getMany, keys, set, setMany, type UseStore } from 'idb-keyval';
-import type { OutboxItem, OutboxPhoto, RequestSummary } from '../api-types';
+import type { EventConfig, OutboxItem, OutboxPhoto, RequestSummary, SessionRole } from '../api-types';
 import type { DraftPhoto, RequestDraft } from './store-contract';
 
 export interface Kv {
@@ -145,6 +146,9 @@ export interface StoredStaff {
   staff: string;
   /** (Events) The event whose cache to open (absent before events). */
   eventId?: string;
+  /** (Events) The session's role and event config, for an offline reload (GET /api/session refreshes them). */
+  role?: SessionRole;
+  event?: EventConfig | null;
 }
 
 /** (Events) What the cache of one event was made under: rows from before it went live are practice rows. */
