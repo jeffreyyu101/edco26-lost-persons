@@ -37,6 +37,21 @@ function trapped<T extends object>(base: T, fields: readonly string[]): T {
 
 const ROW_SECRETS = ['firstName', 'lastName', 'age', 'gender', 'clothing', 'lastSeen', 'hair', 'heightBuild', 'identifyingFeatures', 'physicalDescription', 'additionalNotes', 'contactName', 'contactPhone', 'contactRelationship', 'contactNotes', 'createdBy', 'updatedBy', 'medicalLocation', 'lastMessage'];
 
+// Captured before any test fakes the clock.
+const realSetTimeout = globalThis.setTimeout;
+
+/**
+ * Waits in real time until `done()`. A timed send gzips its batch with the platform's CompressionStream, which runs on
+ * zlib's thread pool: advancing the fake clock does not finish it, and on a busy machine the fetch can come long after
+ * the fake minute has passed.
+ */
+async function realWait(done: () => boolean, what: string, limitMs = 10_000): Promise<void> {
+  for (let waited = 0; !done(); waited += 5) {
+    if (waited >= limitMs) throw new Error(`timed out after ${limitMs} ms waiting for ${what}`);
+    await new Promise((r) => realSetTimeout(r, 5));
+  }
+}
+
 let f: Fakes;
 let store: FakeStore;
 let handle: TelemetryHandle;
@@ -160,8 +175,9 @@ describe('privacy: a scripted session with names and phone numbers everywhere', 
     messaging.set({ threads: new Map(), jobs: [trapped({ id: 'job1', kind: 'message', requestId: ID, createdAt: Date.now(), state: 'pending', attempts: 0, nextAttemptAt: null, error: null } as never, ['body', 'operator'])] });
     messaging.set({ threads: new Map(), jobs: [] });
 
-    // Quiet for a while: a send; then the page hides: a beacon.
+    // Quiet for a while: a send (once its gzip is done); then the page hides: a beacon.
     await vi.advanceTimersByTimeAsync(65_000);
+    await realWait(() => f.fetchCalls.some((c) => c.url === '/api/telemetry'), 'the timed send');
     f.doc.visibilityState = 'hidden';
     f.doc.dispatchEvent(new Event('visibilitychange'));
     await vi.advanceTimersByTimeAsync(10);
