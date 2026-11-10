@@ -26,10 +26,10 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { EndedEvent, SessionInfo } from '@/lib/api-types';
 import { ENDED_PATH, endedAtSignIn, readEnded } from '@/lib/client/ended';
 import { clearRememberedIdentity, forgetBellForOtherStaff, readPrefs, writeRememberedIdentity } from '@/lib/client/prefs';
+import { afterSignInPath, enterApp } from '@/lib/client/enter-app';
 import { announceSignIn } from '@/lib/client/session-signals';
 import { markSignedIn, markSignedInEvent } from '@/lib/client/signed-in-at';
 import { captureJoinCode, forgetJoinCode } from '@/lib/join-link';
-import { safeNextPath } from '@/lib/safe-next';
 import { isWide } from './desktop';
 import { EndedScreen } from './Ended';
 import { MESSAGES, draftFromIdentity, inviteSignInBody, rememberedIdentity, retryMinutes, type Identity, type SignInTeam, type WhoDraft } from './logic';
@@ -115,7 +115,8 @@ function openApp(session: SessionInfo | null, identity: Identity, next: string |
   // event's cache, never the previous event's.
   markSignedIn();
   markSignedInEvent(session?.eventId);
-  window.location.replace(safeNextPath(next) ?? '/');
+  // From the network, never from a page a service worker stored (lib/client/enter-app.ts).
+  void enterApp(afterSignInPath(next, session));
 }
 
 function Steps({ next, teams, onEnded }: { next: string | null; teams: readonly SignInTeam[]; onEnded: (event: EndedEvent | null) => void }) {

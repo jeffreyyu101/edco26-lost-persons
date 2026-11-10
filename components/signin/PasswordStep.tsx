@@ -9,10 +9,10 @@ import { Avatar, Button, Flex, IconButton, Text, TextField } from '@radix-ui/the
 import { Eye, EyeOff } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { forgetBellForOtherStaff, writeRememberedIdentity } from '@/lib/client/prefs';
+import { afterSignInPath, enterApp } from '@/lib/client/enter-app';
 import { announceSignIn } from '@/lib/client/session-signals';
 import { markSignedIn, markSignedInEvent } from '@/lib/client/signed-in-at';
 import { avatarInitials, teamShort } from '@/lib/domain';
-import { safeNextPath } from '@/lib/safe-next';
 import { isEnterControl, isTextEntry, useStepKeys, useWide } from './desktop';
 import type { EndedEvent } from '@/lib/api-types';
 import { MESSAGES, retryMinutes, signInBody, type Identity, type SignInTeam } from './logic';
@@ -111,9 +111,9 @@ export function PasswordStep({ identity, onChange, next, autoFocus, teams = [], 
       // event's cache, never the previous event's.
       markSignedIn();
       markSignedInEvent(outcome.session?.eventId);
-      // (Events) The Ground Control lead passcode signs in with no event open: the Events list.
-      const lead = outcome.session?.role === 'lead' && !outcome.session.eventId;
-      window.location.replace(safeNextPath(next) ?? (lead ? '/events' : '/'));
+      // (Events) The Ground Control lead passcode signs in with no event open: the Events list (even for next=/). The
+      // app opens from the network, never from a page a service worker stored (lib/client/enter-app.ts).
+      void enterApp(afterSignInPath(next, outcome.session));
       return; // Stay busy while the app loads.
     }
 
