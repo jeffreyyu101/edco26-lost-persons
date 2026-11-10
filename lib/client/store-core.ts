@@ -47,7 +47,7 @@ import {
 } from '../domain';
 import { formatCaseNumber } from '../format';
 import { syncPath } from './api-paths';
-import { isSwapRequested, swapCancelState, swapOverlayFields, swapToastTitle, type SwapAction } from './swap';
+import { isSwapRequested, sameSwap, swapOverlayFields, swapToastTitle } from './swap';
 import {
   alertKey,
   alertStillCurrent,
@@ -1449,7 +1449,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       if (gen !== state.generation) return fail('failed', COPY.failed);
       // (F5) Not a Not found when the hold moved: a request someone else just put on hold must not be closed by
       // the resend (the same tap, meant as the first Not found, would be the final one now).
-      if (latest && latest.status === from && !(to === STATUS.notInMedical && hold.holdChanged(row, latest))) {
+      // (Post-event) Nor when a swap was asked for, decided or called off in between: a Friend informed tapped on
+      // a view without it would close a request someone is acting on.
+      if (latest && latest.status === from && sameSwap(latest, row) && !(to === STATUS.notInMedical && hold.holdChanged(row, latest))) {
         res = await postStatus(id, to, latest.rowVersion, kind);
         if (gen !== state.generation) return fail('failed', COPY.failed);
       } else {
@@ -2521,10 +2523,11 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         let res = await send(row.rowVersion);
         if (gen !== state.generation) return fail('failed', COPY.failed);
         if (!res.ok && res.kind === 'http' && res.status === 409) {
-          // Only fields changed in between (same status as the tap started from): resend once, as setStatus.
+          // Only fields changed in between (same status and swap as the tap started from): resend once, as setStatus.
+          // (Post-event) A request declined, cancelled or opened again in between is someone else's decision.
           const latest = await fetchRow(id);
           if (gen !== state.generation) return fail('failed', COPY.failed);
-          if (latest && latest.status === from) {
+          if (latest && latest.status === from && sameSwap(latest, row)) {
             res = await send(latest.rowVersion);
             if (gen !== state.generation) return fail('failed', COPY.failed);
           } else {
@@ -2539,18 +2542,17 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
           markLive();
           if (res.data.changed && !quiet) {
             const title = swapToastTitle(swapAction, swapAction.action === 'cancel' ? row : request);
-            if (swapAction.action === 'request') {
-              showCustomUndo(title, UNDO_MS, () => void actions.swap(id, { action: 'withdraw' }, { quiet: true }));
-              if (state.snackbar) swapRequestUndo = { snackId: state.snackbar.id, id };
-            } else if (swapAction.action === 'cancel') {
-              // (Companion follow-up) Undo puts back what was cancelled: the request, or the approval at the same place.
-              const was = swapCancelState(row);
-              const place = row.swapPlace;
-              const again: SwapAction = was === 'approved' && place ? { action: 'approve', place } : { action: 'request' };
-              showCustomUndo(title, UNDO_MS, () => void actions.swap(id, again, { quiet: true }));
-            } else {
-              showToast({ tone: swapAction.action === 'approve' ? 'green' : 'neutral', icon: swapAction.action === 'approve' ? 'check' : 'x', title, durationMs: 4_000 });
-            }
+            // (Post-event) Every step has its Undo: the request's is withdraw; Cancel swap, Decline and Swap at …
+            // 'restore' exactly what they replaced (the original requester kept). Quiet, but a failed Undo says so.
+            showCustomUndo(title, UNDO_MS, () =>
+              void actions.swap(id, { action: swapAction.action === 'request' ? 'withdraw' : 'restore' }, { quiet: true }).then((r) => {
+                if (!r.ok && r.reason !== 'unauthorized') {
+                  const title = r.reason === 'offline' ? COPY.needsConnection : r.reason === 'conflict' || r.reason === 'invalid' ? COPY.undoStale : COPY.failed;
+                  showToast({ tone: 'amber', icon: r.reason === 'offline' ? 'cloud-off' : 'alert', title, durationMs: 6_000 });
+                }
+              }),
+            );
+            if (swapAction.action === 'request' && state.snackbar) swapRequestUndo = { snackId: state.snackbar.id, id };
           }
           return { ok: true, changed: !!res.data.changed, request: state.confirmed.get(id) ?? request };
         }

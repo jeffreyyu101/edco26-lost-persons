@@ -114,6 +114,9 @@ export class FakeServer {
   }
 
   /** Someone else changes a row (bumps version and updated_at). */
+  /** (Post-event) The latest swap step per request, for 'restore': who took it, the fields it replaced, the version it left. */
+  private swapSteps = new Map<string, { by: string | undefined; prev: Partial<RequestSummary>; version: number }>();
+
   change(id: string, patch: Partial<RequestSummary>, by: string = STAFF.rae.staff): RequestSummary {
     const cur = this.rows.get(id);
     if (!cur) throw new Error(`no row ${id}`);
@@ -202,23 +205,37 @@ export class FakeServer {
     }
     if (action === '/swap') {
       // (Companion) request / approve(place) / decline, as the backend's POST /api/requests/:id/swap.
-      const body = req.body as { action: 'request' | 'approve' | 'decline' | 'withdraw' | 'cancel'; place?: 'fa' | 'mm'; expectedVersion: number };
+      const body = req.body as { action: 'request' | 'approve' | 'decline' | 'withdraw' | 'cancel' | 'restore'; place?: 'fa' | 'mm'; expectedVersion: number };
       if (body.expectedVersion !== cur.rowVersion) return apiError(409, 'conflict', 'Updated by someone else', { currentStatus: cur.status });
       const staff = this.session?.staff;
+      // (Post-event) restore: the caller's own latest step, while the row is still where it left it (as lp_swap).
+      if (body.action === 'restore') {
+        const step = this.swapSteps.get(id);
+        if (!step || step.by !== staff || step.version !== cur.rowVersion) return apiError(422, 'invalid', 'Not allowed');
+        this.swapSteps.delete(id);
+        return json(200, { changed: true, request: this.change(id, step.prev, staff) });
+      }
+      const prev = { status: cur.status, swapRequestedAt: cur.swapRequestedAt ?? null, swapRequestedBy: cur.swapRequestedBy ?? null, swapPlace: cur.swapPlace ?? null, swapClosed: null };
+      const step = (row: RequestSummary) => {
+        this.swapSteps.set(id, { by: staff, prev, version: row.rowVersion });
+        return json(200, { changed: true, request: row });
+      };
       // (Companion follow-up) cancel: an open request → cleared; an approved swap → back to Accompanied.
       if (body.action === 'cancel' && cur.status === STATUS.inMedical && cur.swapPlace) {
-        return json(200, { changed: true, request: this.change(id, { status: STATUS.accompanied, swapPlace: null }, staff) });
+        return step(this.change(id, { status: STATUS.accompanied, swapPlace: null }, staff));
       }
       if (cur.status !== STATUS.accompanied) return apiError(422, 'invalid', 'Not allowed');
       if (body.action === 'request') {
         if (cur.swapRequestedAt) return json(200, { changed: false, request: cur });
-        return json(200, { changed: true, request: this.change(id, { swapRequestedAt: this.stamp(this.seq), swapRequestedBy: staff ?? null }, staff) });
+        return json(200, { changed: true, request: this.change(id, { swapRequestedAt: this.stamp(this.seq), swapRequestedBy: staff ?? null, swapClosed: null }, staff) });
       }
       if (!cur.swapRequestedAt) return apiError(422, 'invalid', 'No swap requested');
       if (body.action === 'approve') {
-        return json(200, { changed: true, request: this.change(id, { status: STATUS.inMedical, swapPlace: body.place ?? null, swapRequestedAt: null, swapRequestedBy: null }, staff) });
+        return step(this.change(id, { status: STATUS.inMedical, swapPlace: body.place ?? null, swapRequestedAt: null, swapRequestedBy: null }, staff));
       }
-      return json(200, { changed: true, request: this.change(id, { swapRequestedAt: null, swapRequestedBy: null }, staff) });
+      const closed = body.action === 'decline' ? 'declined' : body.action === 'withdraw' ? 'withdrawn' : 'cancelled';
+      const cleared = this.change(id, { swapRequestedAt: null, swapRequestedBy: null, swapClosed: closed }, staff);
+      return body.action === 'withdraw' ? json(200, { changed: true, request: cleared }) : step(cleared);
     }
     if (action === '/cancel') {
       const { expectedVersion } = req.body as { expectedVersion: number };

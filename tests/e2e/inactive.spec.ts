@@ -13,7 +13,8 @@ import { newSignedInContext, signedInAs, type TestStaff } from './helpers/sessio
 // server's own lp_close_inactive (on this row only: the 5-minute job stays paused on local stacks), shows
 // "Closed · inactive" (grey, the timer-off glyph, "Inactive" on a phone under 430 px) folded in Archived, and in its
 // detail (the System change and its note, Reopen in the action bar); Reopen returns it to Friend coming. Then the
-// overflow check at 375–1440 px: the row, the request and the dashboard's Closed · inactive tile, each one line.
+// overflow check at 375–1440 px: the row and the request, each one line (the v4 dashboard has no tile of its own;
+// dashboard.spec.ts checks its layout).
 // Synthetic rows only (TEST-F6-…), closed again afterwards.
 
 const BASE = testBaseUrl();
@@ -166,7 +167,7 @@ test('regression: a backlog close raises no alert on the logger\'s open phone; a
   await expect(page.locator('.lp-toast').filter({ hasText: /\d+ updates/ })).toHaveCount(0);
 });
 
-test('overflow 375–1440 px: the row, the request and the dashboard tile, each on one line', async ({ page }) => {
+test('overflow 375–1440 px: the row and the request each on one line', async ({ page }) => {
   test.setTimeout(150_000);
   const r = await inactiveRequest(page);
   const filter = `/?status=${encodeURIComponent(STATUS.inactive)}`;
@@ -191,14 +192,9 @@ test('overflow 375–1440 px: the row, the request and the dashboard tile, each 
     await expect(page.getByTestId('reopen')).toBeVisible();
     await expectNoOverflow(page, page.getByTestId('profile-actions'), `action bar ${width}`);
 
-    // The dashboard: Closed · inactive, one line, its count.
+    // The dashboard (v4, #27) has no Closed · inactive tile; its own layout checks live in dashboard.spec.ts.
     await page.goto('/?dashboard=1');
-    const tile = page.getByTestId('tile-inactive');
-    await expect(tile).toBeVisible({ timeout: 20_000 });
-    await expect(tile).toContainText(LABEL);
-    await expect.poll(async () => Number(await page.getByTestId('tile-inactive-value').textContent())).toBeGreaterThanOrEqual(1);
-    expect(await oneLine(tile.getByText(LABEL, { exact: true })), `tile at ${width}`).toBe(true);
-    await expectNoOverflow(page, page.locator('section[aria-label="Totals"]'), `dashboard tiles ${width}`);
+    await expect(page.getByTestId('dashboard')).toBeVisible({ timeout: 20_000 });
 
     // My requests (the logger's), a phone (from 768 px it is the desk table, checked above): its card under Closed,
     // the progress line ending "Closed · inactive", uncut.

@@ -88,6 +88,9 @@ describe('activity', () => {
     expect(swapApprovedDetail('fa', 'FA 3')).toBe('Swap at FA 3');
     expect(statusChangeEvent(STATUS.accompanied, null)).toEqual({ kind: 'accompanied', detail: accompaniedDetail() });
     expect(statusChangeEvent(STATUS.friendInformed, null)).toEqual({ kind: 'friend_informed', detail: 'Friend informed' });
+    // (Post-event) Back to an approved swap (the Undo of Swap done) says the swap, never "Located".
+    expect(statusChangeEvent(STATUS.inMedical, null, { place: 'fa', post: 'FA 4' })).toEqual({ kind: 'swap_approved', detail: 'Swap at FA 4' });
+    expect(statusChangeEvent(STATUS.inMedical, null, { place: null, post: 'FA 4' })?.kind).toBe('in_medical');
     expect(pushUrgency('accompanied')).toBe('high');
     expect(pushUrgency('swap_requested')).toBe('high');
     expect(pushPayload({ requestId: ID, kind: 'accompanied', detail: 'x' }, 'Jane Doe', null).requireInteraction).toBe(true);
@@ -106,7 +109,7 @@ describe('notify swapEvent recipients', async () => {
   const row = { id: ID, postShort: 'FA 4', swapPlace: null };
   const parties = { answerer: 'Bob · Special Ops', requester: 'Cy · Command', creator: 'Ann · Dispatch' };
 
-  it('request → the answerer (else everyone involved); approve → everyone involved; decline → requester + creator; withdraw → nobody', () => {
+  it('request → the answerer (else everyone involved); approve → everyone involved; decline → requester + creator; withdraw → the answerer', () => {
     expect(swapEvent('request', row, 'Cy · Command', parties)).toEqual({
       recipients: ['Bob · Special Ops'],
       event: { requestId: ID, actor: 'Cy · Command', kind: 'swap_requested', detail: 'Friend swap requested · FA 4 · decide where' },
@@ -120,7 +123,37 @@ describe('notify swapEvent recipients', async () => {
       recipients: ['Cy · Command', 'Ann · Dispatch'],
       event: { kind: 'swap_declined', detail: 'Swap declined' },
     });
-    expect(swapEvent('withdraw', row, 'Cy · Command', parties)).toBeNull();
+    // (Post-event) The requester's Undo tells the answerer their "decide where" is gone.
+    expect(swapEvent('withdraw', row, 'Cy · Command', parties)).toEqual({
+      recipients: ['Bob · Special Ops'],
+      event: { requestId: ID, actor: 'Cy · Command', kind: 'swap_cancelled', detail: 'Swap request cancelled' },
+    });
+  });
+
+  it('(post-event) an answerer who is the actor counts as none: everyone involved is told', () => {
+    expect(swapEvent('request', row, 'bob · special ops', parties)?.recipients).toBeNull();
+    expect(swapEvent('cancel', row, 'Bob · Special Ops', { ...parties, from: 'requested' })?.recipients).toBeNull();
+  });
+
+  it('(post-event) restore: an approval back → "Swap at …"; an approval taken back → "Swap cancelled"; a request back → the answerer, a decline undone → nobody', () => {
+    expect(swapEvent('restore', { ...row, swapPlace: 'fa' }, 'Ann · Dispatch', { ...parties, from: 'approved', undid: 'swap_cancelled' })).toMatchObject({
+      recipients: null,
+      event: { kind: 'swap_approved', detail: 'Swap at FA 4' },
+    });
+    expect(swapEvent('restore', row, 'Bob · Special Ops', { ...parties, from: 'requested', undid: 'swap_approved' })).toMatchObject({
+      recipients: null,
+      event: { kind: 'swap_cancelled', detail: 'Swap cancelled' },
+    });
+    expect(swapEvent('restore', row, 'Ann · Dispatch', { ...parties, from: 'requested', undid: 'swap_cancelled' })).toMatchObject({
+      recipients: ['Bob · Special Ops'],
+      event: { kind: 'swap_requested' },
+    });
+    // The answerer cancelled it themselves: the cancel told everyone involved, so does its Undo.
+    expect(swapEvent('restore', row, 'Bob · Special Ops', { ...parties, from: 'requested', undid: 'swap_cancelled' })).toMatchObject({
+      recipients: null,
+      event: { kind: 'swap_requested' },
+    });
+    expect(swapEvent('restore', row, 'Bob · Special Ops', { ...parties, from: 'requested', undid: 'swap_declined' })).toBeNull();
   });
 
   it('cancel: from requested → the answerer (copy "Swap request cancelled"); from approved → everyone involved ("Swap cancelled")', () => {
@@ -154,5 +187,6 @@ describe('validation', () => {
     expect(swapSchema.safeParse({ action: 'withdraw', expectedVersion: 3 }).success).toBe(true);
     expect(swapSchema.safeParse({ action: 'cancel', expectedVersion: 3 }).success).toBe(true);
     expect(swapSchema.safeParse({ action: 'cancel', place: 'mm', expectedVersion: 3 }).success).toBe(false);
+    expect(swapSchema.safeParse({ action: 'restore', expectedVersion: 3 }).success).toBe(true);
   });
 });

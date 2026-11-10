@@ -29,7 +29,7 @@ import { resultCount, searchDisplay, unreadTotal } from '@/components/list/list-
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { navigate } from '@/lib/client/nav';
 import { splitOpenClosed } from '@/lib/client/selectors';
-import { statusGroups, type StatusGroups } from '@/lib/client/status-order';
+import { LOCATED_GROUP_LABEL, statusGroups, type StatusGroups } from '@/lib/client/status-order';
 import { useMineClosedOpen, useSortOrder } from '@/lib/client/view-prefs';
 import {
   useActions,
@@ -122,7 +122,7 @@ function OpenGroups({ groups, now, tz, selected }: { groups: StatusGroups; now: 
       ) : null}
       {groups.coming.length > 0 ? (
         <>
-          <GroupRow group="coming" count={groups.coming.length} />
+          <GroupRow group="coming" count={groups.coming.length} label={LOCATED_GROUP_LABEL} />
           <Rows rows={groups.coming} now={now} tz={tz} selected={selected} />
         </>
       ) : null}

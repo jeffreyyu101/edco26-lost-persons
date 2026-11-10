@@ -217,13 +217,27 @@ export const TRANSITIONS: Readonly<Record<Status, readonly Status[]>> = {
   [STATUS.cancelled]: [STATUS.waiting],
   [STATUS.legacyBringFriend]: [STATUS.reunited, STATUS.discharged, STATUS.notInMedical],
   // (F6) Reopen only (kind 'reopen', any staff).
-  [STATUS.inactive]: [STATUS.inMedical],
+  // (Post-event) Reopen of a request closed while already accompanied goes back to it (lp_set_status picks it;
+  // KIND_ONLY_TRANSITIONS).
+  [STATUS.inactive]: [STATUS.inMedical, STATUS.accompanied],
   [STATUS.accompanied]: [STATUS.friendInformed, STATUS.inMedical, STATUS.notInMedical, STATUS.discharged, STATUS.waiting],
   [STATUS.friendInformed]: [STATUS.accompanied],
 };
 
-export function canTransition(from: string, to: string): boolean {
-  return isStatus(from) && isStatus(to) && TRANSITIONS[from].includes(to);
+/**
+ * (Post-event) Moves in TRANSITIONS that only one kind may make. MUST match lp_set_status's KIND_ONLY block
+ * (unit-tested). Inactive → Accompanied is the Reopen of a request closed while Accompanied; the server also checks
+ * that it was (a request closed from Located reopens to Located · friend coming).
+ */
+export const KIND_ONLY_TRANSITIONS: ReadonlyArray<{ from: Status; to: Status; kind: StatusKind }> = [
+  { from: STATUS.inactive, to: STATUS.accompanied, kind: 'reopen' },
+];
+
+/** Whether lp_set_status allows from → to. A kind-only move needs its kind (and is refused without one). */
+export function canTransition(from: string, to: string, kind?: StatusKind): boolean {
+  if (!isStatus(from) || !isStatus(to) || !TRANSITIONS[from].includes(to)) return false;
+  const only = KIND_ONLY_TRANSITIONS.find((t) => t.from === from && t.to === to);
+  return !only || only.kind === kind;
 }
 
 /** Cancelled → Added (Reopen or Undo of a cancel) is creator-only, like cancel itself. */

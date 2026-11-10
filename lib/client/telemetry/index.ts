@@ -135,6 +135,8 @@ class Collector {
   private sample = 1;
   private sampledSession: boolean | null = null;
   private prev: StoreState | null = null;
+  /** (Post-event) lastSyncLocalAt when the running sync started: the store saves it before syncing goes false. */
+  private syncFrom: number | null = null;
   private viewNow: TelView = 'unknown';
   private viewAt = 0;
   private visibleNow = true;
@@ -439,8 +441,9 @@ class Collector {
       this.connAt = t;
       this.crumbs.add(t, `c:${s.connection}`);
     }
+    if (s.syncing && !prev?.syncing) this.syncFrom = s.lastSyncLocalAt;
     if (prev?.syncing && !s.syncing) {
-      const ok = s.lastSyncLocalAt !== null && s.lastSyncLocalAt !== prev.lastSyncLocalAt;
+      const ok = s.lastSyncLocalAt !== null && s.lastSyncLocalAt !== this.syncFrom;
       this.buffer.agg(
         'sync',
         () => ({ n: 'sync', at: t, k: 0, p: { ok: 0, fail: 0, full: 0, age: 0 } }),

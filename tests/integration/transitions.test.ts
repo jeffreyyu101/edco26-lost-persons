@@ -7,7 +7,7 @@ import { SETTABLE_STATUSES, STATUS, TRANSITIONS, type Status } from '@/lib/domai
 import { ApiFailure } from '@/lib/server/errors';
 import { reclassify } from '@/lib/server/reclassify';
 import { OPAQUE_DB_ERROR } from '@/lib/server/supabase';
-import { admin, api, cookieFor, createRequest, forceStatus, newStaff, randomUUID, staffOf, withTestServer, type Staff } from './harness';
+import { admin, api, cookieFor, createRequest, forceStatus, newStaff, psql, randomUUID, staffOf, withTestServer, type Staff } from './harness';
 
 withTestServer();
 
@@ -194,6 +194,12 @@ describe('status details', () => {
     });
     expect(await reclassify(opaque(), id, { fn: 'status', expectedVersion: version, target: STATUS.reunited })).toMatchObject({ code: 'invalid' });
     expect(await reclassify(opaque(), id, { fn: 'cancel', expectedVersion: version })).toMatchObject({ code: 'invalid' });
+    // (Post-event) swap: not Accompanied → 422, except a cancel / restore of an approved swap (In medical + place): 503.
+    expect(await reclassify(opaque(), id, { fn: 'swap', expectedVersion: version, action: 'approve' })).toMatchObject({ code: 'invalid' });
+    psql(`update public.patients set status = 'Found – Awaiting Reunion', swap_place = 'mm' where id = '${id}'`);
+    const now = Number(psql(`select row_version from public.patients where id = '${id}'`));
+    expect(await reclassify(opaque(), id, { fn: 'swap', expectedVersion: now, action: 'cancel' })).toMatchObject({ code: 'unavailable' });
+    expect(await reclassify(opaque(), id, { fn: 'swap', expectedVersion: now, action: 'approve' })).toMatchObject({ code: 'invalid' });
     expect(await reclassify(opaque(), randomUUID(), { fn: 'update', expectedVersion: 0 })).toMatchObject({ code: 'not_found' });
     // Any other failure passes through untouched.
     const other = new ApiFailure('unavailable', undefined, { dbCode: '57014' });

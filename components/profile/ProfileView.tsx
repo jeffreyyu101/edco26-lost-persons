@@ -360,10 +360,12 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
   const send = (to: SettableStatus, kind: StatusKind) => void actions.setStatus(row.id, to, kind);
   // (Companion) Located from Waiting / Not located asks "Someone already with them?" first; nothing saves until
   // one of its two answers is tapped.
-  const [locatedKind, setLocatedKind] = useState<StatusKind | null>(null);
+  const [locatedAsk, setLocatedAsk] = useState<{ kind: StatusKind; from: string } | null>(null);
+  // (Post-event) Someone else's answer moved the status under the open sheet: it closes (their answer stands).
+  if (locatedAsk && locatedAsk.from !== row.status) setLocatedAsk(null);
   const move = (to: SettableStatus, kind: StatusKind) => {
     if (to === STATUS.inMedical && (row.status === STATUS.waiting || row.status === STATUS.notInMedical) && kind !== 'undo') {
-      setLocatedKind(kind);
+      setLocatedAsk({ kind, from: row.status });
       return;
     }
     send(to, kind);
@@ -540,13 +542,13 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
         <FriendMayBeRow row={row} />
 
         <LocatedSheet
-          row={locatedKind ? row : null}
-          open={locatedKind !== null}
+          row={locatedAsk ? row : null}
+          open={locatedAsk !== null}
           offline={offline}
-          onClose={() => setLocatedKind(null)}
+          onClose={() => setLocatedAsk(null)}
           onChoose={(to) => {
-            const kind = locatedKind ?? 'answer';
-            setLocatedKind(null);
+            const kind = locatedAsk?.kind ?? 'answer';
+            setLocatedAsk(null);
             send(to, kind);
           }}
         />
@@ -834,6 +836,9 @@ function StatusBlock({
         {formatDuration(minutes)}
       </Badge>
     );
+  } else if (stage.key === 'swapRequested' && row.swapRequestedAt) {
+    // (Post-event) Who asked for the swap and when (as the sheet), not who answered Accompanied.
+    sub = swapSub(row, now, timeZone);
   } else if (isStatus(row.status)) {
     // Who answered and when, nothing else (Brian, 2026-11-06 afternoon: the "heading to Main Med" line went).
     const o = origin ?? fallbackOrigin(row);

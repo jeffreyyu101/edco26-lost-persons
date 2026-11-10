@@ -363,7 +363,7 @@ describe('lp_stats avgReuniteMinutes and loggedLastHour: exact values on a scrat
     psql(`create database ${SCRATCH}`);
     scratchCreated = true;
     const chain = readdirSync(join(ROOT, 'supabase', 'migrations')).filter((f) => f.endsWith('.sql')).sort();
-    expect(chain.at(-1)).toBe('20261108120000_companion.sql');
+    expect(chain.at(-1)).toBe('20261109120000_companion_post_event.sql');
     for (const file of chain) scratch(['-f', join(ROOT, 'supabase', 'migrations', file)]);
     expect(scratchStats()).toMatchObject({ total: 0, avgReuniteMinutes: null, loggedLastHour: 0, avgAnswerMinutes: null });
   }, 60_000);
@@ -440,6 +440,47 @@ describe('lp_stats avgReuniteMinutes and loggedLastHour: exact values on a scrat
        join public.patients p on p.first_name = 'TEST-core-12';`,
     ]);
     expect(scratchStats()).toMatchObject({ total: 12, avgReuniteMinutes: 13.9, loggedLastHour: 6 });
+
+    // (Post-event) A swap: Accompanied 50, approved 20 (Accompanied → Located), Swap done 14 → 6 min, not 36.
+    insertNight(
+      [['TEST-core-13', S.reunited, 55]],
+      [
+        change('TEST-core-13', S.waiting, S.accompanied, 'answer', 50),
+        ['TEST-core-13', 'status_changed', { status: S.accompanied }, { status: S.inMedical, kind: 'swap', swap_place: 'mm' }, 20],
+        change('TEST-core-13', S.inMedical, S.reunited, 'reunite', 14),
+      ],
+    );
+    // (71 + 12.333… + 6) / 7 = 12.76… → 12.8.
+    expect(scratchStats()).toMatchObject({ total: 13, avgReuniteMinutes: 12.8 });
+  });
+
+  it('(post-event) an Undo of Located → Accompanied puts the friend\'s clock back: Time to reunite and Needs attention', () => {
+    insertNight(
+      [
+        ['TEST-core-14', S.reunited, 60],
+        ['TEST-core-15', S.inMedical, 45],
+      ],
+      [
+        // 14: Located 50, changed to Accompanied 30, Undo 28, reunited 14 → 36 min (from the answer), not 14.
+        change('TEST-core-14', S.waiting, S.inMedical, 'answer', 50),
+        change('TEST-core-14', S.inMedical, S.accompanied, 'change', 30),
+        change('TEST-core-14', S.accompanied, S.inMedical, 'undo', 28),
+        change('TEST-core-14', S.inMedical, S.reunited, 'reunite', 14),
+        // 15 (still Located): Located 40, changed to Accompanied 20, Undo 18 → waiting on the friend for 40 min.
+        change('TEST-core-15', S.waiting, S.inMedical, 'answer', 40),
+        change('TEST-core-15', S.inMedical, S.accompanied, 'change', 20),
+        change('TEST-core-15', S.accompanied, S.inMedical, 'undo', 18),
+      ],
+    );
+    // (71 + 12.333… + 6 + 36) / 8 = 15.66… → 15.7 (with the Undo as a new start it would be 12.9).
+    expect(scratchStats()).toMatchObject({ total: 15, avgReuniteMinutes: 15.7 });
+    const id = scratch(['-c', "select id from public.patients where first_name = 'TEST-core-15'"]);
+    const since = scratch([
+      '-c',
+      `set role service_role; select x ->> 'kind', round(extract(epoch from now() - (x ->> 'since')::timestamptz) / 60)
+       from public.lp_stats('event') s, jsonb_array_elements(s #> '{attention,items}') x where x ->> 'id' = '${id}';`,
+    ]);
+    expect(since).toBe('located|40');
   });
 });
 
@@ -487,7 +528,9 @@ describe('lp_stats(p_range): exact values on a scratch database (Dashboard v4)',
       ['l1', 'Other', S.inMedical, m(30), 'null'],
       ['n1', 'FA 4 – Oasis', S.notInMedical, m(90), 'null'],
       ['y1', 'FA 3 – Kinetic', S.reunited, m(24 * 60 + 30), 'null'],
-      ['y2', 'FA 4 – Oasis', S.cancelled, m(24 * 60 - 10), 'null'],
+      // After the same moment last night: in no comparison. 20 min, not 10: the 15-min buckets' night-before line runs
+      // to the end of the current quarter hour a day back (up to 15 min after now − 1 day), whatever the clock says.
+      ['y2', 'FA 4 – Oasis', S.cancelled, m(24 * 60 - 20), 'null'],
     ];
     const ev: Array<[string, string, string, number]> = [
       ['r1', S.waiting, S.inMedical, 35],

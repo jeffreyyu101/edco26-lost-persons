@@ -21,11 +21,13 @@ import { boot, finish, installStoreHooks, ready } from '../client/helpers/boot';
 import { FakeServer, makeRow } from '../client/helpers/fake-server';
 
 describe('changeAnswerChoices', () => {
-  it('In medical: Not found, then Back to Waiting for check', () => {
+  it('In medical: Not found, (post-event) already accompanied, then Back to Waiting for check', () => {
     expect(changeAnswerChoices(STATUS.inMedical)).toEqual([
       { to: STATUS.notInMedical, label: 'Not located', kind: 'change' },
+      { to: STATUS.accompanied, label: 'Located · already accompanied', kind: 'change' },
       { to: STATUS.waiting, label: 'Back to Waiting for check', kind: 'change' },
     ]);
+    expect(changeAnswerChoices(STATUS.legacyBringFriend).map((c) => c.to)).not.toContain(STATUS.accompanied);
     expect(BACK_TO_WAITING).toBe('Back to Waiting for check');
   });
 

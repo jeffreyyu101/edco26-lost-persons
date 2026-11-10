@@ -10,7 +10,7 @@ import { memo, useEffect, useId, useRef, useState, type CSSProperties, type Mous
 import { StageGlyph } from '@/components/ui/StageGlyph';
 import { CheckPreview, ComingEnroute, MessageButton, MessageIconButton, MineActivity, useHasMessages } from '@/components/messages/CardActivity';
 import m from '@/components/messages/messages.module.css';
-import { StatusGlyph } from '@/components/ui/StatusGlyph';
+import { StatusGlyph, SwapGlyph } from '@/components/ui/StatusGlyph';
 import { HoldChip, StageChip, hasStageChip } from './StageChips';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import { photoPath } from '@/lib/client/api-paths';
@@ -18,6 +18,7 @@ import { navigate } from '@/lib/client/nav';
 import { ANSWER_LABEL, NOT_FOUND_YET_LABEL, STATUS, ageGender, isHeld, isRecheckDue, statusMeta, waitTone } from '@/lib/domain';
 import { displayStage, notFoundAnswer, type StageTone } from '@/lib/stages';
 import { formatCaseNumber, formatDuration, minutesSince } from '@/lib/format';
+import { isSwapApproved, swapApprovedLabel } from '@/lib/client/swap';
 import {
   cardDescription,
   displayName,
@@ -356,7 +357,9 @@ export const ComingCard = memo(function ComingCard({ row, now, offline, onReunit
   const minutes = minutesSince(statusSince(row), now);
   const ag = ageGender(row.age, row.gender);
   const location = (row.medicalLocation ?? '').trim();
-  const label = `${whoPhrase(row)}. ${statusMeta(STATUS.inMedical).shortLabel}${location ? `, ${location}` : ''}, ${minutesPhrase(minutes)} ago. ${row.postShort} · ${formatCaseNumber(row.caseNumber)}.`;
+  // (Post-event) An approved swap says where ("Swap at FA 4"), not a plain Located.
+  const swapAt = isSwapApproved(row) && row.swapPlace ? swapApprovedLabel(row.swapPlace, row) : null;
+  const label = `${whoPhrase(row)}. ${swapAt ?? statusMeta(STATUS.inMedical).shortLabel}${location ? `, ${location}` : ''}, ${minutesPhrase(minutes)} ago. ${row.postShort} · ${formatCaseNumber(row.caseNumber)}.`;
   const describedBy = offline ? `${nameId} ${reasonId}` : nameId;
   const messages = useHasMessages();
   const reunited = (
@@ -399,6 +402,12 @@ export const ComingCard = memo(function ComingCard({ row, now, offline, onReunit
               {location ? <MapPin size={14} strokeWidth={2} aria-hidden /> : <Plus size={14} strokeWidth={2} aria-hidden />}
               <span className={s.locText}>{location || 'Location'}</span>
             </button>
+            {swapAt ? (
+              <span className={s.swapTag} aria-hidden data-testid="coming-swap">
+                <SwapGlyph tone="green" size={14} />
+                <span className={s.locText}>{swapAt}</span>
+              </span>
+            ) : null}
           </div>
         </div>
       </div>
@@ -445,7 +454,8 @@ export const MineCard = memo(function MineCard({
   const chip = hasStageChip(stage);
   const hold = holdState(row, now);
   const holdSaid = hold === 'due' ? `${NOT_FOUND_YET_LABEL.toLowerCase()}, recheck due` : hold === 'held' ? NOT_FOUND_YET_LABEL.toLowerCase() : '';
-  const stageSaid = stage.key === 'needsInfo' ? stage.said : hold !== 'none' ? '' : statusMeta(row.status).label;
+  // (Post-event) A swap reads as the screen shows it ("Friend swap requested", "Swap at FA 4").
+  const stageSaid = stage.key === 'needsInfo' || stage.key === 'swapRequested' || stage.key === 'swapApproved' ? stage.said : hold !== 'none' ? '' : statusMeta(row.status).label;
   const said = [stageSaid, holdSaid].filter(Boolean).join(', ').replace(/^./, (c) => c.toUpperCase());
   const label = `${whoPhrase(row)}. ${sub}. ${said}${waiting ? `, waiting ${minutesPhrase(minutes)}` : `, ${minutesPhrase(minutes)} ago`}.`;
   return (

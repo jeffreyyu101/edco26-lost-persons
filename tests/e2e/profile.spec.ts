@@ -263,7 +263,7 @@ test('Change answer opens a menu: the other answer or Back to Waiting for check,
   await expect(menu).toBeVisible();
   // (The open menu is modal: the page behind it, the button included, is aria-hidden until it closes.)
   await expect(page.getByTestId('change-answer')).toHaveAttribute('aria-expanded', 'true');
-  await expect(menu.getByRole('menuitem')).toHaveText(['Not located', 'Back to Waiting for check']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Not located', 'Located · already accompanied', 'Back to Waiting for check']);
   await expect(menu.getByRole('menuitem', { name: 'Not located' }).locator('svg[data-glyph="notInMedical"]')).toHaveCount(1);
   await expect(menu.getByRole('menuitem', { name: 'Back to Waiting for check' }).locator('svg[data-glyph="waiting"]')).toHaveCount(1);
   // 44 px rows (axe on the open menu: the describe block below).

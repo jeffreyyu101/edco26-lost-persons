@@ -115,6 +115,11 @@ export function stepperModel(status: string): StepperModel {
       return { steps: ['Logged', 'Checked', statusMeta(STATUS.inMedical).shortLabel, statusMeta(STATUS.discharged).shortLabel], current: 3, mode: 'cur', color: 'var(--gray-9)' };
     case STATUS.cancelled:
       return { steps: ['Logged', 'Cancelled'], current: 1, mode: 'cur', color: 'var(--gray-9)' };
+    case STATUS.accompanied:
+      // (Post-event) Located with someone already there: open and amber, like its chip.
+      return { steps: ['Logged', 'Checked', statusMeta(STATUS.accompanied).shortLabel], current: 2, mode: 'cur', color: 'var(--amber-9)' };
+    case STATUS.friendInformed:
+      return { steps: ['Logged', 'Checked', statusMeta(STATUS.accompanied).shortLabel, statusMeta(STATUS.friendInformed).shortLabel], current: 3, mode: 'cur', color: 'var(--gray-9)' };
     case STATUS.inactive:
       // (F6) Found, then closed by the server for inactivity: the last step is the status, grey like every closed one.
       return { steps: ['Logged', 'Checked', statusMeta(STATUS.inMedical).shortLabel, statusMeta(STATUS.inactive).shortLabel], current: 3, mode: 'cur', color: 'var(--gray-9)' };

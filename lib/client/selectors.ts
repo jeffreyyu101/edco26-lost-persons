@@ -2,7 +2,7 @@
 // store-contract.ts. No React, no I/O.
 // FROZEN after Phase 1a: later phases may ADD exports, never change existing ones.
 import type { OutboxItem, RequestSummary } from '../api-types';
-import { STATUS, isInMedical, matchesPostFilter, postFull, sameStaff, statusBucket } from '../domain';
+import { STATUS, isInMedical, isLocated, matchesPostFilter, postFull, sameStaff, statusBucket } from '../domain';
 import { formatCaseNumber, parseCaseNumberQuery } from '../format';
 import type { Overlay } from './store-contract';
 
@@ -50,7 +50,8 @@ export function filterAll(rows: readonly RequestSummary[], filter: AllFilter): R
   const post = filter.post?.trim() || null;
   return rows.filter((r) => {
     if (filter.status) {
-      const ok = filter.status === STATUS.inMedical ? isInMedical(r.status) : r.status === filter.status;
+      // (Post-event) Located counts Already accompanied too, as the dashboard's Located number does.
+      const ok = filter.status === STATUS.inMedical ? isLocated(r.status) : r.status === filter.status;
       if (!ok) return false;
     }
     if (post && !matchesPostFilter(r, post)) return false;

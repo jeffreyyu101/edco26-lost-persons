@@ -88,6 +88,8 @@ export function mapRow(raw: unknown): RequestSummary {
     swapRequestedAt: str(r.swap_requested_at),
     swapRequestedBy: str(r.swap_requested_by),
     swapPlace: r.swap_place === 'fa' || r.swap_place === 'mm' ? r.swap_place : null,
+    // (Post-event) A database before 20261109120000 sends none: null (the client falls back to who cleared it).
+    swapClosed: r.swap_closed === 'declined' || r.swap_closed === 'withdrawn' || r.swap_closed === 'cancelled' ? r.swap_closed : null,
   };
 }
 

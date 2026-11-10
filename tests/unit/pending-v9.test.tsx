@@ -12,12 +12,13 @@ import { CheckCard, ComingCard, holdState } from '@/components/list/cards';
 import { ArchivedFold as DeskArchivedFold } from '@/components/desk/table/DeskTable';
 import { logRowLabel, stageClock } from '@/components/list/list-helpers';
 import { ArchivedFold, GroupDivider } from '@/components/list/rows';
-import { QueueHeader } from '@/components/list/PendingQueues';
+import { PendingQueues, QueueHeader } from '@/components/list/PendingQueues';
 import { SORT_WORDS, sortAnnouncement, sortToggleLabel } from '@/components/list/SortToggle';
 import type { RequestSummary } from '@/lib/api-types';
 import { notFoundSnack } from '@/lib/client/hold';
 import { pendingGroups, viewCounts } from '@/lib/client/selectors';
 import {
+  LOCATED_GROUP_LABEL,
   byFriendComing,
   comingRank,
   friendComingOrder,
@@ -125,6 +126,8 @@ describe('status groups (All and My requests sorted by status)', () => {
     expect(html).toContain('aria-level="2"');
     expect(html).toContain('Waiting for check 7 requests');
     expect(renderToString(<GroupDivider group="coming" count={1} />)).toContain('Friend coming 1 request');
+    // (Post-event) A list sorted by status: the second group holds Already accompanied too, so it reads "Located".
+    expect(renderToString(<GroupDivider group="coming" count={2} label={LOCATED_GROUP_LABEL} />)).toContain('Located 2 requests');
   });
 });
 
@@ -151,6 +154,15 @@ describe('the left answer, by hold state', () => {
     );
   const noop = () => {};
 
+  it('(post-event) the desk board shows Friend swap requested with Waiting for check empty, as the phone does', () => {
+    const asked = { ...base, id: 'swap-1', caseNumber: 1201, status: STATUS.accompanied, swapRequestedAt: at(-5), swapRequestedBy: 'Rae · Medical' } as RequestSummary;
+    const leaving = { items: [], mark: noop, unmark: noop };
+    for (const variant of ['phone', 'board'] as const) {
+      const html = render(<PendingQueues waiting={[]} coming={[]} swapRequested={[asked]} now={NOW} offline={false} onNotFound={noop} onInMedical={noop} onReunited={noop} onLocate={noop} leaving={leaving} variant={variant} />);
+      expect(html, variant).toContain('data-testid="pending-section-swap"');
+    }
+  });
+
   it('the card: the same button in both states, the chip only when held or due, the wait the only time', () => {
     const fresh = render(<CheckCard row={BW} now={NOW} offline={false} onNotInMedical={noop} onInMedical={noop} />);
     expect(fresh).toContain('data-answer="hold"');
@@ -176,6 +188,16 @@ describe('the left answer, by hold state', () => {
     expect(html).not.toContain(OLD.contactName ?? 'never');
     expect(html).not.toContain('on the way');
     expect(html).toContain('data-tone="gray" data-testid="card-minutes"');
+  });
+
+  it('(post-event) an approved swap on a Friend coming card says where ("Swap at …"), on screen and to a screen reader', () => {
+    const swap = render(<ComingCard row={{ ...OLD, status: STATUS.inMedical, swapPlace: 'fa' }} now={NOW} offline={false} onReunited={noop} onLocate={noop} />);
+    expect(swap).toContain('data-testid="coming-swap"');
+    expect(swap).toContain('data-glyph="swap-green"');
+    expect(swap).toMatch(/aria-label="[^"]*\. Swap at [^",.]+[,.]/);
+    const plain = render(<ComingCard row={OLD} now={NOW} offline={false} onReunited={noop} onLocate={noop} />);
+    expect(plain).not.toContain('coming-swap');
+    expect(plain).not.toMatch(/aria-label="[^"]*Swap at/);
   });
 
   it('the Undo bar: "Pending · recheck in 20 min", then "<full name> closed · not located"', () => {

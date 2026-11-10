@@ -337,7 +337,15 @@ export const FRIEND_MAY_BE_WITH_THEM = 'friend may be with them';
  * The event of a status change made through POST /api/requests/:id/status (contract D, F4's kinds), or null.
  * Not in medical is never raised here: the Not found yet hold (F5) owns both its answers.
  */
-export function statusChangeEvent(status: string, medicalLocation: string | null | undefined): { kind: ActivityKind; detail: string } | null {
+export function statusChangeEvent(
+  status: string,
+  medicalLocation: string | null | undefined,
+  swap?: { place: SwapPlace | null | undefined; post: string },
+): { kind: ActivityKind; detail: string } | null {
+  // (Post-event) Back to an approved swap (the Undo of Swap done): "Swap at FA 4", never "Located".
+  if ((status === STATUS.inMedical || status === STATUS.legacyBringFriend) && (swap?.place === 'fa' || swap?.place === 'mm')) {
+    return { kind: 'swap_approved', detail: swapApprovedDetail(swap.place, swap.post) };
+  }
   if (status === STATUS.inMedical || status === STATUS.legacyBringFriend) return { kind: 'in_medical', detail: inMedicalDetail(medicalLocation) };
   if (status === STATUS.waiting) return { kind: 'back_to_waiting', detail: backToWaitingDetail() };
   if (status === STATUS.reunited) return { kind: 'reunited', detail: closedDetail('reunited') };

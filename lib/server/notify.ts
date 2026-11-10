@@ -28,7 +28,7 @@ import {
   type ActivityEvent,
 } from '../activity';
 import type { RequestSummary } from '../api-types';
-import { isUuid } from '../domain';
+import { isUuid, sameStaff } from '../domain';
 import { involvedStaff } from './involved';
 import { groupOutcomes, pushEnabled, sendPushes, type PushTarget } from './push';
 import { rpc } from './supabase';
@@ -146,31 +146,46 @@ export interface SwapParties {
   answerer: string | null;
   requester: string | null;
   creator: string | null;
-  /** (Companion) cancel: what was cancelled, 'requested' (an open request) or 'approved' (a running swap). */
+  /**
+   * (Companion) cancel: what was cancelled, 'requested' (an open request) or 'approved' (a running swap).
+   * (Post-event) restore: what came back.
+   */
   from?: 'requested' | 'approved' | null;
+  /** (Post-event) restore: the step it took back ('swap_cancelled' | 'swap_declined' | 'swap_approved'). */
+  undid?: string | null;
 }
 
+export type SwapNoticeAction = 'request' | 'approve' | 'decline' | 'withdraw' | 'cancel' | 'restore';
+
 /**
- * (Companion) The event and recipients of a friend swap change (spec table), or null (withdraw tells nobody):
- *   request → THE STAFF WHO ANSWERED (latest change into Accompanied / Located), else everyone involved
- *   approve → everyone involved (the requester is: lp_involved_staff counts swap_requested)
- *   decline → the requester and the creator
- *   cancel  → from requested: the staff who answered (as request); from approved: everyone involved
- * The actor is always left out (lp_activity_record). `recipients` null = everyone involved.
+ * (Companion) The event and recipients of a friend swap change (spec table), or null (nobody is told):
+ *   request  → THE STAFF WHO ANSWERED (latest change into Accompanied / Located), else everyone involved
+ *   approve  → everyone involved (the requester is: lp_involved_staff counts swap_requested)
+ *   decline  → the requester and the creator
+ *   cancel   → from requested: the staff who answered (as request); from approved: everyone involved
+ *   withdraw → (post-event) as cancel from requested: their push asked them to decide
+ *   restore  → (post-event) the Undo of the caller's own step: an approval back → "Swap at …" to everyone involved;
+ *              an approval taken back → "Swap cancelled" to everyone involved; a cancelled request back → "Friend
+ *              swap requested" to whoever the cancel told; a declined request back → nobody (the next decision tells them)
+ * The actor is always left out (lp_activity_record). `recipients` null = everyone involved. (Post-event) The staff
+ * who answered counts only when it is someone else: the actor alone would leave nobody to tell.
  */
 export function swapEvent(
-  action: 'request' | 'approve' | 'decline' | 'withdraw' | 'cancel',
+  action: SwapNoticeAction,
   row: Pick<RequestSummary, 'id' | 'postShort' | 'swapPlace'>,
   actor: string,
   parties: SwapParties,
 ): { recipients: string[] | null; event: ActivityEvent } | null {
   const base = { requestId: row.id, actor };
-  if (action === 'request') {
-    return {
-      recipients: parties.answerer ? [parties.answerer] : null,
-      event: { ...base, kind: 'swap_requested', detail: swapRequestedDetail(row.postShort) },
-    };
+  const answerer = parties.answerer && !sameStaff(parties.answerer, actor) ? [parties.answerer] : null;
+  const requested: ActivityEvent = { ...base, kind: 'swap_requested', detail: swapRequestedDetail(row.postShort) };
+  if (action === 'restore') {
+    if (parties.undid === 'swap_approved') return { recipients: null, event: { ...base, kind: 'swap_cancelled', detail: SWAP_CANCELLED_DETAIL } };
+    // A cancelled request back goes to whoever the cancel told (the answerer, else everyone involved).
+    if (parties.from !== 'approved') return parties.undid === 'swap_cancelled' ? { recipients: answerer, event: requested } : null;
+    action = 'approve';
   }
+  if (action === 'request') return { recipients: answerer, event: requested };
   if (action === 'approve') {
     const place = row.swapPlace === 'fa' ? 'fa' : 'mm';
     return { recipients: null, event: { ...base, kind: 'swap_approved', detail: swapApprovedDetail(place, row.postShort) } };
@@ -179,12 +194,9 @@ export function swapEvent(
     const list = [parties.requester, parties.creator].filter((s): s is string => !!s);
     return { recipients: list, event: { ...base, kind: 'swap_declined', detail: SWAP_DECLINED_DETAIL } };
   }
-  if (action === 'cancel') {
-    if (parties.from === 'requested') {
-      return {
-        recipients: parties.answerer ? [parties.answerer] : null,
-        event: { ...base, kind: 'swap_cancelled', detail: SWAP_REQUEST_CANCELLED_DETAIL },
-      };
+  if (action === 'withdraw' || action === 'cancel') {
+    if (action === 'withdraw' || parties.from === 'requested') {
+      return { recipients: answerer, event: { ...base, kind: 'swap_cancelled', detail: SWAP_REQUEST_CANCELLED_DETAIL } };
     }
     return { recipients: null, event: { ...base, kind: 'swap_cancelled', detail: SWAP_CANCELLED_DETAIL } };
   }
@@ -193,7 +205,7 @@ export function swapEvent(
 
 /** (Companion) Records and pushes a friend swap change after the response. Never throws. */
 export async function swapNotice(
-  action: 'request' | 'approve' | 'decline' | 'withdraw' | 'cancel',
+  action: SwapNoticeAction,
   row: Pick<RequestSummary, 'id' | 'postShort' | 'swapPlace'>,
   actor: string,
   parties: SwapParties,

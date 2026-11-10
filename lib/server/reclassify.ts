@@ -6,24 +6,25 @@
 //   lp_cancel:        status not Added → P0422 illegal_transition (checked first), else version → P0409
 // Anything that does not fit stays a 503 (the client retries). Server only.
 import 'server-only';
-import { STATUS, canTransition } from '../domain';
+import { STATUS, canTransition, isInMedical, type StatusKind } from '../domain';
 import { ApiFailure } from './errors';
 import { OPAQUE_DB_ERROR, db } from './supabase';
 
 export type MutationKind =
-  | { fn: 'status'; expectedVersion: number; target: string }
+  | { fn: 'status'; expectedVersion: number; target: string; kind?: StatusKind }
   | { fn: 'update'; expectedVersion: number }
   | { fn: 'cancel'; expectedVersion: number }
-  // (Companion) lp_swap: version mismatch → P0409, else (not Accompanied) → P0422 illegal_transition.
-  | { fn: 'swap'; expectedVersion: number };
+  // (Companion) lp_swap: version mismatch → P0409, else (not Accompanied) → P0422 illegal_transition. (Post-event)
+  // cancel and restore also start from an approved swap (In medical + swap_place): left a 503 there.
+  | { fn: 'swap'; expectedVersion: number; action: string };
 
-async function currentRow(id: string): Promise<{ status: string; row_version: number } | null | 'error'> {
+async function currentRow(id: string): Promise<{ status: string; row_version: number; swap_place: unknown } | null | 'error'> {
   try {
-    const { data, error } = await db().from('patients').select('status, row_version').eq('id', id).maybeSingle();
+    const { data, error } = await db().from('patients').select('status, row_version, swap_place').eq('id', id).maybeSingle();
     if (error) return 'error';
     if (!data) return null;
-    const row = data as { status: unknown; row_version: unknown };
-    return { status: String(row.status), row_version: Number(row.row_version) };
+    const row = data as { status: unknown; row_version: unknown; swap_place?: unknown };
+    return { status: String(row.status), row_version: Number(row.row_version), swap_place: row.swap_place ?? null };
   } catch {
     return 'error';
   }
@@ -42,7 +43,10 @@ export async function reclassify(failure: unknown, id: string, kind: MutationKin
   switch (kind.fn) {
     case 'status':
       if (row.row_version !== kind.expectedVersion) return conflict(row.status);
-      if (row.status !== kind.target && !canTransition(row.status, kind.target)) return illegal(row.status);
+      if (row.status !== kind.target && !canTransition(row.status, kind.target, kind.kind)) return illegal(row.status);
+      // (Post-event) A Reopen to Accompanied passes the table, but lp_set_status also refuses it for a request closed
+      // from Located; with the version matching, that is the only raise left.
+      if (row.status === STATUS.inactive && kind.target === STATUS.accompanied) return illegal(row.status);
       return failure;
     case 'update':
       return row.row_version !== kind.expectedVersion ? conflict(row.status) : failure;
@@ -52,6 +56,7 @@ export async function reclassify(failure: unknown, id: string, kind: MutationKin
       return failure;
     case 'swap':
       if (row.row_version !== kind.expectedVersion) return conflict(row.status);
+      if ((kind.action === 'cancel' || kind.action === 'restore') && isInMedical(row.status) && row.swap_place) return failure;
       if (row.status !== STATUS.accompanied) return illegal(row.status);
       return failure;
   }

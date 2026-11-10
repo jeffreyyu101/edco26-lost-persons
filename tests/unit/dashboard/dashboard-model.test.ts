@@ -76,6 +76,15 @@ describe('needs attention', () => {
     expect(rows[0]!.eta).toBe(2);
     expect(rows[4]!.eta).toBeNull();
   });
+  it('(post-event) a swap request turns red 10 minutes after it was asked, as lp_stats scores it', () => {
+    const rows = attentionRows([item(1001, 'wait', 25), item(1002, 'swap', 12), item(1003, 'swap', 5)], NOW);
+    expect(rows.map((r) => [r.caseNumber, r.sev])).toEqual([
+      [1002, 'crit'],
+      [1001, 'warn'],
+      [1003, 'warn'],
+    ]);
+    expect(timerText(rows[0]!)).toBe('12:00');
+  });
   it('ties keep the lower case number first; the spoken row says everything', () => {
     const rows = attentionRows([item(1002, 'wait', 12), item(1001, 'wait', 12)], NOW);
     expect(rows.map((r) => r.caseNumber)).toEqual([1001, 1002]);

@@ -722,7 +722,7 @@ test.describe('desktop 1440 × 900', () => {
     // Change answer: the other answer and Back to Waiting for check, each with its glyph, opening downwards.
     await change.click();
     const menu = page.getByTestId('change-answer-menu');
-    await expect(menu.getByRole('menuitem')).toHaveText(['Not located', 'Back to Waiting for check']);
+    await expect(menu.getByRole('menuitem')).toHaveText(['Not located', 'Located · already accompanied', 'Back to Waiting for check']);
     expect((await menu.boundingBox())!.y).toBeGreaterThanOrEqual(cb.y + cb.height - 1);
     await page.keyboard.press('Escape');
     await expect(menu).toHaveCount(0);

@@ -123,7 +123,7 @@ export function createStubStore(options: StubOptions): AppStore {
     const row = state.confirmed.get(id);
     if (!row) return fail('not_found', 'Request not found');
     if (row.status === to) return { ok: true, changed: false, request: row };
-    if (!canTransition(row.status, to)) return fail('invalid', "That change isn't allowed now");
+    if (!canTransition(row.status, to, kind)) return fail('invalid', "That change isn't allowed now");
     if (isCreatorOnlyTransition(row.status, to) && !sameStaff(row.createdBy, staff())) {
       return fail('forbidden', 'Only the person who logged it can reopen it');
     }

@@ -101,6 +101,8 @@ export interface RequestSummary {
   swapRequestedBy?: string | null;
   /** An approved swap: at the request's own tent / post ('fa') or Main Med ('mm'). */
   swapPlace?: SwapPlace | null;
+  /** (Post-event) How the latest swap request ended while the request stayed Accompanied, or null. */
+  swapClosed?: 'declined' | 'withdrawn' | 'cancelled' | null;
   // Added 2026-11-06 evening (F3 Messages + en route, spec §18 A55). All optional: rows cached on a phone
   // before them, and mutation responses (built by lp_row alone), do not carry them; the client keeps the
   // previous values then (sync-merge carryActivity). Sync and the detail always send them.
