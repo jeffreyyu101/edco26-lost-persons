@@ -32,7 +32,7 @@ export const GET = authedRoute<P>('GET /api/requests/[id]', {}, async ({ params,
 export const PATCH = authedRoute<P>('PATCH /api/requests/[id]', {}, async ({ request, params, session, eventId }) => {
   const id = idParam(params);
   const body = await readJson(request, updateRequestSchema);
-  const data = await withReclassify(id, { fn: 'update', expectedVersion: body.expectedVersion }, () =>
+  const data = await withReclassify(eventId, id, { fn: 'update', expectedVersion: body.expectedVersion }, () =>
     rpc<{ changed?: unknown; row?: unknown }>('lp_update_fields', {
       p_event: eventId,
       p_id: id,

@@ -1,6 +1,9 @@
-// The `lp_session` cookie token (spec §6): a JWT (HS256) holding {staffName, team, iat, sid, eventId, role}.
+// The `lp_session` cookie token (spec §6): a JWT (HS256) holding {staffName, team, iat, sid, eventId, role, pv}.
 //   * (Events) `role` 'staff' works the one event `eventId`; 'lead' sees every event and `eventId` is the one it has
 //     open (null: none). A token without `role` (issued before events existed) is not accepted: sign in again.
+//   * (Events) `pv`, leads only: the lead passcode version the lead signed in with (lp_org.lead_passcode_version). The
+//     route wrapper refuses a lead token whose pv is not the current version, so changing the passcode signs every lead
+//     out. A lead token without pv is not accepted.
 //   * expires 12 h after it was last (re)issued; authenticated responses re-issue it once it is > 1 h old
 //   * absolute cap: 36 h after the first sign-in — `sid` carries that original issue time
 // Used by proxy.ts (redirects) and by lib/server/session (the route helpers). No Next.js imports here, so
@@ -37,12 +40,18 @@ export interface SessionClaims {
   /** (Events) The event this session works (a lead's open event), or null (a lead with none open). */
   eventId: string | null;
   role: SessionRole;
+  /** (Events) Leads: the lead passcode version signed in with. Staff: null. */
+  pv: number | null;
   /** "<first sign-in, epoch seconds>.<random hex>" */
   sid: string;
   iat: number;
   exp: number;
   /** Parsed from sid. */
   firstIssuedAt: number;
+}
+
+function isVersion(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 2_000_000_000;
 }
 
 const keyCache = new Map<string, Uint8Array>();
@@ -81,7 +90,7 @@ export function sessionExpiry(nowSeconds: number, firstIssuedAt: number): number
  * fresh sign-in. Returns null if the absolute cap has already passed.
  */
 export async function signSessionToken(
-  input: { staffName: string; team: string; eventId: string | null; role: SessionRole; sid?: string },
+  input: { staffName: string; team: string; eventId: string | null; role: SessionRole; pv?: number | null; sid?: string },
   secret: string,
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): Promise<{ token: string; claims: SessionClaims } | null> {
@@ -95,14 +104,16 @@ export async function signSessionToken(
   if (input.role !== 'lead' && input.role !== 'staff') return null;
   if (input.role === 'staff' && !input.eventId) return null;
   if (input.eventId !== null && !UUID_RE.test(input.eventId)) return null;
-  const token = await new SignJWT({ staffName: input.staffName, team: input.team, sid, eventId: input.eventId, role: input.role })
+  const pv = input.role === 'lead' ? (input.pv ?? null) : null;
+  if (input.role === 'lead' && !isVersion(pv)) return null;
+  const token = await new SignJWT({ staffName: input.staffName, team: input.team, sid, eventId: input.eventId, role: input.role, ...(pv !== null ? { pv } : {}) })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setIssuedAt(iat)
     .setExpirationTime(exp)
     .sign(key(secret));
   return {
     token,
-    claims: { staffName: input.staffName, team: input.team, eventId: input.eventId, role: input.role, sid, iat, exp, firstIssuedAt },
+    claims: { staffName: input.staffName, team: input.team, eventId: input.eventId, role: input.role, pv, sid, iat, exp, firstIssuedAt },
   };
 }
 
@@ -118,11 +129,12 @@ export async function verifySessionToken(
       algorithms: ['HS256'],
       currentDate: new Date(nowSeconds * 1000),
     });
-    const { staffName, team, sid, iat, exp, eventId, role } = payload as Record<string, unknown>;
+    const { staffName, team, sid, iat, exp, eventId, role, pv } = payload as Record<string, unknown>;
     if (typeof staffName !== 'string' || typeof team !== 'string' || typeof sid !== 'string') return null;
     if (role !== 'staff' && role !== 'lead') return null;
     if (eventId !== null && (typeof eventId !== 'string' || !UUID_RE.test(eventId))) return null;
     if (role === 'staff' && eventId === null) return null;
+    if (role === 'lead' ? !isVersion(pv) : pv !== undefined) return null;
     if (typeof iat !== 'number' || typeof exp !== 'number') return null;
     if (!staffName || !team) return null;
     const firstIssuedAt = sidIssuedAt(sid);
@@ -130,7 +142,7 @@ export async function verifySessionToken(
     if (iat > nowSeconds + CLOCK_SKEW_SECONDS || firstIssuedAt > iat + CLOCK_SKEW_SECONDS) return null;
     if (exp - iat > SESSION_IDLE_SECONDS) return null;
     if (nowSeconds >= exp || nowSeconds >= firstIssuedAt + SESSION_ABSOLUTE_SECONDS) return null;
-    return { staffName, team, eventId, role, sid, iat, exp, firstIssuedAt };
+    return { staffName, team, eventId, role, pv: role === 'lead' ? (pv as number) : null, sid, iat, exp, firstIssuedAt };
   } catch {
     return null;
   }

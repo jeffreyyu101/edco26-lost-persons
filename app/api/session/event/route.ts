@@ -18,7 +18,7 @@ export const POST = authedRoute('POST /api/session/event', { lead: true, event: 
   const row = eventId ? await loadEvent(eventId.toLowerCase()) : null;
   if (eventId && !row) throw new ApiFailure('not_found');
   const signed = await signSessionToken(
-    { staffName: session.claims.staffName, team: session.claims.team, eventId: row?.id ?? null, role: 'lead', sid: session.claims.sid },
+    { staffName: session.claims.staffName, team: session.claims.team, eventId: row?.id ?? null, role: 'lead', pv: session.claims.pv, sid: session.claims.sid },
     serverEnv().sessionSecret,
   );
   if (!signed) throw new ApiFailure('unauthorized');

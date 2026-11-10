@@ -24,7 +24,7 @@ export const dynamic = 'force-dynamic';
 export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/status', {}, async ({ request, params, session, eventId }) => {
   const id = idParam(params);
   const body = await readJson(request, setStatusSchema);
-  const data = await withReclassify(id, { fn: 'status', expectedVersion: body.expectedVersion, target: body.status, kind: body.kind }, () =>
+  const data = await withReclassify(eventId, id, { fn: 'status', expectedVersion: body.expectedVersion, target: body.status, kind: body.kind }, () =>
     rpc<{ changed?: unknown; row?: unknown }>('lp_set_status', {
       p_event: eventId,
       p_id: id,

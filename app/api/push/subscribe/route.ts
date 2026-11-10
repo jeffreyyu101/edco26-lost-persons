@@ -47,7 +47,7 @@ export const POST = authedRoute('POST /api/push/subscribe', {}, async ({ request
   return json(out);
 });
 
-export const DELETE = authedRoute('DELETE /api/push/subscribe', { refresh: false, event: 'optional' }, async ({ request, session }) => {
+export const DELETE = authedRoute('DELETE /api/push/subscribe', { refresh: false, event: 'optional', afterEnd: true }, async ({ request, session }) => {
   const body = await readJson(request, pushEndpointSchema);
   const removed = await rpc<unknown>('lp_push_unsubscribe', { p_endpoint: body.endpoint, p_staff: session.staff });
   return json({ removed: removed === true });

@@ -2,7 +2,8 @@
 // The Health page (/health, desktop only; design/references/observability-design.md §5): what staff ran into on the
 // floor, from the in-house telemetry. Data loads on mount and on Refresh only (no polling). Values first and large,
 // labels small; glyphs and colour carry state; screen readers hear full sentences. The switch turns collection off
-// (behind a confirm) through POST /api/telemetry/settings; once off it is disabled (back on is SQL only).
+// (behind a confirm) through POST /api/telemetry/settings, and back on with one tap. (Events) Leads only: for staff the
+// switch shows the state and is disabled.
 // Plain elements on Radix Themes' CSS variables, inline glyphs, no lib/telemetry: this chunk shares no module with
 // `/`'s first load, which the bundler otherwise regroups (+320 B gzipped, over A25's 42 KB).
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
@@ -129,7 +130,7 @@ async function loadHealth(w: HealthWindow): Promise<LoadResult> {
   }
 }
 
-export function HealthView() {
+export function HealthView({ lead }: { lead: boolean }) {
   const desk = useSyncExternalStore(subscribeDesk, deskNow, deskServer);
   const [win, setWin] = useState<HealthWindow>('3h');
   const [data, setData] = useState<HealthData | null>(null);
@@ -172,14 +173,14 @@ export function HealthView() {
     };
   }, [apply]);
 
-  const turnOff = async () => {
+  const setEnabled = async (enabled: boolean) => {
     setSwitching(true);
     try {
       const res = await fetch('/api/telemetry/settings', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ enabled: false }),
+        body: JSON.stringify({ enabled }),
       });
       if (res.ok) {
         const config = (await res.json()) as HealthData['config'];
@@ -236,11 +237,12 @@ export function HealthView() {
           role="switch"
           className={s.switch}
           aria-checked={!!cfg?.enabled}
-          aria-label={cfg && !cfg.enabled ? 'Collection is off. It is turned back on in SQL only' : 'Collection'}
-          disabled={!cfg?.enabled || switching}
+          aria-label={lead ? 'Collection' : 'Collection. Only a lead can switch it'}
+          disabled={!lead || !cfg || switching}
           data-testid="health-switch"
           onClick={() => {
             if (cfg?.enabled) setConfirmOff(true);
+            else void setEnabled(true).then(() => refresh());
           }}
         >
           <span className={s.thumb} />
@@ -248,7 +250,7 @@ export function HealthView() {
       </header>
       {data ? <HealthDashboard data={data} onTrail={setTrail} /> : <p className={s.empty}>{loading ? '' : DASH}</p>}
       <TrailDrawer problem={trail} examples={data?.examples ?? []} onClose={closeTrail} />
-      <ConfirmOff open={confirmOff} onClose={closeConfirm} onConfirm={() => void turnOff().then(() => refresh())} />
+      <ConfirmOff open={confirmOff} onClose={closeConfirm} onConfirm={() => void setEnabled(false).then(() => refresh())} />
     </main>
   );
 }

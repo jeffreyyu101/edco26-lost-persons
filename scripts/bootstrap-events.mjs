@@ -9,9 +9,11 @@
 // Prints only what it did, never a password, a passcode, a hash or a join code.
 //
 //   set -a; . <env file with the production values>; set +a
-//   LP_LEAD_PASSCODE=… node scripts/bootstrap-events.mjs [--dry-run] [--force]
+//   node scripts/bootstrap-events.mjs [--dry-run] [--force]          # asks for the lead passcode (hidden, twice)
+//   node scripts/bootstrap-events.mjs [--force] < passcode-file      # or reads it from stdin (first line)
 //
-// The lead passcode comes from LP_LEAD_PASSCODE, else it is asked for on the terminal (not echoed, twice). Needs
+// The lead passcode is never taken from the command line or an environment variable (both end up in shell history or
+// process listings): on a terminal it is asked for (not echoed, twice); otherwise it is the first line of stdin. Needs
 // NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY). It refuses to replace a lead passcode
 // that is already set unless --force, and refuses a lead passcode equal to any event's staff password.
 import { createInterface } from 'node:readline';
@@ -33,8 +35,17 @@ const env = (name) => {
   return v === undefined || v.trim() === '' ? undefined : v.trim();
 };
 
+/** The first line of stdin (piped or redirected), without its line ending. */
+async function firstStdinLine() {
+  let data = '';
+  for await (const chunk of process.stdin) {
+    data += chunk;
+    if (data.includes('\n')) break;
+  }
+  return data.split(/\r?\n/)[0] ?? '';
+}
+
 async function askHidden(prompt) {
-  if (!process.stdin.isTTY) die('LP_LEAD_PASSCODE is not set and there is no terminal to ask on.');
   let muted = false;
   const output = new Writable({ write(chunk, enc, cb) { if (!muted) process.stdout.write(chunk, enc); cb(); } });
   const rl = createInterface({ input: process.stdin, output, terminal: true });
@@ -80,11 +91,14 @@ if (!edc?.id) die('the edco26 event is missing: apply 20261110000000_events.sql 
 const secrets = await rpc('lp_auth_secrets', {});
 if (secrets?.lead && !force) die('a lead passcode is already set (pass --force to replace it).');
 
-let passcode = env('LP_LEAD_PASSCODE');
-if (!passcode) {
+if (process.env.LP_LEAD_PASSCODE !== undefined) die('LP_LEAD_PASSCODE is not read: type the passcode at the prompt or pipe it on stdin.');
+let passcode;
+if (process.stdin.isTTY) {
   passcode = await askHidden('Ground Control lead passcode: ');
   const again = await askHidden('Again: ');
   if (passcode !== again) die('the two entries differ.');
+} else {
+  passcode = await firstStdinLine();
 }
 if (passcode.length < 8) die('the lead passcode needs at least 8 characters.');
 // Checked first at sign-in, so it must not be any event's staff password (EDC's included).

@@ -4,8 +4,8 @@
 // or Radix parts directly made the bundler regroup `/`'s own first-load chunks (+320 B gzipped, over A25's 42 KB).
 import { useEffect, useState, type ComponentType } from 'react';
 
-export function HealthEntry() {
-  const [View, setView] = useState<ComponentType | null>(null);
+export function HealthEntry({ lead }: { lead: boolean }) {
+  const [View, setView] = useState<ComponentType<{ lead: boolean }> | null>(null);
   useEffect(() => {
     let live = true;
     import('./HealthView').then(
@@ -18,5 +18,5 @@ export function HealthEntry() {
       live = false;
     };
   }, []);
-  return View ? <View /> : <main style={{ minHeight: '100dvh' }} aria-busy="true" />;
+  return View ? <View lead={lead} /> : <main style={{ minHeight: '100dvh' }} aria-busy="true" />;
 }

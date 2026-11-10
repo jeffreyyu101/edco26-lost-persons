@@ -148,10 +148,12 @@ async function matches(plain: string, hash: string | null | undefined): Promise<
 
 interface AuthSecrets {
   lead: string | null;
+  /** lp_org.lead_passcode_version: what a lead's token carries (pv). */
+  leadVersion?: number;
   events: Array<{ id: string; stage: EventStage; hash: string }>;
 }
 
-export type PasswordMatch = { kind: 'lead' } | { kind: 'event'; eventId: string; stage: EventStage } | null;
+export type PasswordMatch = { kind: 'lead'; version: number } | { kind: 'event'; eventId: string; stage: EventStage } | null;
 
 /**
  * Sign-in with a password (spec "Server"): the lead passcode first; then each event's staff password, live and
@@ -159,7 +161,7 @@ export type PasswordMatch = { kind: 'lead' } | { kind: 'event'; eventId: string;
  */
 export async function matchPassword(plain: string): Promise<PasswordMatch> {
   const secrets = await rpc<AuthSecrets>('lp_auth_secrets', {});
-  if (await matches(plain, secrets?.lead)) return { kind: 'lead' };
+  if (await matches(plain, secrets?.lead)) return { kind: 'lead', version: Number(secrets?.leadVersion ?? 0) };
   for (const e of secrets?.events ?? []) {
     if (await matches(plain, e.hash)) return { kind: 'event', eventId: e.id, stage: e.stage };
   }

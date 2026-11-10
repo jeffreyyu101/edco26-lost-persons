@@ -7,13 +7,22 @@
 //   * (Events) the event comes from the session, never from the client: a route needs one (409 no_event for a lead
 //     with none open) unless it opts out; lead-only routes answer 403 to staff. An archived event's writes fail in
 //     SQL with P0410, mapped to 410 event_ended (lib/server/errors.ts).
+//   * (Events) one lp_session_state call per signed-in request:
+//       - staff of an archived event: 410 event_ended with the event block the Ended screen shows, on EVERY route
+//         (reads included: a phone that only polls learns the event ended), except the few marked `afterEnd`
+//         (sign-out, removing the device's push subscription). GET /api/session answers the same 410, so a reload
+//         lands on the Ended screen rather than on sign-in. Leads are not stopped: they keep reading an ended event.
+//       - a lead whose token carries an older lead passcode version than lp_org's: 401, and the cookie is cleared (a
+//         passcode change signs every lead out).
 // Server only.
 import 'server-only';
 import { EnvError } from './env';
 import { ApiFailure } from './errors';
+import { eventEndedFailure, type EventRow } from './events';
 import { assertSameOrigin, json } from './http';
 import { logRequest } from './log';
-import { requireSession, type ActiveSession } from './session';
+import { clearedSessionCookie, requireSession, type ActiveSession } from './session';
+import { rpc } from './supabase';
 
 type Params = Record<string, string | string[] | undefined>;
 
@@ -31,6 +40,8 @@ export interface RouteOptions {
   event?: 'required' | 'optional';
   /** (Events) Leads only (403 forbidden for staff). */
   lead?: boolean;
+  /** (Events) Staff of an archived event may still call it (sign-out, push unsubscribe). Default false: 410. */
+  afterEnd?: boolean;
 }
 
 export interface PublicContext<P extends Params> {
@@ -42,6 +53,13 @@ export interface AuthedContext<P extends Params> extends PublicContext<P> {
   session: ActiveSession;
   /** (Events) The session's event id; '' only on an `event: 'optional'` route whose session has none. */
   eventId: string;
+  /** (Events) The session's event as the wrapper read it for this request (null: none open). */
+  event: EventRow | null;
+}
+
+interface SessionState {
+  leadVersion: number;
+  event: EventRow | null;
 }
 
 function failureFrom(error: unknown): ApiFailure {
@@ -73,19 +91,37 @@ function wrap<P extends Params>(
     let response: Response;
     let failure: ApiFailure | null = null;
     let session: ActiveSession | null = null;
+    let event: EventRow | null = null;
+    let clearCookie = false;
     try {
       if (sameOrigin) assertSameOrigin(request);
       if (needsSession) {
         session = await requireSession(request);
         if (options.lead && session.role !== 'lead') throw new ApiFailure('forbidden', 'Leads only');
+        const state = await rpc<SessionState | null>('lp_session_state', { p_event: session.eventId });
+        event = state?.event ?? null;
+        if (session.role === 'lead' && session.claims.pv !== Number(state?.leadVersion ?? 0)) {
+          // Signed in with a lead passcode that has since changed.
+          session = null;
+          clearCookie = true;
+          throw new ApiFailure('unauthorized');
+        }
+        if (session.role === 'staff') {
+          if (!event) throw new ApiFailure('unauthorized');
+          if (event.stage === 'archived' && !options.afterEnd) {
+            session = null; // no sliding re-issue for an ended event's session
+            throw eventEndedFailure(event);
+          }
+        }
         if ((options.event ?? 'required') === 'required' && !session.eventId) throw new ApiFailure('no_event');
       }
       const params = (await context.params) as P;
-      response = await handler(session ? { request, params, session, eventId: session.eventId ?? '' } : { request, params });
+      response = await handler(session ? { request, params, session, eventId: session.eventId ?? '', event } : { request, params });
     } catch (error) {
       failure = failureFrom(error);
       response = json(failure.body(), failure.status, failure.headers);
     }
+    if (clearCookie) response.headers.append('Set-Cookie', clearedSessionCookie(request));
     if (refresh && session?.setCookie) response.headers.append('Set-Cookie', session.setCookie);
     // No compression here: Next.js drops a route handler's Content-Encoding header (the client would get
     // gzip bytes labelled as plain JSON). Vercel's edge compresses responses itself.

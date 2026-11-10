@@ -32,7 +32,7 @@ async function finishAttempt(attemptId: number, ok: boolean): Promise<void> {
   }
 }
 
-type Resolved = { role: 'lead' } | { role: 'staff'; event: EventRow } | { role: 'ended'; event: EventRow | null } | null;
+type Resolved = { role: 'lead'; pv: number } | { role: 'staff'; event: EventRow } | { role: 'ended'; event: EventRow | null } | null;
 
 async function resolve(credential: { password: string } | { invite: string }): Promise<Resolved> {
   let eventId: string | null = null;
@@ -40,7 +40,7 @@ async function resolve(credential: { password: string } | { invite: string }): P
     eventId = (await matchInvite(credential.invite))?.eventId ?? null;
   } else {
     const match = await matchPassword(credential.password);
-    if (match?.kind === 'lead') return { role: 'lead' };
+    if (match?.kind === 'lead') return { role: 'lead', pv: match.version };
     eventId = match?.eventId ?? null;
   }
   if (!eventId) return null;
@@ -75,14 +75,17 @@ export const POST = publicRoute('POST /api/session', { sameOrigin: true }, async
   // A staff member's team: one of the event's teams (spelled as the event spells it), or any "Other" text.
   const team = resolved.role === 'staff' && isEventTeam(resolved.event, body.team) ? eventTeamLabel(resolved.event, body.team) : body.team;
   const eventId = resolved.role === 'staff' ? resolved.event.id : null;
-  const signed = await signSessionToken({ staffName: body.staffName, team, eventId, role: resolved.role }, serverEnv().sessionSecret);
+  const pv = resolved.role === 'lead' ? resolved.pv : null;
+  const signed = await signSessionToken({ staffName: body.staffName, team, eventId, role: resolved.role, pv }, serverEnv().sessionSecret);
   if (!signed) throw new ApiFailure('unavailable', undefined, { dbCode: 'sign' });
   const info = await sessionBody(signed.claims, resolved.role === 'staff' ? resolved.event : null);
   return json(info, 200, { 'Set-Cookie': sessionCookie(request, signed.token, signed.claims.exp) });
 });
 
-export const GET = authedRoute('GET /api/session', { event: 'optional' }, async ({ session }) => json(await sessionBody(session.claims)));
+// (Events) A staff session of an ended event gets 410 event_ended with the event block from the route wrapper (the
+// Ended screen), not a bare 401; signing out stays possible after the end.
+export const GET = authedRoute('GET /api/session', { event: 'optional' }, async ({ session, event }) => json(await sessionBody(session.claims, event)));
 
-export const DELETE = authedRoute('DELETE /api/session', { sameOrigin: true, refresh: false, event: 'optional' }, async ({ request }) =>
+export const DELETE = authedRoute('DELETE /api/session', { sameOrigin: true, refresh: false, event: 'optional', afterEnd: true }, async ({ request }) =>
   json({ ok: true }, 200, { 'Set-Cookie': clearedSessionCookie(request) }),
 );

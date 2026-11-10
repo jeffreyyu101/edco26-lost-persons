@@ -85,7 +85,7 @@ export async function requireSession(request: Request): Promise<ActiveSession> {
   });
   if (!needsRefresh(claims, now)) return active(claims, null);
   const refreshed = await signSessionToken(
-    { staffName: claims.staffName, team: claims.team, eventId: claims.eventId, role: claims.role, sid: claims.sid },
+    { staffName: claims.staffName, team: claims.team, eventId: claims.eventId, role: claims.role, pv: claims.pv, sid: claims.sid },
     secret,
     now,
   );

@@ -18,7 +18,7 @@ export const dynamic = 'force-dynamic';
 export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/cancel', {}, async ({ request, params, session, eventId }) => {
   const id = idParam(params);
   const body = await readJson(request, cancelSchema);
-  const data = await withReclassify(id, { fn: 'cancel', expectedVersion: body.expectedVersion }, () =>
+  const data = await withReclassify(eventId, id, { fn: 'cancel', expectedVersion: body.expectedVersion }, () =>
     rpc<{ changed?: unknown; row?: unknown }>('lp_cancel', {
       p_event: eventId,
       p_id: id,

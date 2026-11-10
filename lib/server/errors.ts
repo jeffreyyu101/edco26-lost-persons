@@ -105,6 +105,7 @@ const INVALID_MESSAGES: Readonly<Record<string, string>> = {
   invalid_staff: 'Sign in again',
   too_late: 'Too late to unsend',
   slug_taken: 'That link name is taken',
+  in_use: 'Still used by requests',
 };
 
 /**
@@ -124,7 +125,11 @@ export function mapDbError(error: DbError, context: DbContext = 'default'): ApiF
   switch (code) {
     case 'P0409':
       if (error.message === 'slug_taken') return new ApiFailure('conflict', INVALID_MESSAGES.slug_taken, { dbCode: code, extra: { field: 'slug' } });
-      if (error.message === 'bad_stage') return new ApiFailure('conflict', 'Not possible at this stage', { dbCode: code });
+      if (error.message === 'bad_stage') {
+        // (Events) An ended event's posts, teams, dates… : the setting it refused (DETAIL field:<name>).
+        const field = fieldFromDetail(error.details);
+        return new ApiFailure('conflict', 'Not possible at this stage', { dbCode: code, ...(field ? { extra: { field } } : {}) });
+      }
       return new ApiFailure('conflict', undefined, {
         dbCode: code,
         extra: typeof error.hint === 'string' && error.hint ? { currentStatus: error.hint.slice(0, 60) } : {},

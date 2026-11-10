@@ -34,7 +34,7 @@ interface SwapResult {
 export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/swap', {}, async ({ request, params, session, eventId }) => {
   const id = idParam(params);
   const body = await readJson(request, swapSchema);
-  const data = await withReclassify(id, { fn: 'swap', expectedVersion: body.expectedVersion, action: body.action }, () =>
+  const data = await withReclassify(eventId, id, { fn: 'swap', expectedVersion: body.expectedVersion, action: body.action }, () =>
     rpc<SwapResult>('lp_swap', {
       p_event: eventId,
       p_id: id,
