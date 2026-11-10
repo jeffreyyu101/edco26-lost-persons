@@ -11,6 +11,8 @@ import type { OutboxPrompt } from '@/lib/client/store-contract';
 import styles from './ui.module.css';
 
 export { ActivityHostSlot as ActivityHost } from '@/components/activity/slots';
+// (Phase 3) The toasts and the Undo bar, loaded with this chunk after hydration (app/app-shell.tsx).
+export { Snackbar, Toaster } from './Toast';
 
 export interface OutboxPromptDialogProps {
   prompt: OutboxPrompt;

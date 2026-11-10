@@ -28,7 +28,6 @@ import { DeskFrame, useBrandInHtml } from '@/components/desk/DeskFrame';
 import { useMainView } from '@/components/desk/use-main-view';
 import { isFormView, paneRequestId, type MainView } from '@/components/desk/views';
 import { ProfileSkeleton, RowSkeletons } from '@/components/ui/Skeleton';
-import { Snackbar, Toaster } from '@/components/ui/Toast';
 import { useView, type View, type ViewName } from '@/lib/client/nav';
 import { StoreProvider } from '@/lib/client/store';
 import { useActions, useAppStore, usePrefs, useSnackbar, useStoreSelector, useToasts, type StoreState } from '@/lib/client/store-contract';
@@ -64,6 +63,11 @@ const OutboxPromptDialog = dynamic(() => loadDialogs().then((m) => m.OutboxPromp
 const ConnectionBanner = dynamic(() => import('@/components/ui/Banner').then((m) => m.ConnectionBanner), { ssr: false });
 // Web Push and Activity (F4): starts after hydration, through the dialogs chunk (no new first-load entry, A25).
 const ActivityHost = dynamic(() => loadDialogs().then((m) => m.ActivityHost), { ssr: false });
+// (Phase 3, first-load budget) The toasts and the Undo bar: fixed overlays that only show after something happened,
+// so they mount with the dialogs chunk right after hydration instead of riding the first load (A25). A toast raised
+// before then is in the store and shows as soon as they mount.
+const Toaster = dynamic(() => loadDialogs().then((m) => m.Toaster), { ssr: false });
+const Snackbar = dynamic(() => loadDialogs().then((m) => m.Snackbar), { ssr: false });
 // Desk only. The pane's profile skeleton has no chrome of its own: the pane draws the header.
 const PaneProfileView = dynamic(() => loadProfile().then((m) => m.ProfileView), { ssr: false, loading: () => <ProfileSkeleton chrome={false} /> });
 const DeskNav = dynamic(() => loadDesk().then((m) => m.DeskNav), { ssr: false });
