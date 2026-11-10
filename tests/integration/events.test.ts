@@ -1035,8 +1035,8 @@ describe('(phase 2) X-LP-Event: a tab never writes into another event than the o
     archivedAtEnd.push(e.event.id);
     const cookie = (await signIn(newStaff('Site Ops'), e.password)).cookie;
     const bare = { cookie, event: false as const };
-    // A write (the old outbox's create, post 'Other' which every event accepts) and the old app's poll.
-    const write = await api('/api/requests', { json: createBody({ reportingLocation: 'Other' }), ...bare });
+    // A write (the old outbox's create, with a post this event has) and the old app's poll.
+    const write = await api('/api/requests', { json: createBody({ reportingLocation: 'Main Stage Tent' }), ...bare });
     expect(write.status).toBe(409);
     expect(write.body.error.code).toBe('wrong_event');
     const poll = await api('/api/sync', bare);
@@ -1046,7 +1046,7 @@ describe('(phase 2) X-LP-Event: a tab never writes into another event than the o
     // The session check needs no event: the old app still learns who is signed in (and the new app which event).
     expect((await api<SessionInfo>('/api/session', bare)).body.eventId).toBe(e.event.id);
     // With the cookie's event, as the new client sends it: as before.
-    expect((await api('/api/requests', { json: createBody({ reportingLocation: 'Other' }), cookie, event: e.event.id })).status).toBe(201);
+    expect((await api('/api/requests', { json: createBody({ reportingLocation: 'Main Stage Tent' }), cookie, event: e.event.id })).status).toBe(201);
     expect((await api('/api/sync', { cookie, event: e.event.id })).status).toBe(200);
     // The routes whose calls cannot carry the header (an <img src>, sendBeacon, the service worker) answer without it.
     const photo = await api(`/api/photos/${randomUUID()}`, bare);

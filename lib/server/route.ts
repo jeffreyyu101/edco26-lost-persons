@@ -132,7 +132,9 @@ function wrap<P extends Params>(
         // that knows no event yet) still goes through.
         const claimed = request.headers.get('x-lp-event');
         if ((options.event ?? 'required') === 'required') {
-          if (claimed === null ? !options.headerless : claimed !== 'none' && claimed !== session.eventId) throw new ApiFailure('wrong_event');
+          // The log line tells the two apart: dbCode 'no_header' is the old build's app.
+          if (claimed === null && !options.headerless) throw new ApiFailure('wrong_event', undefined, { dbCode: 'no_header' });
+          if (claimed !== null && claimed !== 'none' && claimed !== session.eventId) throw new ApiFailure('wrong_event');
         }
       }
       const params = (await context.params) as P;
