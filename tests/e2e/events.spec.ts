@@ -96,9 +96,9 @@ test('a 6-post live event in Los Angeles, the show day from 9 AM: the live chip,
   await expect(rowNamed(page, first!.name)).toContainText(la.replace(/\s?[AP]M$/, ''));
   // The dashboard: Today (the show day), By post: the four busiest posts by name, then Other.
   await openApp(page, '/?dashboard=1');
-  await expect(page.getByTestId('range').getByText('Today')).toBeVisible();
+  await expect(page.getByTestId('range').getByRole('radio', { name: 'Today' })).toBeChecked();
   await expect(page.getByText('Tonight')).toHaveCount(0);
-  await page.getByTestId('calls-view').getByText('By post').click();
+  await page.getByTestId('calls-view').getByRole('radio', { name: 'By post' }).click();
   const legend = page.getByTestId('calls').locator('span', { has: page.locator('i') });
   await expect(legend.filter({ hasText: /^(North|South|East|West|Other)$/ })).toHaveCount(5);
   await expect(legend.filter({ hasText: /^(Hill|Pier)$/ })).toHaveCount(0);
@@ -159,9 +159,10 @@ test('practice → live: the practice rows leave the phone and the chip turns Li
   await goLive(event.id);
   await expect(page.getByRole('img', { name: 'Live event' })).toBeVisible({ timeout: 30_000 });
   await expect(rowNamed(page, practice.name)).toHaveCount(0, { timeout: 30_000 });
-  // A reload keeps it gone (the phone's cache of the event was dropped).
+  // A reload keeps it gone (the phone's cache of the event was dropped): the live log starts empty.
   await openApp(page);
-  await expect(list(page)).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Live event' })).toBeVisible();
+  await page.waitForTimeout(3_000);
   await expect(rowNamed(page, practice.name)).toHaveCount(0);
 });
 
