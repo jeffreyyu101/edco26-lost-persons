@@ -8,7 +8,7 @@
 //                  back to whatever had it before (the New request button, the row, the profile's Edit).
 import { Button, Dialog, Heading, IconButton } from '@radix-ui/themes';
 import { X } from 'lucide-react';
-import { useRef, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { isOverlay, isSendShortcut, type FormPresentation } from './presentation';
 import './request-form.css';
 import { EventStageChip, PRACTICE } from '@/components/ui/EventStageChip';
@@ -33,12 +33,30 @@ export interface FormSurfaceProps {
   columns?: 1 | 2;
   /** page: the full-screen root (the form's useKeyboardFit follows the visual viewport with it). */
   rootRef?: RefObject<HTMLDivElement | null>;
+  /** The frame shown while the form waits (RequestFormView FormFrame): the form that replaces it opens in place. */
+  placeholder?: boolean;
   children: ReactNode;
 }
 
-export function FormSurface({ rootRef, ...props }: FormSurfaceProps) {
+/**
+ * Placeholder frames open now. The form that replaces one mounts a dialog of its own; it skips the open animation
+ * (data-instant), so the dialog stays where it is and only its content changes, instead of opening a second time
+ * (the overlay fading in and the content scaling in again) when the first sync lands.
+ */
+let openPlaceholders = 0;
+
+export function FormSurface({ rootRef, placeholder = false, ...props }: FormSurfaceProps) {
   const { presentation, title, mode, children } = props;
   const contentRef = useRef<HTMLDivElement>(null);
+  // Read while rendering the swap, before the placeholder's cleanup runs.
+  const [instant] = useState(() => !placeholder && openPlaceholders > 0);
+  useLayoutEffect(() => {
+    if (!placeholder) return;
+    openPlaceholders += 1;
+    return () => {
+      openPlaceholders -= 1;
+    };
+  }, [placeholder]);
 
   if (!isOverlay(presentation)) {
     return (
@@ -83,6 +101,7 @@ export function FormSurface({ rootRef, ...props }: FormSurfaceProps) {
         data-present={presentation}
         data-cols={props.columns ?? 2}
         data-mode={mode}
+        data-instant={instant ? '' : undefined}
         data-testid="request-form"
         aria-describedby={undefined}
         onOpenAutoFocus={(e) => {

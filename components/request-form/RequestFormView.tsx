@@ -180,7 +180,7 @@ function FormFrame({ title, columns = 2, children }: { title: string; columns?: 
   const leave = useLeaveOnce();
   const close = () => leave();
   return (
-    <FormSurface presentation={presentation} title={title} onCancel={close} onDismiss={close} columns={columns}>
+    <FormSurface presentation={presentation} title={title} onCancel={close} onDismiss={close} columns={columns} placeholder>
       <div className="lp-rf-scroll lp-rf-frame" style={{ display: 'flex', flexDirection: 'column' }}>
         {children}
       </div>

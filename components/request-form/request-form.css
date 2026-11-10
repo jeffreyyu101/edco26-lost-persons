@@ -646,6 +646,13 @@ textarea.lp-rf-in {
     animation: lp-rf-sheet-in 240ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 }
+/* (Phase 3) A form replacing its placeholder frame (FormSurface data-instant) opens in place: no second open
+   animation of the content (Radix Themes' scale-in, the sheet's slide) or the overlay's fade. */
+.lp-rf-dlg.lp-rf-dlg[data-instant],
+.rt-BaseDialogOverlay:has(.lp-rf-dlg[data-instant]),
+.rt-BaseDialogOverlay:has(.lp-rf-dlg[data-instant])::before {
+  animation: none !important;
+}
 @keyframes lp-rf-sheet-in {
   from {
     opacity: 0;
