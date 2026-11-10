@@ -28,7 +28,6 @@ import type {
   StatsRange,
   SyncResponse,
 } from '../api-types';
-import { legacyStats, serverRange } from './stats-shim';
 import {
   NOT_FOUND_YET_LABEL,
   RECHECK_MINUTES,
@@ -2625,7 +2624,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       requireEnv();
       if (networkHeld()) throw new FetchError('failed');
       const gen = ownerGen();
-      // PHASE2: the dashboard's range and Stats shape over the events server's (lib/client/stats-shim.ts).
+      // PHASE2: the dashboard's range and Stats shape over the events server's (lib/client/stats-shim.ts), loaded
+      // with the dashboard only, so it costs the first load nothing.
+      const { legacyStats, serverRange } = await import('./stats-shim');
       const res = await call<EventStats>(range ? `/api/stats?range=${serverRange(range)}` : '/api/stats', { timeoutMs: SYNC.requestTimeoutMs });
       if (gen !== state.generation) throw new FetchError('failed');
       if (res.ok) {

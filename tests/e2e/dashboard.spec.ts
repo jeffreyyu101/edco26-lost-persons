@@ -77,7 +77,8 @@ test('range: Tonight by default; a choice asks the server for that range and is 
   await expect(page.getByTestId('calls-total')).toBeVisible();
   const range = page.getByRole('radiogroup', { name: 'Time range' });
   await expect(range.getByRole('radio', { name: 'Tonight' })).toHaveAttribute('aria-checked', 'true');
-  expect(urls.at(-1)!.url).toContain('range=tonight');
+  // (Events) PHASE2: the dashboard's Tonight is the event's show day, which the server calls 'today'.
+  expect(urls.at(-1)!.url).toContain('range=today');
 
   await range.getByRole('radio', { name: '1h' }).click();
   await expect.poll(() => urls.some((u) => u.url.includes('range=1h'))).toBe(true);

@@ -151,6 +151,8 @@ const TEAM_KEY_OF: Readonly<Record<string, TeamKey>> = {
 };
 
 /** The team key for a session's team (canonical, alias or custom text): custom text is `other`. */
+// PHASE2: EDC's fixed keys (lp_tel_events.team CHECK); another event's teams fall into 'other' until telemetry keys on
+// the event's team ids (EventTeam.id).
 export function teamKey(team: string | null | undefined): TeamKey {
   if (typeof team !== 'string' || !team.trim()) return 'other';
   return TEAM_KEY_OF[canonicalTeam(team)] ?? 'other';

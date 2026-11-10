@@ -600,3 +600,44 @@ describe('scripts/bootstrap-events.mjs (the one-time bootstrap, run here against
     expect(same.stderr).toContain('choose another');
   });
 });
+
+describe('event logo', () => {
+  it('a lead uploads a PNG / WebP / JPEG logo; the public logo route redirects to it; replacing or removing it deletes the old object', async () => {
+    const lead = await leadCookie();
+    const made = await makeEvent({ practice: true });
+    archivedAtEnd.push(made.event.id);
+    const { syntheticPng } = await import('../helpers/images');
+    const upload = (bytes: Buffer, type: string) => {
+      const f = new FormData();
+      f.set('logo', new Blob([new Uint8Array(bytes)], { type }), 'logo');
+      return api<{ event: EventAdmin }>(`/api/events/${made.event.id}/logo`, { method: 'POST', body: f, cookie: lead });
+    };
+    const objects = async () => ((await admin().storage.from('event-logos').list(made.event.id)).data ?? []).map((o) => o.name);
+
+    const first = await upload(syntheticPng(32, 32), 'image/png');
+    expect(first.status, first.text).toBe(200);
+    expect(first.body.event.logoUrl).toMatch(new RegExp(`^/api/events/logo/${made.event.slug}\\?v=`));
+    expect(await objects()).toHaveLength(1);
+    const served = await api(first.body.event.logoUrl!);
+    expect(served.status).toBe(302);
+    expect(served.headers.get('location')).toContain('/storage/v1/object/sign/event-logos/');
+    // Staff see it in their config too.
+    expect((await signIn(newStaff('Site Ops'), made.password)).info.event?.logoUrl).toBe(first.body.event.logoUrl);
+
+    const second = await upload(JPEG, 'image/jpeg');
+    expect(second.status).toBe(200);
+    expect(second.body.event.logoUrl).not.toBe(first.body.event.logoUrl);
+    expect(await objects()).toHaveLength(1);
+
+    // Not an image, too large: refused, nothing stored.
+    expect((await upload(Buffer.from('not an image at all'), 'image/png')).status).toBe(415);
+    expect((await upload(Buffer.alloc(1024 * 1024 + 10, 1), 'image/png')).status).toBe(413);
+    expect(await objects()).toHaveLength(1);
+
+    const removed = await api<{ event: EventAdmin }>(`/api/events/${made.event.id}/logo`, { method: 'DELETE', cookie: lead });
+    expect(removed.body.event.logoUrl).toBeNull();
+    expect(await objects()).toHaveLength(0);
+    expect((await api(`/api/events/logo/${made.event.slug}`)).status).toBe(404);
+    expect((await api('/api/events/logo/no-such-event')).status).toBe(404);
+  });
+});

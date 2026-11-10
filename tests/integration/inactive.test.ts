@@ -424,7 +424,8 @@ rollback;`).split('\n') as [string, string, string];
     const r = await answered();
     backdate(r.id, INACTIVE_MINUTES + 1);
     closeInactive([r.id]);
-    const sql = readFileSync(join(ROOT, 'docs', 'export.sql'), 'utf8');
+    // (Events) The file exports one event (EDC's by default): here the local test event.
+    const sql = readFileSync(join(ROOT, 'docs', 'export.sql'), 'utf8').replaceAll("ev.slug = 'edco26'", "ev.slug = 'local'");
     const [q1, rest] = sql.split(/^-- Query 2: audit trail$/m) as [string, string];
     const [q2] = rest.split(/^-- Query 3: messages and en route$/m) as [string, string];
     const caseLabel = `LP-${String(r.caseNumber).padStart(4, '0')}`;

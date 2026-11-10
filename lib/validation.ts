@@ -234,6 +234,7 @@ export const signInSchema = z
     }
   })
   .transform((v): { staffName: string; team: string } & SignInCredential => {
+    // PHASE2: canonicalTeam maps EDC's legacy aliases ("dispatch" → "GC/HX - Dispatch"); harmless for other events.
     const identity = { staffName: v.staffName, team: v.team === OTHER_TEAM ? canonicalTeam(v.otherTeam as string) : v.team };
     return v.invite !== undefined ? { ...identity, invite: v.invite } : { ...identity, password: v.password as string };
   });

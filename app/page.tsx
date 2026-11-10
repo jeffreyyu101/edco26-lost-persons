@@ -8,5 +8,6 @@ import { AppShell } from './app-shell';
 // either) is rendered here, on the server, so it adds nothing to the first-load JavaScript.
 export default async function Page() {
   await connection();
+  // PHASE2: the display time zone comes from the session's event config (EventConfig.timezone), not the env.
   return <AppShell eventTimezone={eventTimezone()} brand={<BrandCard logoLoading="lazy" />} />;
 }

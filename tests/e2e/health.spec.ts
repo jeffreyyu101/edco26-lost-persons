@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { expect, test, type Page } from '@playwright/test';
-import { localDbUrl, testBaseUrl } from '../../scripts/test-env.mjs';
+import { TEST_EVENT_ID, localDbUrl, testBaseUrl } from '../../scripts/test-env.mjs';
 import { axeViolations } from './helpers/a11y';
 import { sessionCookieHeader, signedInAs, signedInState } from './helpers/session';
 
@@ -23,7 +23,8 @@ const psql = (sql: string) => execFileSync('psql', [localDbUrl(), '-v', 'ON_ERRO
 
 test.beforeAll(() => {
   const ins = (name: string, extra: string) =>
-    `insert into public.lp_tel_events (at, device, session, team, name, view, area, ctl, ms, n, props, trail) values (now(), '${DEVICE}', 'sesse2e001', 'dispatch', '${name}', ${extra});`;
+    // (Events) Telemetry is per event: these rows are the local test event's (the session's).
+    `insert into public.lp_tel_events (event_id, at, device, session, team, name, view, area, ctl, ms, n, props, trail) values ('${TEST_EVENT_ID}', now(), '${DEVICE}', 'sesse2e001', 'dispatch', '${name}', ${extra});`;
   psql(
     [
       ins('stuck_scroll', `'profile', '${AREA}', null, null, 3, '{"dir":"up","edge":"top"}', '[[-2400, "v>profile"], [-900, "w!:thread:u"]]'`),
