@@ -172,9 +172,12 @@ describe('POST /api/session with the team link (route in process; the link lives
     expect(lines).toContain('{"lp":"signin","method":"invite","ok":true}');
     const slugged = await post({ staffName: name(), team: 'Medical', invite: `${TEST_EVENT_SLUG}.${CODE}` }, await ip());
     expect(slugged.status).toBe(200);
-    // Another event's slug in front never opens this event.
+    // Another event's slug in front never opens this event. (Phase 3) That slug is archived EDC's: its Ended screen,
+    // no cookie (an ended event's old link is known by its slug alone).
     const wrongSlug = await post({ staffName: name(), team: 'Medical', invite: `edco26.${CODE}` }, await ip());
-    expect(wrongSlug.status).toBe(401);
+    expect(wrongSlug.status).toBe(410);
+    expect(wrongSlug.body.error).toMatchObject({ code: 'event_ended', event: { name: 'EDC Orlando', stage: 'archived' } });
+    expect(wrongSlug.cookies).toEqual([]);
   });
 
   it.each([

@@ -43,8 +43,11 @@ function fails(path: string): string {
 }
 /** One function's signature list and grants, to compare states. */
 function functions(): string {
-  return sql(`select string_agg(p.oid::regprocedure::text || ':' || md5(pg_get_functiondef(p.oid)) || ':' || coalesce(array_to_string(p.proacl, ','), ''), E'\\n' order by 1)
-              from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prokind = 'f' and p.proname like 'lp\\_%'`);
+  // Ordered by the line itself: `order by 1` inside an aggregate is a constant (catalog order), which a re-run's
+  // `create or replace` reshuffles without changing anything.
+  return sql(`select string_agg(f, E'\\n' order by f) from (
+                select p.oid::regprocedure::text || ':' || md5(pg_get_functiondef(p.oid)) || ':' || coalesce(array_to_string(p.proacl, ','), '') as f
+                  from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prokind = 'f' and p.proname like 'lp\\_%') s`);
 }
 
 describe('supabase/rollback/20261110000000_events_down.sql', () => {
