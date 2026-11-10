@@ -125,7 +125,7 @@ test('the request page: Located · friend coming and Not located, the audit trai
   const changeAnswer = page.getByTestId('profile-actions').getByRole('button', { name: 'Change answer' });
   await changeAnswer.click();
   const menu = page.getByRole('menu');
-  await expect(menu.getByRole('menuitem')).toHaveText(['Not located', 'Back to Waiting for check']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Not located', 'Located · already accompanied', 'Back to Waiting for check']);
   await menu.getByRole('menuitem', { name: 'Not located', exact: true }).click();
   await expect(block.getByTestId('status-label')).toHaveText('Not located');
   await expect(page.getByRole('status').filter({ hasText: /not located/i })).toBeVisible({ timeout: 20_000 });

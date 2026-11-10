@@ -13,8 +13,8 @@ import { newSignedInContext, signedInAs, type TestStaff } from './helpers/sessio
 // server's own lp_close_inactive (on this row only: the 5-minute job stays paused on local stacks), shows
 // "Closed · inactive" (grey, the timer-off glyph, "Inactive" on a phone under 430 px) folded in Archived, and in its
 // detail (the System change and its note, Reopen in the action bar); Reopen returns it to Friend coming. Then the
-// overflow check at 375–1440 px: the row and the request, each one line, and the dashboard (v4: no tile of its own)
-// still fits.
+// overflow check at 375–1440 px: the row and the request, each one line (the v4 dashboard has no tile of its own;
+// dashboard.spec.ts checks its layout).
 // Synthetic rows only (TEST-F6-…), closed again afterwards.
 
 const BASE = testBaseUrl();
@@ -167,7 +167,7 @@ test('regression: a backlog close raises no alert on the logger\'s open phone; a
   await expect(page.locator('.lp-toast').filter({ hasText: /\d+ updates/ })).toHaveCount(0);
 });
 
-test('overflow 375–1440 px: the row and the request each on one line; the dashboard fits', async ({ page }) => {
+test('overflow 375–1440 px: the row and the request each on one line', async ({ page }) => {
   test.setTimeout(150_000);
   const r = await inactiveRequest(page);
   const filter = `/?status=${encodeURIComponent(STATUS.inactive)}`;
@@ -192,10 +192,9 @@ test('overflow 375–1440 px: the row and the request each on one line; the dash
     await expect(page.getByTestId('reopen')).toBeVisible();
     await expectNoOverflow(page, page.getByTestId('profile-actions'), `action bar ${width}`);
 
-    // The dashboard (v4, #27, has no Closed · inactive tile): the page still fits.
+    // The dashboard (v4, #27) has no Closed · inactive tile; its own layout checks live in dashboard.spec.ts.
     await page.goto('/?dashboard=1');
     await expect(page.getByTestId('dashboard')).toBeVisible({ timeout: 20_000 });
-    await expectNoOverflow(page, page.getByTestId('dashboard'), `dashboard ${width}`);
 
     // My requests (the logger's), a phone (from 768 px it is the desk table, checked above): its card under Closed,
     // the progress line ending "Closed · inactive", uncut.
