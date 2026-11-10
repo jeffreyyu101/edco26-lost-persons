@@ -499,7 +499,9 @@ describe('lp_stats(p_range): exact values on a scratch database (Dashboard v4)',
       ['l1', 'Other', S.inMedical, m(30), 'null'],
       ['n1', 'FA 4 – Oasis', S.notInMedical, m(90), 'null'],
       ['y1', 'FA 3 – Kinetic', S.reunited, m(24 * 60 + 30), 'null'],
-      ['y2', 'FA 4 – Oasis', S.cancelled, m(24 * 60 - 10), 'null'],
+      // After the same moment last night: in no comparison. 20 min, not 10: the 15-min buckets' night-before line runs
+      // to the end of the current quarter hour a day back (up to 15 min after now − 1 day), whatever the clock says.
+      ['y2', 'FA 4 – Oasis', S.cancelled, m(24 * 60 - 20), 'null'],
     ];
     const ev: Array<[string, string, string, number]> = [
       ['r1', S.waiting, S.inMedical, 35],
