@@ -1,103 +1,210 @@
-# Releasing the multi-event foundation (phase 1)
+# Releasing multi-event (Ground Control, many events)
 
-`supabase/migrations/20261110000000_events.sql` with the build of `feat/events-foundation`. Rollback:
-`supabase/rollback/20261110000000_events_down.sql` with the build at `main` 0a416a9.
+What ships: `supabase/migrations/20261110000000_events.sql` (one transaction, additive, safe to run twice) together
+with the build of `feat/events-all` (phases 1, 2a, 2b and 3 joined). Rollback: `supabase/rollback/20261110000000_events_down.sql`
+with the build of `main` 0a416a9.
 
-**Do this only while no event is live.** Today that means EDC is over and the next event has not started (Warped Tour
-practice from Thu 2026-11-12). The old build and the new build cannot share a database: whichever goes first, the app
-does not work until the other one is in place, so there is an outage window and nobody may be working a live log
-during it.
+Follow the steps in order. Every SQL step runs in Supabase → **SQL Editor** (role `postgres`) of the production project
+`yrdwvenzktmcbspapdcy`. Never paste a password, passcode, hash or join code into a command line, a chat, a PR or an
+issue.
 
-## Before the day
+**Do this only while no event is live.** EDC is over; Warped Tour Orlando practice starts Thu 2026-11-12. The old build
+and the new build cannot share a database: from the migration until the new deployment is Ready, every screen fails,
+so nobody may be working a live log then.
 
-- The PR is reviewed and green, but **not merged** (merging deploys it).
-- No new environment variable is needed. Keep `APP_SHARED_PASSWORD_HASH_B64` (or `APP_SHARED_PASSWORD`),
-  `INVITE_CODE_SHA256` and `INVITE_EXPIRES_AT` in Vercel: the bootstrap reads them once, and a rollback needs them.
-- Note the Vercel deployment of `main` 0a416a9 (Deployments → the current production one): that is the rollback
-  target.
-- Have the lead passcode ready (8 characters or more, not the EDC staff password). It is typed at a prompt, never put
-  on a command line.
-- Look at the last production build time in Vercel. The outage window below is about that long.
+## 1. Before the day
 
-## Cut-over, in this order
+- [ ] The PR is reviewed, its checks are green, and it is **not merged** yet (merging deploys it).
+- [ ] Decided: the lead passcode (8 characters or more; not the EDC staff password, not any password an event will use).
+      It is typed at the bootstrap's prompt only.
+- [ ] Vercel → Project → Deployments: write down the deployment id of the current production deployment (`main`
+      0a416a9). That is the rollback target.
+- [ ] Vercel → Settings → Environment Variables (Production): `APP_SHARED_PASSWORD_HASH_B64` (or `APP_SHARED_PASSWORD`)
+      is still there. The bootstrap reads it once; a rollback to 0a416a9 needs it, with `INVITE_CODE_SHA256` /
+      `INVITE_EXPIRES_AT`. Remove none of them. No new variable is needed.
+- [ ] Have a file with the production values the bootstrap needs, readable by you only (`chmod 600`), outside every
+      repository: `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SECRET_KEY` (or `SUPABASE_SERVICE_ROLE_KEY`) and
+      `APP_SHARED_PASSWORD_HASH_B64` (or `APP_SHARED_PASSWORD`).
+- [ ] Note the last production build time in Vercel (the outage is about that long, see 3).
+- [ ] A checkout of the PR's branch with `npm ci` done (for the bootstrap script), and the Supabase CLI installed
+      (`supabase --version`) for the backup.
 
-| Step | What you do | What staff see |
+## 2. Backup (same day, right before the cut-over)
+
+The migration changes no existing value (proved on a copy of `main`'s schema with rows in every table: every
+pre-existing column of every row identical after it, after a second run, and after up → down → up), but take a copy
+anyway. Storage (the photos) is not touched by the migration; only the database needs copying.
+
+1. Supabase → Project Settings → Database → **Connection string** → "Session pooler" URI. Keep it in a shell variable,
+   never in a file in a repository or in your shell history:
+   ```sh
+   read -rs PROD_DB_URL; export PROD_DB_URL     # paste the URI (with the database password), Enter
+   mkdir -p ~/lp-backups && chmod 700 ~/lp-backups && cd ~/lp-backups
+   supabase db dump --db-url "$PROD_DB_URL" -f pre-events-schema.sql
+   supabase db dump --db-url "$PROD_DB_URL" --data-only --use-copy -f pre-events-data.sql
+   chmod 600 pre-events-*.sql
+   ```
+   These files hold real people's details: keep them on your machine only, and delete them once the release has been
+   confirmed for a week.
+2. Count what the database holds now. SQL Editor:
+   ```sql
+   select 'patients' t, count(*) from public.patients union all select 'audit_events', count(*) from public.audit_events
+   union all select 'patient_photos', count(*) from public.patient_photos union all select 'lp_messages', count(*) from public.lp_messages
+   union all select 'lp_activity', count(*) from public.lp_activity union all select 'lp_push_subscriptions', count(*) from public.lp_push_subscriptions
+   order by 1;
+   ```
+3. Verify the dump holds the same rows (one line per row between `COPY public.<table>` and `\.`):
+   ```sh
+   awk '/^COPY public\./ {t=$2; n=0; next} /^\\\.$/ {if (t) print t, n; t=""; next} t {n++}' pre-events-data.sql \
+     | grep -E 'public\.(patients|audit_events|patient_photos|lp_messages|lp_activity|lp_push_subscriptions) '
+   ```
+   Every count must equal step 2's. Also: `grep -c 'CREATE TABLE' pre-events-schema.sql` is more than 10, and
+   `grep -c 'CREATE OR REPLACE FUNCTION' pre-events-schema.sql` is more than 40. If anything differs, stop here.
+4. Supabase → Database → Backups: note the time of the latest scheduled backup as well (the second safety net).
+
+Restoring (only if a rollback in 6 is not enough): into an empty Supabase database, `psql "$URL" -f pre-events-schema.sql`
+then `psql "$URL" -f pre-events-data.sql`; or ask Supabase support to restore the scheduled backup of step 4.
+
+## 3. Cut-over, in this order
+
+| Step | What you do | What staff and leads see |
 | --- | --- | --- |
-| 0 | Nothing yet | The old build, EDC's log (EDC is over; nobody should be working in it). |
-| 1. Dry run | Supabase → SQL Editor (role `postgres`): paste the whole events file, change the last line `commit;` to `rollback;`, run. It must finish without an error. | Nothing changes. |
-| 2. Migration | Paste the file again unchanged (ending in `commit;`) and run it. **The outage starts here.** | Every screen fails: lists and new requests answer "Couldn't reach the log" (the old build calls functions this file retired). |
-| 3. Deploy | Merge the PR to `main` right away. Vercel builds and deploys it. | Still the error until the new deployment is Ready. Then: old cookies are refused, so everyone lands on sign-in, and every password is refused (none is set yet). |
-| 4. Bootstrap | `set -a; . <file with the production values>; set +a; node scripts/bootstrap-events.mjs --dry-run`, then the same without `--dry-run`. It asks for the lead passcode twice (hidden). **The outage ends here.** | The lead passcode signs in as lead (Events). The EDC password and the EDC join link show the Ended screen. |
-| 5. Next event | A lead creates it in the app, sets its staff password (and join link), and goes live when ready. | Staff of the new event sign in with its password. |
+| 0 | Nothing yet | The old build, EDC's log (EDC is over; nobody works in it). |
+| 1. Dry run | SQL Editor: paste the whole events file, change its **last** line `commit;` to `rollback;`, run. It must finish without an error (notices are fine). | Nothing changes. |
+| 2. Migration | Paste the file again **unchanged** (ending in `commit;`) and run it. **The outage starts here.** | Every screen fails: lists and new requests answer "Couldn't reach the log" (the old build calls functions this file retired). |
+| 3. Deploy | Merge the PR to `main` at once. Vercel builds and deploys it. | The same error until the new deployment is Ready. Then old sessions are refused, so everyone lands on sign-in, and every password is refused (none is set yet). |
+| 4. Bootstrap | In the checkout: `set -a; . <the file from 1>; set +a; node scripts/bootstrap-events.mjs --dry-run`, then the same without `--dry-run`. It asks for the lead passcode twice (hidden). **The outage ends here.** | The lead passcode signs in as a lead (the Events list). The EDC password is refused like any wrong password. |
+| 5. Check | Section 4 below, signed in. | — |
+| 6. Next event | A lead creates Warped Tour in the app (section 5) and leaves it in practice until the show. | Its staff sign in with its password or join link. |
 
-**Outage window:** from step 2 to the end of step 4: the Vercel build time plus about a minute (typically 3 to 5
+**Expected outage:** from step 2 to the end of step 4: the Vercel build time plus about a minute (usually 3 to 5
 minutes). Run steps 2, 3 and 4 back to back.
 
-## Verify
+The bootstrap sets the lead passcode and records EDC's old staff password (from the env) as **retired**: it is never a
+way in, and only stops anyone from choosing it as the lead passcode, now or later in the app. An archived event keeps no
+staff password and no join link (see "Ended" below).
 
-After step 2 (SQL Editor):
+## 4. Verify
 
-- `select slug, stage, ended_at, case_seq from public.events;` → one row, `edco26 | archived | 2026-11-09 11:00:00+00 | <highest LP number>`.
+### Right after step 2 (SQL Editor)
+
+- `select slug, stage, case_seq, staff_password_hash is null as no_pw, invite_code_sha256 is null as no_link from public.events;`
+  → one row: `edco26 | archived | <highest EDC LP number> | true | true`.
 - `select count(*) from public.patients where event_id is null;` → `0`.
 - `select count(*) from cron.job where jobname = 'lp-close-inactive';` → `1` (unchanged; it now only touches live events).
 
-After step 4:
+### After step 4, signed in (a phone and a computer)
 
-- Sign in with the lead passcode → the Events list (role lead, no event open).
-- Sign in with the old EDC password, and open an old EDC join link → the Ended screen (HTTP 410 `event_ended`).
-- `select lead_passcode_hash is not null, lead_passcode_version from public.lp_org;` → `true | 1`.
+Lead (phone):
+- [ ] Sign-in → your name and team → Continue → the lead passcode in "Event password" → the **Events** list. EDC Orlando
+      is under "Archived 1" with its logo and the Archived chip.
+- [ ] Open EDC Orlando → its log: read-only (no New request), the Archived chip in the header, the dashboard with day
+      tabs (All + one per show day). Account menu → Events → back to the list.
+- [ ] Account menu (top right) → Lead passcode is there; leave it unchanged.
+- [ ] `select lead_passcode_hash is not null, lead_passcode_version, (select ended_password_hash is not null from public.events where slug = 'edco26') from public.lp_org;`
+      → `true | 1 | true`.
 
-## Roll back
+Staff, ended event:
+- [ ] Sign-in with the old EDC password → "Incorrect password".
+- [ ] An old EDC join link (made before events, `#join=<code>` without the event's name) → name + team → Continue →
+      the password step, as for any link that is not accepted. (Links made in the app carry the event,
+      `#join=<slug>.<code>`, and reach the Ended screen.)
 
-Only before a new event has requests: the rollback refuses when any event is live or any request belongs to an event
-other than `edco26`, and it deletes nothing.
+Lead (computer, 1024 px or wider), with a throwaway practice event:
+- [ ] Events → New event: a name such as "Release check", one post, one team, Create. Set a staff password; Create a
+      join link and Copy it.
+- [ ] A second browser (private window): open the join link → name + team → Continue → the practice log with the
+      **Practice** chip, its one post, no rows. Log a request: **LP-0001**.
+- [ ] Back as lead: the sidebar's event switcher lists EDC Orlando and Release check; switching shows each event's rows
+      only.
+- [ ] Go live (the sheet shows "1" practice request) → the second browser loses the practice request within a few
+      seconds and shows the **Live** chip; a new request there is **LP-0001** again.
+- [ ] End event → the second browser shows the **Ended** screen: Ground Control and the event's logo, the event name,
+      the Archived chip, "This event is now closed. Thank you for your work.", and nothing else. Opening the join link
+      again shows the same screen; its password is refused.
+- [ ] The test event's request now belongs to an archived event and can't be deleted (that is the write guard). Leave
+      it; it never shows to any other event. (If you would rather not keep it: before ending, delete it while the event
+      is live, `delete from public.patients where event_id = (select id from public.events where slug = '<its link name>');`.)
 
-1. Dry run: SQL Editor, paste `supabase/rollback/20261110000000_events_down.sql`, last line `commit;` → `rollback;`, run.
-2. Paste it again unchanged and run it. From here the new build fails (its functions are gone).
-3. At once: Vercel → Deployments → the 0a416a9 production deployment → Instant Rollback (seconds). The old build
-   works again with the env password. Later pushes to `main` are not promoted until you promote one by hand.
+## 5. Setting up Warped Tour (no developer needed)
 
-What stays: the `events` and `lp_org` tables, every `event_id` column and its values, the lead functions. Requests the
-old build creates afterwards have no event; running the events file again later puts them in `edco26`, like the rest.
+Lead, on a phone or computer: Events → **New event**: name, link name (suggested), dates, time zone, "Day starts"
+hour, logo (PNG, WebP or JPEG up to 1 MB; a single-colour logo on a transparent background is tinted, anything else is
+shown as uploaded), posts, teams (mark the medical team), "Last seen" chips, main medical → **Create**. Then **Set** the
+staff password and **Create** the join link (shown once: Copy it). The event starts in practice: every screen shows the
+amber Practice chip. **Go live** on the morning of the show deletes every practice request (rows, messages, photos) and
+restarts numbering at LP-0001; phones already open drop the practice rows at their next sync. **End event** signs staff
+out to the Ended screen and clears the staff password and join link; nothing is deleted. **Reopen** brings an archived
+event back to live; set a new password and link then.
 
-To go forward again: the same cut-over from step 1 (the file is safe to run twice and on a rolled-back database).
+## 6. Roll back
 
-## For phase 2 builders
+Possible only while **no event is live and no request belongs to an event other than EDC**: the rollback refuses
+otherwise and changes nothing. So: before Warped Tour's first request (practice included), or after deleting those
+requests while the event is still running (an archived event's requests can't be deleted).
+
+1. If a test or practice event exists: delete its requests while it is practice or live
+   (`delete from public.patients where event_id = (select id from public.events where slug = '<link name>');`), then
+   End it in the app. **Delete first, then end** (the other order is refused by the write guard).
+2. Dry run: SQL Editor, paste `supabase/rollback/20261110000000_events_down.sql`, change its last line `commit;` to
+   `rollback;`, run. It must finish without an error.
+3. Paste it again unchanged and run it. From here the new build fails (its functions are gone).
+4. At once: Vercel → Deployments → the 0a416a9 production deployment noted in 1 → **Instant Rollback** (seconds). The
+   old build works again with the env password and join link. Later pushes to `main` are not promoted until you
+   promote one by hand.
+5. Check: sign in with the EDC password → EDC's log; `select count(*) from public.patients;` matches section 2's count.
+
+What stays after a rollback: the `events` and `lp_org` tables, every `event_id` column with its values, the lead
+functions and the `event-logos` bucket. Requests the old build creates meanwhile have no event; running the events file
+again later puts them in `edco26` with the rest. To go forward again, start this runbook from 2 (the file is safe to
+run twice and on a rolled-back database).
+
+## Ended, sign-in and passwords (what changed in phase 3)
+
+- **End clears the staff password and join link** (as Reopen already did). Every failed sign-in compares the password
+  with each running event's bcrypt hash (≈ 70 ms each); an archived event no longer adds one.
+- **An old password of an ended event is a wrong password** ("Incorrect password").
+- **An old join link of an ended event** (`#join=<slug>.<code>`) reaches the Ended screen through its slug (410
+  `event_ended`). That answer verified no credential, so it counts as a failed attempt in the sign-in rate limit.
+  EDC's own old links have no slug: they are simply not accepted (the sign-in goes on to the password step).
+- Staff still signed in when the event ends get the Ended screen at their next sync or write (unchanged).
+- An archived event refuses a new staff password or join link (409); Reopen first.
+- The hash an event had when it ended is kept apart (`events.ended_password_hash`) for one purpose: the lead passcode
+  may never equal it. Sign-in never reads it.
+
+## For builders
 
 - `20261110000000_events.sql` must be the **last** migration applied. The older files (the rework file above all) put
   back the fixed post list, the global case number and the old functions when pasted after it. If you paste an older
   file into a local stack, paste every later file again in order afterwards (`reapplyAfterRework()` in
-  `tests/integration/harness.ts` does that for the tests).
-- `~/.config/lp-stacks/use.sh N <worktree>` does it for you: on a worktree that has the events file it applies the
-  rework file twice and then every later migration in order, the events file last. On a branch without the events file
-  it does what it always did.
-- A stack that has had the events file is not fit for a branch without it (`main`, `e2e-lanes`), even after `use.sh`:
-  the rework file alone does not bring back the later files' functions. Paste
-  `supabase/rollback/20261110000000_events_down.sql` into it first (it refuses while an event is live or has requests,
-  so end the test events and remove their rows), or give that branch a stack that never had the events file.
-- New migrations go after the events file and must keep its guards: every write RPC calls `lp_require_writable(event)`
+  `tests/integration/harness.ts` does that for the tests; `~/.config/lp-stacks/use.sh N <worktree>` does it for a stack).
+- A stack that has had the events file is not fit for a branch without it (`main`): the rework file alone does not bring
+  back the later files' functions. Paste the rollback file into it first. It refuses while an event is live or holds
+  requests, so **delete the test events' requests first, while they are still running, then end them** (an archived
+  event's requests can't be deleted: the write guard refuses). Or give that branch a stack that never had the events
+  file.
+- New migrations go after the events file and keep its guards: every write RPC calls `lp_require_writable(event)`
   first; requests and their audit, messages, photos and en route rows of an archived event are refused by triggers.
+- Client: `useEventConfig()` / `useSessionRole()` (`lib/client/event-config.ts`), the chip `components/ui/StageChip.tsx`,
+  the logo `components/ui/EventLogo.tsx`. Anything that opens another event calls `markSignedInEvent(eventId)`
+  (`lib/client/signed-in-at.ts`) before loading `/` (sign-in, the Events list and the desk switcher do), so the app
+  never starts from the previous event's cache.
 
-## Phase 2a (client, `feat/events-client`)
+## Notes by phase
 
-Ships with the same cut-over (the migration file was edited in place; it has still not been applied anywhere real).
-
-- **First-load budget:** `/` is 235.4 KB in total (route-only 43.9 KB). The total limit is raised from 235 to 236 KB in
-  `tests/e2e/first-load.spec.ts`. **This needs the owner's approval before release.**
-- **Old phones:** caches and queued items now live under the event's id. A phone that still holds EDC's cache (key
-  `cache:edco26:…`) or a request queued before the cut-over simply never shows or sends it (it belongs to no event).
-  Jeffrey's pre-rework queue (`localStorage edc_pending_queue`) is no longer imported, for the same reason.
-- **Every client call carries `X-LP-Event`** (the event the tab works). A cookie of another event (signed in in another
-  tab) answers `409 wrong_event` on event routes, and the tab re-reads its session. Old clients send no header and are
-  not affected.
-- **Lead screens (phase 2b)** that open another event (`POST /api/session/event`) should call
-  `markSignedInEvent(eventId)` (`lib/client/signed-in-at.ts`) and then `location.replace('/')`; after changing the open
-  event's settings, `actions.refreshSession()` re-reads the config. Read the config with `useEventConfig()`
-  (`lib/client/event-config.ts`); the chip is `components/ui/StageChip.tsx`, the logo `components/ui/EventLogo.tsx`.
-- **Telemetry** no longer stops at the old fixed off date (2026-11-10 06:00 ET) on the phone either: collection
-  follows the server's `on` (an event in practice or live, kill switch on). Phones on the old build stopped this morning.
-- **Sign-in cost:** a wrong password is compared with every event's bcrypt hash (≈ 70 ms each, archived events
-  included so their staff get the Ended screen). Fine for a few events a year; a stack holding hundreds of test events
-  makes failed sign-ins take seconds.
-- **Renamed teams** keep their earlier labels in `teams[].aliases` (server-maintained; a lead never sends them, and
-  sending them back is accepted and ignored).
+- **First-load budget (phase 3):** back under the original limits (235 KB total, 44 KB route-only); 2a's raise to
+  236 KB is withdrawn. The toasts and the Undo bar now load with the dialogs chunk right after hydration.
+- **Alerts banner (phase 3):** the device remembers the banner it last showed (`localStorage lp-alerts-banner`, not per
+  event) and holds its place from the first paint, so a second cold load no longer moves the list. A first-ever visit
+  still shifts once.
+- **Old phones (2a):** caches and queued items live under the event's id. A phone that still holds EDC's cache, or a
+  request queued before the cut-over, simply never shows or sends it. Jeffrey's pre-rework queue
+  (`localStorage edc_pending_queue`) is no longer imported.
+- **`X-LP-Event` (2a):** every client call names the event the tab works; a cookie of another event (signed in in
+  another tab) answers `409 wrong_event` on event routes and the tab re-reads its session.
+- **Telemetry (2a):** on while any event is in practice or live (the kill switch on `/health` still applies); no fixed
+  off date.
+- **Renamed teams (2a):** keep their earlier labels in `teams[].aliases` (server-maintained; sending them back is
+  accepted and ignored).
+- **Lead screens (2b):** work online only; the service worker caches `/` and `/signin`. Report fields (department,
+  staffing, prepared by) are stored; the report itself is phase 4.
