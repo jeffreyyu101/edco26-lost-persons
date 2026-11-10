@@ -21,7 +21,13 @@ export const POST = authedRoute<P>('POST /api/events/[id]/join-link', { lead: tr
   const body = await readJson(request, joinLinkSchema);
   const event = await requireEvent(id);
   const expiresMs = body.expiresAt ? Date.parse(body.expiresAt) : Date.parse(`${event.endsOn}T00:00:00Z`) + 3 * DAY_MS;
-  if (!Number.isFinite(expiresMs) || expiresMs <= Date.now() || expiresMs > Date.now() + 90 * DAY_MS) {
+  const now = Date.now();
+  if (!body.expiresAt && Number.isFinite(expiresMs) && (expiresMs <= now || expiresMs > now + 90 * DAY_MS)) {
+    // The lead picks no expiry (the setup screen sends none): the event's dates are what is wrong, so say which.
+    const message = expiresMs <= now ? 'Event dates have passed' : 'Event is more than 90 days away';
+    throw new ApiFailure('invalid', message, { extra: { field: 'expiresAt' } });
+  }
+  if (!Number.isFinite(expiresMs) || expiresMs <= now || expiresMs > now + 90 * DAY_MS) {
     throw new ApiFailure('invalid', 'Pick an expiry within 90 days', { extra: { field: 'expiresAt' } });
   }
   const code = newJoinCode();
