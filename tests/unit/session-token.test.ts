@@ -78,8 +78,12 @@ describe('session token', () => {
   it('(events) carries eventId and role; a staff token always has an event, a lead token may have none', async () => {
     const staff = await signSessionToken({ staffName: 'Dana Kim', team: 'Medical', eventId: EVENT, role: 'staff' }, SECRET, T0);
     expect(await verifySessionToken(staff!.token, SECRET, T0 + 1)).toMatchObject({ eventId: EVENT, role: 'staff' });
-    const lead = await signSessionToken({ staffName: 'Brian', team: 'Medical', eventId: null, role: 'lead' }, SECRET, T0);
-    expect(await verifySessionToken(lead!.token, SECRET, T0 + 1)).toMatchObject({ eventId: null, role: 'lead' });
+    const lead = await signSessionToken({ staffName: 'Brian', team: 'Medical', eventId: null, role: 'lead', pv: 3 }, SECRET, T0);
+    expect(await verifySessionToken(lead!.token, SECRET, T0 + 1)).toMatchObject({ eventId: null, role: 'lead', pv: 3 });
+    expect((await verifySessionToken(staff!.token, SECRET, T0 + 1))?.pv).toBeNull();
+    // (Events) A lead token always carries the lead passcode version it signed in with.
+    expect(await signSessionToken({ staffName: 'Brian', team: 'Medical', eventId: null, role: 'lead' }, SECRET, T0)).toBeNull();
+    expect(await signSessionToken({ staffName: 'Brian', team: 'Medical', eventId: null, role: 'lead', pv: -1 }, SECRET, T0)).toBeNull();
     expect(await signSessionToken({ staffName: 'Dana Kim', team: 'Medical', eventId: null, role: 'staff' }, SECRET, T0)).toBeNull();
     expect(await signSessionToken({ staffName: 'Dana Kim', team: 'Medical', eventId: 'not-a-uuid', role: 'staff' }, SECRET, T0)).toBeNull();
   });
@@ -92,6 +96,11 @@ describe('session token', () => {
     expect(await verifySessionToken(await mint({ role: 'staff', eventId: null }), SECRET, T0)).toBeNull();
     expect(await verifySessionToken(await mint({ role: 'admin', eventId: EVENT }), SECRET, T0)).toBeNull();
     expect(await verifySessionToken(await mint({ role: 'staff', eventId: 42 }), SECRET, T0)).toBeNull();
-    expect(await verifySessionToken(await mint({ role: 'lead', eventId: null }), SECRET, T0)).toMatchObject({ role: 'lead', eventId: null });
+    expect(await verifySessionToken(await mint({ role: 'lead', eventId: null, pv: 0 }), SECRET, T0)).toMatchObject({ role: 'lead', eventId: null, pv: 0 });
+    // A lead token without a passcode version, or with a broken one; a staff token with one.
+    expect(await verifySessionToken(await mint({ role: 'lead', eventId: null }), SECRET, T0)).toBeNull();
+    expect(await verifySessionToken(await mint({ role: 'lead', eventId: null, pv: '1' }), SECRET, T0)).toBeNull();
+    expect(await verifySessionToken(await mint({ role: 'lead', eventId: null, pv: 1.5 }), SECRET, T0)).toBeNull();
+    expect(await verifySessionToken(await mint({ role: 'staff', eventId: EVENT, pv: 1 }), SECRET, T0)).toBeNull();
   });
 });

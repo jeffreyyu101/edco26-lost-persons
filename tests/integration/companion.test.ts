@@ -96,7 +96,7 @@ describe('Located · already accompanied', () => {
     const row = await activityOf(r.id, FOH, 'accompanied');
     expect(row.detail).toBe("Located · already accompanied · Don't send the friend");
     // The answerer is involved now.
-    const { data } = await admin().rpc('lp_involved_staff', { p_request: r.id });
+    const { data } = await admin().rpc('lp_involved_staff', { p_event: EVENT_ID, p_request: r.id });
     expect(data as string[]).toContain(canon(ANSWERER));
   });
 

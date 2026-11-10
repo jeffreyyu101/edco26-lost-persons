@@ -517,7 +517,7 @@ describe('the routes notify (contract D)', () => {
     const rae = medical();
     const r = await createRequest(dana);
     await setStatus(r, 'Checked – Not Found', 'answer', rae);
-    const { data, error } = await admin().rpc('lp_involved_staff', { p_request: r.id });
+    const { data, error } = await admin().rpc('lp_involved_staff', { p_event: EVENT_ID, p_request: r.id });
     expect(error).toBeNull();
     expect(data as string[]).toEqual(expect.arrayContaining([canon(dana), canon(rae)]));
     const res = await api(`/api/requests/${r.id}/messages`, { json: { clientMutationId: crypto.randomUUID(), body: 'Friend is still here' }, cookie: await cookieFor(dana) });

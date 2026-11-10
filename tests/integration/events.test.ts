@@ -94,6 +94,13 @@ async function sync(cookie: string): Promise<SyncResponse> {
 
 const archivedAtEnd: string[] = [];
 
+/** "YYYY-MM-DD" moved by `days`. */
+function dayShift(day: string, days: number): string {
+  const d = new Date(`${day}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 afterAll(async () => {
   for (const v of ips.splice(0)) await clearAttempts(v);
   // Leave nothing of this file running: its events end (their requests stay frozen, as at a real event's end).
@@ -256,6 +263,60 @@ describe('two events live at once', () => {
     // GET /api/session carries the same config.
     expect((await api<SessionInfo>('/api/session', { cookie: medic.cookie })).body.event?.id).toBe(a.event.id);
   });
+  it('messages delta, inactive claim, en route, Health, speed and attention: nothing of B reaches A', async () => {
+    const letters = (v: string) => v.replace(/\d/g, (c) => 'abcdefghij'[Number(c)] ?? 'a');
+    const before = (await sync(cookieA)).serverTime;
+    // B: its request answered (In medical), someone en route, and a message on it.
+    const vB1 = Number(psql(`select row_version from public.patients where id = '${reqB1.id}'`));
+    const answered = await api(`/api/requests/${reqB1.id}/status`, { json: { status: STATUS.inMedical, expectedVersion: vB1, kind: 'answer' }, cookie: cookieB });
+    expect(answered.status, answered.text).toBe(200);
+    expect((await api(`/api/requests/${reqB1.id}/enroute`, { json: { action: 'set', etaMinutes: 5 }, cookie: cookieB })).status).toBe(200);
+    expect((await api(`/api/requests/${reqB1.id}/messages`, { json: { body: 'TEST-S in B', clientMutationId: randomUUID() }, cookie: cookieB })).status).toBe(201);
+
+    // Messages delta: A's delta carries no row or thread of B (the same person is in both); B's does.
+    const deltaA = await api<SyncResponse>(`/api/sync?since=${encodeURIComponent(before)}`, { cookie: cookieA });
+    expect(deltaA.body.rows.map((r) => r.id)).not.toContain(reqB1.id);
+    const deltaB = await api<SyncResponse>(`/api/sync?since=${encodeURIComponent(before)}`, { cookie: cookieB });
+    expect(deltaB.body.rows.find((r) => r.id === reqB1.id)?.messageCount).toBe(1);
+    const staffBoth = `${(await api<SessionInfo>('/api/session', { cookie: cookieA })).body.staff}`;
+    const raw = JSON.parse(psql(`set role service_role; select lp_messages_sync('${a.event.id}', '${staffBoth}', array['${reqB1.id}']::uuid[], now() - interval '1 hour', true)::text`)) as { threads: unknown[]; rows: unknown[] };
+    expect([raw.threads, raw.rows]).toEqual([[], []]);
+
+    // En route stats: B counts its friend en route, A none.
+    const statsA = (await api<EventStats>('/api/stats?range=event', { cookie: cookieA })).body;
+    const statsB = (await api<EventStats>('/api/stats?range=event', { cookie: cookieB })).body;
+    expect([statsA.friendsEnRoute, statsB.friendsEnRoute]).toEqual([0, 1]);
+    // Speed: only B's first check counts in B; A has none. Attention: each lists only its own requests.
+    expect(statsA.speed!.find((x) => x.key === 'firstCheck')?.n ?? 0).toBe(0);
+    expect(statsB.speed!.find((x) => x.key === 'firstCheck')?.n).toBe(1);
+    const aIds = [reqA1.id, reqA2.id];
+    expect(statsA.attention!.items.map((i) => i.id).sort()).toEqual([...aIds].sort());
+    expect(statsA.attention!.total).toBe(2);
+    expect(statsB.attention!.items.map((i) => i.id)).toEqual([reqB1.id]);
+
+    // Inactive claim: a close of B's request is never claimed through A.
+    const closedB = await create(cookieB);
+    psql(`update public.patients set status = 'Closed – Inactive', closed_at = now() where id = '${closedB.id}';
+          insert into public.lp_inactive_closes (request_id, closed_at, idle_since, quiet) values ('${closedB.id}', now(), now() - interval '2 hours', false)`);
+    expect(psql(`set role service_role; select lp_inactive_claim('${a.event.id}', array['${closedB.id}']::uuid[])::text`)).toBe('[]');
+    expect(psql(`select count(*) from public.lp_inactive_closes where request_id = '${closedB.id}' and notified_at is null`)).toBe('1');
+    expect(psql(`set role service_role; select lp_inactive_claim('${b.event.id}', array['${closedB.id}']::uuid[])::text`)).toBe(`["${closedB.id}"]`);
+
+    // Health: B's telemetry problems are B's only.
+    const area = letters(`xev${uniq()}`).slice(0, 40);
+    const device = letters(`xev${uniq()}${uniq()}`).slice(0, 20);
+    psql(`insert into public.lp_tel_events (event_id, at, device, session, team, name, view, area, ctl, n, props, trail)
+          values ('${b.event.id}', now(), '${device}', 'sessxeva', 'other', 'rage_tap', 'pending', '${area}', 'check-card', 3, '{"ptr":"touch"}', '[[-500, "t:pending"]]')`);
+    try {
+      const healthA = await api('/api/telemetry/health?window=1h', { cookie: cookieA });
+      const healthB = await api('/api/telemetry/health?window=1h', { cookie: cookieB });
+      expect([healthA.status, healthB.status]).toEqual([200, 200]);
+      expect(healthA.text).not.toContain(area);
+      expect(healthB.text).toContain(area);
+    } finally {
+      psql(`delete from public.lp_tel_events where device = '${device}'`);
+    }
+  });
 });
 
 describe('practice → go live', () => {
@@ -292,11 +353,12 @@ describe('practice → go live', () => {
   });
 });
 
-describe('end → event_ended at every layer; reads still work; reopen', () => {
+describe('end → event_ended at every layer; staff are locked out, leads keep reading; reopen', () => {
   let e: Made;
   let cookie: string;
   let r: RequestSummary;
   let msgId: string;
+  let photoId: string;
   const staff = newStaff('Site Ops');
 
   beforeAll(async () => {
@@ -306,6 +368,13 @@ describe('end → event_ended at every layer; reads still work; reopen', () => {
     r = await create(cookie);
     const m = await api(`/api/requests/${r.id}/messages`, { json: { body: 'TEST-S before the end', clientMutationId: randomUUID() }, cookie });
     msgId = m.body.message.id;
+    photoId = randomUUID();
+    const photo = new FormData();
+    photo.set('photoId', photoId);
+    photo.set('timing', 'today');
+    photo.set('photo', new Blob([new Uint8Array(JPEG)], { type: 'image/jpeg' }), 'p.jpg');
+    photo.set('thumb', new Blob([new Uint8Array(JPEG_THUMB)], { type: 'image/jpeg' }), 't.jpg');
+    expect((await api(`/api/requests/${r.id}/photos`, { method: 'POST', body: photo, cookie })).status).toBe(201);
     const ended = await api<{ event: EventAdmin }>(`/api/events/${e.event.id}/end`, { json: {}, cookie: await leadCookie() });
     expect(ended.status).toBe(200);
     expect(ended.body.event).toMatchObject({ stage: 'archived' });
@@ -334,23 +403,94 @@ describe('end → event_ended at every layer; reads still work; reopen', () => {
       expect(res.status, label).toBe(410);
       expect(res.body.error?.code, label).toBe('event_ended');
     }
-    expect(((await admin().storage.from('patient-photos').list(r.id)).data ?? []).length).toBe(0);
+    // Only the original photo's two objects: nothing new was stored.
+    expect(((await admin().storage.from('patient-photos').list(r.id)).data ?? []).length).toBe(2);
     expect(psql(`select row_version || ':' || status from public.patients where id = '${r.id}'`)).toBe(`${v}:${STATUS.waiting}`);
   });
 
-  it('reads, read markers and the session still work', async () => {
-    expect((await sync(cookie)).rows.map((x) => x.id)).toEqual([r.id]);
-    expect((await api(`/api/requests/${r.id}`, { cookie })).status).toBe(200);
-    expect((await api(`/api/requests/${r.id}/messages`, { cookie })).status).toBe(200);
-    expect((await api('/api/stats?range=event', { cookie })).status).toBe(200);
-    expect((await api(`/api/requests/${r.id}/messages/read`, { json: {}, cookie })).status).toBe(200);
-    expect((await api('/api/activity/read', { json: { all: true }, cookie })).status).toBe(200);
-    expect((await api<SessionInfo>('/api/session', { cookie })).body.event?.stage).toBe('archived');
+  it('staff: every read answers 410 event_ended with the Ended screen\'s event, so a phone that only polls learns it ended', async () => {
+    const reads: Array<[string, string, RequestInit & { json?: unknown }]> = [
+      ['sync', '/api/sync', {}],
+      ['sync delta', '/api/sync?since=2099-01-01T00:00:00.000000%2B00:00&ev=', {}],
+      ['sync ids', `/api/sync?ids=${r.id}`, {}],
+      ['sync reconcile', '/api/sync?reconcile=1', {}],
+      ['detail', `/api/requests/${r.id}`, {}],
+      ['messages', `/api/requests/${r.id}/messages`, {}],
+      ['photo', `/api/photos/${photoId}?size=thumb`, {}],
+      ['stats', '/api/stats?range=event', {}],
+      ['stats today', '/api/stats', {}],
+      ['activity', '/api/activity', {}],
+      ['activity unread', '/api/activity/unread', {}],
+      ['health', '/api/telemetry/health', {}],
+      // Read markers and push need the event too: after the end there is nothing left to mark or to be told.
+      ['message read', `/api/requests/${r.id}/messages/read`, { method: 'POST', json: {} }],
+      ['activity read', '/api/activity/read', { method: 'POST', json: { all: true } }],
+      ['push prefs', '/api/push/prefs', { method: 'POST', json: { newRequests: true } }],
+      // GET /api/session reports the end (the Ended screen), not a bare 401.
+      ['session', '/api/session', {}],
+    ];
+    for (const [label, path, init] of reads) {
+      const res = await api(path, { method: init.method, json: init.json, cookie });
+      expect(res.status, `${label} ${res.text}`).toBe(410);
+      expect(res.body.error, label).toMatchObject({ code: 'event_ended', event: { name: e.event.name, stage: 'archived', logoUrl: null } });
+      // No sliding re-issue of an ended event's session.
+      expect(setCookies(res.headers), label).toEqual([]);
+    }
+  });
+
+  it('staff: signing out and removing the device\'s push subscription still work after the end', async () => {
+    const endpoint = `https://127.0.0.1:9/push/${uniq()}`;
+    psql(`insert into public.lp_push_subscriptions (event_id, endpoint, p256dh, auth, staff, team) values ('${e.event.id}', '${endpoint}', 'p256dh-test-key-0000', 'auth-test-0000', '${`${staff.staffName} · ${staff.team}`.toLowerCase()}', 'Site Ops')`);
+    const unsub = await api('/api/push/subscribe', { method: 'DELETE', json: { endpoint }, cookie });
+    expect(unsub.status, unsub.text).toBe(200);
+    expect(psql(`select count(*) from public.lp_push_subscriptions where endpoint = '${endpoint}'`)).toBe('0');
+    // A second session of the same person (the first one keeps its cookie for the reads test above).
+    const other = await cookieFor(staff, { eventId: e.event.id });
+    const out = await api('/api/session', { method: 'DELETE', cookie: other });
+    expect(out.status).toBe(200);
+    expect(setCookies(out.headers)[0]).toMatch(/^lp_session=;/);
+  });
+
+  it('a lead keeps reading the ended event (sync, detail, messages, photos, stats) and learns its stage from sync', async () => {
+    const lead = await leadCookie(e.event.id);
+    expect((await sync(lead)).rows.map((x) => x.id)).toEqual([r.id]);
+    expect((await api(`/api/requests/${r.id}`, { cookie: lead })).status).toBe(200);
+    expect((await api(`/api/requests/${r.id}/messages`, { cookie: lead })).status).toBe(200);
+    expect((await api(`/api/photos/${photoId}?size=thumb`, { cookie: lead })).status).toBe(302);
+    expect((await api('/api/stats?range=event', { cookie: lead })).status).toBe(200);
+    expect((await api(`/api/requests/${r.id}/messages/read`, { json: {}, cookie: lead })).status).toBe(200);
+    expect((await api<SessionInfo>('/api/session', { cookie: lead })).body.event?.stage).toBe('archived');
     // A client holding an older config version learns the stage from sync.
-    const withEv = await api<SyncResponse>('/api/sync?since=2099-01-01T00:00:00.000000%2B00:00&ev=', { cookie });
+    const withEv = await api<SyncResponse>('/api/sync?since=2099-01-01T00:00:00.000000%2B00:00&ev=', { cookie: lead });
     expect(withEv.body.event).toMatchObject({ id: e.event.id, stage: 'archived' });
-    const same = await api<SyncResponse>(`/api/sync?since=2099-01-01T00:00:00.000000%2B00:00&ev=${encodeURIComponent(withEv.body.event!.version)}`, { cookie });
+    const same = await api<SyncResponse>(`/api/sync?since=2099-01-01T00:00:00.000000%2B00:00&ev=${encodeURIComponent(withEv.body.event!.version)}`, { cookie: lead });
     expect(same.body.event).toBeUndefined();
+    // Its writes are refused like anyone's (SQL guard → 410).
+    const v = Number(psql(`select row_version from public.patients where id = '${r.id}'`));
+    const write = await api(`/api/requests/${r.id}`, { method: 'PATCH', json: { expectedVersion: v, patch: { hair: 'Red' } }, cookie: lead });
+    expect(write.status).toBe(410);
+  });
+
+  it('child tables: no audit row, message, photo row or en route row of an ended event is added, changed or removed, whoever writes', () => {
+    const R = `'${r.id}'`;
+    const refused = [
+      `insert into public.audit_events (patient_id, staff_name, action_type) values (${R}, 'X', 'note')`,
+      `update public.audit_events set notes = 'x' where patient_id = ${R}`,
+      `delete from public.audit_events where patient_id = ${R}`,
+      `insert into public.audit_events (event_id, staff_name, action_type) values ('${e.event.id}', 'X', 'note')`,
+      `insert into public.lp_messages (request_id, staff, staff_key, team, body, client_mutation_id) values (${R}, 'X · Site Ops', 'x · site ops', 'Site Ops', 'TEST-S late', gen_random_uuid())`,
+      `update public.lp_messages set body = 'x' where request_id = ${R}`,
+      `delete from public.lp_messages where request_id = ${R}`,
+      `insert into public.patient_photos (patient_id, storage_path, photo_timing, uploaded_by) values (${R}, '${r.id}/late.jpg', 'today', 'X')`,
+      `update public.patient_photos set photo_timing = 'older' where patient_id = ${R}`,
+      `delete from public.patient_photos where patient_id = ${R}`,
+      `insert into public.lp_enroute (request_id, staff, staff_name, eta_at, eta_minutes, state) values (${R}, 'x · site ops', 'X', now(), 5, 'enroute')`,
+    ];
+    for (const sql of refused) expect(() => psql(sql), sql).toThrow(/event_ended/);
+    expect(psql(`select (select count(*) from public.lp_messages where request_id = ${R}) || '/' || (select count(*) from public.patient_photos where patient_id = ${R})`)).toBe('1/1');
+    // What the system still writes after the end lives elsewhere: read markers.
+    psql(`insert into public.lp_message_reads (request_id, staff, last_read_at) values (${R}, 'test-s marker · site ops', now()) on conflict do nothing`);
+    expect(psql(`select event_id from public.lp_message_reads where request_id = ${R} and staff = 'test-s marker · site ops'`)).toBe(e.event.id);
   });
 
   it('SQL layer: every write RPC raises P0410 event_ended first (lp_require_writable)', () => {
@@ -401,12 +541,17 @@ describe('end → event_ended at every layer; reads still work; reopen', () => {
     expect(viaLink.body.error.code).toBe('event_ended');
   });
 
-  it('reopen: archived → live, writable again, numbering continues; only from archived', async () => {
+  it('reopen: archived → live, writable again, numbering continues; its password and join link are cleared; only from archived', async () => {
     const lead = await leadCookie();
     const reopened = await api<{ event: EventAdmin }>(`/api/events/${e.event.id}/reopen`, { json: {}, cookie: lead });
     expect(reopened.status).toBe(200);
-    expect(reopened.body.event).toMatchObject({ stage: 'live', endedAt: null });
+    expect(reopened.body.event).toMatchObject({ stage: 'live', endedAt: null, hasStaffPassword: false, joinLinkExpiresAt: null });
+    expect(psql(`select (reopened_at > now() - interval '1 minute')::text || '/' || (staff_password_hash is null)::text || '/' || (invite_code_sha256 is null)::text from public.events where id = '${e.event.id}'`)).toBe('true/true/true');
+    // Sessions still open carry on; nobody new signs in until a lead sets a password again.
     expect((await create(cookie)).caseNumber).toBe(2);
+    expect((await signIn(newStaff('Site Ops'), e.password)).status).toBe(401);
+    expect((await api(`/api/events/${e.event.id}/password`, { json: { password: e.password }, cookie: lead })).status).toBe(200);
+    expect((await signIn(newStaff('Site Ops'), e.password)).info.eventId).toBe(e.event.id);
     expect((await api(`/api/events/${e.event.id}/reopen`, { json: {}, cookie: lead })).status).toBe(409);
     expect((await api(`/api/events/${e.event.id}/end`, { json: {}, cookie: lead })).status).toBe(200);
     expect((await api(`/api/events/${e.event.id}/end`, { json: {}, cookie: lead })).status).toBe(409);
@@ -429,6 +574,9 @@ describe('lead vs staff', () => {
       ['POST', `/api/events/${target}/reopen`, {}],
       ['POST', '/api/org/lead-passcode', { passcode: 'whatever-123' }],
       ['POST', '/api/session/event', { eventId: target }],
+      // (Events review) The telemetry kill switch, both ways.
+      ['POST', '/api/telemetry/settings', { enabled: false }],
+      ['POST', '/api/telemetry/settings', { enabled: true }],
     ];
     for (const [method, path, json] of leadRoutes) {
       const res = await api(path, { method, json, cookie: staffCookie });
@@ -517,6 +665,152 @@ describe('the password rule', () => {
   });
 });
 
+describe('reopen never captures another event\'s staff', () => {
+  it('B takes archived A\'s password; A is reopened; B\'s staff still land in B, and A\'s old link is off', async () => {
+    const lead = await leadCookie();
+    const a = await makeEvent();
+    const b = await makeEvent({ practice: true });
+    archivedAtEnd.push(a.event.id, b.event.id);
+    const link = await api<{ link: string }>(`/api/events/${a.event.id}/join-link`, { json: {}, cookie: lead });
+    expect(link.status).toBe(201);
+    const token = decodeURIComponent(new URL(link.body.link).hash.slice('#join='.length));
+    expect((await api(`/api/events/${a.event.id}/end`, { json: {}, cookie: lead })).status).toBe(200);
+    // A's password is free once A has ended: B takes it.
+    expect((await api(`/api/events/${b.event.id}/password`, { json: { password: a.password }, cookie: lead })).status).toBe(200);
+    const reopened = await api<{ event: EventAdmin }>(`/api/events/${a.event.id}/reopen`, { json: {}, cookie: lead });
+    expect(reopened.status).toBe(200);
+    expect(reopened.body.event).toMatchObject({ stage: 'live', hasStaffPassword: false, joinLinkExpiresAt: null });
+    // A (older, now live) would have matched first; its hash is gone, so the password is B's alone.
+    const who = await signIn(newStaff('Site Ops'), a.password);
+    expect(who.status).toBe(200);
+    expect(who.info.eventId).toBe(b.event.id);
+    // A's join link from before the end no longer opens anything.
+    const viaLink = await api('/api/session', { json: { staffName: pii(`TEST-S Link ${uniq()}`), team: 'Site Ops', invite: token }, headers: { 'x-real-ip': await ip() } });
+    expect(viaLink.status).toBe(401);
+    // Giving A its old password back now goes through the rule: B (practice) holds it.
+    const clash = await api(`/api/events/${a.event.id}/password`, { json: { password: a.password }, cookie: lead });
+    expect(clash.status).toBe(422);
+    expect(clash.body.error).toMatchObject({ field: 'password' });
+  });
+});
+
+describe('a lead passcode change signs every lead out', () => {
+  afterAll(async () => {
+    await ensureTestEvent();
+  });
+
+  it('old lead sessions get 401 with the cookie cleared; the lead who changed it carries on', async () => {
+    const minted = await leadCookie();
+    const res = await api('/api/session', { json: { staffName: pii(`TEST-S Lead ${uniq()}`), team: 'Medical', password: LEAD_PASSCODE }, headers: { 'x-real-ip': await ip() } });
+    expect(res.status).toBe(200);
+    const signedIn = setCookies(res.headers)[0]!.split(';')[0]!;
+    expect((await api('/api/events', { cookie: signedIn })).status).toBe(200);
+    const version = Number(psql('select lead_passcode_version from public.lp_org'));
+
+    const changed = await api('/api/org/lead-passcode', { json: { passcode: pii(`lead-${uniq()}-${uniq()}`) }, cookie: signedIn });
+    expect(changed.status).toBe(200);
+    expect(Number(psql('select lead_passcode_version from public.lp_org'))).toBe(version + 1);
+    const reissued = setCookies(changed.headers)[0]!.split(';')[0]!;
+    expect((await api('/api/events', { cookie: reissued })).status).toBe(200);
+
+    for (const [label, cookie] of [['the changing lead\'s old cookie', signedIn], ['another lead', minted]] as const) {
+      const out = await api('/api/events', { cookie });
+      expect(out.status, label).toBe(401);
+      expect(setCookies(out.headers)[0], label).toMatch(/^lp_session=;/);
+      expect((await api<SessionInfo>('/api/session', { cookie })).status, label).toBe(401);
+    }
+    // A token with a version from the future is refused the same way; staff sessions are untouched.
+    expect((await api('/api/events', { cookie: await cookieFor(newStaff(), { role: 'lead', pv: version + 5 }) })).status).toBe(401);
+    expect((await api('/api/sync', { cookie: await cookieFor(newStaff()) })).status).toBe(200);
+  });
+});
+
+describe('event settings and the requests that use them', () => {
+  it('a renamed post takes its requests along; a post or team in use cannot be removed; an ended event\'s setup is frozen', async () => {
+    const lead = await leadCookie();
+    const e = await makeEvent();
+    archivedAtEnd.push(e.event.id);
+    const staffCookie = (await signIn(newStaff('Site Ops'), e.password)).cookie;
+    const r = await create(staffCookie);
+    const patch = (json: unknown) => api<{ event: EventAdmin; error?: { code: string; field?: string } }>(`/api/events/${e.event.id}`, { method: 'PATCH', json, cookie: lead });
+
+    // Rename "Main Stage Tent" (same id): the request moves with it, in stats too, and stays editable.
+    const renamed = [{ id: 'main', label: 'Main Tent', short: 'Main' }, POSTS[1]!];
+    expect((await patch({ posts: renamed })).status).toBe(200);
+    const row = (await api(`/api/requests/${r.id}`, { cookie: staffCookie })).body as RequestSummary;
+    expect(row.reportingLocation).toBe('Main Tent');
+    expect(row.rowVersion).toBeGreaterThan(r.rowVersion);
+    const stats = (await api<EventStats>('/api/stats?range=event', { cookie: staffCookie })).body;
+    expect(stats.range!.posts).toEqual([{ post: 'Main', n: 1 }]);
+    const edit = await api(`/api/requests/${r.id}`, { method: 'PATCH', json: { expectedVersion: row.rowVersion, patch: { hair: 'Red', reportingLocation: 'Main Tent' } }, cookie: staffCookie });
+    expect(edit.status, edit.text).toBe(200);
+    // Two posts swap labels: the requests swap with them (one statement).
+    expect((await patch({ posts: [{ id: 'main', label: 'North Gate', short: 'North' }, { id: 'north', label: 'Main Tent', short: 'Main' }] })).status).toBe(200);
+    expect(psql(`select reporting_location from public.patients where id = '${r.id}'`)).toBe('North Gate');
+
+    // Removing the post in use: refused, with the field. An unused one goes.
+    const inUse = await patch({ posts: [{ id: 'north', label: 'Main Tent', short: 'Main' }] });
+    expect(inUse.status).toBe(422);
+    expect(inUse.body.error).toMatchObject({ code: 'invalid', field: 'posts' });
+    expect((await patch({ posts: [{ id: 'main', label: 'North Gate', short: 'North' }] })).status).toBe(200);
+    // A team in use (the request was logged by Site Ops) cannot go; an unused one can.
+    const teamInUse = await patch({ teams: [TEAMS[1]] });
+    expect(teamInUse.status).toBe(422);
+    expect(teamInUse.body.error).toMatchObject({ code: 'invalid', field: 'teams' });
+    expect((await patch({ teams: [...TEAMS, { id: 'spare', label: 'Spare Crew' }] })).status).toBe(200);
+    expect((await patch({ teams: TEAMS })).status).toBe(200);
+
+    // Ended: posts, teams, Main Med, chips, time zone, show-day start and dates are frozen; the name is not.
+    expect((await api(`/api/events/${e.event.id}/end`, { json: {}, cookie: lead })).status).toBe(200);
+    const current = (await api<{ event: EventAdmin }>(`/api/events/${e.event.id}`, { cookie: lead })).body.event;
+    const frozen: Array<[string, Record<string, unknown>]> = [
+      ['posts', { posts: [...current.posts, { id: 'extra', label: 'Extra Post' }] }],
+      ['teams', { teams: [...current.teams, { id: 'extra', label: 'Extra Crew' }] }],
+      ['mainMedical', { mainMedical: 'Big Med' }],
+      ['lastSeen', { lastSeen: ['Somewhere else'] }],
+      ['timezone', { timezone: 'America/Denver' }],
+      ['dayStartHour', { dayStartHour: 9 }],
+      ['startsOn', { startsOn: dayShift(current.startsOn, -1) }],
+      ['endsOn', { endsOn: dayShift(current.endsOn, 1) }],
+    ];
+    for (const [field, body] of frozen) {
+      const res = await patch(body);
+      expect(res.status, field).toBe(409);
+      expect(res.body.error, field).toMatchObject({ code: 'conflict', field });
+    }
+    // The same values again are fine, and the name may change.
+    expect((await patch({ posts: current.posts, teams: current.teams, timezone: current.timezone })).status).toBe(200);
+    const named = await patch({ name: pii(`TEST-S Renamed ${uniq()}`) });
+    expect(named.status).toBe(200);
+    expect(psql(`select timezone || '/' || jsonb_array_length(posts) from public.events where id = '${e.event.id}'`)).toBe(`${current.timezone}/1`);
+  });
+});
+
+describe('the auto-close after a reopen', () => {
+  it('counts inactivity from the reopen, not from before the end', async () => {
+    const lead = await leadCookie();
+    const e = await makeEvent();
+    archivedAtEnd.push(e.event.id);
+    const staffCookie = (await signIn(newStaff('Site Ops'), e.password)).cookie;
+    const r = await create(staffCookie);
+    const located = await api(`/api/requests/${r.id}/status`, { json: { status: STATUS.inMedical, expectedVersion: r.rowVersion, kind: 'answer' }, cookie: staffCookie });
+    expect(located.status, located.text).toBe(200);
+    // Idle for three hours before the event ended.
+    psql(`update public.audit_events set occurred_at = occurred_at - interval '3 hours' where patient_id = '${r.id}';
+          update public.patients set created_at = created_at - interval '3 hours' where id = '${r.id}'`);
+    expect((await api(`/api/events/${e.event.id}/end`, { json: {}, cookie: lead })).status).toBe(200);
+    expect((await api(`/api/events/${e.event.id}/reopen`, { json: {}, cookie: lead })).status).toBe(200);
+    // Just reopened: not idle yet, whatever happened before the end.
+    expect(psql(`select public.lp_close_inactive(array['${r.id}']::uuid[])`)).toBe('0');
+    expect(psql(`select status from public.patients where id = '${r.id}'`)).toBe(STATUS.inMedical);
+    // Reopened two hours ago and still untouched: closed, idle since the reopen.
+    psql(`update public.events set reopened_at = now() - interval '2 hours' where id = '${e.event.id}'`);
+    expect(psql(`select public.lp_close_inactive(array['${r.id}']::uuid[])`)).toBe('1');
+    expect(psql(`select status from public.patients where id = '${r.id}'`)).toBe(STATUS.inactive);
+    expect(psql(`select (abs(extract(epoch from c.idle_since - e.reopened_at)) < 1)::text from public.lp_inactive_closes c join public.events e on e.id = '${e.event.id}' where c.request_id = '${r.id}'`)).toBe('true');
+  });
+});
+
 describe('event settings', () => {
   it('create and update validate the posts, teams and dates; the link name is unique', async () => {
     const lead = await leadCookie();
@@ -543,12 +837,14 @@ describe('event settings', () => {
 });
 
 describe('scripts/bootstrap-events.mjs (the one-time bootstrap, run here against the local stack only)', () => {
-  const run = async (env: Record<string, string>, args: string[] = []) => {
+  // The lead passcode goes in on stdin (never the command line or the environment).
+  const run = async (env: Record<string, string>, args: string[] = [], passcode?: string) => {
     const { spawnSync } = await import('node:child_process');
     const base = loadTestEnv();
     return spawnSync(process.execPath, [join(ROOT, 'scripts', 'bootstrap-events.mjs'), ...args], {
       cwd: ROOT,
       encoding: 'utf8',
+      input: passcode === undefined ? '' : `${passcode}\n`,
       env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NEXT_PUBLIC_SUPABASE_URL: base.NEXT_PUBLIC_SUPABASE_URL!, SUPABASE_SECRET_KEY: base.SUPABASE_SECRET_KEY!, ...env } as unknown as NodeJS.ProcessEnv,
     });
   };
@@ -565,17 +861,25 @@ describe('scripts/bootstrap-events.mjs (the one-time bootstrap, run here against
     const code = pii(`boot-code-${uniq()}`);
     const { createHash } = await import('node:crypto');
     const sha = createHash('sha256').update(code, 'utf8').digest('hex');
-    const env = { LP_LEAD_PASSCODE: lead, APP_SHARED_PASSWORD: edcPassword, INVITE_CODE_SHA256: sha, INVITE_EXPIRES_AT: '2026-11-09T12:00:00Z' };
+    const env = { APP_SHARED_PASSWORD: edcPassword, INVITE_CODE_SHA256: sha, INVITE_EXPIRES_AT: '2026-11-09T12:00:00Z' };
 
     // Already set (the test setups set it): refused without --force; a dry run writes nothing.
-    const refused = await run(env);
+    const refused = await run(env, [], lead);
     expect(refused.status).toBe(1);
     expect(refused.stderr).toContain('already set');
-    const dry = await run(env, ['--dry-run', '--force']);
+    const dry = await run(env, ['--dry-run', '--force'], lead);
     expect(dry.status, dry.stderr).toBe(0);
     expect(psql(`select staff_password_hash is null from public.events where slug = 'edco26'`)).toBe('t');
+    // Never from the environment (it would sit in shell history and process listings), nor an empty stdin.
+    const fromEnv = await run({ ...env, LP_LEAD_PASSCODE: lead }, ['--force'], lead);
+    expect(fromEnv.status).toBe(1);
+    expect(fromEnv.stderr).toContain('LP_LEAD_PASSCODE is not read');
+    const empty = await run(env, ['--force']);
+    expect(empty.status).toBe(1);
+    expect(empty.stderr).toContain('at least 8 characters');
+    expect(psql(`select staff_password_hash is null from public.events where slug = 'edco26'`)).toBe('t');
 
-    const res = await run(env, ['--force']);
+    const res = await run(env, ['--force'], lead);
     expect(res.status, res.stderr).toBe(0);
     const printed = res.stdout + res.stderr;
     for (const secret of [lead, edcPassword, code, sha]) expect(printed).not.toContain(secret);
@@ -595,7 +899,7 @@ describe('scripts/bootstrap-events.mjs (the one-time bootstrap, run here against
     expect(asLead.body).toMatchObject({ role: 'lead' });
 
     // A lead passcode equal to the EDC password is refused.
-    const same = await run({ ...env, LP_LEAD_PASSCODE: edcPassword }, ['--force']);
+    const same = await run(env, ['--force'], edcPassword);
     expect(same.status).toBe(1);
     expect(same.stderr).toContain('choose another');
   });

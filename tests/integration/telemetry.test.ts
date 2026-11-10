@@ -37,18 +37,21 @@ const setSettings = (sql: string) => psql(`update public.lp_tel_settings set ${s
 
 let medic: string;
 let dispatcher: string;
+/** (Events) The kill switch is a lead's: a lead with the local event open, on the Dispatch team. */
+let lead: string;
 
 beforeAll(async () => {
   medic = await cookieFor(newStaff('Medical'));
   dispatcher = await cookieFor(newStaff('GC/HX - Dispatch'));
+  lead = await cookieFor(newStaff('GC/HX - Dispatch'), { role: 'lead', eventId: EVENT_ID });
   setSettings(`enabled = true, off_at = timestamptz '2026-11-10 06:00:00-05', device_hour_cap = 3000, device_hour_bytes = 2097152`);
   // Collection must be on in the server's cache (it may have read "off" in an earlier file).
-  await api('/api/telemetry/settings', { json: { enabled: true }, cookie: medic });
+  await api('/api/telemetry/settings', { json: { enabled: true }, cookie: lead });
 });
 
 afterAll(async () => {
   setSettings(`enabled = true, off_at = timestamptz '2026-11-10 06:00:00-05', device_hour_cap = 3000, device_hour_bytes = 2097152`);
-  await api('/api/telemetry/settings', { json: { enabled: true }, cookie: medic });
+  await api('/api/telemetry/settings', { json: { enabled: true }, cookie: lead });
   psql(`delete from public.lp_tel_events where device like 'ti%'; delete from public.lp_tel_devices where device like 'ti%';
         delete from public.lp_tel_quota where device like 'ti%'; delete from public.lp_tel_batches where device like 'ti%'`);
   setSettings('fleet_hour_cap = 60000, fleet_hour_bytes = 50331648');
@@ -193,7 +196,7 @@ describe('POST /api/telemetry', () => {
     }
   });
 
-  it('the kill switch: 204 and nothing written (the next ones without a database call); back on in SQL only', async () => {
+  it('the kill switch: 204 and nothing written (the next ones without a database call); a lead turns it back on', async () => {
     const d = device();
     setSettings('enabled = false');
     const first = await post(batch(d, [{ n: 'view', at: Date.now() }]), medic);
@@ -204,16 +207,16 @@ describe('POST /api/telemetry', () => {
     // lp_tel_ingest itself says off and writes nothing.
     expect(psql(`set role service_role; select public.lp_tel_ingest('${EVENT_ID}', 'direct00001', '${d}', 'sessint001', 'medical', 0, '{}', '[{"n":"view","at":1}]', 10)::text`)).toBe('{"on": false}');
     expect(rows(d)).toBe('');
-    // The route never turns it back on: 403, and it stays off.
+    // (Events) Staff never turn it back on: 403, and it stays off.
     const refused = await api('/api/telemetry/settings', { json: { enabled: true }, cookie: medic });
     expect(refused.status).toBe(403);
     expect(psql(`select enabled from public.lp_tel_settings`)).toBe('f');
     expect((await post(batch(d, [{ n: 'view', at: Date.now() }]), medic)).status).toBe(204);
-    // Back on in SQL; {enabled: true} then only re-reads the settings for this server instance.
-    setSettings('enabled = true');
-    const on = await api('/api/telemetry/settings', { json: { enabled: true }, cookie: medic });
+    // A lead does, through the route (lp_tel_set(true)); this instance forgets its cached "off" at once.
+    const on = await api('/api/telemetry/settings', { json: { enabled: true }, cookie: lead });
     expect(on.status).toBe(200);
     expect(on.body).toMatchObject({ on: true, enabled: true });
+    expect(psql(`select enabled from public.lp_tel_settings`)).toBe('t');
     expect((await post(batch(d, [{ n: 'view', at: Date.now() }]), medic)).status).toBe(200);
     expect(rows(d)).toBe('view');
   });
@@ -221,7 +224,7 @@ describe('POST /api/telemetry', () => {
   it('(events) a past off_at no longer turns it off; no practice or live event does (204, nothing written)', async () => {
     const d = device();
     setSettings(`off_at = now() - interval '1 minute'`);
-    await api('/api/telemetry/settings', { json: { enabled: true }, cookie: medic });
+    await api('/api/telemetry/settings', { json: { enabled: true }, cookie: lead });
     try {
       expect((await post(batch(d, [{ n: 'view', at: Date.now() }]), medic)).status).toBe(200);
       expect(rows(d)).toBe('view');
@@ -238,18 +241,21 @@ describe('POST /api/telemetry', () => {
     expect(rows(d2)).toBe('');
   });
 
-  it('the switch route turns it off, records tel_switch (team only, before the flip) and needs a session', async () => {
+  it('the switch route turns it off, records tel_switch (team only, before the flip) and needs a lead session', async () => {
     expect((await api('/api/telemetry/settings', { json: { enabled: false }, cookie: null })).status).toBe(401);
+    // (Events) Staff may not switch it, either way.
+    expect((await api('/api/telemetry/settings', { json: { enabled: false }, cookie: dispatcher })).status).toBe(403);
+    expect(psql(`select enabled from public.lp_tel_settings`)).toBe('t');
     const before = Number(psql(`select count(*) from public.lp_tel_events where name = 'tel_switch' and team = 'dispatch' and ok = false`));
     try {
-      const res = await api('/api/telemetry/settings', { json: { enabled: false }, cookie: dispatcher });
+      const res = await api('/api/telemetry/settings', { json: { enabled: false }, cookie: lead });
       expect(res.status).toBe(200);
       expect(res.body).toMatchObject({ on: false, enabled: false });
       expect(psql(`select enabled from public.lp_tel_settings`)).toBe('f');
       expect(Number(psql(`select count(*) from public.lp_tel_events where name = 'tel_switch' and team = 'dispatch' and ok = false`))).toBe(before + 1);
     } finally {
       setSettings('enabled = true');
-      await api('/api/telemetry/settings', { json: { enabled: true }, cookie: medic });
+      await api('/api/telemetry/settings', { json: { enabled: true }, cookie: lead });
       psql(`delete from public.lp_tel_events where name = 'tel_switch' and device = 'server' and received_at > now() - interval '1 minute'`);
     }
   });

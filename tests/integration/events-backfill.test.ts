@@ -7,7 +7,9 @@
 //   * every request (and every row keyed by one, or by a device) belongs to the archived edco26 event; telemetry rows
 //     are not rewritten; the counter continues after the highest case number; records_delete_at is NULL;
 //   * pasted again, nothing changes at all;
-//   * the event is frozen (the guard), still readable (stats), and its old numbers stay unique per event.
+//   * the event is frozen (the guard), still readable (stats), and its old numbers stay unique per event;
+//   * (review) the global case-number rule goes whatever it is called (a renamed constraint and an extra unique index
+//     here), a trigger someone disabled on purpose stays disabled, and EDC's ended_at is its real end.
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { readdirSync } from 'node:fs';
@@ -102,7 +104,11 @@ describe('20261110000000_events.sql on a database like production (the finished 
       insert into public.lp_tel_devices (device, team) values ('synthdevice01', 'medical');
       insert into public.lp_tel_events (at, device, session, team, name) values (now() - interval '1 day', 'synthdevice01', 'synthsession', 'medical', 'view');
       insert into public.audit_events (patient_id, staff_name, action_type, notes) values (null, 'System', 'note', 'a row with no request');
-      insert into public.lp_login_attempts (ip, name_key, ok) values ('198.18.0.9', 'dana kim', true);`);
+      insert into public.lp_login_attempts (ip, name_key, ok) values ('198.18.0.9', 'dana kim', true);
+      -- Production may name its rule differently, or carry a second one; and a trigger may be off on purpose.
+      alter table public.patients rename constraint patients_case_number_key to patients_case_number_legacy;
+      create unique index patients_case_number_extra on public.patients (case_number) where case_number > 0;
+      alter table public.patients disable trigger lp_enroute_clear;`);
     expect(sql('select count(*) from public.patients')).toBe('21');
     expect(Number(sql('select count(*) from public.audit_events'))).toBeGreaterThan(20);
     expect(Number(sql('select count(*) from public.patient_photos'))).toBeGreaterThan(0);
@@ -130,7 +136,8 @@ describe('20261110000000_events.sql on a database like production (the finished 
       report_to: [],
       case_seq: Number(sql('select max(case_number) from public.patients')),
     });
-    expect(edc.ended_at).not.toBeNull();
+    // The end of its last show day (06:00 Monday in Orlando), not the time the file ran.
+    expect(sql(`select ended_at = timestamptz '2026-11-09 06:00:00-05' from public.events where slug = 'edco26'`)).toBe('t');
     expect(edc.posts).toEqual([
       { id: 'fa3', label: 'FA 3 – Kinetic', short: 'FA 3' },
       { id: 'fa4', label: 'FA 4 – Oasis', short: 'FA 4' },
@@ -154,7 +161,13 @@ describe('20261110000000_events.sql on a database like production (the finished 
     // Numbering: per event, the old global default retired (the sequence itself kept, untouched).
     expect(sql(`select column_default is null from information_schema.columns where table_name = 'patients' and column_name = 'case_number'`)).toBe('t');
     expect(sql(`select count(*) from pg_indexes where indexname = 'patients_event_case_key'`)).toBe('1');
-    expect(sql(`select count(*) from pg_constraint where conname in ('patients_case_number_key', 'patients_reporting_location_check')`)).toBe('0');
+    expect(sql(`select count(*) from pg_constraint where conname in ('patients_case_number_key', 'patients_case_number_legacy', 'patients_reporting_location_check')`)).toBe('0');
+    // No unique rule on case_number alone is left, whatever its name (constraint or index, partial or not).
+    expect(sql(`select count(*) from pg_index i join pg_attribute a on a.attrelid = i.indrelid and a.attnum = i.indkey[0]
+                where i.indrelid = 'public.patients'::regclass and i.indisunique and i.indnkeyatts = 1 and a.attname = 'case_number'`)).toBe('0');
+    // The backfill switched off only the triggers that were on, and switched exactly those back on.
+    expect(sql(`select string_agg(tgname || ':' || tgenabled::text, ',' order by tgname) from pg_trigger where tgrelid = 'public.patients'::regclass and not tgisinternal`))
+      .toBe('lp_enroute_clear:D,lp_patients_touch:O,lp_patients_writable:O');
     expect(sql(`select is_nullable from information_schema.columns where table_name = 'patients' and column_name = 'event_id'`)).toBe('NO');
   });
 

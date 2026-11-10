@@ -164,14 +164,16 @@ function sessionSecret(): string {
  */
 export async function cookieFor(
   staff: Staff,
-  opts: { issuedAgo?: number; firstIssuedAgo?: number; eventId?: string | null; role?: 'staff' | 'lead' } = {},
+  opts: { issuedAgo?: number; firstIssuedAgo?: number; eventId?: string | null; role?: 'staff' | 'lead'; pv?: number } = {},
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const iat = now - (opts.issuedAgo ?? 0);
   const sid = opts.firstIssuedAgo !== undefined ? `${now - opts.firstIssuedAgo}.${randomBytes(12).toString('hex')}` : undefined;
   const role = opts.role ?? 'staff';
   const eventId = opts.eventId === undefined ? (role === 'lead' ? null : EVENT_ID) : opts.eventId;
-  const signed = await signSessionToken({ ...staff, sid, eventId, role }, sessionSecret(), iat);
+  // (Events) A lead token carries the current lead passcode version unless the test says otherwise.
+  const pv = role === 'lead' ? (opts.pv ?? leadPasscodeVersion()) : null;
+  const signed = await signSessionToken({ ...staff, sid, eventId, role, pv }, sessionSecret(), iat);
   if (!signed) throw new Error('could not sign a test session');
   return `${SESSION_COOKIE}=${signed.token}`;
 }
@@ -309,6 +311,11 @@ export function dbUrl(): string {
  * 1 MB default: the shared local stack keeps every agent's TEST rows, and a whole-table json_agg (stats.test)
  * outgrows 1 MB (ENOBUFS).
  */
+/** (Events) lp_org.lead_passcode_version now (what a lead's token must carry). */
+export function leadPasscodeVersion(): number {
+  return Number(psql('select coalesce((select lead_passcode_version from public.lp_org where id), 0)'));
+}
+
 export function psql(sql: string): string {
   return execFileSync('psql', [dbUrl(), '-v', 'ON_ERROR_STOP=1', '-q', '-At', '-c', sql], {
     encoding: 'utf8',

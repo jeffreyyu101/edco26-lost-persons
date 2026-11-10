@@ -7,7 +7,7 @@ import { SETTABLE_STATUSES, STATUS, TRANSITIONS, type Status } from '@/lib/domai
 import { ApiFailure } from '@/lib/server/errors';
 import { reclassify } from '@/lib/server/reclassify';
 import { OPAQUE_DB_ERROR } from '@/lib/server/supabase';
-import { admin, api, cookieFor, createRequest, forceStatus, newStaff, psql, randomUUID, staffOf, withTestServer, type Staff } from './harness';
+import { EVENT_ID, admin, api, cookieFor, createRequest, forceStatus, newStaff, psql, randomUUID, staffOf, withTestServer, type Staff } from './harness';
 
 withTestServer();
 
@@ -184,26 +184,28 @@ describe('status details', () => {
     const { id, version } = await requestIn(creator, STATUS.notInMedical);
     const opaque = () => new ApiFailure('unavailable', undefined, { dbCode: OPAQUE_DB_ERROR });
     // Fits nothing (current version, legal target): stays a 503 so the client retries.
-    const kept = await reclassify(opaque(), id, { fn: 'status', expectedVersion: version, target: STATUS.inMedical });
+    const kept = await reclassify(opaque(), EVENT_ID, id, { fn: 'status', expectedVersion: version, target: STATUS.inMedical });
     expect(kept).toMatchObject({ code: 'unavailable', status: 503 });
-    expect(await reclassify(opaque(), id, { fn: 'update', expectedVersion: version })).toMatchObject({ code: 'unavailable' });
+    expect(await reclassify(opaque(), EVENT_ID, id, { fn: 'update', expectedVersion: version })).toMatchObject({ code: 'unavailable' });
     // Stale version → 409; illegal target → 422; non-Waiting cancel → 422; missing row → 404.
-    expect(await reclassify(opaque(), id, { fn: 'status', expectedVersion: version - 1, target: STATUS.inMedical })).toMatchObject({
+    expect(await reclassify(opaque(), EVENT_ID, id, { fn: 'status', expectedVersion: version - 1, target: STATUS.inMedical })).toMatchObject({
       code: 'conflict',
       extra: { currentStatus: STATUS.notInMedical },
     });
-    expect(await reclassify(opaque(), id, { fn: 'status', expectedVersion: version, target: STATUS.reunited })).toMatchObject({ code: 'invalid' });
-    expect(await reclassify(opaque(), id, { fn: 'cancel', expectedVersion: version })).toMatchObject({ code: 'invalid' });
+    expect(await reclassify(opaque(), EVENT_ID, id, { fn: 'status', expectedVersion: version, target: STATUS.reunited })).toMatchObject({ code: 'invalid' });
+    expect(await reclassify(opaque(), EVENT_ID, id, { fn: 'cancel', expectedVersion: version })).toMatchObject({ code: 'invalid' });
     // (Post-event) swap: not Accompanied → 422, except a cancel / restore of an approved swap (In medical + place): 503.
-    expect(await reclassify(opaque(), id, { fn: 'swap', expectedVersion: version, action: 'approve' })).toMatchObject({ code: 'invalid' });
+    expect(await reclassify(opaque(), EVENT_ID, id, { fn: 'swap', expectedVersion: version, action: 'approve' })).toMatchObject({ code: 'invalid' });
     psql(`update public.patients set status = 'Found – Awaiting Reunion', swap_place = 'mm' where id = '${id}'`);
     const now = Number(psql(`select row_version from public.patients where id = '${id}'`));
-    expect(await reclassify(opaque(), id, { fn: 'swap', expectedVersion: now, action: 'cancel' })).toMatchObject({ code: 'unavailable' });
-    expect(await reclassify(opaque(), id, { fn: 'swap', expectedVersion: now, action: 'approve' })).toMatchObject({ code: 'invalid' });
-    expect(await reclassify(opaque(), randomUUID(), { fn: 'update', expectedVersion: 0 })).toMatchObject({ code: 'not_found' });
+    expect(await reclassify(opaque(), EVENT_ID, id, { fn: 'swap', expectedVersion: now, action: 'cancel' })).toMatchObject({ code: 'unavailable' });
+    expect(await reclassify(opaque(), EVENT_ID, id, { fn: 'swap', expectedVersion: now, action: 'approve' })).toMatchObject({ code: 'invalid' });
+    expect(await reclassify(opaque(), EVENT_ID, randomUUID(), { fn: 'update', expectedVersion: 0 })).toMatchObject({ code: 'not_found' });
     // Any other failure passes through untouched.
     const other = new ApiFailure('unavailable', undefined, { dbCode: '57014' });
-    expect(await reclassify(other, id, { fn: 'update', expectedVersion: version - 1 })).toBe(other);
+    expect(await reclassify(other, EVENT_ID, id, { fn: 'update', expectedVersion: version - 1 })).toBe(other);
+    // (Events) Read within the caller's event only: from another event the row is missing.
+    expect(await reclassify(opaque(), randomUUID(), id, { fn: 'update', expectedVersion: version - 1 })).toMatchObject({ code: 'not_found' });
   });
 
   it('validation 422 (bad status / kind / version), unknown id 404, auth 401, Origin 403', async () => {

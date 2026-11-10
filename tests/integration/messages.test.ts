@@ -389,7 +389,9 @@ describe('lp_involved_staff and permissions', () => {
                          has_function_privilege('service_role', p.oid, 'execute')::text || '/' || has_function_privilege('anon', p.oid, 'execute')::text || '/' ||
                          has_function_privilege('authenticated', p.oid, 'execute')::text, ',' order by 1)
                       from pg_proc p where p.proname in (${fns.map((f) => `'${f}'`).join(', ')})`).split(',');
-    const internal = new Set(['lp_post_message', 'lp_mark_read', 'lp_set_enroute', 'lp_unsend_message', 'lp_messages_thread']);
+    // (Events review) The per-request helpers with no event (lp_involved_staff(uuid), lp_messages_activity,
+    // lp_enroute_summary) are internal too: only functions that already filter by the event call them.
+    const internal = new Set(['lp_post_message', 'lp_mark_read', 'lp_set_enroute', 'lp_unsend_message', 'lp_messages_thread', 'lp_involved_staff', 'lp_messages_activity', 'lp_enroute_summary']);
     for (const row of rows) {
       const [, name, first, rights] = /^(\w+)\((\w*)\):(.*)$/.exec(row) ?? [];
       const expected = first === 'p_event' || !internal.has(name ?? '') ? 'true/false/false' : 'false/false/false';
