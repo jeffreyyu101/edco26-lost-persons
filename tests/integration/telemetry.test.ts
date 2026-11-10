@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { telemetryPaste } from '../../scripts/telemetry-sql.mjs';
-import { api, cookieFor, dbUrl, newStaff, psql, setCookies, uniq, withTestServer } from './harness';
+import { EVENT_ID, api, cookieFor, dbUrl, newStaff, psql, setCookies, uniq, withTestServer } from './harness';
 
 withTestServer();
 
@@ -202,7 +202,7 @@ describe('POST /api/telemetry', () => {
     expect(again.status).toBe(204);
     expect(rows(d)).toBe('');
     // lp_tel_ingest itself says off and writes nothing.
-    expect(psql(`set role service_role; select public.lp_tel_ingest('direct00001', '${d}', 'sessint001', 'medical', 0, '{}', '[{"n":"view","at":1}]', 10)::text`)).toBe('{"on": false}');
+    expect(psql(`set role service_role; select public.lp_tel_ingest('${EVENT_ID}', 'direct00001', '${d}', 'sessint001', 'medical', 0, '{}', '[{"n":"view","at":1}]', 10)::text`)).toBe('{"on": false}');
     expect(rows(d)).toBe('');
     // The route never turns it back on: 403, and it stays off.
     const refused = await api('/api/telemetry/settings', { json: { enabled: true }, cookie: medic });
@@ -218,16 +218,24 @@ describe('POST /api/telemetry', () => {
     expect(rows(d)).toBe('view');
   });
 
-  it('past off_at: 204 and nothing written', async () => {
+  it('(events) a past off_at no longer turns it off; no practice or live event does (204, nothing written)', async () => {
     const d = device();
     setSettings(`off_at = now() - interval '1 minute'`);
+    await api('/api/telemetry/settings', { json: { enabled: true }, cookie: medic });
     try {
-      expect((await post(batch(d, [{ n: 'view', at: Date.now() }]), medic)).status).toBe(204);
-      expect(rows(d)).toBe('');
+      expect((await post(batch(d, [{ n: 'view', at: Date.now() }]), medic)).status).toBe(200);
+      expect(rows(d)).toBe('view');
     } finally {
       setSettings(`off_at = timestamptz '2026-11-10 06:00:00-05'`);
-      await api('/api/telemetry/settings', { json: { enabled: true }, cookie: medic });
     }
+    // Every running event archived (this transaction only): lp_tel_ingest says off and writes nothing.
+    const d2 = device();
+    expect(psql(`begin; update public.events set stage = 'archived' where stage in ('practice', 'live');
+      set local role service_role;
+      select public.lp_tel_ingest('${EVENT_ID}', 'direct00002', '${d2}', 'sessint001', 'medical', 0, '{}', '[{"n":"view","at":1}]', 10)::text;
+      select public.lp_tel_config() ->> 'on';
+      rollback;`)).toBe('{"on": false}\nfalse');
+    expect(rows(d2)).toBe('');
   });
 
   it('the switch route turns it off, records tel_switch (team only, before the flip) and needs a session', async () => {
@@ -252,7 +260,7 @@ describe('GET /api/telemetry/health and the aggregates', () => {
     // Letters only: a stored string can't hold 4 digits in a row (lp_tel_events_no_digit_run).
     const area = `tiarea${uniq().replace(/[^a-z0-9]/g, '').replace(/\d/g, (c) => 'abcdefghij'[Number(c)] ?? 'a').slice(0, 10)}`;
     const ins = (d: string, name: string, extra: string) =>
-      `insert into public.lp_tel_events (at, device, session, team, name, view, area, ctl, ms, n, ok, props) values (now(), '${d}', 'sessint001', 'medical', '${name}', ${extra});`;
+      `insert into public.lp_tel_events (event_id, at, device, session, team, name, view, area, ctl, ms, n, ok, props) values ('${EVENT_ID}', now(), '${d}', 'sessint001', 'medical', '${name}', ${extra});`;
     const d1 = device();
     const d2 = device();
     const d3 = device();

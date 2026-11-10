@@ -85,7 +85,7 @@ export class FakeServer {
   readonly rows = new Map<string, Stored>();
   readonly log: FakeRequest[] = [];
   readonly photos = new Map<string, { requestId: string; info: PhotoInfo }>();
-  session: SessionInfo | null = { ...STAFF.dana, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
+  session: SessionInfo | null = { ...STAFF.dana, role: 'staff', eventId: null, event: null, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
   pageSize = 500;
   /** How many seq units each delta repeats (the 30 s overlap). */
   overlap = 2;

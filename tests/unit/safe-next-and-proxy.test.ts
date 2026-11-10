@@ -97,7 +97,7 @@ describe('proxy auth redirects', () => {
     // The session routes sign with serverEnv().sessionSecret, which is trimmed. A value pasted into Vercel
     // with a trailing newline must not turn every sign-in into a redirect loop.
     process.env.SESSION_SECRET = ` ${SECRET}\n`;
-    const signed = await signSessionToken({ staffName: 'Dana Kim', team: 'GC/HX - Dispatch' }, SECRET);
+    const signed = await signSessionToken({ staffName: 'Dana Kim', team: 'GC/HX - Dispatch', eventId: '10ca1000-0000-4000-8000-000000000001', role: 'staff' }, SECRET);
     const home = await proxy(request('/', signed!.token));
     expect(home.status).toBe(200);
     expect(home.headers.get('x-middleware-next')).toBe('1');
@@ -113,13 +113,13 @@ describe('proxy auth redirects', () => {
     const location = new URL(response.headers.get('location') ?? '');
     expect(`${location.pathname}${location.search}`).toBe('/signin?next=%2Fhealth');
     expect(safeNextPath('/health')).toBe('/health');
-    const signed = await signSessionToken({ staffName: 'Dana Kim', team: 'GC/HX - Dispatch' }, SECRET);
+    const signed = await signSessionToken({ staffName: 'Dana Kim', team: 'GC/HX - Dispatch', eventId: '10ca1000-0000-4000-8000-000000000001', role: 'staff' }, SECRET);
     expect((await proxy(request('/health', signed!.token))).headers.get('x-middleware-next')).toBe('1');
   });
 
   it('rejects a cookie signed with a different secret', async () => {
     process.env.SESSION_SECRET = SECRET;
-    const signed = await signSessionToken({ staffName: 'Dana Kim', team: 'Medical' }, `${SECRET}-other`);
+    const signed = await signSessionToken({ staffName: 'Dana Kim', team: 'Medical', eventId: '10ca1000-0000-4000-8000-000000000001', role: 'staff' }, `${SECRET}-other`);
     expect((await proxy(request('/', signed!.token))).status).toBe(307);
   });
 });

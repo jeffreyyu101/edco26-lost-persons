@@ -143,7 +143,7 @@ describe('docs/export.sql', () => {
     expect(thread).toMatch(/\bfrom public\.audit_events e\b/);
     expect(thread).toMatch(/order by p\.case_number nulls last, ev\.at\s*$/);
     const tables = [...parsed.statements.join(' ').matchAll(/\b(?:from|join)\s+([a-z_.]+)/gi)].map((m) => m[1]);
-    expect(new Set(tables)).toEqual(new Set(['public.patients', 'public.audit_events', 'public.lp_messages', 'settings', 'events']));
+    expect(new Set(tables)).toEqual(new Set(['public.patients', 'public.audit_events', 'public.lp_messages', 'public.events', 'settings', 'events']));
   });
 
   it('Query 1 has every field the old CSV had, with New York times', () => {

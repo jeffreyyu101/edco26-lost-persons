@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AuditEvent, RequestDetail, RequestSummary, Stats, SyncResponse } from '@/lib/api-types';
 import { RECHECK_MINUTES, STATUS } from '@/lib/domain';
-import { admin, api, cookieFor, createRequest, newStaff, psql, staffOf, withTestServer, type Staff } from './harness';
+import { EVENT_ID, admin, api, cookieFor, createRequest, newStaff, psql, staffOf, withTestServer, type Staff } from './harness';
 
 withTestServer();
 
@@ -179,10 +179,14 @@ describe('the "Pending" hold', () => {
 });
 
 describe('builds from before the hold', () => {
-  it('the old server calls lp_set_status exactly as before and gets the hold (its allowlist sees Waiting for check)', async () => {
+  it('lp_set_status straight from the server gets the hold (its allowlist sees Waiting for check)', async () => {
     const r = await createRequest(newStaff());
-    // The call the live build's server makes, straight to the database.
+    // (Events) The server's call, straight to the database: now with the session's event. The pre-events signature
+    // (no p_event) is internal: service_role can no longer call it.
+    const old = await admin().rpc('lp_set_status', { p_id: r.id, p_expected_version: r.rowVersion, p_status: STATUS.notInMedical, p_staff: staffOf(medical), p_kind: 'answer' });
+    expect(old.error).not.toBeNull();
     const { data, error } = await admin().rpc('lp_set_status', {
+      p_event: EVENT_ID,
       p_id: r.id,
       p_expected_version: r.rowVersion,
       p_status: STATUS.notInMedical,
@@ -246,7 +250,7 @@ describe('dashboard', () => {
     const held = await ok(medical, r.id, STATUS.notInMedical, r.rowVersion);
     const during = (await api('/api/stats', { cookie: await cookieFor(medical) })).body as Stats;
     // Other files may run in between: compare with the database itself.
-    const count = (where: string) => Number(psql(`select count(*) from public.patients where ${where}`));
+    const count = (where: string) => Number(psql(`select count(*) from public.patients where event_id = '${EVENT_ID}' and ${where}`));
     expect(during.open.waiting).toBe(count(`status = 'Added'`));
     expect(during.notInMedical).toBe(count(`status = 'Checked – Not Found'`));
     expect(during.notInMedical).toBe(before.notInMedical);

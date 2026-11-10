@@ -433,7 +433,7 @@ describe('session', () => {
     await ready();
     await advance(3_500);
     first.stop();
-    server.session = { ...STAFF.sam, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
+    server.session = { ...STAFF.sam, role: 'staff', eventId: null, event: null, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
     server.put(makeRow(2));
     const second = boot(server, { dbName: first.fe.dbName });
     await ready();

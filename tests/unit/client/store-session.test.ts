@@ -326,7 +326,7 @@ describe('sign out vs answers still on their way (regression: a re-issued cookie
         if ((init.method ?? 'GET') === 'DELETE' && !landed) {
           landed = true;
           // An answer this tab could not abort (another tab's) re-issued the cookie after the clear.
-          server.session = { ...STAFF.dana, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
+          server.session = { ...STAFF.dana, role: 'staff', eventId: null, event: null, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
         }
         return res;
       };

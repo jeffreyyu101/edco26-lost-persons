@@ -7,6 +7,7 @@ import { K } from '@/lib/client/persist';
 import { mineRows } from '@/lib/client/selectors';
 import { COPY } from '@/lib/client/store-core';
 import type { AlertEvent } from '@/lib/client/store-contract';
+import type { SessionInfo } from '@/lib/api-types';
 import { STATUS, canonStaff } from '@/lib/domain';
 import { advance, settle } from './helpers/env';
 import { boot, finish, gate, installStoreHooks, ready, values } from './helpers/boot';
@@ -15,7 +16,7 @@ import { FakeServer, STAFF, apiError, makeRow } from './helpers/fake-server';
 installStoreHooks();
 
 const CMID = (n: number) => `1d000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
-const SAM = { ...STAFF.sam, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
+const SAM: SessionInfo = { ...STAFF.sam, role: 'staff', eventId: null, event: null, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
 const creates = (server: FakeServer) => server.requests('POST', '/api/requests').filter((r) => r.path === '/api/requests');
 
 type Booted = ReturnType<typeof boot>;

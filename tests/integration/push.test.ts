@@ -18,7 +18,7 @@ import { apiRequest } from '@/lib/client/http';
 import { forgetBell, forgetBellForOtherStaff, readPrefs, setBell, setBellIntroSeen, writeRememberedIdentity } from '@/lib/client/prefs';
 import { createPushClient, type PushHost } from '@/lib/client/push-client';
 import { STATUS_META } from '@/lib/domain';
-import { BASE, ORIGIN, admin, api, cookieFor, createRequest, newStaff, staffOf, withTestServer, type Staff } from './harness';
+import { EVENT_ID, BASE, ORIGIN, admin, api, cookieFor, createRequest, newStaff, staffOf, withTestServer, type Staff } from './harness';
 import { eventually, startPushService, type FakeDevice, type PushService } from './push-service';
 
 withTestServer();
@@ -117,7 +117,7 @@ describe('POST /api/push/prefs', () => {
     const raePhone = push.device();
     expect(await subscribe(rae, raePhone, { bell: false })).toMatchObject({ newRequests: true, myUpdates: true });
     expect(await subRow(raePhone.endpoint)).toMatchObject({ new_requests: true });
-    const { data: who } = await admin().rpc('lp_push_new_request_staff');
+    const { data: who } = await admin().rpc('lp_push_new_request_staff', { p_event: EVENT_ID });
     expect(who as string[]).toContain(canon(rae));
     // Existing rows that never had the switch set (made before this default) turn on at their next read, Medical
     // or not (2026-11-08).
@@ -576,7 +576,7 @@ describe('the routes notify (contract D)', () => {
     const dana = newStaff();
     const danaPhone = push.device();
     expect(await subscribe(dana, danaPhone)).toMatchObject({ newRequests: true });
-    const { data: who } = await admin().rpc('lp_push_new_request_staff');
+    const { data: who } = await admin().rpc('lp_push_new_request_staff', { p_event: EVENT_ID });
     expect(who as string[]).toEqual(expect.arrayContaining([canon(fay), canon(dana)]));
     expect(who as string[]).not.toContain(canon(gus));
 

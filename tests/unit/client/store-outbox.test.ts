@@ -291,7 +291,7 @@ describe('operator prompt (A13)', () => {
     await finish(first.a.create({ values: values(), clientMutationId: CMID(16), photos: [], photoTiming: 'today' }));
     first.stop();
     await settle();
-    server.session = { ...STAFF.sam, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
+    server.session = { ...STAFF.sam, role: 'staff', eventId: null, event: null, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
     const second = boot(server, { dbName: first.fe.dbName });
     await ready();
     await advance(100);

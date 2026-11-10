@@ -3,17 +3,16 @@
 //     TEST_INVITE_ENV): the right code → 200 + the same session cookie as a password; a wrong one → 401
 //     and a failed attempt that counts toward the same per-name limit as passwords; password and invite
 //     together or neither → 422 (not counted); the password path is unchanged; the log names the method only.
-//   * In process (the route handler itself, on the same local database), for the server environments one
-//     test server can't have at once: an expired link and a switched-off or unreadable one → 401, counted;
-//     the password still signs in with the link off.
+//   * In process (the route handler itself, on the same local database): (Events) the link lives on the event
+//     (only its code's SHA-256 and expiry), so an expired or switched-off link is the event's columns → 401, counted;
+//     the password still signs in with the link off; "<slug>.<code>" opens only that slug's event.
 // Every test uses its own fake IP and deletes its own attempts. Synthetic values only.
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from '@/app/api/session/route';
-import { resetServerEnvCache } from '@/lib/server/env';
 import { verifySessionToken } from '@/lib/server/session-token';
-import { TEST_INVITE_CODE, TEST_INVITE_ENV } from '../../scripts/test-env.mjs';
-import { BASE, ORIGIN, PASSWORD, admin, api, clearAttempts, freshIp, pii, serverLogPath, setCookies, uniq, withTestServer } from './harness';
+import { TEST_EVENT_SLUG, TEST_INVITE_CODE, TEST_INVITE_ENV, ensureTestEvent } from '../../scripts/test-env.mjs';
+import { BASE, EVENT_ID, ORIGIN, PASSWORD, admin, api, clearAttempts, freshIp, pii, psql, serverLogPath, setCookies, uniq, withTestServer } from './harness';
 
 withTestServer();
 
@@ -130,39 +129,29 @@ describe('POST /api/session with the team link (test server, link on)', () => {
   });
 });
 
-describe('POST /api/session with the team link (route in process, other environments)', () => {
-  const KEYS = ['INVITE_CODE_SHA256', 'INVITE_EXPIRES_AT'] as const;
-  let saved: Record<string, string | undefined>;
+describe('POST /api/session with the team link (route in process; the link lives on the event)', () => {
   let lines: string[];
 
   beforeEach(() => {
-    saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
     lines = [];
     for (const level of ['info', 'warn', 'error'] as const) {
       vi.spyOn(console, level).mockImplementation((...args: unknown[]) => void lines.push(args.map(String).join(' ')));
     }
   });
 
-  afterEach(() => {
-    for (const k of KEYS) {
-      if (saved[k] === undefined) delete process.env[k];
-      else process.env[k] = saved[k];
-    }
-    resetServerEnvCache();
+  afterEach(async () => {
     vi.restoreAllMocks();
     for (const line of lines) {
       expect(line).not.toContain(CODE);
       expect(line).not.toContain(TEST_INVITE_ENV.INVITE_CODE_SHA256);
     }
+    // (Events) The test event's link back as the setups leave it (TEST_INVITE_ENV).
+    await ensureTestEvent();
   });
 
-  function useEnv(vars: Partial<Record<(typeof KEYS)[number], string | null>>): void {
-    for (const k of KEYS) {
-      const v = vars[k] === undefined ? TEST_INVITE_ENV[k] : vars[k];
-      if (v === null) delete process.env[k];
-      else process.env[k] = v;
-    }
-    resetServerEnvCache();
+  /** (Events) Sets the test event's join-link columns for one test. */
+  function useInvite(set: string): void {
+    psql(`update public.events set ${set} where id = '${EVENT_ID}'`);
   }
 
   async function post(body: Record<string, unknown>, addr: string) {
@@ -175,21 +164,24 @@ describe('POST /api/session with the team link (route in process, other environm
     return { status: res.status, body: await res.json(), cookies: res.headers.getSetCookie() };
   }
 
-  it('control: the test link signs in in process too', async () => {
-    useEnv({});
+  it('control: the test link signs in in process too, with or without the event slug in front', async () => {
     const res = await post({ staffName: name(), team: 'Medical', invite: CODE }, await ip());
     expect(res.status).toBe(200);
     expect(res.cookies).toHaveLength(1);
+    expect(res.body).toMatchObject({ role: 'staff', eventId: EVENT_ID, event: { slug: TEST_EVENT_SLUG } });
     expect(lines).toContain('{"lp":"signin","method":"invite","ok":true}');
+    const slugged = await post({ staffName: name(), team: 'Medical', invite: `${TEST_EVENT_SLUG}.${CODE}` }, await ip());
+    expect(slugged.status).toBe(200);
+    // Another event's slug in front never opens this event.
+    const wrongSlug = await post({ staffName: name(), team: 'Medical', invite: `edco26.${CODE}` }, await ip());
+    expect(wrongSlug.status).toBe(401);
   });
 
   it.each([
-    ['expired', { INVITE_EXPIRES_AT: '2026-01-01T00:00:00Z' }],
-    ['switched off (INVITE_CODE_SHA256 unset)', { INVITE_CODE_SHA256: null }],
-    ['switched off (INVITE_EXPIRES_AT unset)', { INVITE_EXPIRES_AT: null }],
-    ['unreadable hash', { INVITE_CODE_SHA256: 'not-a-sha256' }],
-  ] as const)('%s: the right code → 401 field invite, no cookie, counted toward the limit', async (_label, vars) => {
-    useEnv(vars);
+    ['expired', `invite_expires_at = timestamptz '2026-01-01T00:00:00Z'`],
+    ['switched off', 'invite_code_sha256 = null, invite_expires_at = null'],
+  ] as const)('%s: the right code → 401 field invite, no cookie, counted toward the limit', async (_label, set) => {
+    useInvite(set);
     const addr = await ip();
     const staffName = name();
     for (let i = 0; i < 10; i += 1) {
@@ -204,22 +196,11 @@ describe('POST /api/session with the team link (route in process, other environm
     expect(lines.filter((l) => l === '{"lp":"signin","method":"invite","ok":false}')).toHaveLength(10);
   });
 
-  it('with the link off, the password still signs in (production before the variables exist)', async () => {
-    useEnv({ INVITE_CODE_SHA256: null, INVITE_EXPIRES_AT: null });
+  it('with the link off, the password still signs in', async () => {
+    useInvite('invite_code_sha256 = null, invite_expires_at = null');
     const res = await post({ staffName: name(), team: 'Medical', password: PASSWORD }, await ip());
     expect(res.status).toBe(200);
     expect(res.cookies).toHaveLength(1);
     expect(lines).toContain('{"lp":"signin","method":"password","ok":true}');
-    expect(lines.some((l) => l.includes('"lp":"env"'))).toBe(false);
-  });
-
-  it('an unreadable value is reported once, by name', async () => {
-    useEnv({ INVITE_CODE_SHA256: 'not-a-sha256' });
-    await post({ staffName: name(), team: 'Medical', password: PASSWORD }, await ip());
-    await post({ staffName: name(), team: 'Medical', password: PASSWORD }, await ip());
-    const env = lines.filter((l) => l.includes('"lp":"env"'));
-    expect(env).toHaveLength(1);
-    expect(env[0]).toContain('INVITE_CODE_SHA256');
-    expect(env[0]).not.toContain('not-a-sha256');
   });
 });

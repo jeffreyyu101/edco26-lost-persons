@@ -20,7 +20,10 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, expect } from 'vitest';
 import type { RequestSummary } from '@/lib/api-types';
 import { SESSION_COOKIE, signSessionToken } from '@/lib/server/session-token';
-import { ROOT, assertLocalUrl } from '../../scripts/test-env.mjs';
+import { ROOT, TEST_EVENT_ID, assertLocalUrl } from '../../scripts/test-env.mjs';
+
+/** (Events) The seed's live local event: every session and request of these tests is in it unless a test says otherwise. */
+export const EVENT_ID = TEST_EVENT_ID;
 
 export const PORT = process.env.PORT || '3100';
 export const BASE = `http://127.0.0.1:${PORT}`;
@@ -159,11 +162,16 @@ function sessionSecret(): string {
  * A Cookie header value for a session minted with the test secret. `issuedAgo` / `firstIssuedAgo`
  * (seconds) backdate the token's iat and its sid (first sign-in time).
  */
-export async function cookieFor(staff: Staff, opts: { issuedAgo?: number; firstIssuedAgo?: number } = {}): Promise<string> {
+export async function cookieFor(
+  staff: Staff,
+  opts: { issuedAgo?: number; firstIssuedAgo?: number; eventId?: string | null; role?: 'staff' | 'lead' } = {},
+): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const iat = now - (opts.issuedAgo ?? 0);
   const sid = opts.firstIssuedAgo !== undefined ? `${now - opts.firstIssuedAgo}.${randomBytes(12).toString('hex')}` : undefined;
-  const signed = await signSessionToken({ ...staff, sid }, sessionSecret(), iat);
+  const role = opts.role ?? 'staff';
+  const eventId = opts.eventId === undefined ? (role === 'lead' ? null : EVENT_ID) : opts.eventId;
+  const signed = await signSessionToken({ ...staff, sid, eventId, role }, sessionSecret(), iat);
   if (!signed) throw new Error('could not sign a test session');
   return `${SESSION_COOKIE}=${signed.token}`;
 }
@@ -244,13 +252,19 @@ export async function closeCreatedRequests(): Promise<void> {
   const ids = [...createdIds];
   createdIds.clear();
   const closedAt = new Date().toISOString();
+  // (Events) An archived event's requests are frozen (the patients guard refuses any write): left as they are.
+  const { data: archived, error: archivedError } = await admin().from('events').select('id').eq('stage', 'archived');
+  if (archivedError) throw new Error(`could not read events: ${archivedError.code}`);
+  const frozen = (archived ?? []).map((e: { id: string }) => e.id);
   for (let i = 0; i < ids.length; i += 100) {
     const batch = ids.slice(i, i + 100);
     for (const [from, to] of [
       [OPEN_WAITING, 'Cancelled'],
       [OPEN_IN_MEDICAL, 'Reunited – Closed'],
     ] as const) {
-      const { error } = await admin().from('patients').update({ status: to, closed_at: closedAt }).in('id', batch).in('status', [...from]);
+      let q = admin().from('patients').update({ status: to, closed_at: closedAt }).in('id', batch).in('status', [...from]);
+      if (frozen.length > 0) q = q.not('event_id', 'in', `(${frozen.join(',')})`);
+      const { error } = await q;
       if (error) throw new Error(`could not close test requests: ${error.code}`);
     }
   }

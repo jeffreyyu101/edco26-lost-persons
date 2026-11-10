@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { AuditEvent, RequestDetail, RequestSummary, SyncResponse } from '@/lib/api-types';
 import { syncPath } from '@/lib/client/api-paths';
 import { REQUEST_SUMMARY_KEYS } from '@/lib/server/mappers';
-import { admin, api, cookieFor, createBody, createRequest, newStaff, psql, staffOf, withTestServer } from './harness';
+import { EVENT_ID, admin, api, cookieFor, createBody, createRequest, newStaff, psql, staffOf, withTestServer } from './harness';
 
 withTestServer();
 
@@ -126,7 +126,7 @@ describe('medicalLocation', () => {
     const r = await createRequest(newStaff());
     const update = (value: string) => `begin;
       set local role service_role;
-      select lp_update_fields(id, json_build_object('medical_location', ${value})::jsonb, row_version, 'T · Medical') -> 'row' ->> 'medical_location'
+      select lp_update_fields('${EVENT_ID}', id, json_build_object('medical_location', ${value})::jsonb, row_version, 'T · Medical') -> 'row' ->> 'medical_location'
         from patients where id = '${r.id}';
       rollback;`;
     expect(psql(update(`E' \\t Chair 7 \\n'`))).toBe('Chair 7');
@@ -134,7 +134,7 @@ describe('medicalLocation', () => {
     expect(() =>
       psql(`begin;
         set local role service_role;
-        select lp_create_request('{"client_mutation_id":"00000000-0000-4000-8000-00000000c0de","reporting_location":"Base","medical_location":"Chair 1"}', 'T · Medical');
+        select lp_create_request('${EVENT_ID}', '{"client_mutation_id":"00000000-0000-4000-8000-00000000c0de","reporting_location":"Base","medical_location":"Chair 1"}', 'T · Medical');
         rollback;`),
     ).toThrow(/unknown_field/);
     // Nothing of it stayed.

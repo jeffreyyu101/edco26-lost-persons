@@ -60,7 +60,6 @@ describe('serverEnv', () => {
     const env = serverEnv();
     expect(env.supabaseUrl).toBe('http://127.0.0.1:54421');
     expect(env.supabaseOrigin).toBe('http://127.0.0.1:54421');
-    expect(env.password).toEqual({ kind: 'plain', value: 'pw' });
     expect(env.eventTimezone).toBe('America/New_York');
   });
 
@@ -71,11 +70,12 @@ describe('serverEnv', () => {
     expect(serverEnv().supabaseKey).toBe('legacy-key');
   });
 
-  it('prefers the bcrypt hash when both passwords are set', () => {
+  it('(events) needs no password: the staff passwords and the lead passcode live in the database', () => {
     valid();
-    const hash = '$2b$10$' + 'a'.repeat(53);
-    process.env.APP_SHARED_PASSWORD_HASH_B64 = Buffer.from(hash).toString('base64');
-    expect(serverEnv().password).toEqual({ kind: 'bcrypt', hash });
+    delete process.env.APP_SHARED_PASSWORD;
+    expect(() => serverEnv()).not.toThrow();
+    expect(serverEnv()).not.toHaveProperty('password');
+    expect(serverEnv()).not.toHaveProperty('invite');
   });
 
   it('fails with a clear message naming every problem, never values', () => {
@@ -92,15 +92,9 @@ describe('serverEnv', () => {
     expect(message).toContain('NEXT_PUBLIC_SUPABASE_URL is missing');
     expect(message).toContain('SUPABASE_SECRET_KEY');
     expect(message).toContain('SESSION_SECRET must be at least 32 characters');
-    expect(message).toContain('APP_SHARED_PASSWORD_HASH_B64 or APP_SHARED_PASSWORD is required');
+    expect(message).not.toContain('APP_SHARED_PASSWORD');
     expect(message).toContain('EVENT_TIMEZONE is not a valid IANA time zone');
     expect(message).not.toContain('short-secret-value');
-  });
-
-  it('rejects a hash that is not bcrypt', () => {
-    valid();
-    process.env.APP_SHARED_PASSWORD_HASH_B64 = Buffer.from('not-a-hash').toString('base64');
-    expect(() => serverEnv()).toThrow(/not a base64-encoded bcrypt hash/);
   });
 
   it('trims SESSION_SECRET exactly like the proxy does (a pasted trailing newline is harmless)', () => {

@@ -119,7 +119,8 @@ describe('interpretSignInResponse', () => {
   const session = { staffName: 'Dana Kim', team: MED, staff: `Dana Kim · ${MED}`, expiresAt: '2026-11-07T11:00:00.000Z' };
 
   it('200 → signed in with the SessionInfo', () => {
-    expect(interpretSignInResponse(200, session, null, NOW)).toEqual({ kind: 'ok', session });
+    // (Events) A body without role / event reads as staff with no event config.
+    expect(interpretSignInResponse(200, session, null, NOW)).toEqual({ kind: 'ok', session: { ...session, role: 'staff', eventId: null, event: null } });
   });
   it('200 with an unreadable body is still signed in (the cookie is set)', () => {
     expect(interpretSignInResponse(200, null, null, NOW)).toEqual({ kind: 'ok', session: null });

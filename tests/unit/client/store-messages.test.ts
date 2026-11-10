@@ -237,7 +237,7 @@ describe('sending a message', () => {
     fe.setOnline(false);
     await finish(api.send(ROW, 'From Dana'));
     stop();
-    fe.server.session = { ...STAFF.sam, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
+    fe.server.session = { ...STAFF.sam, role: 'staff', eventId: null, event: null, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
     const sam = boot(fe.server, { dbName: fe.dbName });
     await ready();
     await advance(10_000);
@@ -530,7 +530,7 @@ describe('an open thread when the page comes back into view (fix 4)', () => {
     await advance(50);
     away(fe);
     await advance(60_000);
-    server.session = { ...STAFF.rae, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
+    server.session = { ...STAFF.rae, role: 'staff', eventId: null, event: null, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
     // Rae's own message, as Rae's cookie sees it.
     threads.messages.push({ id: '00000000-0000-4000-8000-0000000000ba', requestId: ROW, staff: STAFF.rae.staff, by: 'Rae C.', team: 'Medical', body: 'from rae', createdAt: server.stamp(5000), mine: true, clientMutationId: '00000000-0000-4000-8000-0000000000bb' });
     const base = threads.handle;

@@ -5,7 +5,7 @@ import type { SyncResponse } from '@/lib/api-types';
 import { syncPath } from '@/lib/client/api-paths';
 import { ACTIVITY_KEYS } from '@/lib/messaging';
 import { REQUEST_SUMMARY_KEYS } from '@/lib/server/mappers';
-import { admin, api, cookieFor, createRequest, newStaff, psql, psqlAsync, randomUUID, withTestServer } from './harness';
+import { EVENT_ID, admin, api, cookieFor, createRequest, newStaff, psql, psqlAsync, randomUUID, withTestServer } from './harness';
 
 withTestServer();
 
@@ -16,7 +16,8 @@ const sync = async (path: string, cookie: string) => {
 };
 
 async function totalRows(): Promise<number> {
-  const { count, error } = await admin().from('patients').select('id', { count: 'exact', head: true });
+  // (Events) Sync is the session's event: the test event's rows.
+  const { count, error } = await admin().from('patients').select('id', { count: 'exact', head: true }).eq('event_id', EVENT_ID);
   if (error) throw new Error(error.code);
   return count ?? 0;
 }

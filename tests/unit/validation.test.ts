@@ -43,7 +43,10 @@ describe('createRequestSchema', () => {
     expect(createRequestSchema.safeParse({ reportingLocation: 'Base' }).success).toBe(false);
     expect(createRequestSchema.safeParse({ clientMutationId: 'nope', reportingLocation: 'Base' }).success).toBe(false);
     expect(createRequestSchema.safeParse({ clientMutationId: CMID }).success).toBe(false);
-    expect(createRequestSchema.safeParse({ clientMutationId: CMID, reportingLocation: 'FA 3' }).success).toBe(false);
+    // (Events) Which posts exist is the event's (lp_clean_fields(p_event, …) refuses the rest with 422); here only the shape.
+    expect(createRequestSchema.safeParse({ clientMutationId: CMID, reportingLocation: 'FA 3' }).success).toBe(true);
+    expect(createRequestSchema.safeParse({ clientMutationId: CMID, reportingLocation: ' FA 3' }).success).toBe(false);
+    expect(createRequestSchema.safeParse({ clientMutationId: CMID, reportingLocation: 'x'.repeat(41) }).success).toBe(false);
   });
 
   it('Other needs a location; other posts drop it', () => {
@@ -225,7 +228,10 @@ describe('signInSchema', () => {
     expect(signInSchema.safeParse({ staffName: 'x'.repeat(61), team: 'Medical', password: 'pw' }).success).toBe(false);
     expect(signInSchema.safeParse({ staffName: 'Dana · Kim', team: 'Medical', password: 'pw' }).success).toBe(false);
     expect(signInSchema.safeParse({ staffName: 'Dana Kim', team: 'Medical', password: '' }).success).toBe(false);
-    expect(signInSchema.safeParse({ staffName: 'Dana Kim', team: 'Prevent', password: 'pw' }).success).toBe(false);
+    // (Events) A team is the event's (the route matches it) or free text, so any 2–80 characters without "·" parse.
+    expect(signInSchema.safeParse({ staffName: 'Dana Kim', team: 'Prevent', password: 'pw' }).success).toBe(true);
+    expect(signInSchema.safeParse({ staffName: 'Dana Kim', team: 'P', password: 'pw' }).success).toBe(false);
+    expect(signInSchema.safeParse({ staffName: 'Dana Kim', team: 'Pre · vent', password: 'pw' }).success).toBe(false);
   });
 });
 

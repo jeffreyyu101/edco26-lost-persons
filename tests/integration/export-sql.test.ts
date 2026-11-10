@@ -8,12 +8,13 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { STATUS, STATUS_META } from '@/lib/domain';
-import { ROOT } from '../../scripts/test-env.mjs';
+import { ROOT, TEST_EVENT_ID, TEST_EVENT_SLUG } from '../../scripts/test-env.mjs';
 import { api, cookieFor, createBody, dbUrl, newStaff, pii, psql, staffOf, uniq, withTestServer } from './harness';
 
 withTestServer();
 
-const SQL = readFileSync(join(ROOT, 'docs', 'export.sql'), 'utf8');
+// (Events) The file exports one event (EDC's by default): here the local test event, whose rows the tests create.
+const SQL = readFileSync(join(ROOT, 'docs', 'export.sql'), 'utf8').replaceAll("ev.slug = 'edco26'", `ev.slug = '${TEST_EVENT_SLUG}'`);
 const [QUERY_1, REST] = SQL.split(/^-- Query 2: audit trail$/m) as [string, string];
 const [QUERY_2, QUERY_3] = REST.split(/^-- Query 3: messages and en route$/m) as [string, string];
 
@@ -154,9 +155,9 @@ describe('docs/export.sql', () => {
     expect(answered.status).toBe(200);
     const r = answered.body.request;
 
-    const before = Number(psql('select count(*) from public.patients'));
+    const before = Number(psql(`select count(*) from public.patients where event_id = '${TEST_EVENT_ID}'`));
     const { header, rows } = runReadOnly(QUERY_1);
-    const after = Number(psql('select count(*) from public.patients'));
+    const after = Number(psql(`select count(*) from public.patients where event_id = '${TEST_EVENT_ID}'`));
     expect(rows.length).toBeGreaterThanOrEqual(before);
     expect(rows.length).toBeLessThanOrEqual(after);
     expect(rows.every((row) => row.length === REQUEST_COLUMNS.length)).toBe(true);

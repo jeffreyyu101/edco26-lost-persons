@@ -143,7 +143,7 @@ describe('readTelemetryBody', () => {
 });
 
 describe('the config cache', () => {
-  it('one RPC per 30 s; the auto-off passes on its own', async () => {
+  it('one RPC per 30 s; (events) the database decides "on", a past off_at no longer turns it off', async () => {
     expect((await telemetryConfig(1_000)).on).toBe(true);
     await telemetryConfig(20_000);
     expect(rpcMock.calls.filter(([fn]) => fn === 'lp_tel_config')).toHaveLength(1);
@@ -151,6 +151,9 @@ describe('the config cache', () => {
     expect(rpcMock.calls.filter(([fn]) => fn === 'lp_tel_config')).toHaveLength(2);
     resetTelemetryConfigCache();
     rpcMock.answer = () => ({ on: true, enabled: true, until: Date.now() - 1, flushSeconds: 60, sample: 1 });
+    expect((await telemetryConfig()).on).toBe(true);
+    resetTelemetryConfigCache();
+    rpcMock.answer = () => ({ on: false, enabled: true, until: Date.now() + 3_600_000, flushSeconds: 60, sample: 1 });
     expect((await telemetryConfig()).on).toBe(false);
   });
 
@@ -190,11 +193,14 @@ describe('quotaKey', () => {
   });
 });
 
+const EVENT = '10ca1000-0000-4000-8000-000000000001';
+
 describe('push_send rows', () => {
   it('one row per team of the devices pushed to, with ok / gone / failed counts; nothing when off', async () => {
     resetTelemetryConfigCache();
     rpcMock.answer = (fn) => (fn === 'lp_tel_config' ? { on: true, enabled: true, until: Date.now() + 3_600_000, flushSeconds: 60, sample: 1 } : 2);
     await recordPushSend(
+      EVENT,
       'new_request',
       [
         { endpoint: 'e1', staff: 'test-s ana · medical' },
@@ -210,6 +216,7 @@ describe('push_send rows', () => {
     );
     const call = rpcMock.calls.find(([fn]) => fn === 'lp_tel_server_events');
     expect(call?.[1]).toEqual({
+      p_event: EVENT,
       p_rows: [
         { n: 'push_send', team: 'medical', ms: 123, k: 2, p: { kind: 'new_request', ok: 1, gone: 1, failed: 0 } },
         { n: 'push_send', team: 'dispatch', ms: 123, k: 1, p: { kind: 'new_request', ok: 0, gone: 0, failed: 1 } },
@@ -219,7 +226,7 @@ describe('push_send rows', () => {
     rpcMock.calls = [];
     resetTelemetryConfigCache();
     rpcMock.answer = (fn) => (fn === 'lp_tel_config' ? { on: false } : 0);
-    await recordPushSend('message', [{ endpoint: 'e1', staff: 'x · medical' }], [{ endpoint: 'e1', result: 'ok' }], 1);
+    await recordPushSend(EVENT, 'message', [{ endpoint: 'e1', staff: 'x · medical' }], [{ endpoint: 'e1', result: 'ok' }], 1);
     expect(rpcMock.calls.map(([fn]) => fn)).toEqual(['lp_tel_config']);
   });
 });

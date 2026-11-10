@@ -107,7 +107,8 @@ describe('POST /api/session', () => {
   it.each([
     ['short name', { staffName: 'A', team: 'Medical' }, 'staffName'],
     ['name with the separator', { staffName: 'Dana · Kim', team: 'Medical' }, 'staffName'],
-    ['unknown team', { staffName: 'TEST-S Val', team: 'Security' }, 'team'],
+    // (Events) A team outside the event's is free text like Other's, so only its shape is checked here.
+    ['team too short', { staffName: 'TEST-S Val', team: 'S' }, 'team'],
     ['Other without text', { staffName: 'TEST-S Val', team: 'Other' }, 'otherTeam'],
     ['extra key', { staffName: 'TEST-S Val', team: 'Medical', admin: true }, undefined],
   ])('validation: %s → 422', async (_label, body, field) => {

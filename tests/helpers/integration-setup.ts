@@ -3,7 +3,7 @@
 // into process.env and refuses to continue if any Supabase URL is not local.
 // (F6) It also pauses the auto-close job on the local database (scripts/test-env.mjs pauseInactiveJob): the tests
 // run lp_close_inactive() themselves, on their own rows.
-import { assertLocalUrl, loadTestEnv, pauseInactiveJob } from '../../scripts/test-env.mjs';
+import { assertLocalUrl, ensureTestEvent, loadTestEnv, pauseInactiveJob } from '../../scripts/test-env.mjs';
 
 const env = loadTestEnv();
 for (const [key, value] of Object.entries(env)) {
@@ -12,3 +12,5 @@ for (const [key, value] of Object.entries(env)) {
 }
 assertLocalUrl('NEXT_PUBLIC_SUPABASE_URL', process.env.NEXT_PUBLIC_SUPABASE_URL);
 pauseInactiveJob();
+// (Events) The live local event every test signs in to (its staff password, join link and the lead passcode).
+await ensureTestEvent();
