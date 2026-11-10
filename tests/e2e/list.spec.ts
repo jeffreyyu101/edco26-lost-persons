@@ -681,11 +681,15 @@ async function logLayout(page: Page) {
     const cut = (el: Element) => el.scrollWidth > el.clientWidth + 0.5;
     const names = [...log.querySelectorAll<HTMLElement>('[data-col="name"]')];
     // A status label (the span after the glyph) may be cut, but only in a row whose name is at its floor.
-    const labels = [...log.querySelectorAll<HTMLElement>('[data-col="status"] > span')].map((el) => ({
-      text: el.innerText,
-      cut: cut(el),
-      name: el.closest('[data-request-id], [data-outbox-id]')!.querySelector<HTMLElement>('[data-col="name"]')!.getBoundingClientRect().width,
-    }));
+    const labels = [...log.querySelectorAll<HTMLElement>('[data-col="status"] > span')].map((el) => {
+      const rowEl = el.closest<HTMLElement>('[data-request-id], [data-outbox-id]')!;
+      return {
+        id: rowEl.dataset.requestId ?? rowEl.dataset.outboxId ?? '',
+        text: el.innerText,
+        cut: cut(el),
+        name: rowEl.querySelector<HTMLElement>('[data-col="name"]')!.getBoundingClientRect().width,
+      };
+    });
     const updated = [...log.querySelectorAll<HTMLElement>('[data-col="updated"]')].map((el) => el.getBoundingClientRect().width);
     const tracks = getComputedStyle(log).gridTemplateColumns.split(' ').map(parseFloat);
     return {
@@ -724,7 +728,10 @@ test('at 375 px after midnight the name keeps at least 80 px; numbers and times 
   let layout = await logLayout(page);
   expect(Math.min(...layout.nameWidths)).toBeGreaterThanOrEqual(79.5);
   expect(layout.cutCells).toEqual([]);
-  expect(layout.cutLabels).toEqual([]);
+  // This test's own rows: their labels are whole. Other open rows on a shared local stack (the integration suite
+  // leaves "Accompanied" ones) follow the log's rule: cut only where the name is down to its floor.
+  expect(layout.cutLabels.filter((l) => l.id === r.id || l.id === notIn.id)).toEqual([]);
+  for (const label of layout.cutLabels) expect(label.name, `"${label.text}" cut`).toBeLessThanOrEqual(80.5);
   expect(layout.updatedTrack).toBeLessThanOrEqual(layout.updatedWidest + 0.5);
   expect(layout.pageScrolls).toBe(false);
   expect(layout.nameEllipsis).toBe('ellipsis');
