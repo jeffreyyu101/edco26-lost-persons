@@ -17,3 +17,7 @@ export declare const SHARED_STACK_API_PORT: string;
 export declare const E2E_LOCK_WAIT_MS: number;
 export declare function e2eLockDir(env?: Record<string, string | undefined>, supabaseUrl?: string): string;
 export declare function e2eLockHolder(dir: string): string;
+export declare const TEST_EVENT_ID: string;
+export declare const TEST_EVENT_SLUG: string;
+export declare const TEST_EVENT_SQL: string;
+export declare function ensureTestEvent(url?: string): Promise<void>;

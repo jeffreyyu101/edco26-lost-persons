@@ -15,16 +15,17 @@ import { createRequestSchema } from '@/lib/validation';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export const POST = authedRoute('POST /api/requests', {}, async ({ request, session }) => {
+export const POST = authedRoute('POST /api/requests', {}, async ({ request, session, eventId }) => {
   const input = await readJson(request, createRequestSchema);
   const data = await rpc<{ created?: unknown; row?: unknown }>('lp_create_request', {
+    p_event: eventId,
     p: createPayload(input),
     p_staff: session.staff,
   });
   const body: CreateResponse = { created: data.created === true, request: mapRow(data.row) };
   if (body.created) {
     const row = body.request;
-    await notifyLater(newRequestStaff, () => ({ requestId: row.id, kind: 'new_request', actor: session.staff, detail: newRequestDetail(row) }));
+    await notifyLater(eventId, () => newRequestStaff(eventId), () => ({ requestId: row.id, kind: 'new_request', actor: session.staff, detail: newRequestDetail(row) }));
   }
   return json(body, body.created ? 201 : 200);
 });

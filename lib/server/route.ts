@@ -4,6 +4,9 @@
 //   * every failure → {error: {code, message, id?}} with Cache-Control: no-store; anything unexpected → 503
 //     with an error id
 //   * one log line per failure / slow request: route pattern, status, code, error id, db code, timing only
+//   * (Events) the event comes from the session, never from the client: a route needs one (409 no_event for a lead
+//     with none open) unless it opts out; lead-only routes answer 403 to staff. An archived event's writes fail in
+//     SQL with P0410, mapped to 410 event_ended (lib/server/errors.ts).
 // Server only.
 import 'server-only';
 import { EnvError } from './env';
@@ -24,6 +27,10 @@ export interface RouteOptions {
   sameOrigin?: boolean;
   /** Re-issue the session cookie when it is over 1 h old (default true). Off for logout and redirects. */
   refresh?: boolean;
+  /** (Events) 'required' (default): the session must have an event (409 no_event). 'optional': it may have none. */
+  event?: 'required' | 'optional';
+  /** (Events) Leads only (403 forbidden for staff). */
+  lead?: boolean;
 }
 
 export interface PublicContext<P extends Params> {
@@ -33,6 +40,8 @@ export interface PublicContext<P extends Params> {
 
 export interface AuthedContext<P extends Params> extends PublicContext<P> {
   session: ActiveSession;
+  /** (Events) The session's event id; '' only on an `event: 'optional'` route whose session has none. */
+  eventId: string;
 }
 
 function failureFrom(error: unknown): ApiFailure {
@@ -66,9 +75,13 @@ function wrap<P extends Params>(
     let session: ActiveSession | null = null;
     try {
       if (sameOrigin) assertSameOrigin(request);
-      if (needsSession) session = await requireSession(request);
+      if (needsSession) {
+        session = await requireSession(request);
+        if (options.lead && session.role !== 'lead') throw new ApiFailure('forbidden', 'Leads only');
+        if ((options.event ?? 'required') === 'required' && !session.eventId) throw new ApiFailure('no_event');
+      }
       const params = (await context.params) as P;
-      response = await handler(session ? { request, params, session } : { request, params });
+      response = await handler(session ? { request, params, session, eventId: session.eventId ?? '' } : { request, params });
     } catch (error) {
       failure = failureFrom(error);
       response = json(failure.body(), failure.status, failure.headers);

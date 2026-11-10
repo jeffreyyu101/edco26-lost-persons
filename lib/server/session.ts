@@ -6,7 +6,7 @@
 // token's remaining life. Authenticated responses re-issue it once the token is over 1 h old (sliding 12 h),
 // never past the 36 h absolute cap carried in `sid`.
 import 'server-only';
-import type { SessionInfo } from '../api-types';
+import type { EventConfig, SessionInfo } from '../api-types';
 import { serverEnv } from './env';
 import { ApiFailure } from './errors';
 import { isHttps } from './http';
@@ -58,6 +58,9 @@ export function clearedSessionCookie(request: Request): string {
 
 export interface ActiveSession {
   claims: SessionClaims;
+  /** (Events) The session's event, or null (a lead with none open). Every RPC is called with it. */
+  eventId: string | null;
+  role: SessionClaims['role'];
   /** "staffName · team" — the attribution passed to every lp_* write. Never from the client. */
   staff: string;
   /** A re-issued cookie to attach to the response (token older than 1 h), or null. */
@@ -73,22 +76,32 @@ export async function requireSession(request: Request): Promise<ActiveSession> {
   const now = Math.floor(Date.now() / 1000);
   const claims = await verifySessionToken(readSessionCookie(request), secret, now);
   if (!claims) throw new ApiFailure('unauthorized');
-  if (!needsRefresh(claims, now)) return { claims, staff: claimsStaff(claims), setCookie: null };
-  const refreshed = await signSessionToken({ staffName: claims.staffName, team: claims.team, sid: claims.sid }, secret, now);
+  const active = (c: SessionClaims, setCookie: string | null): ActiveSession => ({
+    claims: c,
+    eventId: c.eventId,
+    role: c.role,
+    staff: claimsStaff(c),
+    setCookie,
+  });
+  if (!needsRefresh(claims, now)) return active(claims, null);
+  const refreshed = await signSessionToken(
+    { staffName: claims.staffName, team: claims.team, eventId: claims.eventId, role: claims.role, sid: claims.sid },
+    secret,
+    now,
+  );
   if (!refreshed || refreshed.claims.exp <= claims.exp) {
     // Already at the absolute cap: the current token stays valid until it expires.
-    return { claims, staff: claimsStaff(claims), setCookie: null };
+    return active(claims, null);
   }
-  return {
-    claims: refreshed.claims,
-    staff: claimsStaff(refreshed.claims),
-    setCookie: sessionCookie(request, refreshed.token, refreshed.claims.exp, now),
-  };
+  return active(refreshed.claims, sessionCookie(request, refreshed.token, refreshed.claims.exp, now));
 }
 
-/** The SessionInfo body for a set of claims (A27). */
-export function sessionInfo(claims: SessionClaims): SessionInfo {
+/** The SessionInfo body for a set of claims (A27) and the session's event config (null: none open). */
+export function sessionInfo(claims: SessionClaims, event: EventConfig | null): SessionInfo {
   return {
+    role: claims.role,
+    eventId: claims.eventId,
+    event,
     staffName: claims.staffName,
     team: claims.team,
     staff: claimsStaff(claims),

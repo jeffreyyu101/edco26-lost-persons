@@ -39,11 +39,11 @@ export function inactiveCandidates(rows: readonly Pick<RequestSummary, 'id' | 's
 }
 
 /** Claims the closes of `ids` not told yet and tells each one to everyone involved. Resolves when done; never rejects. */
-export async function notifyInactiveCloses(ids: readonly string[]): Promise<void> {
+export async function notifyInactiveCloses(eventId: string, ids: readonly string[]): Promise<void> {
   if (ids.length === 0) return;
   let claimed: string[] = [];
   try {
-    const data = await rpc<unknown>('lp_inactive_claim', { p_ids: [...new Set(ids)].slice(0, MAX_IDS) });
+    const data = await rpc<unknown>('lp_inactive_claim', { p_event: eventId, p_ids: [...new Set(ids)].slice(0, MAX_IDS) });
     claimed = Array.isArray(data) ? data.filter((id): id is string => isUuid(id)) : [];
   } catch {
     // A database before F6 (no lp_inactive_claim), or a blip: the next sync tries again within the window.
@@ -53,7 +53,7 @@ export async function notifyInactiveCloses(ids: readonly string[]): Promise<void
   const detail = inactiveDetail();
   for (const requestId of claimed) {
     try {
-      await deliver(await involvedStaff(requestId), { requestId, kind: 'closed_inactive', actor: SYSTEM_STAFF, detail });
+      await deliver(eventId, await involvedStaff(eventId, requestId), { requestId, kind: 'closed_inactive', actor: SYSTEM_STAFF, detail });
     } catch {
       log('inactive_notify_failed');
     }

@@ -15,10 +15,11 @@ export const dynamic = 'force-dynamic';
 
 type P = { id: string; messageId: string };
 
-export const POST = authedRoute<P>('POST /api/requests/[id]/messages/[messageId]/unsend', {}, async ({ params, session }) => {
+export const POST = authedRoute<P>('POST /api/requests/[id]/messages/[messageId]/unsend', {}, async ({ params, session, eventId }) => {
   const parsed = messageParamsSchema.safeParse({ id: params.id, messageId: params.messageId });
   if (!parsed.success) throw new ApiFailure('not_found');
   const data = await rpc<{ changed?: unknown; activity?: unknown }>('lp_unsend_message', {
+    p_event: eventId,
     p_request: parsed.data.id.toLowerCase(),
     p_message: parsed.data.messageId.toLowerCase(),
     p_staff: session.staff,

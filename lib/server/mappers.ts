@@ -297,6 +297,11 @@ export function mapSync(raw: unknown): SyncResponse {
       .filter((v): v is [unknown, unknown] => Array.isArray(v) && v.length === 2)
       .map(([vid, version]) => [id(vid), reqNum(version)] as [string, number]);
   }
+  // (Events) The session's event stage and config version.
+  if (isObject(s.event) && typeof s.event.id === 'string' && typeof s.event.version === 'string'
+      && (s.event.stage === 'practice' || s.event.stage === 'live' || s.event.stage === 'archived')) {
+    out.event = { id: s.event.id, stage: s.event.stage, version: s.event.version };
+  }
   return out;
 }
 

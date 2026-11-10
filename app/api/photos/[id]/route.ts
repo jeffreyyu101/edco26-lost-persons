@@ -11,7 +11,7 @@ import { photoQuerySchema } from '@/lib/validation';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export const GET = authedRoute<{ id: string }>('GET /api/photos/[id]', { refresh: false }, async ({ request, params }) => {
+export const GET = authedRoute<{ id: string }>('GET /api/photos/[id]', { refresh: false }, async ({ request, params, eventId }) => {
   const id = idParam(params);
   const { size } = parseQuery(new URL(request.url).searchParams, photoQuerySchema);
 
@@ -19,9 +19,11 @@ export const GET = authedRoute<{ id: string }>('GET /api/photos/[id]', { refresh
   try {
     found = await db()
       .from('patient_photos')
-      .select('storage_path, thumb_path')
+      // (Events) Only a photo of a request in the session's event (the inner join filters the rest out → 404).
+      .select('storage_path, thumb_path, patients!inner(event_id)')
       .eq('id', id)
       .eq('is_active', true)
+      .eq('patients.event_id', eventId)
       .maybeSingle();
   } catch {
     throw new ApiFailure('unavailable', undefined, { dbCode: 'fetch' });

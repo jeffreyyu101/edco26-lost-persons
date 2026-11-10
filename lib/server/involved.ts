@@ -23,18 +23,18 @@ export function staffList(data: unknown): string[] {
 }
 
 /** Logger + answerers (lp_activity_fallback_staff). Never throws. */
-export async function fallbackStaff(requestId: string): Promise<string[]> {
+export async function fallbackStaff(eventId: string, requestId: string): Promise<string[]> {
   try {
-    return staffList(await rpc<unknown>('lp_activity_fallback_staff', { p_request: requestId }));
+    return staffList(await rpc<unknown>('lp_activity_fallback_staff', { p_event: eventId, p_request: requestId }));
   } catch {
     return [];
   }
 }
 
 /** Everyone involved in the request (attribution strings). Never throws. */
-export async function involvedStaff(requestId: string): Promise<string[]> {
+export async function involvedStaff(eventId: string, requestId: string): Promise<string[]> {
   try {
-    const { data, error } = await db().rpc('lp_involved_staff', { p_request: requestId });
+    const { data, error } = await db().rpc('lp_involved_staff', { p_event: eventId, p_request: requestId });
     if (!error) {
       const list = staffList(data);
       // The richer list always includes the logger; an empty answer means something is off: fall back.
@@ -43,13 +43,13 @@ export async function involvedStaff(requestId: string): Promise<string[]> {
   } catch {
     // network or timeout: the fallback below tries again
   }
-  return fallbackStaff(requestId);
+  return fallbackStaff(eventId, requestId);
 }
 
-/** Everyone whose "New requests" switch is on (canonical staff strings). Never throws. */
-export async function newRequestStaff(): Promise<string[]> {
+/** Everyone in the event whose "New requests" switch is on (canonical staff strings). Never throws. */
+export async function newRequestStaff(eventId: string): Promise<string[]> {
   try {
-    return staffList(await rpc<unknown>('lp_push_new_request_staff', {}));
+    return staffList(await rpc<unknown>('lp_push_new_request_staff', { p_event: eventId }));
   } catch {
     return [];
   }

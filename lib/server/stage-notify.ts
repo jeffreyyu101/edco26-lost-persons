@@ -19,13 +19,13 @@ export function notFoundDetail(row: Pick<RequestSummary, 'status' | 'recheckAt'>
 }
 
 /** Tells everyone involved (but the actor) that `row` was answered Not found. Never throws. */
-export async function notifyNotFound(row: RequestSummary, actorStaff: string): Promise<void> {
+export async function notifyNotFound(eventId: string, row: RequestSummary, actorStaff: string): Promise<void> {
   try {
     const detail = notFoundDetail(row, eventTimezone());
     if (!detail) return;
-    const recipients = await involvedStaff(row.id);
+    const recipients = await involvedStaff(eventId, row.id);
     const event: ActivityEvent = { requestId: row.id, kind: 'not_in_medical', actor: canonStaff(actorStaff) ?? actorStaff, detail };
-    await notifyStaff(recipients, event);
+    await notifyStaff(eventId, recipients, event);
   } catch {
     console.warn(JSON.stringify({ lp: 'notify', code: 'not_found_failed' }));
   }

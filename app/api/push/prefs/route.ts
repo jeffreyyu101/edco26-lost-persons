@@ -13,7 +13,7 @@ import { pushPrefsSchema } from '@/lib/validation';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export const POST = authedRoute('POST /api/push/prefs', {}, async ({ request, session }) => {
+export const POST = authedRoute('POST /api/push/prefs', { event: 'optional' }, async ({ request, session }) => {
   const body = await readJson(request, pushPrefsSchema);
   const prefs = await rpc<{ newRequests?: unknown; myUpdates?: unknown } | null>('lp_push_prefs_sync', {
     p_staff: session.staff,

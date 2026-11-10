@@ -122,6 +122,8 @@ export function recipientsOf(raw: unknown): string[] {
 // ---------------------------------------------------------------------------------------------------
 
 export interface DecorateOptions {
+  /** (Events) The session's event. */
+  eventId: string;
   staff: string;
   /** The delta cursor; with `changed`, requests whose thread changed since (− 30 s) are added. */
   since: string | null;
@@ -139,6 +141,7 @@ export async function decorateSync(sync: SyncResponse, opts: DecorateOptions): P
   let data: unknown;
   try {
     data = await rpc<unknown>('lp_messages_sync', {
+      p_event: opts.eventId,
       p_staff: opts.staff,
       p_ids: ids,
       p_since: opts.since,
@@ -160,9 +163,9 @@ export async function decorateSync(sync: SyncResponse, opts: DecorateOptions): P
 }
 
 /** The thread's first page, or null when it can't be read (the detail then goes out without it). */
-export async function readThread(requestId: string, staff: string): Promise<ThreadPage | null> {
+export async function readThread(eventId: string, requestId: string, staff: string): Promise<ThreadPage | null> {
   try {
-    return mapThread(await rpc<unknown>('lp_messages_thread', { p_request: requestId, p_staff: staff }));
+    return mapThread(await rpc<unknown>('lp_messages_thread', { p_event: eventId, p_request: requestId, p_staff: staff }));
   } catch (error) {
     logSoft((error as { dbCode?: string } | null)?.dbCode ?? 'thread_failed');
     return null;
@@ -170,9 +173,9 @@ export async function readThread(requestId: string, staff: string): Promise<Thre
 }
 
 /** lp_enroute_stats(), or {} when it can't be read (the dashboard shows "—"). */
-export async function readEnrouteStats(): Promise<{ friendsEnRoute?: number; avgArriveMinutes?: number | null }> {
+export async function readEnrouteStats(eventId: string): Promise<{ friendsEnRoute?: number; avgArriveMinutes?: number | null }> {
   try {
-    const raw = await rpc<unknown>('lp_enroute_stats', {});
+    const raw = await rpc<unknown>('lp_enroute_stats', { p_event: eventId });
     if (!isObject(raw)) return {};
     const friends = typeof raw.friendsEnRoute === 'number' ? raw.friendsEnRoute : undefined;
     const avg = raw.avgArriveMinutes === null ? null : typeof raw.avgArriveMinutes === 'number' ? raw.avgArriveMinutes : Number.isFinite(Number(raw.avgArriveMinutes)) ? Number(raw.avgArriveMinutes) : undefined;
@@ -188,10 +191,10 @@ export async function readEnrouteStats(): Promise<{ friendsEnRoute?: number; avg
 // ---------------------------------------------------------------------------------------------------
 
 /** Tells the request's involved staff (the actor is dropped by notifyStaff). Never throws. */
-export async function notifyInvolved(recipients: readonly string[], event: ActivityEvent): Promise<void> {
+export async function notifyInvolved(eventId: string, recipients: readonly string[], event: ActivityEvent): Promise<void> {
   if (recipients.length === 0) return;
   try {
-    await notifyStaff(recipients, event);
+    await notifyStaff(eventId, recipients, event);
   } catch {
     logSoft('notify_failed');
   }

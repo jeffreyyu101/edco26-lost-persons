@@ -10,10 +10,11 @@ import { markReadSchema } from '@/lib/validation';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/messages/read', {}, async ({ request, params, session }) => {
+export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/messages/read', {}, async ({ request, params, session, eventId }) => {
   const id = idParam(params);
   const body = await readJson(request, markReadSchema);
   const data = await rpc<{ changed?: unknown; activity?: unknown }>('lp_mark_read', {
+    p_event: eventId,
     p_request: id,
     p_staff: session.staff,
     p_upto: body.upto ?? null,

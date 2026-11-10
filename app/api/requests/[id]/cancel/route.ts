@@ -15,11 +15,12 @@ import { cancelSchema } from '@/lib/validation';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/cancel', {}, async ({ request, params, session }) => {
+export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/cancel', {}, async ({ request, params, session, eventId }) => {
   const id = idParam(params);
   const body = await readJson(request, cancelSchema);
   const data = await withReclassify(id, { fn: 'cancel', expectedVersion: body.expectedVersion }, () =>
     rpc<{ changed?: unknown; row?: unknown }>('lp_cancel', {
+      p_event: eventId,
       p_id: id,
       p_expected_version: body.expectedVersion,
       p_staff: session.staff,
@@ -27,7 +28,7 @@ export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/cancel'
   );
   const out: ChangeResponse = { changed: data.changed === true, request: mapRow(data.row) };
   if (out.changed) {
-    await notifyLater(() => involvedStaff(id), () => ({ requestId: id, kind: 'cancelled', actor: session.staff, detail: closedDetail('cancelled') }));
+    await notifyLater(eventId, () => involvedStaff(eventId, id), () => ({ requestId: id, kind: 'cancelled', actor: session.staff, detail: closedDetail('cancelled') }));
   }
   return json(out);
 });

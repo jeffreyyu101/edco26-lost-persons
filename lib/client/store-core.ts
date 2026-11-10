@@ -17,6 +17,7 @@ import type {
   ChangeResponse,
   CreateRequestBody,
   CreateResponse,
+  EventStats,
   OutboxItem,
   PhotoResponse,
   RequestDetail,
@@ -27,6 +28,7 @@ import type {
   StatsRange,
   SyncResponse,
 } from '../api-types';
+import { legacyStats, serverRange } from './stats-shim';
 import {
   NOT_FOUND_YET_LABEL,
   RECHECK_MINUTES,
@@ -2623,11 +2625,12 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       requireEnv();
       if (networkHeld()) throw new FetchError('failed');
       const gen = ownerGen();
-      const res = await call<Stats>(range ? `/api/stats?range=${range}` : '/api/stats', { timeoutMs: SYNC.requestTimeoutMs });
+      // PHASE2: the dashboard's range and Stats shape over the events server's (lib/client/stats-shim.ts).
+      const res = await call<EventStats>(range ? `/api/stats?range=${serverRange(range)}` : '/api/stats', { timeoutMs: SYNC.requestTimeoutMs });
       if (gen !== state.generation) throw new FetchError('failed');
       if (res.ok) {
         markLive();
-        return res.data;
+        return legacyStats(res.data);
       }
       if (res.kind === 'http' && res.status === 401) {
         sessionExpired();

@@ -7,6 +7,8 @@
 --   3. Above the results, click "Download CSV" (under Export). Then repeat steps 2 and 3 for Query 2 and
 --      Query 3.
 --
+-- (Events) Each query exports ONE event: set its link name in the three settings blocks ('edco26' = EDC Orlando,
+-- 'America/New_York'); case numbers restart at LP-0001 in every event.
 -- Query 1 is every request, one row each, by case number. Query 2 is the whole audit trail, one row per
 -- event, by case number and time. Query 3 is every message and en route event, by case number and time
 -- (unsent messages included, marked "yes"). Times are America/New_York, the event's time zone.
@@ -18,7 +20,9 @@
 with settings as (
   select 'America/New_York'::text as tz,
          'YYYY-MM-DD HH24:MI:SS'::text as fmt,
-         '^(?=[\t\r\n]|[\u0001- \u007f- ­؜ ᠎ -‏ -  -⁤　﻿]*[=+@＝＋－＠-])'::text as guard
+         '^(?=[\t\r\n]|[\u0001- \u007f- ­؜ ᠎ -‏ -  -⁤　﻿]*[=+@＝＋－＠-])'::text as guard,
+         -- (Events) The event to export: its link name (slug). The times above use its time zone.
+         (select ev.id from public.events ev where ev.slug = 'edco26') as event
 )
 select
   'LP-' || lpad(p.case_number::text, greatest(4, length(p.case_number::text)), '0') as "Case number",
@@ -61,13 +65,16 @@ select
   regexp_replace(p.updated_by, s.guard, '''') as "Updated by"
 from public.patients p
 cross join settings s
+where p.event_id = s.event
 order by p.case_number;
 
 -- Query 2: audit trail
 with settings as (
   select 'America/New_York'::text as tz,
          'YYYY-MM-DD HH24:MI:SS'::text as fmt,
-         '^(?=[\t\r\n]|[\u0001- \u007f- ­؜ ᠎ -‏ -  -⁤　﻿]*[=+@＝＋－＠-])'::text as guard
+         '^(?=[\t\r\n]|[\u0001- \u007f- ­؜ ᠎ -‏ -  -⁤　﻿]*[=+@＝＋－＠-])'::text as guard,
+         -- (Events) The event to export: its link name (slug). The times above use its time zone.
+         (select ev.id from public.events ev where ev.slug = 'edco26') as event
 )
 select
   'LP-' || lpad(p.case_number::text, greatest(4, length(p.case_number::text)), '0') as "Case number",
@@ -83,13 +90,16 @@ select
 from public.audit_events e
 left join public.patients p on p.id = e.patient_id
 cross join settings s
+where e.event_id = s.event
 order by p.case_number nulls last, e.occurred_at, e.id;
 
 -- Query 3: messages and en route
 with settings as (
   select 'America/New_York'::text as tz,
          'YYYY-MM-DD HH24:MI:SS'::text as fmt,
-         '^(?=[\t\r\n]|[\u0001- \u007f- ­؜ ᠎ -‏ -  -⁤　﻿]*[=+@＝＋－＠-])'::text as guard
+         '^(?=[\t\r\n]|[\u0001- \u007f- ­؜ ᠎ -‏ -  -⁤　﻿]*[=+@＝＋－＠-])'::text as guard,
+         -- (Events) The event to export: its link name (slug). The times above use its time zone.
+         (select ev.id from public.events ev where ev.slug = 'edco26') as event
 ), events as (
   select m.request_id, m.created_at as at, m.staff, nullif(m.team, '') as team, 'Message'::text as kind, m.body as said,
          null::text as eta, m.unsent_at
@@ -113,4 +123,5 @@ select
 from events ev
 left join public.patients p on p.id = ev.request_id
 cross join settings s
+where p.event_id = s.event
 order by p.case_number nulls last, ev.at;

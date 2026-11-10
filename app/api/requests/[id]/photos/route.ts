@@ -92,7 +92,7 @@ async function removeObjects(paths: string[]): Promise<void> {
   }
 }
 
-export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/photos', {}, async ({ request, params, session }) => {
+export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/photos', {}, async ({ request, params, session, eventId }) => {
   const id = idParam(params);
   const contentType = request.headers.get('content-type') ?? '';
   if (!/^multipart\/form-data\s*;/i.test(contentType)) throw new ApiFailure('unsupported_media', 'Send the photo as multipart/form-data');
@@ -121,6 +121,7 @@ export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/photos'
   const record = async (stored: Upload[]): Promise<AddPhotoResult> => {
     try {
       return await rpc<AddPhotoResult>('lp_add_photo', {
+        p_event: eventId,
         p_id: id,
         p_photo_id: photoId,
         p_path: paths.full,
@@ -136,6 +137,10 @@ export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/photos'
       throw error;
     }
   };
+
+  // (Events) Nothing is stored for an ended event (410) or a request of another event (404): checked before the upload.
+  await rpc('lp_require_writable', { p_event: eventId });
+  await rpc('lp_require_event_row', { p_event: eventId, p_request: id });
 
   let data: AddPhotoResult;
   if (await photoRowExists(photoId)) {

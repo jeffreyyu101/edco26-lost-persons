@@ -129,9 +129,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readSession(body: unknown): SessionInfo | null {
   if (!isRecord(body)) return null;
-  const { staffName, team, staff, expiresAt } = body;
+  const { staffName, team, staff, expiresAt, role, eventId, event } = body;
   if (typeof staffName !== 'string' || typeof team !== 'string') return null;
   return {
+    role: role === 'lead' ? 'lead' : 'staff',
+    eventId: typeof eventId === 'string' ? eventId : null,
+    event: isRecord(event) ? (event as unknown as SessionInfo['event']) : null,
     staffName,
     team,
     staff: typeof staff === 'string' ? staff : `${staffName} · ${team}`,

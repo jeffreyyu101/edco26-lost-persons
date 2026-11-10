@@ -31,11 +31,12 @@ interface SwapResult {
   undid?: unknown;
 }
 
-export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/swap', {}, async ({ request, params, session }) => {
+export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/swap', {}, async ({ request, params, session, eventId }) => {
   const id = idParam(params);
   const body = await readJson(request, swapSchema);
   const data = await withReclassify(id, { fn: 'swap', expectedVersion: body.expectedVersion, action: body.action }, () =>
     rpc<SwapResult>('lp_swap', {
+      p_event: eventId,
       p_id: id,
       p_expected_version: body.expectedVersion,
       p_action: body.action,
@@ -46,7 +47,7 @@ export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/swap', 
   const out: ChangeResponse = { changed: data.changed === true, request: mapRow(data.row) };
   if (out.changed) {
     const str = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v : null);
-    await swapNotice(body.action, out.request, session.staff, {
+    await swapNotice(eventId, body.action, out.request, session.staff, {
       answerer: str(data.answerer),
       requester: str(data.requester),
       creator: str(data.creator),

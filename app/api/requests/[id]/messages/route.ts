@@ -16,11 +16,12 @@ export const dynamic = 'force-dynamic';
 
 type P = { id: string };
 
-export const GET = authedRoute<P>('GET /api/requests/[id]/messages', {}, async ({ request, params, session }) => {
+export const GET = authedRoute<P>('GET /api/requests/[id]/messages', {}, async ({ request, params, session, eventId }) => {
   const id = idParam(params);
   const q = parseQuery(new URL(request.url).searchParams, threadQuerySchema);
   const page: ThreadPage = mapThread(
     await rpc<unknown>('lp_messages_thread', {
+      p_event: eventId,
       p_request: id,
       p_staff: session.staff,
       p_before_at: q.beforeAt ?? null,
@@ -30,12 +31,13 @@ export const GET = authedRoute<P>('GET /api/requests/[id]/messages', {}, async (
   return json(page);
 });
 
-export const POST = authedRoute<P>('POST /api/requests/[id]/messages', {}, async ({ request, params, session }) => {
+export const POST = authedRoute<P>('POST /api/requests/[id]/messages', {}, async ({ request, params, session, eventId }) => {
   const id = idParam(params);
   const body = await readJson(request, postMessageSchema);
   const data = await rpc<{ created?: unknown; message?: unknown; activity?: unknown; recipients?: unknown }>(
     'lp_post_message',
     {
+      p_event: eventId,
       p_request: id,
       p_body: body.body,
       p_client_mutation_id: body.clientMutationId,
@@ -48,7 +50,7 @@ export const POST = authedRoute<P>('POST /api/requests/[id]/messages', {}, async
   if (out.created) {
     const recipients = recipientsOf(data.recipients);
     const event = messageEvent(id, session.staff, out.message.body);
-    after(() => notifyInvolved(recipients, event));
+    after(() => notifyInvolved(eventId, recipients, event));
   }
   return json(out, out.created ? 201 : 200);
 });

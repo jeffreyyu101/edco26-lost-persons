@@ -10,9 +10,10 @@ import { activityReadSchema } from '@/lib/validation';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export const POST = authedRoute('POST /api/activity/read', {}, async ({ request, session }) => {
+export const POST = authedRoute('POST /api/activity/read', {}, async ({ request, session, eventId }) => {
   const body = await readJson(request, activityReadSchema);
   const data = await rpc<{ ids?: unknown } | null>('lp_activity_mark_read', {
+    p_event: eventId,
     p_staff: session.staff,
     p_request: 'requestId' in body ? body.requestId.toLowerCase() : null,
   });

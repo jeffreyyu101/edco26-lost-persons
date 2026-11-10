@@ -33,7 +33,7 @@ export const dynamic = 'force-dynamic';
 
 const off = () => new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
 
-export const POST = authedRoute('POST /api/telemetry', { refresh: false, sameOrigin: false }, async ({ request, session }) => {
+export const POST = authedRoute('POST /api/telemetry', { refresh: false, sameOrigin: false }, async ({ request, session, eventId }) => {
   assertTelemetryOrigin(request);
   const cfg = await telemetryConfig();
   if (!cfg.on) return off();
@@ -44,6 +44,7 @@ export const POST = authedRoute('POST /api/telemetry', { refresh: false, sameOri
   // The probe after an "off": nothing to write, only whether collection is back on.
   if (batch.ev.length === 0) return answer();
   const res = await rpc<IngestResult | null>('lp_tel_ingest', {
+    p_event: eventId,
     p_batch: batch.b,
     p_device: batch.d,
     p_session: batch.s,

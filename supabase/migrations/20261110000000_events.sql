@@ -1371,7 +1371,9 @@ begin
   -- Notices nobody claimed in time are done with (their request was reopened, or no phone synced).
   update public.lp_inactive_closes
      set notified_at = v_now
-   where notified_at is null and closed_at <= v_now - interval '15 minutes';
+   where notified_at is null and closed_at <= v_now - interval '15 minutes'
+     -- (Events) Only live events' notices: nothing of a finished event changes.
+     and event_id in (select e.id from public.events e where e.stage = 'live');
 
   return v_count;
 end
@@ -2448,7 +2450,7 @@ $fn$;
 --   p_range  '1h' | '2h' | '6h' (rolling, from a 15-minute boundary), 'today' (since the current show day began at
 --            day_start_hour), 'event' (from the event's first request), 'day:N' (show day N: starts_on + N − 1 from
 --            day_start_hour, 24 h; N ≥ 1).
---   range    {key, from, to, step, compare, day (N or null), posts: [{post, n}]}: the posts of this range, by count, the
+--   range    {key, from, to (day:N's end, else null = now), step, compare, day (N or null), posts: [{post, n}]}: the posts of this range, by count, the
 --            four busiest by name and the rest (Other locations and legacy values too) as 'Other', last.
 --   calls    {total, prevTotal, buckets [{at, day, n, posts [{post, n}], prev}]}: per 15 min (per hour and show day for
 --            'event'); prev = the same clock bucket the day before ('today', 'day:N' after the first, 1h/2h/6h).
@@ -2662,7 +2664,10 @@ begin
     ) en on true
   )
   select pg_catalog.jsonb_build_object(
-    'range', pg_catalog.jsonb_build_object('key', p_range, 'from', v_from, 'to', v_to,
+    'range', pg_catalog.jsonb_build_object('key', p_range, 'from', v_from,
+                                           -- The nominal end: a show day's end for 'day:N', else null (now). Never the
+                                           -- clock itself, so an unchanged poll keeps its ETag.
+                                           'to', case when v_n is not null then ((v_ev.starts_on + v_n) + v_dh) at time zone v_tz end,
                                            'step', (extract(epoch from v_step) / 60)::integer, 'compare', v_cmp, 'day', v_n,
                                            'posts', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('post', pl.tent, 'n', pl.n)
                                                                 order by pl.tent_rank) from plist pl), '[]'::jsonb)),

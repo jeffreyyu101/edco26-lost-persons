@@ -19,6 +19,8 @@ export const HTTP_STATUS: Readonly<Record<ApiErrorCode, number>> = {
   photo_limit: 422,
   rate_limited: 429,
   unavailable: 503,
+  event_ended: 410,
+  no_event: 409,
 };
 
 /** Safe default messages (never contain request data). */
@@ -35,6 +37,8 @@ export const DEFAULT_MESSAGE: Readonly<Record<ApiErrorCode, string>> = {
   photo_limit: 'This request already has 3 photos',
   rate_limited: 'Too many attempts. Try again later',
   unavailable: "Couldn't reach the log. Try again",
+  event_ended: 'This event is now closed',
+  no_event: 'Open an event first',
 };
 
 type Extra = Omit<ApiError['error'], 'code' | 'message' | 'id'>;
@@ -100,6 +104,7 @@ const INVALID_MESSAGES: Readonly<Record<string, string>> = {
   photo_path_in_use: 'Photo already stored',
   invalid_staff: 'Sign in again',
   too_late: 'Too late to unsend',
+  slug_taken: 'That link name is taken',
 };
 
 /**
@@ -118,6 +123,8 @@ export function mapDbError(error: DbError, context: DbContext = 'default'): ApiF
   const code = typeof error.code === 'string' ? error.code : '';
   switch (code) {
     case 'P0409':
+      if (error.message === 'slug_taken') return new ApiFailure('conflict', INVALID_MESSAGES.slug_taken, { dbCode: code, extra: { field: 'slug' } });
+      if (error.message === 'bad_stage') return new ApiFailure('conflict', 'Not possible at this stage', { dbCode: code });
       return new ApiFailure('conflict', undefined, {
         dbCode: code,
         extra: typeof error.hint === 'string' && error.hint ? { currentStatus: error.hint.slice(0, 60) } : {},
@@ -135,6 +142,9 @@ export function mapDbError(error: DbError, context: DbContext = 'default'): ApiF
     }
     case 'P0403':
       return new ApiFailure('forbidden', undefined, { dbCode: code });
+    // (Events) lp_require_writable / the patients guard: the event is archived.
+    case 'P0410':
+      return new ApiFailure('event_ended', undefined, { dbCode: code });
     case 'P0429': {
       if (context === 'photo') return new ApiFailure('photo_limit', undefined, { dbCode: code, extra: { field: 'photo' } });
       if (context === 'message') {
@@ -165,5 +175,11 @@ export function mapDbError(error: DbError, context: DbContext = 'default'): ApiF
 
 /** True for the rejections after which an uploaded photo's objects are deleted (spec §6 photos). */
 export function isDefinitiveRejection(failure: ApiFailure): boolean {
-  return failure.code === 'photo_limit' || failure.code === 'invalid' || failure.code === 'forbidden' || failure.code === 'not_found';
+  return (
+    failure.code === 'photo_limit' ||
+    failure.code === 'invalid' ||
+    failure.code === 'forbidden' ||
+    failure.code === 'not_found' ||
+    failure.code === 'event_ended'
+  );
 }

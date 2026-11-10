@@ -18,13 +18,14 @@ import { enrouteSchema } from '@/lib/validation';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/enroute', {}, async ({ request, params, session }) => {
+export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/enroute', {}, async ({ request, params, session, eventId }) => {
   const id = idParam(params);
   const body = await readJson(request, enrouteSchema);
   const minutes = body.action === 'set' ? (body.etaMinutes ?? null) : null;
   const queuedSeconds = Math.floor((body.queuedMs ?? 0) / 1000);
   const offset = minutes === null || body.etaAt ? null : Math.max(0, minutes * 60 - queuedSeconds);
   const data = await rpc<{ changed?: unknown; ignored?: unknown; event?: unknown; activity?: unknown; recipients?: unknown }>('lp_set_enroute', {
+    p_event: eventId,
     p_request: id,
     p_action: body.action,
     p_eta_offset_seconds: offset,
@@ -37,7 +38,7 @@ export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/enroute
     const event = enrouteEvent(id, session.staff, data.event, out.activity.enroute);
     if (event) {
       const recipients = recipientsOf(data.recipients);
-      after(() => notifyInvolved(recipients, event));
+      after(() => notifyInvolved(eventId, recipients, event));
     }
   }
   return json(out);

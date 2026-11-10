@@ -9,8 +9,8 @@ import { rpc } from '@/lib/server/supabase';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export const GET = authedRoute('GET /api/activity', {}, async ({ session }) => {
-  const data = await rpc<{ serverTime?: unknown; rows?: unknown } | null>('lp_activity_list', { p_staff: session.staff });
+export const GET = authedRoute('GET /api/activity', {}, async ({ session, eventId }) => {
+  const data = await rpc<{ serverTime?: unknown; rows?: unknown } | null>('lp_activity_list', { p_event: eventId, p_staff: session.staff });
   const rows = Array.isArray(data?.rows) ? data.rows.map(mapActivityRow).filter((r): r is ActivityRow => r !== null) : [];
   const out: ActivityListResponse = { serverTime: typeof data?.serverTime === 'string' ? data.serverTime : new Date().toISOString(), rows };
   return json(out);

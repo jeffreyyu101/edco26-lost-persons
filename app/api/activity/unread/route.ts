@@ -11,16 +11,16 @@ import { activityUnreadSchema } from '@/lib/validation';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export const GET = authedRoute('GET /api/activity/unread', {}, async ({ session }) => {
-  const data = await rpc<{ ids?: unknown; key?: unknown } | null>('lp_activity_unread', { p_staff: session.staff });
+export const GET = authedRoute('GET /api/activity/unread', {}, async ({ session, eventId }) => {
+  const data = await rpc<{ ids?: unknown; key?: unknown } | null>('lp_activity_unread', { p_event: eventId, p_staff: session.staff });
   const ids = Array.isArray(data?.ids) ? data.ids.filter((x): x is string => typeof x === 'string') : [];
   const out: ActivityUnreadIdsResponse = { count: ids.length, ids, key: typeof data?.key === 'string' ? data.key : null };
   return json(out);
 });
 
-export const POST = authedRoute('POST /api/activity/unread', {}, async ({ request, session }) => {
+export const POST = authedRoute('POST /api/activity/unread', {}, async ({ request, session, eventId }) => {
   const body = await readJson(request, activityUnreadSchema);
-  const count = await rpc<unknown>('lp_activity_unmark', { p_staff: session.staff, p_requests: body.requestIds.map((id) => id.toLowerCase()) });
+  const count = await rpc<unknown>('lp_activity_unmark', { p_event: eventId, p_staff: session.staff, p_requests: body.requestIds.map((id) => id.toLowerCase()) });
   const out: ActivityUnreadResponse = { count: typeof count === 'number' ? count : 0 };
   return json(out);
 });

@@ -21,11 +21,12 @@ import { setStatusSchema } from '@/lib/validation';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/status', {}, async ({ request, params, session }) => {
+export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/status', {}, async ({ request, params, session, eventId }) => {
   const id = idParam(params);
   const body = await readJson(request, setStatusSchema);
   const data = await withReclassify(id, { fn: 'status', expectedVersion: body.expectedVersion, target: body.status, kind: body.kind }, () =>
     rpc<{ changed?: unknown; row?: unknown }>('lp_set_status', {
+      p_event: eventId,
       p_id: id,
       p_expected_version: body.expectedVersion,
       p_status: body.status,
@@ -39,12 +40,12 @@ export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/status'
   // the response (next/server `after`), so it never holds the answer up.
   if (out.changed && body.status === STATUS.notInMedical) {
     const row = out.request;
-    after(() => notifyNotFound(row, session.staff));
+    after(() => notifyNotFound(eventId, row, session.staff));
   } else if (out.changed) {
     // (F4) Every other real change. Decided by the target too: a hold's row is still Waiting for check, which
     // must never read as "Back to Waiting for check".
     const event = statusChangeEvent(out.request.status, out.request.medicalLocation ?? null, { place: out.request.swapPlace, post: out.request.postShort });
-    if (event) await notifyLater(() => involvedStaff(id), () => ({ requestId: id, actor: session.staff, ...event }));
+    if (event) await notifyLater(eventId, () => involvedStaff(eventId, id), () => ({ requestId: id, actor: session.staff, ...event }));
   }
   return json(out);
 });

@@ -25,9 +25,9 @@ const DEFAULT_PAGE = 500;
 
 type ActivityPart = Pick<SyncResponse, 'activityUnread' | 'activityKey'>;
 
-async function unreadActivity(staff: string): Promise<ActivityPart> {
+async function unreadActivity(eventId: string, staff: string): Promise<ActivityPart> {
   try {
-    const data = await rpc<{ count?: unknown; key?: unknown } | null>('lp_activity_unread', { p_staff: staff });
+    const data = await rpc<{ count?: unknown; key?: unknown } | null>('lp_activity_unread', { p_event: eventId, p_staff: staff });
     if (typeof data?.count !== 'number') return {};
     // The poll stays small (spec §7 Data use): the count and the key, never the ids; with nothing unread the
     // count alone (the empty delta stays about 100 bytes; a 0 says everything is read).
@@ -37,11 +37,12 @@ async function unreadActivity(staff: string): Promise<ActivityPart> {
   }
 }
 
-export const GET = authedRoute('GET /api/sync', {}, async ({ request, session }) => {
+export const GET = authedRoute('GET /api/sync', {}, async ({ request, session, eventId }) => {
   const q = parseQuery(new URL(request.url).searchParams, syncQuerySchema);
   const args = q.ids
-    ? { p_since: null, p_ids: q.ids, p_reconcile: false, p_after_at: null, p_after_id: null, p_limit: DEFAULT_PAGE }
+    ? { p_event: eventId, p_since: null, p_ids: q.ids, p_reconcile: false, p_after_at: null, p_after_id: null, p_limit: DEFAULT_PAGE }
     : {
+        p_event: eventId,
         p_since: q.since ?? null,
         p_ids: null,
         p_reconcile: q.reconcile === '1',
@@ -50,11 +51,14 @@ export const GET = authedRoute('GET /api/sync', {}, async ({ request, session })
         p_limit: q.limit ?? DEFAULT_PAGE,
       };
   const firstPage = !q.ids && !q.afterAt;
-  const [raw, activity] = await Promise.all([rpc<unknown>('lp_sync', args), firstPage ? unreadActivity(session.staff) : Promise.resolve<ActivityPart>({})]);
-  const sync = mapSync(raw);
+  const [raw, activity] = await Promise.all([rpc<unknown>('lp_sync', args), firstPage ? unreadActivity(eventId, session.staff) : Promise.resolve<ActivityPart>({})]);
+  const { event, ...sync } = mapSync(raw);
   const firstDeltaPage = !q.ids && !!q.since && !q.afterAt;
-  const out = { ...(await decorateSync(sync, { staff: session.staff, since: q.since ?? null, changed: firstDeltaPage })), ...activity };
+  // (Events) The event's stage and config version, only to a client that sends the version it holds (ev) and only
+  // when it differs: the client then re-reads GET /api/session (and sees an ended event).
+  const eventPart = q.ev !== undefined && event && event.version !== q.ev ? { event } : {};
+  const out = { ...(await decorateSync(sync, { eventId, staff: session.staff, since: q.since ?? null, changed: firstDeltaPage })), ...activity, ...eventPart };
   const closed = inactiveCandidates(out.rows);
-  if (closed.length > 0) after(() => notifyInactiveCloses(closed));
+  if (closed.length > 0) after(() => notifyInactiveCloses(eventId, closed));
   return json(out);
 });

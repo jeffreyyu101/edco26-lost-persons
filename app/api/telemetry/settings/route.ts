@@ -20,7 +20,7 @@ export const dynamic = 'force-dynamic';
 
 const bodySchema = z.object({ enabled: z.boolean() }).strict();
 
-export const POST = authedRoute('POST /api/telemetry/settings', {}, async ({ request, session }) => {
+export const POST = authedRoute('POST /api/telemetry/settings', { event: 'optional' }, async ({ request, session }) => {
   const { enabled } = await readJson(request, bodySchema);
   if (enabled) {
     invalidateTelemetryConfig();
@@ -28,7 +28,7 @@ export const POST = authedRoute('POST /api/telemetry/settings', {}, async ({ req
     if (!cfg.enabled) throw new ApiFailure('forbidden', 'Collection is turned back on in SQL only');
     return json(cfg);
   }
-  await recordServerEvents([{ n: 'tel_switch', team: teamKey(session.claims.team), ok: false }]);
+  if (session.eventId) await recordServerEvents(session.eventId, [{ n: 'tel_switch', team: teamKey(session.claims.team), ok: false }]);
   const raw = await rpc<unknown>('lp_tel_set', { p_enabled: false });
   invalidateTelemetryConfig();
   return json(parseTelemetryConfig(raw));
