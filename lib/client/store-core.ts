@@ -975,6 +975,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 
   /** False when a sign-out overtook it (nothing applied then). */
   const applySession = async (info: SessionInfo): Promise<boolean> => {
+    // (Events) A lead with no event open belongs on the Events list (the proxy covers a page load of `/`; this, the
+    // service worker's cached shell).
+    if (info.role === 'lead' && !info.eventId) return (env?.redirect('/events'), false);
     const gen = ownerGen();
     const canon = canonStaff(info.staff) ?? '';
     if (cacheStaff !== canon) {

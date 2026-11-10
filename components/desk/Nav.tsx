@@ -16,6 +16,7 @@ import { Activity, ChartColumn, ChevronsUpDown, Inbox, List, UserRound, type Luc
 import { useEffect, useSyncExternalStore } from 'react';
 import { AccountMenu } from '@/components/account/AccountMenu';
 import { DeskAlertsRowSlot } from '@/components/activity/slots';
+import { DeskEventLink, EventSwitcher, useIsLeadInEvent } from '@/components/events/LeadNav';
 import { PendingDot } from '@/components/messages/CardActivity';
 import { useActions, usePrefs, useCounts, useIsLoading, useSession } from '@/lib/client/store-contract';
 import { teamShort } from '@/lib/domain';
@@ -76,6 +77,7 @@ export function DeskNav({ main, pane = false }: DeskNavProps) {
   const counts = useCounts();
   const loading = useIsLoading();
   const showHeader = useShowHeader(main);
+  const lead = useIsLeadInEvent();
 
   // Open over the content until the address changes (a view chosen, a request or a form opened) or the sidebar
   // docks (a wider window, the request closed): then it is closed for good, not waiting to come back.
@@ -115,6 +117,7 @@ export function DeskNav({ main, pane = false }: DeskNavProps) {
       >
         <div className={d.sideHead}>
           <LiveMark />
+          {lead ? <EventSwitcher /> : null}
         </div>
         <nav className={d.sideContent} aria-label="Views">
           <div className={d.group}>
@@ -126,6 +129,8 @@ export function DeskNav({ main, pane = false }: DeskNavProps) {
           <div className={`${d.group} ${d.groupNext}`}>
             <div className={d.menu}>
               {item('dashboard')}
+              {/* (Events) A lead's setup of the open event (its own route). */}
+              <DeskEventLink className={d.item} labelClassName={d.label} tip={<Tip>Event</Tip>} />
               {health ? (
                 // A plain link: /health is its own route.
                 <a href="/health" className={d.item} data-testid="desk-health">

@@ -16,6 +16,7 @@ import { AlertDialog, Avatar, Button, Popover, SegmentedControl, Text } from '@r
 import { ChartColumn, Eye, LogOut, Sun } from 'lucide-react';
 import { useId, useState } from 'react';
 import { AccountAlertsRowSlot } from '@/components/activity/slots';
+import { LeadMenuItems } from '@/components/events/LeadNav';
 import { navigate } from '@/lib/client/nav';
 import { useActions, usePrefs, useSession, type ThemePref } from '@/lib/client/store-contract';
 import { avatarInitials, teamShort } from '@/lib/domain';
@@ -168,6 +169,8 @@ export function AccountMenu({ size = '2', onShowHeader }: AccountMenuProps) {
             <ChartColumn size={16} aria-hidden />
             Dashboard
           </button>
+          {/* (Events) A lead's Event (setup) and Events (the list); nothing for staff. */}
+          <LeadMenuItems className={s.mitem} />
           <div className={s.msep} />
           <button type="button" className={s.mitem} disabled={busy} onClick={() => void signOut(false)}>
             <LogOut size={16} aria-hidden />
