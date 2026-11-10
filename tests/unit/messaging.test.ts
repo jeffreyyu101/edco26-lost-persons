@@ -336,6 +336,8 @@ describe('the message / en route outbox', () => {
     expect(classifyJobFailure({ ok: false, kind: 'http', status: 401, error: null })).toEqual({ type: 'unauthorized' });
     expect(classifyJobFailure({ ok: false, kind: 'http', status: 429, error: { code: 'rate_limited', message: 'x', retryAfterSeconds: 12 } })).toEqual({ type: 'rate_limited', retryAfterMs: 12_000 });
     expect(classifyJobFailure({ ok: false, kind: 'http', status: 422, error: { code: 'invalid', message: 'Too long' } })).toEqual({ type: 'rejected', code: 'invalid', message: 'Too long' });
+    // The event ended (any role): never retried.
+    expect(classifyJobFailure({ ok: false, kind: 'http', status: 410, error: { code: 'event_ended', message: 'x' } })).toEqual({ type: 'rejected', code: 'event_ended', message: 'x' });
     // A portal's HTML 404 is not ours: retry, never fail the message.
     expect(classifyJobFailure({ ok: false, kind: 'http', status: 404, error: null })).toEqual({ type: 'retry' });
   });

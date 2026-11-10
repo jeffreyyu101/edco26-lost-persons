@@ -50,14 +50,23 @@ export function readEnded(storage: Storage | null = session()): EndedEvent | nul
 }
 
 /** Marks an ended event's local data for the store to drop when it next starts. */
-export function markEventDrop(eventId: string): void {
-  const ids = readEventDrops();
+export function markEventDrop(eventId: string, storage: Storage | null = local()): void {
+  const ids = readEventDrops(storage);
   if (ids.includes(eventId)) return;
   try {
-    local()?.setItem(DROP_KEY, JSON.stringify([...ids, eventId].slice(-20)));
+    storage?.setItem(DROP_KEY, JSON.stringify([...ids, eventId].slice(-20)));
   } catch {
     // best effort
   }
+}
+
+/**
+ * Sign-in answered `event_ended` (a password or join link of an archived event): keeps what the Ended screen shows and
+ * marks the event's data (cache, outbox) for the app to drop at its next start.
+ */
+export function endedAtSignIn(event: EndedEvent | null, storage: { session: Storage | null; local: Storage | null } = { session: session(), local: local() }): void {
+  rememberEnded(event, storage.session);
+  if (event?.id) markEventDrop(event.id, storage.local);
 }
 
 export function readEventDrops(storage: Storage | null = local()): string[] {

@@ -2430,7 +2430,15 @@ begin
       raise exception using errcode = 'P0409', message = 'secrets_changed', hint = 'secrets_changed', detail = 'field:password';
     end if;
   end if;
-  update public.events set staff_password_hash = p_hash, updated_at = pg_catalog.now() where id = p_event returning * into v_row;
+  -- Removing the password of an archived event inside its 24 h hold retires the held hash, exactly as the clearing
+  -- after 24 h does (lp_event_release_held): the lead passcode may never equal it.
+  update public.events
+     set staff_password_hash = p_hash,
+         ended_password_hash = case when p_hash is null and stage = 'archived'
+                                    then coalesce(staff_password_hash, ended_password_hash) else ended_password_hash end,
+         updated_at = pg_catalog.now()
+   where id = p_event
+  returning * into v_row;
   if v_row.id is null then
     raise exception using errcode = 'P0002', message = 'not_found';
   end if;

@@ -5,10 +5,13 @@ import { OUTBOX_BACKOFF_MS, SYNC } from './constants';
 import type { HttpFailure } from './http';
 import type { OutboxPrompt } from './store-contract';
 
-/** Create rejections that mean "this payload is wrong" → Needs attention (same mutationId on resend). */
-export const CREATE_DEFINITIVE: ReadonlySet<number> = new Set([400, 403, 413, 415, 422]);
-/** Photo rejections that will never succeed (photo limit, bad image, request gone) → the job finishes. */
-export const PHOTO_DEFINITIVE: ReadonlySet<number> = new Set([400, 403, 404, 413, 415, 422]);
+/**
+ * Create rejections that will never succeed as they are → Needs attention (same mutationId on resend). 410: the event
+ * ended (event_ended), for every role: staff leave for the Ended screen, a lead's queued create stops retrying.
+ */
+export const CREATE_DEFINITIVE: ReadonlySet<number> = new Set([400, 403, 410, 413, 415, 422]);
+/** Photo rejections that will never succeed (photo limit, bad image, request gone, event ended) → the job finishes. */
+export const PHOTO_DEFINITIVE: ReadonlySet<number> = new Set([400, 403, 404, 410, 413, 415, 422]);
 
 /** 5 s, 15 s, 60 s, then every 2 min (attempts counts failures so far, ≥ 1). */
 export function outboxBackoffMs(attempts: number): number {

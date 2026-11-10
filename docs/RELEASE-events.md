@@ -53,10 +53,9 @@ anyway. Storage (the photos) is not touched by the migration; only the database 
    union all select 'lp_activity', count(*) from public.lp_activity union all select 'lp_push_subscriptions', count(*) from public.lp_push_subscriptions
    order by 1;
    ```
-3. Verify the dump holds the same rows (one line per row between `COPY public.<table>` and `\.`):
+3. Verify the dump holds the same rows (one line per row between `COPY "public"."<table>"` and `\.`):
    ```sh
-   awk '/^COPY public\./ {t=$2; n=0; next} /^\\\.$/ {if (t) print t, n; t=""; next} t {n++}' pre-events-data.sql \
-     | grep -E 'public\.(patients|audit_events|patient_photos|lp_messages|lp_activity|lp_push_subscriptions) '
+   awk '/^COPY / {t=$2; gsub(/"/, "", t); n=0; next} /^\\\.$/ {if (t) print t, n; t=""; next} t {n++}' pre-events-data.sql | grep -E '^public\.(patients|audit_events|patient_photos|lp_messages|lp_activity|lp_push_subscriptions) '
    ```
    Every count must equal step 2's. Also: `grep -c 'CREATE TABLE' pre-events-schema.sql` is more than 10, and
    `grep -c 'CREATE OR REPLACE FUNCTION' pre-events-schema.sql` is more than 40. If anything differs, stop here.
@@ -70,15 +69,20 @@ then `psql "$URL" -f pre-events-data.sql`; or ask Supabase support to restore th
 | Step | What you do | What staff and leads see |
 | --- | --- | --- |
 | 0 | Nothing yet | The old build, EDC's log (EDC is over; nobody works in it). |
-| 1. Dry run | SQL Editor: paste the whole events file, change its **last** line `commit;` to `rollback;`, run. It must finish without an error (notices are fine). | Nothing changes. |
+| 1. Dry run | SQL Editor: the **patients fingerprint** (section 4), write down both values. Then paste the whole events file, change its **last** line `commit;` to `rollback;`, run. It must finish without an error (notices are fine). | Nothing changes. |
 | 2. Migration | Paste the file again **unchanged** (ending in `commit;`) and run it. **The outage starts here.** | Every screen fails: lists and new requests answer "Couldn't reach the log" (the old build calls functions this file retired). |
 | 3. Deploy | Merge the PR to `main` at once. Vercel builds and deploys it. | The same error until the new deployment is Ready. Then old sessions are refused, so everyone lands on sign-in, and every password is refused (none is set yet). |
-| 4. Bootstrap | In the checkout: `set -a; . <the file from 1>; set +a; node scripts/bootstrap-events.mjs --dry-run`, then the same without `--dry-run`. It asks for the lead passcode twice (hidden). **The outage ends here.** | The lead passcode signs in as a lead (the Events list). The EDC password is refused like any wrong password. |
+| 4. Bootstrap | In the checkout: `set -a; . <the file from 1>; set +a; node scripts/bootstrap-events.mjs --dry-run`, then the same without `--dry-run`. It asks for the lead passcode twice (hidden). If it stops after `lead passcode set.` (before `retired staff password recorded`), run it again with `--force`: without it, it refuses a passcode that is already set. Type the same passcode. **The outage ends here.** | The lead passcode signs in as a lead (the Events list). The EDC password is refused like any wrong password. |
 | 5. Check | Section 4 below, signed in. | — |
 | 6. Next event | A lead creates Warped Tour in the app (section 5) and leaves it in practice until the show. | Its staff sign in with its password or join link. |
 
 **Expected outage:** from step 2 to the end of step 4: the Vercel build time plus about a minute (usually 3 to 5
 minutes). Run steps 2, 3 and 4 back to back.
+
+**If the Vercel build fails in step 3:** the old build is still the production deployment, so there is nothing to undo
+in Vercel. The way back is the rollback SQL alone (section 6, steps 2, 3 and 5). Then push nothing to `main` until you go
+forward again (or revert the merge): the next build of `main` that succeeds deploys the new build onto the rolled-back
+database.
 
 The bootstrap sets the lead passcode and records EDC's old staff password (from the env) as **retired**: it is never a
 way in, and only stops anyone from choosing it as the lead passcode, now or later in the app. An archived event keeps no
@@ -86,8 +90,18 @@ staff password and no join link once 24 hours have passed since its end (EDC end
 
 ## 4. Verify
 
+### Patients fingerprint (right before step 2 and right after it)
+
+```sql
+select count(*) as patients, md5(coalesce(string_agg((to_jsonb(p) - 'event_id')::text, E'\n' order by p.id), '')) as fingerprint from public.patients p;
+```
+
+Every column of every request except `event_id` (the one column the migration adds), in id order. After step 2 both
+values must equal the ones written down in step 1. If they differ, roll back (section 6, steps 2 and 3).
+
 ### Right after step 2 (SQL Editor)
 
+- The patients fingerprint above → the same two values as before step 2.
 - `select slug, stage, case_seq, staff_password_hash is null as no_pw, invite_code_sha256 is null as no_link from public.events;`
   → one row: `edco26 | archived | <highest EDC LP number> | true | true`.
 - `select count(*) from public.patients where event_id is null;` → `0`.
@@ -97,7 +111,7 @@ staff password and no join link once 24 hours have passed since its end (EDC end
 
 Lead (phone):
 - [ ] Sign-in → your name and team → Continue → the lead passcode in "Event password" → the **Events** list. EDC Orlando
-      is under "Archived 1" with its logo and the Archived chip.
+      is under "Archived 1" with the Archived chip and no logo (EDC has none until a lead uploads one in Event setup).
 - [ ] Open EDC Orlando → its log: read-only (no New request), the Archived chip in the header, the dashboard with day
       tabs (All + one per show day). Account menu → Events → back to the list.
 - [ ] Account menu (top right) → Lead passcode is there; leave it unchanged.
@@ -119,12 +133,11 @@ Lead (computer, 1024 px or wider), with a throwaway practice event:
       only.
 - [ ] Go live (the sheet shows "1" practice request) → the second browser loses the practice request within a few
       seconds and shows the **Live** chip; a new request there is **LP-0001** again.
-- [ ] End event → the second browser shows the **Ended** screen: Ground Control and the event's logo, the event name,
+- [ ] End event → the second browser shows the **Ended** screen: Ground Control (and the event's logo, if one was uploaded), the event name,
       the Archived chip, "This event is now closed. Thank you for your work.", and nothing else. Opening the join link
       again shows the same screen; its password is refused.
-- [ ] The test event's request now belongs to an archived event and can't be deleted (that is the write guard). Leave
-      it; it never shows to any other event. (If you would rather not keep it: before ending, delete it while the event
-      is live, `delete from public.patients where event_id = (select id from public.events where slug = '<its link name>');`.)
+- [ ] The test event's request now belongs to an archived event: it never shows to any other event. Leave it, or
+      remove it with section 6, step 1 (Reopen, delete, End). A rollback needs it gone.
 
 ## 5. Setting up Warped Tour (no developer needed)
 
@@ -142,12 +155,24 @@ time left.
 ## 6. Roll back
 
 Possible only while **no event is live and no request belongs to an event other than EDC**: the rollback refuses
-otherwise and changes nothing. So: before Warped Tour's first request (practice included), or after deleting those
-requests while the event is still running (an archived event's requests can't be deleted).
+otherwise and changes nothing. So: before Warped Tour's first request (practice included), or after step 1.
 
-1. If a test or practice event exists: delete its requests while it is practice or live
-   (`delete from public.patients where event_id = (select id from public.events where slug = '<link name>');`), then
-   End it in the app. **Delete first, then end** (the other order is refused by the write guard).
+If the Vercel build failed in section 3, step 3, the old build is still serving: do steps 2, 3 and 5 only.
+
+1. For every event other than EDC that holds requests (the Release check event from section 4 does):
+   1. If it is archived, **Reopen** it in the app first (Events → the event → Reopen). An archived event's requests
+      can't be deleted: the write guard answers `event_ended` to every delete.
+   2. SQL Editor: delete its requests, with its link name in place of `<link name>` (three times):
+      ```sql
+      begin;
+      delete from public.patient_photos where patient_id in (select p.id from public.patients p where p.event_id = (select e.id from public.events e where e.slug = '<link name>'));
+      delete from public.audit_events where event_id = (select e.id from public.events e where e.slug = '<link name>');
+      delete from public.patients where event_id = (select e.id from public.events e where e.slug = '<link name>');
+      commit;
+      ```
+      Its messages, message reads, en route marks, activity and auto-close records go with each request (they are
+      deleted with it). The photo files stay in Storage (`patient-photos`); nothing shows them.
+   3. **End** it in the app.
 2. Dry run: SQL Editor, paste `supabase/rollback/20261110000000_events_down.sql`, change its last line `commit;` to
    `rollback;`, run. It must finish without an error.
 3. Paste it again unchanged and run it. From here the new build fails (its functions are gone).

@@ -5,7 +5,7 @@
 import type { OutboxItem } from '../api-types';
 import { K, NO_EVENT, type Kv, type StoredDraft, type StoredEventMeta, type StoredJob } from './persist';
 
-export { DROP_KEY, clearEventDrops, readEventDrops, rememberEnded } from './ended';
+export { rememberEnded } from './ended';
 
 export interface LifecycleHost {
   kv(): Kv | null;

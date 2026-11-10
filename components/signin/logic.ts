@@ -155,10 +155,15 @@ function readSession(body: unknown): SessionInfo | null {
   };
 }
 
-/** The ended event an `event_ended` answer carries (name, logo), or null. */
+/** The ended event an `event_ended` answer carries (id, name, logo), or null. The id marks its local data for removal. */
 export function readEnded(value: unknown): EndedEvent | null {
   if (!isRecord(value) || typeof value.name !== 'string') return null;
-  return { name: value.name, logoUrl: typeof value.logoUrl === 'string' ? value.logoUrl : null, stage: 'archived' };
+  return {
+    ...(typeof value.id === 'string' ? { id: value.id } : {}),
+    name: value.name,
+    logoUrl: typeof value.logoUrl === 'string' ? value.logoUrl : null,
+    stage: 'archived',
+  };
 }
 
 function errorField(body: unknown): Record<string, unknown> | null {

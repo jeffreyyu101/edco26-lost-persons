@@ -93,7 +93,8 @@ describe('the Ended screen', () => {
 describe('sign-in to an archived event', () => {
   it('410 event_ended reads as the Ended screen with the event the server sent', () => {
     const body = { error: { code: 'event_ended', message: 'x', event: { id: 'e1', name: 'EDC Orlando', logoUrl: null, stage: 'archived' } } };
-    expect(interpretSignInResponse(410, body, null, 0)).toEqual({ kind: 'ended', event: { name: 'EDC Orlando', logoUrl: null, stage: 'archived' } });
+    // The id stays: it marks that event's data on the phone for removal (lib/client/ended.ts endedAtSignIn).
+    expect(interpretSignInResponse(410, body, null, 0)).toEqual({ kind: 'ended', event: { id: 'e1', name: 'EDC Orlando', logoUrl: null, stage: 'archived' } });
     expect(interpretSignInResponse(410, { error: { code: 'event_ended', message: 'x' } }, null, 0)).toEqual({ kind: 'ended', event: null });
     // Another 410 is not the Ended screen.
     expect(interpretSignInResponse(410, null, null, 0)).toEqual({ kind: 'server' });

@@ -309,6 +309,10 @@ describe('HTTP classification', () => {
     const err = await apiRequest(async () => json(422, { error: { code: 'invalid', message: 'Bad', field: 'otherLocation' } }), '/api/x', { timeoutMs: 1000 });
     expect(err).toEqual({ ok: false, kind: 'http', status: 422, error: { code: 'invalid', message: 'Bad', field: 'otherLocation' } });
     expect(isDefinitive(err as never, CREATE_DEFINITIVE)).toBe(true);
+    // 410 event_ended is definitive for every role: a queued create or photo stops retrying.
+    const ended = { ok: false, kind: 'http', status: 410, error: { code: 'event_ended', message: 'x' } };
+    expect(isDefinitive(ended as never, CREATE_DEFINITIVE)).toBe(true);
+    expect(isDefinitive(ended as never, PHOTO_DEFINITIVE)).toBe(true);
   });
 
   it('treats captive portals (HTML 200, redirects, 511) as no network', async () => {

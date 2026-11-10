@@ -737,6 +737,26 @@ describe('the password rule', () => {
     expect((await api('/api/org/lead-passcode', { json: { passcode: `lead-${uniq()}-${uniq()}` }, cookie: lead })).status).toBe(200);
     await ensureTestEvent();
   });
+
+  it('removing an ended event\'s password inside its 24 h retires the held hash, as the clearing after 24 h does', async () => {
+    const lead = await leadCookie();
+    const ended = await makeEvent();
+    archivedAtEnd.push(ended.event.id);
+    expect((await api(`/api/events/${ended.event.id}/end`, { json: {}, cookie: lead })).status).toBe(200);
+    // Held: still the event's own hash (compared by digest; no hash is printed).
+    const before = psql(`select md5(staff_password_hash) from public.events where id = '${ended.event.id}'`);
+    expect(before).toMatch(/^[0-9a-f]{32}$/);
+    const off = await api<{ event: EventAdmin }>(`/api/events/${ended.event.id}/password`, { method: 'DELETE', cookie: lead });
+    expect(off.status).toBe(200);
+    expect(off.body.event).toMatchObject({ stage: 'archived', hasStaffPassword: false });
+    expect(psql(`select (staff_password_hash is null)::text || '/' || md5(coalesce(ended_password_hash, '')) from public.events where id = '${ended.event.id}'`)).toBe(`true/${before}`);
+    // Past the 24 h (nothing is left for the clearing to move), the lead passcode still may not be it.
+    psql(`update public.events set ended_at = ended_at - interval '25 hours' where id = '${ended.event.id}'`);
+    expect(psql(`select public.lp_event_release_held('${ended.event.id}')`)).toBe('0');
+    const asLead = await api('/api/org/lead-passcode', { json: { passcode: ended.password }, cookie: lead });
+    expect(asLead.status).toBe(422);
+    expect(asLead.body.error).toMatchObject({ code: 'invalid', field: 'passcode' });
+  });
 });
 
 describe('reopen never captures another event\'s staff', () => {

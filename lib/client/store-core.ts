@@ -93,7 +93,7 @@ import {
 import type * as LifecycleModuleNs from './event-lifecycle';
 import type { LifecycleHost } from './event-lifecycle';
 
-type LifecycleModule = typeof LifecycleModuleNs;
+export type LifecycleModule = typeof LifecycleModuleNs;
 import { forgetBell, readPrefs, subscribePrefs, writePref } from './prefs';
 import { dropBrowserPush, provideApi, publishSyncExtras, pushHooks } from './f4-bridge';
 import { SESSION_CHANNEL, clearLogoutPending, readLogoutPending, writeLogoutPending, type LogoutPending } from './session-signals';
@@ -258,6 +258,8 @@ export interface CreateAppStoreOptions {
   env?: () => StoreEnv;
   /** (F3) Loads the messages engine; a dynamic import by default (tests pass it in directly). */
   loadMessaging?: () => Promise<CreateMessaging>;
+  /** (Events) Loads the event lifecycle (lib/client/event-lifecycle.ts); a dynamic import by default (tests: a failing load). */
+  loadLifecycle?: () => Promise<LifecycleModule>;
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -1043,10 +1045,15 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     void enqueue((store) => store.del(K.lastStaff));
     if (own) {
       // What the Ended screen shows; the event's data (unsent requests and messages can never be sent: they go,
-      // silently); the session cookie (DELETE /api/session still answers after the end).
+      // silently); the session cookie (DELETE /api/session still answers after the end). The drop marker is written
+      // first: if the lifecycle chunk fails to load (or the tab dies), the next start drops the data (boot).
+      const ls = e?.localStorage() ?? null;
+      writeDropMarks(ls, [...readDropMarks(ls).filter((x) => x !== eventId), eventId]);
       const m = await lifecycle().catch(() => null);
       m?.rememberEnded(shown, e?.sessionStorage() ?? null);
-      await m?.dropEventData(lifecycleHost, eventId).catch(() => undefined);
+      if (m && (await m.dropEventData(lifecycleHost, eventId).then(() => true, () => false))) {
+        writeDropMarks(ls, readDropMarks(ls).filter((x) => x !== eventId));
+      }
       if (e) await apiRequest(e.fetch, '/api/session', { method: 'DELETE', timeoutMs: SIGN_OUT_TIMEOUT_MS }).catch(() => undefined);
     }
     await (pushHooks()?.afterSignOut(true) ?? dropBrowserPush());
@@ -1056,7 +1063,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   // (Events) The event lifecycle on this phone (lib/client/event-lifecycle.ts): loaded with import(), off the first load.
   let lifecycleLoad: Promise<LifecycleModule> | null = null;
   const lifecycle = () =>
-    (lifecycleLoad ??= import('./event-lifecycle').catch((error: unknown) => {
+    (lifecycleLoad ??= (options.loadLifecycle ?? (() => import('./event-lifecycle')))().catch((error: unknown) => {
       lifecycleLoad = null;
       throw error;
     }));
@@ -1088,8 +1095,18 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     const gen = ownerGen();
     const canon = canonStaff(info.staff) ?? '';
     const event = info.eventId ?? NO_EVENT;
-    // (Events) Practice → live since this phone cached the event: its cache and practice creates go first.
-    if (info.event) await checkWentLive(event, info.event.wentLiveAt ?? null).catch(() => false);
+    // (Events) Practice → live since this phone cached the event: its cache and practice creates go first. If the
+    // check's chunk fails to load, what it records on first sight is recorded here (so the next check that runs still
+    // sees a later go-live), and processJob never sends a create saved before the event's go-live.
+    if (info.event) {
+      const wentLiveAt = info.event.wentLiveAt ?? null;
+      await checkWentLive(event, wentLiveAt).catch(async () => {
+        if (!kv || event === NO_EVENT) return;
+        await enqueue(async (store) => {
+          if (!(await store.get(K.meta(event)))) await store.set(K.meta(event), { wentLiveAt });
+        }).catch(() => undefined);
+      });
+    }
     if (gen !== state.generation || signingOut || ending) return false;
     const otherEvent = event !== eventKey;
     if (cacheStaff !== canon || cacheEvent !== event) {
@@ -1887,6 +1904,13 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     patchJob(mutationId, { state: 'sending' });
     if (!job.serverId) {
       const existing = confirmedRowForJob(job, state.confirmed);
+      const ev = state.event;
+      if (!existing && job.wentLiveAt !== undefined && ev?.id === eventKey && (job.wentLiveAt ?? null) !== (ev.wentLiveAt ?? null)) {
+        // (Events) Saved before the event's go-live: a practice request (go-live deleted those on the server). It goes,
+        // silently, as the go-live check drops it; this holds even when that check's chunk failed to load.
+        await removeJob(mutationId);
+        return 'next';
+      }
       if (existing) {
         // A6: it was created already (another tab, or a lost response): continue with its photos.
         createdOk(mutationId, existing);
@@ -2879,13 +2903,13 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     }
     if (!isLive(id)) return;
     if (durable && kv) {
-      // (Events) Ended events this phone learned of at sign-in (lib/client/ended.ts): their data goes first.
-      // (Events) Ended events this phone learned of at sign-in (lib/client/ended.ts DROP_KEY): their data goes first.
-      if (e.localStorage()?.getItem(DROP_EVENTS_KEY)) {
-        const m = await lifecycle().catch(() => null);
-        const drops = m?.readEventDrops(e.localStorage()) ?? [];
-        for (const eventId of drops) await dropEventData(eventId).catch(() => undefined);
-        if (m && drops.length) m.clearEventDrops(drops, e.localStorage());
+      // (Events) Ended events whose data has to go (marked at sign-in, lib/client/ended.ts, or by an End this app could
+      // not finish): it goes first. A mark stays until its drop has run.
+      const marked = readDropMarks(e.localStorage());
+      if (marked.length) {
+        const done: string[] = [];
+        for (const eventId of marked) if (await dropEventData(eventId).then(() => true, () => false)) done.push(eventId);
+        if (done.length) writeDropMarks(e.localStorage(), readDropMarks(e.localStorage()).filter((x) => !done.includes(x)));
       }
       if (!isLive(id)) return;
       try {
@@ -3057,6 +3081,23 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 const ENDED_PATH = '/signin?ended=1';
 /** lib/client/ended.ts DROP_KEY. */
 const DROP_EVENTS_KEY = 'lp-drop-events';
+/** lib/client/ended.ts readEventDrops / markEventDrop, here so they work without the lifecycle chunk. */
+function readDropMarks(ls: Storage | null): string[] {
+  try {
+    const v = JSON.parse(ls?.getItem(DROP_EVENTS_KEY) ?? '[]') as unknown;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+function writeDropMarks(ls: Storage | null, ids: readonly string[]): void {
+  try {
+    if (ids.length) ls?.setItem(DROP_EVENTS_KEY, JSON.stringify(ids.slice(-20)));
+    else ls?.removeItem(DROP_EVENTS_KEY);
+  } catch {
+    // best effort
+  }
+}
 /** lib/client/signed-in-at.ts SIGNED_IN_EVENT_KEY. */
 const SIGNED_IN_EVENT_KEY = 'lp-signin-event';
 

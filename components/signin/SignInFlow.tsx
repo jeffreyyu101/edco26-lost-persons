@@ -24,7 +24,7 @@
 import { VisuallyHidden } from '@radix-ui/themes';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { EndedEvent, SessionInfo } from '@/lib/api-types';
-import { ENDED_PATH, markEventDrop, readEnded, rememberEnded } from '@/lib/client/ended';
+import { ENDED_PATH, endedAtSignIn, readEnded } from '@/lib/client/ended';
 import { clearRememberedIdentity, forgetBellForOtherStaff, readPrefs, writeRememberedIdentity } from '@/lib/client/prefs';
 import { announceSignIn } from '@/lib/client/session-signals';
 import { markSignedIn, markSignedInEvent } from '@/lib/client/signed-in-at';
@@ -64,8 +64,7 @@ export function SignInFlow({ next, teams = [], ended = false }: SignInFlowProps)
   const [endedEvent, setEndedEvent] = useState<EndedEvent | null | undefined>(undefined);
   const showEnded = mounted && (endedEvent !== undefined || ended);
   const onEnded = (event: EndedEvent | null) => {
-    rememberEnded(event);
-    if (event?.id) markEventDrop(event.id);
+    endedAtSignIn(event);
     forgetJoinCode();
     window.history.replaceState(window.history.state, '', ENDED_PATH);
     setEndedEvent(event);

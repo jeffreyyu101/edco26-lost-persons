@@ -1,7 +1,8 @@
 // (Events) POST /api/events/:id/password {password}: sets the event's staff password (bcrypt; only the hash is stored).
 // Refused (422, field password) when it equals the Ground Control lead passcode or the staff password of another
 // event that is running or still holds it (24 h after its End): a password must name exactly one way in. An archived
-// event takes none (409; Reopen first). DELETE turns password sign-in off. Leads only.
+// event takes none (409; Reopen first). DELETE turns password sign-in off; for an archived event inside its 24 h hold
+// it retires the held hash, as the clearing after 24 h does, so the lead passcode can never equal it. Leads only.
 import { eventAdmin, setStaffPassword, type EventRow } from '@/lib/server/events';
 import { idParam, json, readJson } from '@/lib/server/http';
 import { authedRoute } from '@/lib/server/route';

@@ -4,7 +4,8 @@
 // a write or the session check signs out, drops the event's data silently and opens /signin?ended=1).
 import { describe, expect, it } from 'vitest';
 import type { EventConfig, SessionInfo } from '@/lib/api-types';
-import { ENDED_KEY, ENDED_PATH } from '@/lib/client/ended';
+import { interpretSignInResponse } from '@/components/signin/logic';
+import { DROP_KEY, ENDED_KEY, ENDED_PATH, endedAtSignIn } from '@/lib/client/ended';
 import { K, openKv } from '@/lib/client/persist';
 import { STUB_EVENT } from '@/lib/client/stub-data';
 import { advance, settle } from './helpers/env';
@@ -248,5 +249,142 @@ describe('the Ended flow (410 event_ended)', () => {
     expect(tab.s().toasts.map((t) => t.title)).toContain('Event archived');
     expect(tab.fe.redirects).not.toContain(ENDED_PATH);
     expect(server.session).not.toBeNull();
+  });
+});
+
+describe('the Ended answer at sign-in (a phone whose session had expired)', () => {
+  it("keeps the event's id, so the app's next start drops that event's cache and outbox", async () => {
+    // Event A on this phone: a cached row and a create queued offline.
+    const server = new FakeServer([makeRow(1, { name: 'A row' })]);
+    server.session = sessionOf(A);
+    const tab = boot(server);
+    await ready();
+    await advance(3_500);
+    tab.fe.setOnline(false);
+    await finish(tab.a.create({ values: values(), clientMutationId: CMID(6), photos: [], photoTiming: 'today' }));
+    tab.stop();
+    await settle();
+    const kv = openKv(tab.fe.dbName)!;
+    expect((await kv.keys()).filter((k) => k.startsWith(`cache:${A.id}:`)).length).toBeGreaterThan(0);
+    expect(await kv.get(`outbox:${CMID(6)}`)).toMatchObject({ eventId: A.id });
+
+    // /signin: A's password answers 410 event_ended with the event (lib/server/events.ts endedEvent); SignInFlow's
+    // onEnded hands the outcome's event to endedAtSignIn.
+    const outcome = interpretSignInResponse(410, { error: { code: 'event_ended', message: 'x', event: { id: A.id, name: 'Event A', logoUrl: null, stage: 'archived' } } }, null, 0);
+    expect(outcome).toEqual({ kind: 'ended', event: { id: A.id, name: 'Event A', logoUrl: null, stage: 'archived' } });
+    endedAtSignIn(outcome.kind === 'ended' ? outcome.event : null, { session: tab.fe.session, local: tab.fe.local });
+    expect(JSON.parse(tab.fe.local.getItem(DROP_KEY) ?? '[]')).toEqual([A.id]);
+
+    // The app's next start (signed in to event B): A's data goes first.
+    const serverB = new FakeServer([makeRow(2, { name: 'B row' })]);
+    serverB.session = sessionOf(B);
+    boot(serverB, { dbName: tab.fe.dbName, local: tab.fe.local });
+    await ready();
+    await advance(3_500);
+    const keys = await kv.keys();
+    expect(keys.filter((k) => k.startsWith(`cache:${A.id}:`))).toEqual([]);
+    expect(keys.filter((k) => k.startsWith('outbox:'))).toEqual([]);
+    expect(tab.fe.local.getItem(DROP_KEY)).toBeNull();
+    expect(creates(serverB)).toHaveLength(0);
+  });
+});
+
+describe('the lifecycle chunk fails to load', () => {
+  const lostChunk = () => Promise.reject(new Error('ChunkLoadError: Loading chunk failed'));
+
+  it("Ended: the drop marker is written first, so the next start drops the event's cache and outbox", async () => {
+    const server = new FakeServer([makeRow(1)]);
+    server.session = sessionOf({ ...A, stage: 'live', wentLiveAt: '2026-11-07T05:00:00Z' });
+    const tab = boot(server, { loadLifecycle: lostChunk });
+    await ready();
+    await advance(3_500);
+    tab.fe.setOnline(false);
+    await finish(tab.a.create({ values: values(), clientMutationId: CMID(7), photos: [], photoTiming: 'today' }));
+    tab.fe.setOnline(true);
+    server.ended = { name: 'Event A', logoUrl: null, stage: 'archived', id: A.id };
+    await advance(7_000);
+    await advance(2_000);
+    await settle();
+    expect(tab.fe.redirects.at(-1)).toBe(ENDED_PATH);
+    expect(server.session).toBeNull();
+    // Nothing could be dropped (no chunk), but the event is marked and nothing more is sent.
+    expect(JSON.parse(tab.fe.local.getItem(DROP_KEY) ?? '[]')).toEqual([A.id]);
+    const kv = openKv(tab.fe.dbName)!;
+    expect(await kv.get(`outbox:${CMID(7)}`)).toBeDefined();
+    tab.stop();
+    await settle();
+
+    // The next start (the chunk loads): the marked event's data goes, and the mark with it.
+    const serverB = new FakeServer([makeRow(2)]);
+    serverB.session = sessionOf(B);
+    boot(serverB, { dbName: tab.fe.dbName, local: tab.fe.local });
+    await ready();
+    await advance(3_500);
+    const keys = await kv.keys();
+    expect(keys.filter((k) => k.startsWith(`cache:${A.id}:`))).toEqual([]);
+    expect(keys.filter((k) => k.startsWith('outbox:'))).toEqual([]);
+    expect(tab.fe.local.getItem(DROP_KEY)).toBeNull();
+  });
+
+  it("go-live: a create saved in practice is never sent live; the next start still drops the practice rows", async () => {
+    const server = new FakeServer([makeRow(1, { name: 'Practice row' })]);
+    server.session = sessionOf(A);
+    const tab = boot(server, { loadLifecycle: lostChunk });
+    await ready();
+    await advance(3_500);
+    expect([...tab.s().confirmed.values()].map((r) => r.name)).toEqual(['Practice row']);
+    tab.fe.setOnline(false);
+    await finish(tab.a.create({ values: values({ name: 'Practice create' }), clientMutationId: CMID(8), photos: [], photoTiming: 'today' }));
+    expect(tab.s().outbox).toHaveLength(1);
+    // Go live on the server.
+    server.rows.clear();
+    server.put(makeRow(5, { name: 'Live row' }));
+    const live = { ...A, stage: 'live' as const, wentLiveAt: '2026-11-07T05:00:00Z', updatedAt: '2026-11-07T05:00:00.000000+00:00' };
+    server.session = sessionOf(live);
+    tab.fe.setOnline(true);
+    tab.fe.fire('window', 'online');
+    await advance(8_000);
+    await settle();
+    await advance(8_000);
+    expect(tab.s().event?.stage).toBe('live');
+    expect(creates(server)).toHaveLength(0);
+    expect(tab.s().outbox).toHaveLength(0);
+    const kv = openKv(tab.fe.dbName)!;
+    expect(await kv.get(`outbox:${CMID(8)}`)).toBeUndefined();
+    tab.stop();
+    await settle();
+
+    // The next start, with the chunk: the go-live check sees the go-live (the practice moment was recorded without
+    // the chunk), drops the practice rows and syncs in full.
+    const tab2 = boot(server, { dbName: tab.fe.dbName, local: tab.fe.local });
+    await ready();
+    await advance(8_000);
+    await settle();
+    await advance(8_000);
+    expect([...tab2.s().confirmed.values()].map((r) => r.name)).toEqual(['Live row']);
+    expect(creates(server)).toHaveLength(0);
+  });
+});
+
+describe('a lead whose queued create meets an ended event (410 event_ended)', () => {
+  it('stops retrying at once: Needs attention, one POST, no backoff loop', async () => {
+    const server = new FakeServer([makeRow(1)]);
+    server.session = { ...sessionOf({ ...A, stage: 'live', wentLiveAt: '2026-11-07T05:00:00Z' }), role: 'lead' };
+    const tab = boot(server);
+    await ready();
+    await advance(3_500);
+    tab.fe.setOnline(false);
+    await finish(tab.a.create({ values: values(), clientMutationId: CMID(9), photos: [], photoTiming: 'today' }));
+    server.override = (req) => (req.method === 'POST' && req.path === '/api/requests' ? apiError(410, 'event_ended', 'This event is now closed', { event: { id: A.id, name: 'Event A', logoUrl: null, stage: 'archived' } }) : undefined);
+    tab.fe.setOnline(true);
+    tab.fe.fire('window', 'online');
+    await advance(8_000);
+    await settle();
+    expect(creates(server)).toHaveLength(1);
+    expect(tab.s().outbox.find((j) => j.mutationId === CMID(9))?.state).toBe('needs_attention');
+    await advance(300_000);
+    expect(creates(server)).toHaveLength(1);
+    // A lead is not signed out by it.
+    expect(tab.fe.redirects).not.toContain(ENDED_PATH);
   });
 });
