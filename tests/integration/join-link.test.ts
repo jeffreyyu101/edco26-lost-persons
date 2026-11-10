@@ -58,7 +58,7 @@ describe('POST /api/session with the team link (test server, link on)', () => {
     expect(await attemptsFor(addr)).toEqual([{ name_key: staffName.toLowerCase(), ok: true }]);
   });
 
-  it('Other team with the link stores the canonical team', async () => {
+  it("(events) Other team with the link stores the event's team it names (its short name here)", async () => {
     const res = await api('/api/session', {
       json: { staffName: name(), team: 'Other', otherTeam: ' dispatch ', invite: CODE },
       headers: { 'x-real-ip': await ip() },

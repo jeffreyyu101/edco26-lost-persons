@@ -797,6 +797,28 @@ describe('event settings and the requests that use them', () => {
   });
 });
 
+describe('(phase 2) X-LP-Event: a tab never writes into another event than the one it works', () => {
+  it("a request naming another event than the cookie's is refused (409 wrong_event); its own, none, or GET /api/session are not", async () => {
+    const a = await makeEvent();
+    const b = await makeEvent();
+    archivedAtEnd.push(a.event.id, b.event.id);
+    const cookie = (await signIn(newStaff('Site Ops'), b.password)).cookie;
+    const as = (event: string) => ({ cookie, headers: { 'x-lp-event': event } });
+    const wrong = await api('/api/requests', { json: createBody({ reportingLocation: 'Main Stage Tent' }), ...as(a.event.id) });
+    expect(wrong.status).toBe(409);
+    expect(wrong.body.error.code).toBe('wrong_event');
+    expect((await sync(cookie)).rows).toHaveLength(0);
+    expect((await api('/api/sync', as(a.event.id))).body.error.code).toBe('wrong_event');
+    // The session check answers whatever the header says: that is how the tab learns the cookie's event.
+    const who = await api<SessionInfo>('/api/session', as(a.event.id));
+    expect(who.status).toBe(200);
+    expect(who.body.eventId).toBe(b.event.id);
+    // Its own event, or no header / 'none' (a tab that knows no event yet), go through.
+    expect((await api('/api/requests', { json: createBody({ reportingLocation: 'Main Stage Tent' }), ...as(b.event.id) })).status).toBe(201);
+    expect((await api('/api/sync', as('none'))).status).toBe(200);
+  });
+});
+
 describe('(phase 2) a renamed team stays that team', () => {
   it('renaming the medical team (same id) keeps "Medical asked" for messages stored, and sessions signed in, under the old label', async () => {
     const lead = await leadCookie();

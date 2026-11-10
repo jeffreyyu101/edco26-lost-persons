@@ -286,7 +286,15 @@ describe('GET /api/telemetry/health and the aggregates', () => {
     const res = await api('/api/telemetry/health?window=1h', { cookie: medic });
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
-    expect(Object.keys(res.body).sort()).toEqual(['coverage', 'config', 'errors', 'examples', 'flows', 'generatedAt', 'kpis', 'net', 'problems', 'push', 'window'].sort());
+    expect(Object.keys(res.body).sort()).toEqual(['coverage', 'config', 'errors', 'examples', 'flows', 'generatedAt', 'kpis', 'net', 'problems', 'push', 'teams', 'timeZone', 'window'].sort());
+    // (Events) The event's team names by id (telemetry's team keys) and its time zone, for the page's labels.
+    expect(res.body.teams).toEqual([
+      { id: 'transpo', short: 'GCHX Med Transpo' },
+      { id: 'dispatch', short: 'Dispatch' },
+      { id: 'base', short: 'GCHX Base' },
+      { id: 'medical', short: 'Medical' },
+    ]);
+    expect(res.body.timeZone).toBe('America/New_York');
     const mine = (res.body.problems as Array<{ area: string; n: number; devices: number }>).filter((p) => p.area.startsWith(area));
     expect(mine.map((p) => [p.area, p.n, p.devices])).toEqual([
       [`${area}-b`, 2, 2],

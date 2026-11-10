@@ -7,6 +7,8 @@
 //   * (Events) the event comes from the session, never from the client: a route needs one (409 no_event for a lead
 //     with none open) unless it opts out; lead-only routes answer 403 to staff. An archived event's writes fail in
 //     SQL with P0410, mapped to 410 event_ended (lib/server/errors.ts).
+//   * (Phase 2) a request whose X-LP-Event header names another event than the session's: 409 wrong_event (a tab still
+//     working event A must never write into event B, signed in meanwhile in another tab).
 //   * (Events) one lp_session_state call per signed-in request:
 //       - staff of an archived event: 410 event_ended with the event block the Ended screen shows, on EVERY route
 //         (reads included: a phone that only polls learns the event ended), except the few marked `afterEnd`
@@ -114,6 +116,11 @@ function wrap<P extends Params>(
           }
         }
         if ((options.event ?? 'required') === 'required' && !session.eventId) throw new ApiFailure('no_event');
+        // (Phase 2) The tab says which event its request is for (X-LP-Event): another than the cookie's (signed in to
+        // another event in another tab) is refused, so a queued write of event A never lands in event B.
+        // Routes that serve any session (GET /api/session above all: how the tab learns the cookie's event) are exempt.
+        const claimed = request.headers.get('x-lp-event');
+        if ((options.event ?? 'required') === 'required' && claimed && claimed !== 'none' && claimed !== session.eventId) throw new ApiFailure('wrong_event');
       }
       const params = (await context.params) as P;
       response = await handler(session ? { request, params, session, eventId: session.eventId ?? '', event } : { request, params });

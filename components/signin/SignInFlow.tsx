@@ -27,7 +27,7 @@ import type { EndedEvent, SessionInfo } from '@/lib/api-types';
 import { ENDED_PATH, markEventDrop, readEnded, rememberEnded } from '@/lib/client/ended';
 import { clearRememberedIdentity, forgetBellForOtherStaff, readPrefs, writeRememberedIdentity } from '@/lib/client/prefs';
 import { announceSignIn } from '@/lib/client/session-signals';
-import { markSignedIn } from '@/lib/client/signed-in-at';
+import { markSignedIn, markSignedInEvent } from '@/lib/client/signed-in-at';
 import { captureJoinCode, forgetJoinCode } from '@/lib/join-link';
 import { safeNextPath } from '@/lib/safe-next';
 import { isWide } from './desktop';
@@ -112,8 +112,10 @@ function openApp(session: SessionInfo | null, identity: Identity, next: string |
   writeRememberedIdentity(session?.staffName ?? identity.name, session?.team ?? identity.team);
   // A sign-out left pending must not end this new session; open tabs re-check who is signed in.
   announceSignIn();
-  // The app page opens a notification tapped before this sign-in (lib/client/signed-in-at.ts).
+  // The app page opens a notification tapped before this sign-in (lib/client/signed-in-at.ts), and starts from this
+  // event's cache, never the previous event's.
   markSignedIn();
+  markSignedInEvent(session?.eventId);
   window.location.replace(safeNextPath(next) ?? '/');
 }
 

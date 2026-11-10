@@ -165,10 +165,17 @@ export async function requireEvent(eventId: string): Promise<EventRow> {
   return row;
 }
 
-/** `team` names this team: its label or (phase 2) a label it had before a rename, case-insensitive. */
+/**
+ * `team` names this team: its label, its short name or (phase 2) a label it had before a rename, case-insensitive (so
+ * "dispatch" typed as Other team is the event's Dispatch, whatever the event calls it in full).
+ */
 function teamNamed(x: Partial<EventTeam>, team: string): boolean {
-  const t = team.trim().toLowerCase();
-  return str(x.label).toLowerCase() === t || (Array.isArray(x.aliases) && x.aliases.some((a) => typeof a === 'string' && a.toLowerCase() === t));
+  const t = team.trim().replace(/\s+/g, ' ').toLowerCase();
+  return (
+    str(x.label).toLowerCase() === t ||
+    (!!x.short && str(x.short).toLowerCase() === t) ||
+    (Array.isArray(x.aliases) && x.aliases.some((a) => typeof a === 'string' && a.toLowerCase() === t))
+  );
 }
 
 /** True when `team` is one of the event's sign-in teams (by label or an earlier label, case-insensitive). */

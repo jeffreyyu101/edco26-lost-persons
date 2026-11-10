@@ -663,10 +663,18 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     if (outer?.aborted) controller.abort();
     else outer?.addEventListener('abort', onOuter, { once: true });
     inflight.add(controller);
-    return apiRequest<T>(e.fetch, path, { ...opts, signal: controller.signal })
+    // (Events) Every call says which event this tab works: a cookie of another event refuses it (409 wrong_event).
+    return apiRequest<T>(e.fetch, path, { ...opts, signal: controller.signal, event: eventKey })
       .then((res) => {
-        // (Events) Any answer saying the event ended (a poll, a write, the session check, the messages engine, F4).
-        if (!res.ok && res.kind === 'http' && res.status === 410 && res.error?.code === 'event_ended') eventEnded(res.error);
+        if (!res.ok && res.kind === 'http') {
+          // Any answer saying the event ended (a poll, a write, the session check, the messages engine, F4).
+          if (res.error?.code === 'event_ended') eventEnded(res.error);
+          // Signed in to another event (another tab): read the session again; applySession switches to that event.
+          if (res.error?.code === 'wrong_event') {
+            sessionMayHaveChanged();
+            triggerSync();
+          }
+        }
         return res;
       })
       .finally(() => {
@@ -1102,6 +1110,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     // (Events) With the role and the event config: an offline reload renders the same posts, teams, zone and logo.
     const last: StoredStaff = { staffName: info.staffName, team: info.team, staff: info.staff, eventId: event, role: info.role, event: info.event ?? null };
     void enqueue((store) => store.set(K.lastStaff, last));
+    env?.localStorage()?.removeItem(SIGNED_IN_EVENT_KEY);
     refreshPrompt();
     kickOutbox();
     messaging.kick();
@@ -2877,9 +2886,12 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
       }
       if (!isLive(id)) return;
       try {
-        const last = await kv.get<StoredStaff>(K.lastStaff);
-        // (Events) The event this phone last worked (its cache, outbox and config), until GET /api/session confirms one.
-        if (last && typeof last.eventId === 'string' && eventKey === NO_EVENT) eventKey = last.eventId;
+        let last = await kv.get<StoredStaff>(K.lastStaff);
+        // (Events) The event this phone last worked (its cache, outbox and config), until GET /api/session confirms one;
+        // one a sign-in just opened (lib/client/signed-in-at.ts) wins, so the previous event's rows never show.
+        const opened = e.localStorage()?.getItem(SIGNED_IN_EVENT_KEY);
+        if (eventKey === NO_EVENT) eventKey = opened || last?.eventId || NO_EVENT;
+        if (last?.eventId !== eventKey) last = undefined;
         if (last?.event && !state.event) set({ event: last.event, role: last.role ?? null, eventTimezone: last.event.timezone || state.eventTimezone });
         const [ids, jobs] = await Promise.all([kv.get<string[]>(K.myIds), readJobs(kv, eventKey)]);
         if (!isLive(id)) return;
@@ -3039,6 +3051,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
 const ENDED_PATH = '/signin?ended=1';
 /** lib/client/ended.ts DROP_KEY. */
 const DROP_EVENTS_KEY = 'lp-drop-events';
+/** lib/client/signed-in-at.ts SIGNED_IN_EVENT_KEY. */
+const SIGNED_IN_EVENT_KEY = 'lp-signin-event';
 
 const syncPathFor = (since: string | null, reconcile: boolean, after: SyncResponse['next'], ev?: string) =>
   syncPath({ since, reconcile, after, ...(ev !== undefined ? { ev } : {}) });

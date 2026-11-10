@@ -63,11 +63,11 @@ export function mainMedicalLabel(event: Pick<EventConfig, 'mainMedical'> | null 
   return event?.mainMedical?.trim() || '';
 }
 
-/** One of the event's teams by its label (case-insensitive), or null for any other (Other) team text. */
+/** One of the event's teams by its label, short name or an earlier label (case-insensitive), or null for any other text. */
 export function teamOf(event: Pick<EventConfig, 'teams'> | null | undefined, team: string | null | undefined): EventTeam | null {
   const t = (team ?? '').trim().toLowerCase();
   if (!t) return null;
-  return event?.teams.find((x) => x.label.toLowerCase() === t || (x.aliases ?? []).some((a) => a.toLowerCase() === t)) ?? null;
+  return event?.teams.find((x) => x.label.toLowerCase() === t || x.short.toLowerCase() === t || (x.aliases ?? []).some((a) => a.toLowerCase() === t)) ?? null;
 }
 
 /** The short form of a team for display: the event's short name, else the team text itself. */

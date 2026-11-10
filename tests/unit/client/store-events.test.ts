@@ -107,6 +107,34 @@ describe('one browser profile, two events', () => {
   });
 });
 
+describe('signing in to another event', () => {
+  it("the app never flashes the previous event's cached rows while GET /api/session is on its way", async () => {
+    const serverA = new FakeServer([makeRow(1, { name: 'A row' })]);
+    serverA.session = sessionOf(A);
+    const tabA = boot(serverA);
+    await ready();
+    await advance(3_500);
+    tabA.stop();
+    await settle();
+    // The sign-in screen marks the event it opened (lib/client/signed-in-at.ts) before it opens the app.
+    tabA.fe.local.setItem('lp-signin-event', B.id);
+    const serverB = new FakeServer([makeRow(2, { name: 'B row' })]);
+    serverB.session = sessionOf(B);
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    serverB.override = async (req) => (req.path === '/api/session' ? (await held, undefined) : undefined);
+    const tabB = boot(serverB, { dbName: tabA.fe.dbName, local: tabA.fe.local });
+    await settle();
+    await advance(50);
+    expect(tabB.s().hydrated).toBe(true);
+    expect([...tabB.s().confirmed.values()].map((r) => r.name)).not.toContain('A row');
+    release();
+    await advance(3_500);
+    expect([...tabB.s().confirmed.values()].map((r) => r.name)).toEqual(['B row']);
+    expect(tabB.fe.local.getItem('lp-signin-event')).toBeNull();
+  });
+});
+
 describe('practice → live', () => {
   it("drops the event's cache (practice rows the delta would never remove) and its practice creates, then syncs in full", async () => {
     const server = new FakeServer([makeRow(1, { name: 'Practice row' })]);

@@ -614,7 +614,13 @@ export type ApiErrorCode =
   /** (Events) 410: the event is archived. Staff are refused on every route (reads too); a lead only on writes. */
   | 'event_ended'
   /** (Events) 409: a lead session with no event open called an event route. */
-  | 'no_event';
+  | 'no_event'
+  /**
+   * (Phase 2) 409: the request says it is for another event (X-LP-Event) than the session's cookie: this tab's data,
+   * queued requests and messages are another event's, and nothing of them may reach this one. The client re-reads its
+   * session (GET /api/session) and switches to the cookie's event.
+   */
+  | 'wrong_event';
 
 export interface ApiError {
   error: {
