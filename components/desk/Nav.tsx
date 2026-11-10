@@ -6,7 +6,7 @@
 // where an expanded sidebar would squeeze the list and an open request it opens over them instead, with a scrim
 // (./sidebar-model.ts, ./sidebar-state.ts).
 //
-// Header: the logo lockup (EDC Orlando | Ground Control, the brand card's colours) with the live dot; tap syncs.
+// Header: the logo lockup (the event's logo | Ground Control, the brand card's colours) with the live dot; tap syncs.
 // Content: the views with live counts (hidden while loading), Pending's unread-messages bubble, F4's Activity (it
 // opens the top bar's Activity popover), a separator, Dashboard, and Health (the in-house telemetry's page, its own
 // route) only on a device that has opened /health once (localStorage lp-health): floor staff never see it.
@@ -25,6 +25,7 @@ import { SIDEBAR_ID } from './sidebar-model';
 import { closeSidebarOverlay, toggleSidebar, useSidebar } from './sidebar-state';
 import type { MainView } from './views';
 import d from './desk.module.css';
+import { useEventConfig } from '@/lib/client/event-config';
 
 const ICONS: Readonly<Record<NavKey, LucideIcon>> = {
   all: List,
@@ -158,12 +159,13 @@ function Person({ onShowHeader }: { onShowHeader: (() => void) | undefined }) {
   const prefs = usePrefs();
   const name = session.staffName ?? prefs.rememberedName ?? '';
   const team = session.team ?? prefs.rememberedTeam ?? '';
+  const event = useEventConfig();
   return (
     <div className={d.person}>
       <AccountMenu size="2" onShowHeader={onShowHeader} />
       <span className={d.personText} aria-hidden>
         <span className={d.personName}>{name || 'Signed in'}</span>
-        {team ? <span className={d.personTeam}>{teamShort(team)}</span> : null}
+        {team ? <span className={d.personTeam}>{teamShort(team, event?.teams)}</span> : null}
       </span>
       <ChevronsUpDown size={16} strokeWidth={1.75} className={d.personEnd} aria-hidden />
       <Tip>{name || 'Account'}</Tip>

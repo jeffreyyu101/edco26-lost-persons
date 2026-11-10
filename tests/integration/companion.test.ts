@@ -2,7 +2,7 @@
 // the friend swap (POST /api/requests/:id/swap: request → the answerer, approve → everyone involved, decline → the
 // requester and the creator), Friend informed and its Undo, sync / detail payloads, stats and the inactive close.
 import { describe, expect, it } from 'vitest';
-import type { RequestDetail, RequestSummary, Stats, SyncResponse } from '@/lib/api-types';
+import type { RequestDetail, RequestSummary, EventStats, SyncResponse } from '@/lib/api-types';
 import { STATUS } from '@/lib/domain';
 import { EVENT_ID, admin, api, cookieFor, createRequest, newStaff, psql, staffOf, withTestServer, type Staff } from './harness';
 import { eventually } from './push-service';
@@ -270,7 +270,7 @@ describe('payloads, stats, inactive close', () => {
   it('stats: Accompanied is In medical / located; a swap request needs attention (kind swap); Friend informed is counted', async () => {
     const r = await accompanied();
     await swap(ASKER, r, { action: 'request' });
-    const stats = (await api('/api/stats?range=today', { cookie: await cookieFor(FOH) })).body as Stats;
+    const stats = (await api('/api/stats?range=today', { cookie: await cookieFor(FOH) })).body as EventStats;
     expect(stats.open.inMedical).toBeGreaterThanOrEqual(1);
     expect(typeof stats.friendInformed).toBe('number');
     expect(stats.live?.located).toBeGreaterThanOrEqual(1);

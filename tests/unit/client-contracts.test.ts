@@ -1,3 +1,4 @@
+import { STUB_EVENT } from '@/lib/client/stub-data';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import {
@@ -144,7 +145,7 @@ describe('selectors', () => {
       caseNumber: n,
       reportingLocation,
       otherLocation,
-      postShort: postShort(reportingLocation, otherLocation),
+      postShort: postShort(reportingLocation, otherLocation, STUB_EVENT.posts),
     });
     const base = at(1, 'Base', null);
     const otherBase = at(2, 'Other', 'Base');

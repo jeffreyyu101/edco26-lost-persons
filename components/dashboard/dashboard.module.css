@@ -17,11 +17,14 @@
   --dv-tip-bg: #ffffff;
   --dv-tip-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
   --dv-warn-ink: var(--amber-12);
-  /* Tents (categorical, all pairs checked in both modes): Radix indigo 9, orange 10, cyan 10. */
-  --dv-tent-fa4: #3e63dd;
-  --dv-tent-fa3: #ef5f00;
-  --dv-tent-other: #0797b9;
-  /* Hour × tent: one hue as an opacity ramp; empty cells stay gray. */
+  /* (Events) Posts, in one fixed categorical order (the range's busiest first, dashboard-model postSeries): Radix
+     indigo 9, orange 10, cyan 10, purple 9; Other a neutral grey. All pairs checked in both modes. */
+  --dv-post-1: #3e63dd;
+  --dv-post-2: #ef5f00;
+  --dv-post-3: #0797b9;
+  --dv-post-4: #8e4ec6;
+  --dv-post-other: #8b8d98;
+  /* Hour × post: one hue as an opacity ramp; empty cells stay gray. */
   --dv-heat: #c2298a;
   --dv-heat-0: var(--gray-a3);
   --dv-heat-1: color-mix(in srgb, var(--dv-heat) 18%, transparent);
@@ -1117,4 +1120,35 @@
   content: '';
   position: absolute;
   inset: -4px 0 -14px;
+}
+
+/* ---- (Events) an archived event: four tiles across, the calls chart under them (design/screens/events-v2-c/-d) ---- */
+.tiles .spd {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.tiles .sp3 {
+  cursor: default;
+}
+.tiles .sp3:hover {
+  background: none;
+}
+.desk.archived {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.desk.archived .zSpd,
+.desk.archived .zCalls {
+  grid-column: 1;
+  grid-row: auto;
+}
+.desk.archived .zCalls .chart {
+  min-height: 320px;
+}
+/* The phone: two by two. */
+.phone .tiles .spd {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  row-gap: 8px;
+}
+.phone .tiles .sp3:nth-child(3)::before {
+  display: none;
 }

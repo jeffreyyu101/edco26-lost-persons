@@ -2,6 +2,7 @@
 // with a numeric age (24) in IndexedDB, and the smallint → text ALTER bumps no row_version, so sync never
 // resends them. The real store must text them on the way in, so search (and everything else) only ever
 // sees a string. Synthetic data only.
+import { STUB_EVENT } from '@/lib/client/stub-data';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RequestSummary } from '@/lib/api-types';
 import { K, openKv } from '@/lib/client/persist';
@@ -61,7 +62,7 @@ describe('numeric ages from before the free-text change', () => {
     first.stop();
     // The cache as the old client left it, and a cursor well inside the 6 h full-fetch window.
     const kv = openKv(first.fe.dbName);
-    await kv?.set(K.rows(STAFF_KEY), [legacy(1, 24), legacy(2, 31)]);
+    await kv?.set(K.rows(STUB_EVENT.id, STAFF_KEY), [legacy(1, 24), legacy(2, 31)]);
 
     server.overlap = 0; // the delta resends nothing: only the cache holds these rows' ages
     const second = boot(server, { dbName: first.fe.dbName });

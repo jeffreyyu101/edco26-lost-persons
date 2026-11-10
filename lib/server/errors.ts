@@ -21,6 +21,7 @@ export const HTTP_STATUS: Readonly<Record<ApiErrorCode, number>> = {
   unavailable: 503,
   event_ended: 410,
   no_event: 409,
+  wrong_event: 409,
 };
 
 /** Safe default messages (never contain request data). */
@@ -39,6 +40,7 @@ export const DEFAULT_MESSAGE: Readonly<Record<ApiErrorCode, string>> = {
   unavailable: "Couldn't reach the log. Try again",
   event_ended: 'This event is now closed',
   no_event: 'Open an event first',
+  wrong_event: 'Signed in to another event',
 };
 
 type Extra = Omit<ApiError['error'], 'code' | 'message' | 'id'>;

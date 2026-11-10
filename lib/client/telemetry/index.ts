@@ -4,7 +4,7 @@
 // it. Events are numbers, enums and attribute tokens only (lib/client/telemetry/sanitize.ts); they wait in memory and a
 // small IndexedDB ring and go out about once a minute when the phone is idle (send.ts). Every handler is wrapped: a
 // fault is counted, never rethrown, and 20 of them stop the collector for this page load.
-import { FETCH_OBSERVER, SAMPLED, TEL_DEFAULT_UNTIL, TEL_KEYS, TEL_LIMITS, type TelView } from '../../telemetry';
+import { FETCH_OBSERVER, SAMPLED, TEL_KEYS, TEL_LIMITS, type TelView } from '../../telemetry';
 import type { StoreState } from '../store-contract';
 import type { MessagingApi } from '../messages-core';
 import { EventBuffer, type Props, type TelEvent } from './buffer';
@@ -131,7 +131,6 @@ class Collector {
   private readonly session: string;
   private readonly timeOrigin: number;
   private readonly started: number;
-  private until: number;
   private sample = 1;
   private sampledSession: boolean | null = null;
   private prev: StoreState | null = null;
@@ -170,8 +169,6 @@ class Collector {
     const perf = (this.win as Window & { performance?: Performance }).performance;
     this.timeOrigin = typeof perf?.timeOrigin === 'number' && perf.timeOrigin > 0 ? perf.timeOrigin : host.now();
     this.started = host.now();
-    const untilRaw = Number(this.kv.get(TEL_KEYS.until));
-    this.until = Number.isFinite(untilRaw) && untilRaw > 0 ? untilRaw : TEL_DEFAULT_UNTIL;
     let device = this.kv.get(TEL_KEYS.device);
     if (!device || !/^[a-z0-9]{16}$/.test(device)) {
       device = randomId(this.random, 16);
@@ -194,7 +191,6 @@ class Collector {
   }
 
   start(): void {
-    if (this.now() >= this.until) return;
     this.visibleNow = this.doc.visibilityState !== 'hidden';
     this.visAt = this.now();
     this.linkAt = this.now();
@@ -777,10 +773,6 @@ class Collector {
 
   private check(): void {
     const t = this.now();
-    if (t >= this.until) {
-      this.guard.stop();
-      return;
-    }
     this.bindMessages();
     this.flows.tick(t, this.prev?.connection === 'offline');
     if (this.prev) this.checkStuckSend(this.prev, t);
@@ -796,11 +788,8 @@ class Collector {
   }
 
   private onAnswer(a: Answer, [sent, answered]: [number, number]): void {
-    if (typeof a.until === 'number' && a.until > 0) {
-      this.until = a.until;
-      this.kv.set(TEL_KEYS.until, String(a.until));
-      if (this.now() >= a.until) this.guard.stop();
-    }
+    // (Events) No fixed off date any more: the server's `on` decides (lp_tel_config: an event in practice or live and
+    // the kill switch on). An answer's `until` (lp_tel_settings.off_at) is ignored.
     if (typeof a.sample === 'number' && a.sample >= 0 && a.sample <= 1) {
       this.sample = a.sample;
       if (this.sampledSession === null) this.sampledSession = this.random() < this.sample;

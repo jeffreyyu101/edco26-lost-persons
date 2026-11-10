@@ -139,23 +139,20 @@ export const ENGINES = ['webkit', 'blink', 'gecko', 'other'] as const;
 export const LAYOUTS = ['phone', 'tablet', 'laptop', 'desktop'] as const;
 export const EFFECTIVE = ['na', 'slow-2g', '2g', '3g', '4g'] as const;
 
-/** Team keys: the server derives one from the session, never from the phone. */
-export const TEAM_KEYS = ['medical', 'dispatch', 'base', 'transpo', 'other'] as const;
-export type TeamKey = (typeof TEAM_KEYS)[number];
+/**
+ * (Events) A team key: the id of one of the event's teams (EventTeam.id, `^[a-z0-9_-]{1,24}$`, the lp_tel_events.team
+ * CHECK), or 'other' for any other team. The server derives it from the session, never from the phone.
+ */
+export type TeamKey = string;
+export const OTHER_TEAM_KEY = 'other';
 
-const TEAM_KEY_OF: Readonly<Record<string, TeamKey>> = {
-  Medical: 'medical',
-  'GC/HX - Dispatch': 'dispatch',
-  'GC/HX - Base': 'base',
-  'GC/HX - Special Operations/Med Transpo': 'transpo',
-};
-
-/** The team key for a session's team (canonical, alias or custom text): custom text is `other`. */
-// PHASE2: EDC's fixed keys (lp_tel_events.team CHECK); another event's teams fall into 'other' until telemetry keys on
-// the event's team ids (EventTeam.id).
-export function teamKey(team: string | null | undefined): TeamKey {
-  if (typeof team !== 'string' || !team.trim()) return 'other';
-  return TEAM_KEY_OF[canonicalTeam(team)] ?? 'other';
+/** The team key for a session's team: the event's team with that label or short name (case-insensitive), else 'other'. */
+export function teamKey(team: string | null | undefined, teams: ReadonlyArray<{ id?: unknown; label?: unknown; short?: unknown }> = []): TeamKey {
+  if (typeof team !== 'string' || !team.trim()) return OTHER_TEAM_KEY;
+  const t = canonicalTeam(team).toLowerCase();
+  const hit = teams.find((x) => (typeof x.label === 'string' && x.label.toLowerCase() === t) || (typeof x.short === 'string' && x.short.toLowerCase() === t));
+  const id = typeof hit?.id === 'string' ? hit.id : '';
+  return /^[a-z0-9_-]{1,24}$/.test(id) && !DIGIT_RUN_RE.test(id) ? id : OTHER_TEAM_KEY;
 }
 
 /** Limits (design §4.5, §2 caps). */
@@ -191,7 +188,7 @@ export const TEL_LIMITS = {
   sendTimeoutMs: 8_000,
 } as const;
 
-export { TEL_DEFAULT_UNTIL, TEL_KEYS } from './telemetry-keys';
+export { TEL_KEYS } from './telemetry-keys';
 
 /** The pass-through fetch observer (design §4.3, decision §8). Off: resource timing only (status `unk` on WebKit). */
 export const FETCH_OBSERVER = true;

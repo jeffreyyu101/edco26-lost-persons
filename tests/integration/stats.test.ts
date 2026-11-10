@@ -9,9 +9,17 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { EventStats, Stats } from '@/lib/api-types';
-import { POSTS, STATUS } from '@/lib/domain';
+import { STATUS } from '@/lib/domain';
 import { ROOT, TEST_EVENT_ID, TEST_EVENT_SQL } from '../../scripts/test-env.mjs';
 import { EVENT_ID, admin, api, cookieFor, createBody, createRequest, dbUrl, newStaff, pii, psql, uniq, withTestServer } from './harness';
+
+/** (Phase 2) The local test event's posts (scripts/test-env.mjs TEST_EVENT_SQL): no post list is built into the app. */
+const TEST_POSTS = [
+  { value: 'FA 3 – Kinetic', short: 'FA 3' },
+  { value: 'FA 4 – Oasis', short: 'FA 4' },
+  { value: 'Command', short: 'Command' },
+  { value: 'Base', short: 'Base' },
+] as const;
 
 withTestServer();
 
@@ -137,7 +145,7 @@ describe('GET /api/stats', () => {
 
     // byPost: (Events) the event's posts (always present, also at 0) and other locations with open rows, ordered by
     // count; sums to open.
-    const fixed = POSTS.filter((p) => p.value !== 'Other');
+    const fixed = TEST_POSTS;
     for (const p of fixed) {
       const b = s.byPost.find((x) => x.reportingLocation === p.value);
       expect(b, p.value).toMatchObject({ postShort: p.short, otherLocation: null });

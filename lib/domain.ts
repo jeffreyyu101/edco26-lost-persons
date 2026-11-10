@@ -177,14 +177,17 @@ export function isSwapApproved(row: { status: string; swapPlace?: SwapPlace | nu
   return isInMedical(row.status) && (row.swapPlace === 'fa' || row.swapPlace === 'mm');
 }
 
-/** (Companion) "Main Med" for 'mm'; the request's post for 'fa' ("FA 4", "Command"). */
-export function swapPlaceLabel(place: SwapPlace, post: string): string {
-  return place === 'mm' ? 'Main Med' : post || 'FA';
+/**
+ * (Companion) Where a swap happens, in words: the event's main medical (EventConfig.mainMedical, "Main Med") for 'mm';
+ * the request's post for 'fa' ("FA 4", "Command"). An empty name falls back to "post" / "medical".
+ */
+export function swapPlaceLabel(place: SwapPlace, post: string, mainMedical: string): string {
+  return place === 'mm' ? mainMedical.trim() || 'medical' : post || 'post';
 }
 
 /** (Companion) The approved swap's status label: "Swap at Main Med" / "Swap at FA 4". */
-export function swapLabel(place: SwapPlace, post: string): string {
-  return `Swap at ${swapPlaceLabel(place, post)}`;
+export function swapLabel(place: SwapPlace, post: string, mainMedical: string): string {
+  return `Swap at ${swapPlaceLabel(place, post, mainMedical)}`;
 }
 
 /** (Companion) The open swap request's status label (blue, swap glyph). */
@@ -334,16 +337,14 @@ export function canCancel(status: string, createdBy: string, sessionStaff: strin
 // Teams and staff identity
 // ---------------------------------------------------------------------------------------------------
 
-/** Sign-in cards, in display order. `value` is what the data stores. */
-export const TEAMS = [
-  { value: 'GC/HX - Special Operations/Med Transpo', label: 'GCHX Med Transpo', icon: 'transpo' },
-  { value: 'GC/HX - Dispatch', label: 'Dispatch', icon: 'dispatch' },
-  { value: 'GC/HX - Base', label: 'GCHX Base', icon: 'base' },
-  { value: 'Medical', label: 'Medical', icon: 'medical' },
-] as const;
-
-export type TeamValue = (typeof TEAMS)[number]['value'];
-export const TEAM_VALUES = TEAMS.map((t) => t.value) as unknown as readonly [TeamValue, ...TeamValue[]];
+// (Events) The sign-in teams are each event's data (EventConfig.teams: label, short, medical); nothing here lists them.
+/** A team as stored: one of the event's team labels, or any Other text. */
+export type TeamValue = string;
+/** The short form of a team label for display (EventTeam.short). */
+export interface TeamName {
+  label: string;
+  short: string;
+}
 export const OTHER_TEAM = 'Other' as const;
 
 export const STAFF_NAME_MIN = 2;
@@ -352,8 +353,9 @@ export const OTHER_TEAM_MIN = 2;
 export const OTHER_TEAM_MAX = 80;
 
 /**
- * Legacy team aliases (v2.1 A4), lowercased alias → lowercased canonical team.
- * MUST equal the TEAM_ALIASES block in lp_canon_staff (unit-tested by parsing the SQL).
+ * Legacy team aliases (v2.1 A4), lowercased alias → lowercased canonical team. Only for the creator checks of
+ * attribution strings already stored (canonStaff, the archived EDC Orlando log): no sign-in maps a team through
+ * them any more (events). MUST equal the TEAM_ALIASES block in lp_canon_staff (unit-tested by parsing the SQL).
  */
 export const TEAM_ALIASES: Readonly<Record<string, string>> = {
   dispatch: 'gc/hx - dispatch',
@@ -405,20 +407,19 @@ export function staffString(staffName: string, team: string): string {
   return `${normalizeStaffSpacing(staffName)}${STAFF_SEPARATOR}${normalizeStaffSpacing(team)}`;
 }
 
-/** The canonical team for a team string (alias or canonical, any case); unknown teams are returned trimmed. */
+/**
+ * A team string as it is stored: whitespace collapsed and trimmed. (Events) Which team it is, and its short name, is
+ * the event's data: the server spells a card team as the event does (eventTeamLabel); any other text is Other.
+ */
 export function canonicalTeam(team: string): string {
-  const t = normalizeStaffSpacing(team);
-  const key = TEAM_ALIASES[t.toLowerCase()] ?? t.toLowerCase();
-  const known = TEAMS.find((x) => x.value.toLowerCase() === key);
-  if (known) return known.value;
-  if (key === 'prevent') return 'Prevent';
-  return t;
+  return normalizeStaffSpacing(team);
 }
 
-/** Short team label for display: the card label for known teams, else the team itself. */
-export function teamShort(team: string): string {
-  const canonical = canonicalTeam(team);
-  return TEAMS.find((x) => x.value === canonical)?.label ?? canonical;
+/** Short team label for display: the event's short name for one of its teams (case-insensitive), else the team itself. */
+export function teamShort(team: string, teams: readonly TeamName[] = []): string {
+  const t = canonicalTeam(team);
+  const key = t.toLowerCase();
+  return teams.find((x) => x.label.toLowerCase() === key)?.short || t;
 }
 
 export interface ParsedStaff {
@@ -427,13 +428,16 @@ export interface ParsedStaff {
   teamShort: string;
 }
 
-/** "Rae Chen · GC/HX - Special Operations/Med Transpo" → {name: "Rae Chen", team: …, teamShort: "GCHX Med Transpo"}. */
-export function parseStaff(value: string | null | undefined): ParsedStaff {
+/**
+ * "Rae Chen · GC/HX - Special Operations/Med Transpo" → {name: "Rae Chen", team: …, teamShort: "GCHX Med Transpo"}
+ * (the short name from `teams`, the event's; without them the team itself).
+ */
+export function parseStaff(value: string | null | undefined, teams: readonly TeamName[] = []): ParsedStaff {
   const v = normalizeStaffSpacing(value ?? '');
   const at = v.lastIndexOf(STAFF_SEPARATOR);
   if (at < 0) return { name: v, team: '', teamShort: '' };
   const team = v.slice(at + STAFF_SEPARATOR.length);
-  return { name: v.slice(0, at), team, teamShort: teamShort(team) };
+  return { name: v.slice(0, at), team, teamShort: teamShort(team, teams) };
 }
 
 /** Characters a staff name or custom team may not contain (they would break the attribution format). */
@@ -443,32 +447,32 @@ export const STAFF_FORBIDDEN_CHARS = /[\u2022\u00b7\u2219\u22c5\u30fb\uff65\u038
 // Posts (reporting location)
 // ---------------------------------------------------------------------------------------------------
 
-export const POSTS = [
-  { value: 'FA 3 – Kinetic', short: 'FA 3' },
-  { value: 'FA 4 – Oasis', short: 'FA 4' },
-  { value: 'Command', short: 'Command' },
-  { value: 'Base', short: 'Base' },
-  { value: 'Other', short: 'Other' },
-] as const;
-
-export type PostValue = (typeof POSTS)[number]['value'];
-export const POST_VALUES = POSTS.map((p) => p.value) as unknown as readonly [PostValue, ...PostValue[]];
+// (Events) The posts are each event's data (EventConfig.posts: label, short); a request stores the label, or 'Other'
+// with other_location. The server checks a post against its event's (lp_clean_fields).
+/** A post as stored: one of the event's post labels, or 'Other'. */
+export type PostValue = string;
+/** A post's label and short form (EventPost). */
+export interface PostName {
+  label: string;
+  short: string;
+}
 export const OTHER_POST = 'Other' as const;
 export const OTHER_LOCATION_MIN = 1;
 export const OTHER_LOCATION_MAX = 80;
 
-export function isPostValue(value: unknown): value is PostValue {
-  return typeof value === 'string' && (POST_VALUES as readonly string[]).includes(value);
+/** True for 'Other' and for one of `posts` (the event's) by label. */
+export function isPostValue(value: unknown, posts: readonly PostName[]): value is PostValue {
+  return typeof value === 'string' && (value === OTHER_POST || posts.some((p) => p.label === value));
 }
 
 /**
- * Short form: "FA 3", "FA 4", "Command", "Base", or the other_location text for Other ("Other" if blank).
- * Must match the CASE in lp_stats. Unknown legacy values are returned as they are.
+ * Short form: the event's short name for one of its posts ("FA 3", "Command"), or the other_location text for Other
+ * ("Other" if blank). Must match lp_stats. Any other (legacy) value is returned as it is.
  */
-export function postShort(reportingLocation: string | null | undefined, otherLocation?: string | null): string {
+export function postShort(reportingLocation: string | null | undefined, otherLocation?: string | null, posts: readonly PostName[] = []): string {
   if (!reportingLocation) return '';
   if (reportingLocation === OTHER_POST) return otherLocation?.trim() || OTHER_POST;
-  return POSTS.find((p) => p.value === reportingLocation)?.short ?? reportingLocation;
+  return posts.find((p) => p.label === reportingLocation)?.short || reportingLocation;
 }
 
 /** Full form for the "Reporting from" row and the audit trail: "FA 3 – Kinetic", or the other_location text. */
@@ -808,9 +812,6 @@ export function waitTone(minutes: number): WaitTone {
 // ---------------------------------------------------------------------------------------------------
 // New-request form helpers
 // ---------------------------------------------------------------------------------------------------
-
-/** "Last seen" shortcuts (stage names from the site plan). */
-export const STAGE_CHIPS = ['kineticFIELD', 'circuitGROUNDS', 'neonGARDEN', 'stereoBLOOM', 'Taken to medical'] as const;
 
 /** Appends a chip to the Last seen text, with ", " when the field isn't empty. */
 export function appendChip(current: string, chip: string): string {

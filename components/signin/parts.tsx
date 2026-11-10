@@ -4,6 +4,7 @@
 import { Heading, IconButton, Text } from '@radix-ui/themes';
 import { CircleAlert, Moon, Sun } from 'lucide-react';
 import { useEffect, useSyncExternalStore, type ReactNode } from 'react';
+import { EventLogo } from '@/components/ui/EventLogo';
 import { setThemePref } from '@/lib/client/prefs';
 import { followSystemTheme } from '@/lib/theme';
 import styles from './signin.module.css';
@@ -42,18 +43,33 @@ export function ThemeToggle() {
 }
 
 /**
+ * (Events) The logos: Ground Control, the permanent brand, and beside it the event's logo once the event is known
+ * (a join link names its event; a password says which event only once it has signed in, so it shows Ground Control
+ * alone). `eventLogo`: its URL, or null.
+ */
+export function Logos({ eventLogo, eventName }: { eventLogo: string | null; eventName?: string | null }) {
+  return (
+    <div className={styles.logos} role="img" aria-label={eventName ? `${eventName} and Ground Control` : 'Ground Control'}>
+      {eventLogo ? (
+        <>
+          <EventLogo src={eventLogo} surface="theme" className={styles.logoEdc} height={40} />
+          <span className={styles.ldiv} aria-hidden="true" />
+        </>
+      ) : null}
+      <img className={styles.logoGc} src="/logos/ground-control.png" alt="" width={313} height={120} />
+    </div>
+  );
+}
+
+/**
  * One step: the logos, then the card with the optional app-name line (step 1 only), the step heading and
  * the step's form. Phone: one centred column, as before. From 768 px (desktop-sign-in.html layout A): the
  * logos sit above a 420 px bordered card, and the heading is left-aligned and one size larger.
  */
-export function StepCard({ title, appLine, children }: { title: string; appLine: boolean; children: ReactNode }) {
+export function StepCard({ title, appLine, eventLogo = null, children }: { title: string; appLine: boolean; eventLogo?: string | null; children: ReactNode }) {
   return (
     <>
-      <div className={styles.logos}>
-        <img className={`lp-logo-edc ${styles.logoEdc}`} src="/logos/edc-orlando.png" alt="EDC Orlando" width={194} height={132} />
-        <span className={styles.ldiv} aria-hidden="true" />
-        <img className={styles.logoGc} src="/logos/ground-control.png" alt="Ground Control" width={313} height={120} />
-      </div>
+      <Logos eventLogo={eventLogo} />
       <div className={styles.card} data-testid="signin-card">
         <div className={styles.head}>
           {appLine ? (

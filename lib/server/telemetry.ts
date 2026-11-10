@@ -30,6 +30,7 @@ import {
   type TeamKey,
 } from '../telemetry';
 import { parseStaff } from '../domain';
+import { loadEvent } from './events';
 import { ApiFailure } from './errors';
 import { assertSameOrigin, readBodyLimited } from './http';
 import { rpc } from './supabase';
@@ -354,7 +355,11 @@ export async function recordPushSend(
 ): Promise<void> {
   try {
     const kindToken = ENUM_RE.test(kind) ? kind : 'other';
-    const teamByEndpoint = new Map(targets.map((t) => [t.endpoint, teamKey(parseStaff(t.staff).team)]));
+    // Off: nothing to write (and no event to read).
+    if (!(await telemetryConfig()).on) return;
+    // (Events) Team keys are the event's team ids.
+    const teams = (await loadEvent(eventId).catch(() => null))?.teams ?? [];
+    const teamByEndpoint = new Map(targets.map((t) => [t.endpoint, teamKey(parseStaff(t.staff).team, teams)]));
     const byTeam = new Map<TeamKey, { ok: number; gone: number; failed: number }>();
     for (const o of outcomes) {
       const team = teamByEndpoint.get(o.endpoint) ?? 'other';

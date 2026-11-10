@@ -21,3 +21,4 @@ export declare const TEST_EVENT_ID: string;
 export declare const TEST_EVENT_SLUG: string;
 export declare const TEST_EVENT_SQL: string;
 export declare function ensureTestEvent(url?: string): Promise<void>;
+export declare function archiveOtherEvents(url?: string): void;

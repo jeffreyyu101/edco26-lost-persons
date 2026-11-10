@@ -2,6 +2,7 @@
 // was suspended while someone else signed in must confirm GET /api/session before it syncs on, writes or
 // sends queued requests, and switch its per-staff cache, "My requests" and outbox prompt to that staff.
 // Synthetic data only.
+import { STUB_EVENT } from '@/lib/client/stub-data';
 import { describe, expect, it, vi } from 'vitest';
 import { K } from '@/lib/client/persist';
 import { mineRows } from '@/lib/client/selectors';
@@ -16,7 +17,7 @@ import { FakeServer, STAFF, apiError, makeRow } from './helpers/fake-server';
 installStoreHooks();
 
 const CMID = (n: number) => `1d000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
-const SAM: SessionInfo = { ...STAFF.sam, role: 'staff', eventId: null, event: null, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
+const SAM: SessionInfo = { ...STAFF.sam, role: 'staff', eventId: STUB_EVENT.id, event: STUB_EVENT, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
 const creates = (server: FakeServer) => server.requests('POST', '/api/requests').filter((r) => r.path === '/api/requests');
 
 type Booted = ReturnType<typeof boot>;
@@ -174,7 +175,7 @@ describe('switching to the new staff is one step (regression: nothing in between
   it('while the new staff’s cache is still loading, queued jobs and a new create wait, then get the prompt', async () => {
     const server = new FakeServer([]);
     const slowCache = gate();
-    const samCursor = K.cursor(canonStaff(STAFF.sam.staff) ?? '');
+    const samCursor = K.cursor(STUB_EVENT.id, canonStaff(STAFF.sam.staff) ?? '');
     const tab = boot(server, {}, (env) => {
       const open = env.openKv;
       env.openKv = () => {

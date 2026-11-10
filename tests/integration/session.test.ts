@@ -79,7 +79,7 @@ describe('POST /api/session', () => {
     expect(cookieAttrs(setCookies(res.headers)[0] as string).secure).toBe(true);
   });
 
-  it('stores the canonical team: Other "dispatch" → GC/HX - Dispatch, unknown text kept (A28)', async () => {
+  it("(events) Other text naming one of the event's teams (label or short name, any case) stores that team: 'dispatch' → GC/HX - Dispatch; unknown text is kept", async () => {
     const a = await api('/api/session', {
       json: { staffName: pii(`TEST-S Other ${uniq()}`), team: 'Other', otherTeam: ' dispatch ', password: PASSWORD },
       headers: { 'x-real-ip': await ip() },

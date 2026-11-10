@@ -8,7 +8,7 @@ import type { EndedEvent, EventAdmin, EventConfig, EventPost, EventStage, EventT
 import { ApiFailure } from './errors';
 import { sessionInfo } from './session';
 import type { SessionClaims } from './session-token';
-import { rpc } from './supabase';
+import { db, rpc } from './supabase';
 
 /** What lp_event_json returns (already camelCase). */
 export interface EventRow {
@@ -60,12 +60,30 @@ export function eventConfig(row: EventRow): EventConfig {
     logoUrl: logoUrl(row),
     posts: (row.posts ?? []).map((p) => ({ id: str(p.id), label: str(p.label), short: str(p.short) || str(p.label) })),
     mainMedical: row.mainMedical,
-    teams: (row.teams ?? []).map((t) => ({ id: str(t.id), label: str(t.label), short: str(t.short) || str(t.label), medical: t.medical === true })),
+    teams: (row.teams ?? []).map((t) => {
+      const aliases = Array.isArray(t.aliases) ? t.aliases.filter((a): a is string => typeof a === 'string') : [];
+      return { id: str(t.id), label: str(t.label), short: str(t.short) || str(t.label), medical: t.medical === true, ...(aliases.length ? { aliases } : {}) };
+    }),
     lastSeen: (row.lastSeen ?? []).filter((v): v is string => typeof v === 'string'),
     wentLiveAt: row.wentLiveAt,
     endedAt: row.endedAt,
     updatedAt: row.updatedAt,
   };
+}
+
+/** The event's posts as label + short (the mappers' postShort), [] without an event. */
+export function postNames(row: Pick<EventRow, 'posts'> | null | undefined): Array<{ label: string; short: string }> {
+  return (row?.posts ?? []).map((p) => ({ label: str(p.label), short: str(p.short) || str(p.label) })).filter((p) => p.label);
+}
+
+/** The event's teams as label + short (display names), [] without an event. */
+export function teamNames(row: Pick<EventRow, 'teams'> | null | undefined): Array<{ label: string; short: string }> {
+  return (row?.teams ?? []).map((t) => ({ label: str(t.label), short: str(t.short) || str(t.label) })).filter((t) => t.label);
+}
+
+/** What a swap place 'mm' is called at the event (its main medical), '' without an event. */
+export function mainMedicalOf(row: Pick<EventRow, 'mainMedical'> | null | undefined): string {
+  return typeof row?.mainMedical === 'string' ? row.mainMedical : '';
 }
 
 /** A lead's view of an event. */
@@ -85,7 +103,7 @@ export function eventAdmin(row: EventRow): EventAdmin {
 
 /** What the Ended screen shows. */
 export function endedEvent(row: EventRow): EndedEvent {
-  return { name: row.name, logoUrl: logoUrl(row), stage: 'archived' };
+  return { id: row.id, name: row.name, logoUrl: logoUrl(row), stage: 'archived' };
 }
 
 /** The 410 for an archived event, carrying what the Ended screen needs. */
@@ -107,6 +125,39 @@ export async function sessionBody(claims: SessionClaims, known?: EventRow | null
   return sessionInfo(claims, row ? eventConfig(row) : null);
 }
 
+/** A sign-in team card (no event is known before a password or join link signs in). */
+export interface SignInTeam {
+  label: string;
+  short: string;
+  medical: boolean;
+}
+
+/**
+ * The sign-in cards: the teams of every event in practice or live, in setup order, each label once (oldest event
+ * first). A password does not say which event it is until it signs in, so the cards are every running event's
+ * (Ground Control's teams are usually the same at every event); the server then spells the team as the matched event
+ * does, or keeps it as Other text. [] when none can be read (the Other field still works).
+ */
+export async function signInTeams(): Promise<SignInTeam[]> {
+  try {
+    const { data, error } = await db().from('events').select('teams').in('stage', ['practice', 'live']).order('created_at');
+    if (error || !Array.isArray(data)) return [];
+    const seen = new Set<string>();
+    const out: SignInTeam[] = [];
+    for (const row of data as Array<{ teams?: unknown }>) {
+      for (const t of Array.isArray(row.teams) ? (row.teams as Array<Partial<EventTeam>>) : []) {
+        const label = str(t.label).trim();
+        if (!label || seen.has(label.toLowerCase())) continue;
+        seen.add(label.toLowerCase());
+        out.push({ label, short: str(t.short).trim() || label, medical: t.medical === true });
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 /** The event or 404. */
 export async function requireEvent(eventId: string): Promise<EventRow> {
   const row = await loadEvent(eventId);
@@ -114,16 +165,27 @@ export async function requireEvent(eventId: string): Promise<EventRow> {
   return row;
 }
 
-/** True when `team` is one of the event's sign-in teams (by label, case-insensitive). */
-export function isEventTeam(row: Pick<EventRow, 'teams'>, team: string): boolean {
-  const t = team.trim().toLowerCase();
-  return (row.teams ?? []).some((x) => str(x.label).toLowerCase() === t);
+/**
+ * `team` names this team: its label, its short name or (phase 2) a label it had before a rename, case-insensitive (so
+ * "dispatch" typed as Other team is the event's Dispatch, whatever the event calls it in full).
+ */
+function teamNamed(x: Partial<EventTeam>, team: string): boolean {
+  const t = team.trim().replace(/\s+/g, ' ').toLowerCase();
+  return (
+    str(x.label).toLowerCase() === t ||
+    (!!x.short && str(x.short).toLowerCase() === t) ||
+    (Array.isArray(x.aliases) && x.aliases.some((a) => typeof a === 'string' && a.toLowerCase() === t))
+  );
 }
 
-/** The label of `team` as the event spells it. */
+/** True when `team` is one of the event's sign-in teams (by label or an earlier label, case-insensitive). */
+export function isEventTeam(row: Pick<EventRow, 'teams'>, team: string): boolean {
+  return (row.teams ?? []).some((x) => teamNamed(x, team));
+}
+
+/** The label of `team` as the event spells it now (an earlier label signs in as the renamed team). */
 export function eventTeamLabel(row: Pick<EventRow, 'teams'>, team: string): string {
-  const t = team.trim().toLowerCase();
-  return str((row.teams ?? []).find((x) => str(x.label).toLowerCase() === t)?.label, team);
+  return str((row.teams ?? []).find((x) => teamNamed(x, team))?.label, team);
 }
 
 // ---------------------------------------------------------------------------------------------------

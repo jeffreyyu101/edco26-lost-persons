@@ -1081,3 +1081,12 @@ textarea.lp-rf-in {
     content: none;
   }
 }
+
+/* (Events) The practice chip at the right of the phone form's bar, and after the dialog's title. */
+.lp-rf-stage {
+  justify-self: end;
+  display: inline-flex;
+}
+.lp-rf-dstage {
+  margin-left: 10px;
+}

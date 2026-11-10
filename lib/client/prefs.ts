@@ -28,7 +28,6 @@ import {
   STAFF_NAME_MAX,
   STAFF_NAME_MIN,
   canonicalTeam,
-  isPostValue,
   sameStaff,
   staffString,
   type PostValue,
@@ -178,7 +177,8 @@ function cleanIdentity(name: unknown, team: unknown): { name: string; team: stri
 function cleanLastPost(value: unknown): LastPost | null {
   if (!value || typeof value !== 'object') return null;
   const { reportingLocation, otherLocation } = value as Record<string, unknown>;
-  if (!isPostValue(reportingLocation)) return null;
+  // (Events) Any post label: whether it is one of the open event's posts is checked where it is used (the form).
+  if (typeof reportingLocation !== 'string' || !reportingLocation.trim() || codePoints(reportingLocation) > OTHER_LOCATION_MAX) return null;
   if (reportingLocation !== OTHER_POST) return { reportingLocation, otherLocation: null };
   if (typeof otherLocation !== 'string') return null;
   const where = otherLocation.trim();

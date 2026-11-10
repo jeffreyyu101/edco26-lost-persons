@@ -4,10 +4,11 @@
 //   node scripts/generate-assets.mjs
 //
 // Outputs (committed):
-//   public/icons/icon-192.png, icon-512.png   maskable, logos inside the 80% safe zone
+//   public/icons/icon-192.png, icon-512.png   maskable, the Ground Control logo inside the 80% safe zone
 //   public/icons/apple-touch-icon.png         180×180
-//   public/icons/favicon-32.png
-//   public/logos/edc-orlando.png, ground-control.png   copied from design/
+//   public/icons/favicon-32.png               the Ground Control "O" (its target mark)
+//   public/logos/ground-control.png           copied from design/
+// (Events) Ground Control only: no event's logo is in the build (an event's logo is uploaded in the app).
 //   supabase/seed-photos/photo.jpg, photo_thumb.jpg    synthetic placeholder "photos" (no real person)
 import { chromium } from '@playwright/test';
 import { copyFile, mkdir, readFile } from 'node:fs/promises';
@@ -24,10 +25,8 @@ async function main() {
   await mkdir(join(root, 'public/logos'), { recursive: true });
   await mkdir(join(root, 'supabase/seed-photos'), { recursive: true });
 
-  await copyFile(join(root, 'design/edc-logo.png'), join(root, 'public/logos/edc-orlando.png'));
   await copyFile(join(root, 'design/gc-logo.png'), join(root, 'public/logos/ground-control.png'));
 
-  const edc = await dataUrl('design/edc-logo.png');
   const gc = await dataUrl('design/gc-logo.png');
 
   const browser = await chromium.launch();
@@ -40,10 +39,8 @@ async function main() {
       const w = Math.round(size * content);
       await page.setViewportSize({ width: size, height: size });
       await page.setContent(`<!doctype html><html><body style="margin:0">
-        <div style="width:${size}px;height:${size}px;background:${BG};display:flex;flex-direction:column;
-                    align-items:center;justify-content:center;gap:${Math.round(size * 0.045)}px">
-          <img src="${edc}" style="width:${Math.round(w * 0.62)}px;filter:invert(1)">
-          <div style="width:${Math.round(w * 0.5)}px;height:${Math.max(1, Math.round(size / 256))}px;background:rgba(255,255,255,.22)"></div>
+        <div style="width:${size}px;height:${size}px;background:${BG};display:flex;
+                    align-items:center;justify-content:center">
           <img src="${gc}" style="width:${w}px">
         </div></body></html>`);
       await page.evaluate(() => Promise.all([...document.images].map((i) => i.decode())));
@@ -54,11 +51,11 @@ async function main() {
     await icon(192, 0.55, 'public/icons/icon-192.png');
     await icon(180, 0.72, 'public/icons/apple-touch-icon.png');
 
-    // Favicon: just the GC mark area would be illegible at 32 px; use the EDC mark.
+    // Favicon: the whole Ground Control word would be illegible at 32 px; its target "O" (in GROUND) alone.
     await page.setViewportSize({ width: 32, height: 32 });
     await page.setContent(`<!doctype html><html><body style="margin:0">
-      <div style="width:32px;height:32px;background:${BG};border-radius:6px;display:grid;place-items:center">
-        <img src="${edc}" style="width:26px;filter:invert(1)"></div></body></html>`);
+      <div style="width:32px;height:32px;background:${BG};border-radius:6px;overflow:hidden;position:relative">
+        <img src="${gc}" style="position:absolute;width:190px;left:-69px;top:0px"></div></body></html>`);
     await page.evaluate(() => Promise.all([...document.images].map((i) => i.decode())));
     await page.screenshot({ path: join(root, 'public/icons/favicon-32.png'), type: 'png', omitBackground: true });
 

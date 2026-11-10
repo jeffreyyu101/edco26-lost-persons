@@ -51,6 +51,7 @@ import { formatCreatedTime } from '@/lib/format';
 import { ArchivedFold, ArchivedRows, DeskTable, GroupHeader, GroupRow, OutboxRow, SearchRow, TableRow, TableSkeleton } from './DeskTable';
 import { rowTimes } from './table-model';
 import t from './table.module.css';
+import { useEventConfig } from '@/lib/client/event-config';
 
 const selectHydrated = (state: StoreState) => state.hydrated;
 
@@ -93,6 +94,7 @@ function Frame({ view, chips = null, skeleton = <TableSkeleton />, children }: F
 }
 
 function Rows({ rows, now, tz, selected }: { rows: readonly RequestSummary[]; now: number; tz: string; selected: string | null }) {
+  const mainMedical = useEventConfig()?.mainMedical ?? '';
   return (
     <>
       {rows.map((row) => (
@@ -101,7 +103,7 @@ function Rows({ rows, now, tz, selected }: { rows: readonly RequestSummary[]; no
           row={row}
           times={rowTimes(row, now, tz)}
           selected={row.id === selected}
-          stage={displayStage(row, { now, timeZone: tz })}
+          stage={displayStage(row, { now, timeZone: tz, mainMedical })}
           timeZone={tz}
           now={now}
         />
@@ -350,6 +352,7 @@ export function DeskSearchTable({ q, selected = null }: { q: string; selected?: 
   const hits = useSearch(query);
   const loading = useIsLoading();
   const tz = useEventTimezone();
+  const mainMedical = useEventConfig()?.mainMedical ?? '';
   const now = useNow();
   const hasQuery = query.trim() !== '';
   useScrollMemory('desk-search', !loading);
@@ -372,7 +375,7 @@ export function DeskSearchTable({ q, selected = null }: { q: string; selected?: 
                 hit={hit}
                 times={rowTimes(hit.row, now, tz)}
                 selected={hit.row.id === selected}
-                stage={displayStage(hit.row, { now, timeZone: tz })}
+                stage={displayStage(hit.row, { now, timeZone: tz, mainMedical })}
                 timeZone={tz}
                 now={now}
                 nameRanges={d.nameRanges}

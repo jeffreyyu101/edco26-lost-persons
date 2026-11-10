@@ -208,10 +208,9 @@ export type SignInCredential = { password: string } | { invite: string };
 /**
  * POST /api/session. `team` is a card value or "Other" with `otherTeam` (2–80 characters), and exactly one
  * of `password` (the event password) or `invite` (the team join link's code, J1).
- * Output: {staffName, team, password} or {staffName, team, invite}. `team` is always canonical (spec §4
- * "Data stores the canonical value"): a card value as is, and the Other text through domain.canonicalTeam(),
- * so a known alias typed there ("dispatch", "gchx base", "prevent") becomes its canonical team; anything else
- * stays as typed (whitespace collapsed).
+ * Output: {staffName, team, password} or {staffName, team, invite}. `team`: a card value as is, the Other text as
+ * typed (whitespace collapsed). (Events) The route then spells it as the matched event does when it is one of that
+ * event's teams (by label, case-insensitive); anything else stays Other text.
  */
 export const signInSchema = z
   .strictObject({
@@ -234,7 +233,6 @@ export const signInSchema = z
     }
   })
   .transform((v): { staffName: string; team: string } & SignInCredential => {
-    // PHASE2: canonicalTeam maps EDC's legacy aliases ("dispatch" → "GC/HX - Dispatch"); harmless for other events.
     const identity = { staffName: v.staffName, team: v.team === OTHER_TEAM ? canonicalTeam(v.otherTeam as string) : v.team };
     return v.invite !== undefined ? { ...identity, invite: v.invite } : { ...identity, password: v.password as string };
   });
@@ -479,6 +477,9 @@ export const eventTeamsSchema = z
       label: listLabel(80).refine((v) => v.length >= 2 && !STAFF_FORBIDDEN_CHARS.test(v), { message: 'Team: 2–80 characters, no "·"' }),
       short: z.string().trim().min(1).max(24).optional(),
       medical: z.boolean().optional(),
+      // (Phase 2) A team's earlier labels (EventTeam.aliases): the server keeps them on a rename; what a lead sends back
+      // with the teams it read is accepted and ignored.
+      aliases: z.array(z.string().max(80)).max(24).optional(),
     }),
   )
   .max(12)

@@ -4,12 +4,18 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { DesktopOnly, HealthDashboard } from '@/components/health/HealthView';
-import { fmtMs, grade, pct, problemSentence, summarizePaths, trend, type HealthData } from '@/components/health/health-model';
+import { applyHealthEvent, fmtMs, grade, pct, problemSentence, summarizePaths, teamLabel, trend, type HealthData } from '@/components/health/health-model';
 
 const AT = '2026-11-09T03:00:00.000Z';
 const fixture = (): HealthData => ({
   generatedAt: AT,
   window: '3h',
+  // (Events) The event's teams (telemetry keys them by id) and time zone come with the answer.
+  teams: [
+    { id: 'medical', short: 'Medical' },
+    { id: 'dispatch', short: 'Dispatch' },
+  ],
+  timeZone: 'America/New_York',
   config: { on: true, enabled: true, until: Date.parse('2026-11-10T11:00:00Z'), flushSeconds: 60, sample: 1 },
   kpis: { devices: 38, sessions: 51, events: 9_000, frustrations: 412, hitDevices: 17, errors: 9, syncOk: 986, syncFail: 14, pushRx: 100, pushOpened: 71, openP95: 3_100, prev: { devices: 30, frustrations: 300, hitDevices: 20, errors: 9 } },
   problems: [
@@ -104,6 +110,15 @@ describe('the model', () => {
   });
 
   it('the problem sentence names the place, counts, teams and when', () => {
+    applyHealthEvent(fixture());
     expect(problemSentence(fixture().problems![1]!, Date.parse(AT))).toBe('Rage tap in pending-column-# on Pending at check-card: 17 times on 9 devices, Medical, last 20 minutes ago.');
+  });
+
+  it("(events) team names are the event's, by id; anyone outside its teams is Other", () => {
+    applyHealthEvent({ teams: [{ id: 'gate', short: 'Gate' }], timeZone: 'Europe/Berlin' });
+    expect(teamLabel('gate')).toBe('Gate');
+    expect(teamLabel('other')).toBe('Other');
+    applyHealthEvent(fixture());
+    expect(teamLabel('gate')).toBe('gate');
   });
 });

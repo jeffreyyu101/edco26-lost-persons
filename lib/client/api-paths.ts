@@ -25,6 +25,11 @@ export type SyncPathQuery =
       after?: SyncAfter | null;
       /** Page size (server default 500, at most 1000). */
       limit?: number;
+      /**
+       * (Events) The event config version this tab holds (EventConfig.updatedAt; '' for none): the answer carries
+       * `event` only when it moved. First page only.
+       */
+      ev?: string;
     };
 
 /**
@@ -43,6 +48,7 @@ export function syncPath(query: SyncPathQuery): string {
       params.set('afterId', query.after.id);
     }
     if (query.limit !== undefined) params.set('limit', String(query.limit));
+    if (query.ev !== undefined) params.set('ev', query.ev);
   }
   const qs = params.toString();
   return qs ? `/api/sync?${qs}` : '/api/sync';

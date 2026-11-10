@@ -1,13 +1,14 @@
 // List views (agent L): the pure display helpers in components/list/list-helpers.ts, the search / filter /
 // sort selectors as the lists use them, and server renders of the views against a fixed store state.
 // Synthetic data only.
+import { STUB_EVENT } from '@/lib/client/stub-data';
 import { Theme } from '@radix-ui/themes';
 import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DeskContext } from '@/components/desk/desk-context';
 import { ConnectionIndicator } from '@/components/list/AppHeader';
-import { BRAND_DATES_LONG, BRAND_DATES_SHORT, HIDE_HEADER_LABEL } from '@/components/list/BrandCard';
+import { HIDE_HEADER_LABEL } from '@/components/list/BrandCard';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { AllView, MineView, PendingView, SearchView } from '@/components/list/ListViews';
 import { switcherLabel } from '@/components/list/ViewSwitcher';
@@ -123,7 +124,7 @@ describe('list helpers', () => {
   });
 
   it('outboxDisplay: "Not sent" until an LP number exists, Needs attention for rejected creates', () => {
-    expect(outboxDisplay(outboxItem())).toEqual({
+    expect(outboxDisplay(outboxItem(), STUB_EVENT.posts)).toEqual({
       name: 'TEST-L Queued',
       ageGender: '30 M',
       post: 'FA 3',
@@ -192,7 +193,7 @@ describe('list helpers', () => {
       const v = words(visible);
       return v.every((w, i) => n[i] === w);
     };
-    const d = outboxDisplay(outboxItem());
+    const d = outboxDisplay(outboxItem(), STUB_EVENT.posts);
     expect(outboxRowLabel(d, '11:02 PM')).toBe('TEST-L Queued, 30 M, 11:02 PM. Waiting to send, FA 3, Not sent.');
     expect(startsWith(outboxRowLabel(d, '11:02 PM'), `${d.name} ${d.ageGender} 11:02 PM`)).toBe(true);
     expect(switcherLabel('Pending', 4)).toBe('Pending 4, change view');
@@ -560,7 +561,7 @@ describe('list views render', () => {
   });
 
   it('All requests opens with the compact brand row, above the sticky bar; Pending, My requests and Search do not (v8)', () => {
-    const store = storeWith((s) => ({ ...s, myIds: new Set([...s.confirmed.keys()]) }));
+    const store = storeWith((s) => ({ ...s, myIds: new Set([...s.confirmed.keys()]), event: s.event && { ...s.event, logoUrl: '/api/events/logo/local?v=abc' } }));
     // Pending v8 (Brian, 2026-11-06 afternoon): Pending and My requests get just the large title.
     for (const node of [<PendingView key="pending" />, <MineView key="mine" />]) {
       const html = render(store, node);
@@ -584,17 +585,16 @@ describe('list views render', () => {
       expect(header).toBeLessThan(title);
       const brand = html.slice(html.lastIndexOf('<div', card), header).replace(/<!-- -->/g, '');
       expect(brand).toMatch(/<\/button><\/div><div class="[^"]*sticky[^"]*">$/);
-      // The real logos, sized up front (no shift when they load), EDC first, a divider, Ground Control.
-      expect(brand).toMatch(/<img [^>]*src="\/logos\/edc-orlando.png" alt="EDC Orlando" width="194" height="132"/);
+      // (Events) The permanent Ground Control logo, sized up front (no shift when it loads). The event's logo and dates
+      // are the event's config, drawn on the client after the first paint (BrandEventSlot): none in the server's HTML,
+      // and no event logo baked into the build.
       expect(brand).toMatch(/<img [^>]*src="\/logos\/ground-control.png" alt="Ground Control" width="313" height="120"/);
-      expect(brand.indexOf('edc-orlando.png')).toBeLessThan(brand.indexOf('ground-control.png'));
+      expect(brand).not.toContain('/api/events/logo');
+      expect(brand).not.toContain('edc-orlando');
+      expect(brand).not.toMatch(/Nov 6/);
       // The title with "in medical?" in its own span, then the dates (capitals come from CSS): short on a
       // phone, long on a wide screen (CSS shows one of them).
       expect(brand).toMatch(/>Is my friend <span class="[^"]*accent[^"]*">in medical\?<\/span><\/p>/);
-      expect(BRAND_DATES_SHORT).toBe('Nov 6–8');
-      expect(BRAND_DATES_LONG).toBe('November 6–8, 2026');
-      expect(brand).toMatch(new RegExp(`class="[^"]*datesShort[^"]*">${BRAND_DATES_SHORT}</p>`));
-      expect(brand).toMatch(new RegExp(`class="[^"]*datesLong[^"]*">${BRAND_DATES_LONG}</p>`));
       // No "event operations" (or "event ops"), no credit line, no orbit rings.
       expect(brand).not.toMatch(/event op/i);
       expect(brand).not.toContain('Built by');
@@ -651,8 +651,9 @@ describe('list views render', () => {
       const live = html.indexOf('data-testid="live-indicator"');
       expect(live, name).toBeGreaterThan(header);
       // Directly after the header, inside the sticky bar, before the list. (Pending v9.1) On All and My requests the
-      // line shares its row with the "⇅" sort toggle, at the row's right end; Pending has no toggle.
-      const row = name === 'Pending' ? '' : '<div class="[^"]*liveRow[^"]*" data-testid="live-row"><div class="[^"]*liveIn[^"]*">';
+      // line shares its row with the "⇅" sort toggle, at the row's right end; Pending has no toggle. (Events) Every
+      // view's row also holds the event's stage chip, after the line.
+      const row = name === 'Pending' ? '<div class="[^"]*liveRow[^"]*"><div class="[^"]*liveIn[^"]*">' : '<div class="[^"]*liveRow[^"]*" data-testid="live-row"><div class="[^"]*liveIn[^"]*">';
       expect(html.slice(header, live), name).toMatch(new RegExp(`^</header>${row}<div class="[^"]*live[^"]*"[^>]*data-state="healthy"\\s*$`));
       expect(live, name).toBeLessThan(html.indexOf('data-testid="request-list"'));
       if (name === 'Pending') expect(html, name).not.toContain('data-testid="sort-toggle"');

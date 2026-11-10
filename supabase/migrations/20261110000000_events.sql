@@ -182,6 +182,11 @@ alter table public.lp_inactive_closes add column if not exists event_id uuid ref
 alter table public.lp_push_subscriptions add column if not exists event_id uuid references public.events (id);
 alter table public.lp_tel_devices add column if not exists event_id uuid references public.events (id);
 alter table public.lp_tel_events add column if not exists event_id uuid references public.events (id);
+-- (Phase 2) Telemetry keys a team by the event's team id (EventTeam.id: `^[a-z0-9_-]{1,24}$`), or 'other': EDC's fixed
+-- five keys are no longer the only ones. Still never four digits in a row. NOT VALID: rows already there keep theirs.
+alter table public.lp_tel_events drop constraint if exists lp_tel_events_team_check;
+alter table public.lp_tel_events add constraint lp_tel_events_team_check
+  check (team ~ '^[a-z0-9_-]{1,24}$' and team !~ '[0-9]{4}') not valid;
 
 do $backfill$
 declare
@@ -900,6 +905,24 @@ $fn$;
 -- after the request's last status change: a front-of-house reply or any status change clears it), involved
 -- (the caller is in lp_involved_staff: the in-app alert) and the en route summary. Unsent messages never
 -- count. Internal helper.
+-- lp_team_named: is `p_name` (a team as a session or a message stored it) this team of an event (one element of
+-- events.teams)? By its label or a label it had before (`aliases`: a team renamed under the same id keeps its old
+-- labels, lp_event_update), case-insensitive; `p_loose` also accepts its short name and its id (who's on, the Health
+-- page, telemetry). Phase 2: renaming a team never orphans what was stored, or signed in, under its old label.
+create or replace function public.lp_team_named(p_team jsonb, p_name text, p_loose boolean default false)
+returns boolean
+language sql
+immutable
+set search_path = public, pg_temp
+as $fn$
+  select pg_catalog.lower(pg_catalog.btrim(coalesce(p_name, ''))) <> ''
+     and (pg_catalog.lower(pg_catalog.btrim(p_name)) = pg_catalog.lower(p_team ->> 'label')
+          or (pg_catalog.jsonb_typeof(p_team -> 'aliases') = 'array'
+              and exists (select 1 from pg_catalog.jsonb_array_elements_text(p_team -> 'aliases') as a(v)
+                           where pg_catalog.lower(a.v) = pg_catalog.lower(pg_catalog.btrim(p_name))))
+          or (p_loose and pg_catalog.lower(pg_catalog.btrim(p_name)) in (pg_catalog.lower(p_team ->> 'short'), pg_catalog.lower(p_team ->> 'id'))))
+$fn$;
+
 create or replace function public.lp_messages_activity(p_request uuid, p_key text, p_status text)
 returns jsonb
 language plpgsql
@@ -932,12 +955,14 @@ begin
   where m.request_id = p_request and m.unsent_at is null and m.staff_key <> p_key
     and (v_read is null or m.created_at > v_read);
 
-  -- (Events) "Medical asked" = the message came from the event's medical team (teams[].medical), not the word Medical.
+  -- (Events) "Medical asked" = the message came from the event's medical team (teams[].medical), not the word Medical:
+  -- by its label or one it had before it was renamed (lp_team_named), so a message stored, or sent by a session signed
+  -- in, under the old label still counts.
   if p_status = 'Added' and v_last.id is not null and exists (
        select 1 from public.patients pt join public.events ev on ev.id = pt.event_id
               cross join lateral pg_catalog.jsonb_array_elements(ev.teams) as t(team)
         where pt.id = p_request and (t.team ->> 'medical')::boolean
-          and pg_catalog.lower(t.team ->> 'label') = pg_catalog.lower(pg_catalog.btrim(v_last.team))) then
+          and public.lp_team_named(t.team, v_last.team)) then
     select pg_catalog.max(e.occurred_at) into v_changed
     from public.audit_events e
     where e.patient_id = p_request and e.action_type in ('status_changed', 'cancelled');
@@ -1514,7 +1539,8 @@ $fn$;
 
 
 -- lp_tel_config: what the ingest route caches for 30 s. {on, until (epoch ms), cap, capBytes, flushSeconds, sample}.
--- on = enabled and before off_at. No settings row: off.
+-- on = enabled and some event in practice or live (until = off_at, kept in the answer but no longer used). No
+-- settings row: off.
 create or replace function public.lp_tel_config()
 returns jsonb
 language plpgsql
@@ -1544,8 +1570,8 @@ end
 $fn$;
 
 drop function if exists public.lp_tel_ingest(text, text, text, text, bigint, jsonb, jsonb, integer, text);
--- lp_tel_ingest: one batch from one phone, in one statement's worth of work. Off (kill switch, past off_at, no
--- settings row) → {on: false} and nothing is written. A batch id seen before → {dup: true}. Three quota rows count
+-- lp_tel_ingest: one batch from one phone, in one statement's worth of work. Off (kill switch, no event in practice
+-- or live, no settings row) → {on: false} and nothing is written. A batch id seen before → {dup: true}. Three quota rows count
 -- every event and byte offered this hour: the body's device id and the route's sign-in key (p_quota) against the
 -- device caps, and '*' against the fleet caps. Past any of them the rest is dropped ({capped: true}). The event time
 -- is the phone's plus the route's skew correction, clamped to [now − 2 days, now].
@@ -1849,12 +1875,11 @@ begin
              pg_catalog.count(*) filter (where l.props ->> 'newreq' = 'true') as newreq
         from latest l group by 1
     ), subs as (
-      select case (pg_catalog.regexp_match(s.staff, '^(.*) · (.*)$'))[2]
-               when 'medical' then 'medical'
-               when 'gc/hx - dispatch' then 'dispatch'
-               when 'gc/hx - base' then 'base'
-               when 'gc/hx - special operations/med transpo' then 'transpo'
-               else 'other' end as team,
+      -- (Phase 2) The event's team ids (telemetry's team keys), whatever the event calls its teams.
+      select coalesce((select t.team ->> 'id'
+                         from public.events ev cross join lateral pg_catalog.jsonb_array_elements(ev.teams) as t(team)
+                        where ev.id = p_event and public.lp_team_named(t.team, (pg_catalog.regexp_match(s.staff, '^(.*) · (.*)$'))[2], true)
+                        limit 1), 'other') as team,
              pg_catalog.count(*) as n, pg_catalog.count(*) filter (where s.new_requests) as newreq
         from (select * from public.lp_push_subscriptions x where x.event_id = p_event) s group by 1
     ), alerts as (
@@ -2123,7 +2148,11 @@ $fn$;
 --     was true then);
 --   * a post or team removed while the event's requests still use it: refused (P0422 in_use, field:posts / teams). A
 --     post is in use when a request reports from it; a team when a request was logged or last changed by someone of
---     it, or a message of the event was written by it.
+--     it, or a message of the event was written by it (under its label or a label it had before);
+--   * (phase 2) a team renamed (same id, new label): its old label is kept in the team's `aliases`, so everything
+--     stored under it (messages, attribution) and every session still signed in with it stays that team (the medical
+--     team's "Medical asked" above all, lp_messages_activity). Attribution strings are not rewritten: a request's
+--     creator check compares them with the session's own string.
 create or replace function public.lp_event_update(p_event uuid, p jsonb)
 returns jsonb
 language plpgsql
@@ -2172,21 +2201,48 @@ begin
     raise exception using errcode = 'P0422', message = 'in_use', detail = 'field:posts';
   end if;
 
-  -- A team that goes (id and label) while the event's requests or messages carry it.
+  -- A team that goes (id and label) while the event's requests or messages carry it (its label or an earlier one).
   select o.team ->> 'label' into v_label
     from pg_catalog.jsonb_array_elements(v_old.teams) as o(team)
    where not exists (select 1 from pg_catalog.jsonb_array_elements(v_row.teams) as n(team)
                       where n.team ->> 'id' = o.team ->> 'id' or pg_catalog.lower(n.team ->> 'label') = pg_catalog.lower(o.team ->> 'label'))
      and (exists (select 1 from public.patients pt
                    where pt.event_id = p_event
-                     and (pg_catalog.lower(pg_catalog.right(pt.created_by, pg_catalog.char_length(o.team ->> 'label') + 3)) = ' · ' || pg_catalog.lower(o.team ->> 'label')
-                       or pg_catalog.lower(pg_catalog.right(pt.updated_by, pg_catalog.char_length(o.team ->> 'label') + 3)) = ' · ' || pg_catalog.lower(o.team ->> 'label')))
+                     and (public.lp_team_named(o.team, pg_catalog.regexp_replace(pt.created_by, '^.* · ', ''))
+                       or public.lp_team_named(o.team, pg_catalog.regexp_replace(pt.updated_by, '^.* · ', ''))))
        or exists (select 1 from public.lp_messages m join public.patients pt on pt.id = m.request_id
-                   where pt.event_id = p_event and pg_catalog.lower(pg_catalog.btrim(m.team)) = pg_catalog.lower(o.team ->> 'label')))
+                   where pt.event_id = p_event and public.lp_team_named(o.team, m.team)))
    limit 1;
   if v_label is not null then
     raise exception using errcode = 'P0422', message = 'in_use', detail = 'field:teams';
   end if;
+
+  -- (Phase 2) Renamed teams keep their earlier labels (aliases) in the same transaction: a lead's settings never carry
+  -- them (lp_event_apply takes the teams as sent), so they come from the stored teams, by id. A label taken back is no
+  -- longer an alias.
+  v_row.teams := coalesce((
+    select pg_catalog.jsonb_agg(
+             case when al.list is null or pg_catalog.jsonb_array_length(al.list) = 0 then n.team - 'aliases'
+                  else (n.team - 'aliases') || pg_catalog.jsonb_build_object('aliases', al.list) end
+             order by n.ord)
+      from pg_catalog.jsonb_array_elements(v_row.teams) with ordinality as n(team, ord)
+      left join lateral (
+        select pg_catalog.jsonb_agg(distinct x.v) as list
+          from (
+            select o.team ->> 'label' as v
+              from pg_catalog.jsonb_array_elements(v_old.teams) as o(team)
+             where o.team ->> 'id' = n.team ->> 'id'
+            union
+            select a.v
+              from pg_catalog.jsonb_array_elements(v_old.teams) as o(team)
+              cross join lateral pg_catalog.jsonb_array_elements_text(
+                case when pg_catalog.jsonb_typeof(o.team -> 'aliases') = 'array' then o.team -> 'aliases' else '[]'::jsonb end) as a(v)
+             where o.team ->> 'id' = n.team ->> 'id'
+          ) x
+         where pg_catalog.lower(x.v) <> pg_catalog.lower(n.team ->> 'label')
+           and not exists (select 1 from pg_catalog.jsonb_array_elements(v_row.teams) as other(team)
+                            where pg_catalog.lower(other.team ->> 'label') = pg_catalog.lower(x.v))
+      ) al on true), '[]'::jsonb);
 
   -- Renamed posts: one statement, so two posts that swap labels swap their requests too.
   update public.patients pt
@@ -3003,7 +3059,7 @@ begin
     where pt.event_id = p_event and m.created_at > v_now - interval '10 minutes'
   ), named as (
     select coalesce((select t.team ->> 'id' from pg_catalog.jsonb_array_elements(v_ev.teams) as t(team)
-                      where s.t in (pg_catalog.lower(t.team ->> 'label'), pg_catalog.lower(t.team ->> 'short'), pg_catalog.lower(t.team ->> 'id'))
+                      where public.lp_team_named(t.team, s.t, true)
                       limit 1), 'other') as team,
            pg_catalog.count(distinct s.who)::integer as n
     from (select a.who, pg_catalog.lower(pg_catalog.regexp_replace(a.who, '^.* · ', '')) as t from acts a where a.who is not null) s
@@ -3079,7 +3135,7 @@ begin
     'public.lp_event_set_invite(uuid, text, timestamptz)', 'public.lp_event_set_logo(uuid, text)', 'public.lp_event_go_live(uuid)',
     'public.lp_event_end(uuid)', 'public.lp_event_reopen(uuid)', 'public.lp_session_state(uuid)', 'public.lp_auth_secrets()', 'public.lp_invite_candidates(text)',
     'public.lp_org_set_lead_passcode(text)', 'public.lp_post_short(jsonb, text, text)', 'public.lp_stats_base(uuid, boolean)',
-    'public.lp_stats(uuid, text)'
+    'public.lp_stats(uuid, text)', 'public.lp_team_named(jsonb, text, boolean)'
   ] loop
     execute pg_catalog.format('revoke all on function %s from public, anon, authenticated', v_sig);
     execute pg_catalog.format('grant execute on function %s to service_role', v_sig);

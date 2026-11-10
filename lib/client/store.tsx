@@ -14,14 +14,18 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { StoreContext, type AppStore } from './store-contract';
 import { createAppStore } from './store-core';
+import { FALLBACK_TIMEZONE } from '../format';
 
 export interface StoreProviderProps {
   children: ReactNode;
-  /** IANA zone for every displayed time (EVENT_TIMEZONE, read on the server). */
-  eventTimezone: string;
+  /**
+   * IANA zone of the server render and hydration, before the event's config is known (default UTC; the server HTML
+   * shows no time). The store then uses the event's (EventConfig.timezone).
+   */
+  eventTimezone?: string;
 }
 
-export function StoreProvider({ children, eventTimezone }: StoreProviderProps) {
+export function StoreProvider({ children, eventTimezone = FALLBACK_TIMEZONE }: StoreProviderProps) {
   // Pure construction: safe on the server (see above).
   const [store] = useState<AppStore>(() => createAppStore({ eventTimezone }));
   // Side effects start on the client only, after hydration; the returned function stops them.

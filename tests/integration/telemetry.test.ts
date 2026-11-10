@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { telemetryPaste } from '../../scripts/telemetry-sql.mjs';
+import { ROOT } from '../../scripts/test-env.mjs';
 import { EVENT_ID, api, cookieFor, dbUrl, newStaff, psql, setCookies, uniq, withTestServer } from './harness';
 
 withTestServer();
@@ -286,7 +287,15 @@ describe('GET /api/telemetry/health and the aggregates', () => {
     const res = await api('/api/telemetry/health?window=1h', { cookie: medic });
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
-    expect(Object.keys(res.body).sort()).toEqual(['coverage', 'config', 'errors', 'examples', 'flows', 'generatedAt', 'kpis', 'net', 'problems', 'push', 'window'].sort());
+    expect(Object.keys(res.body).sort()).toEqual(['coverage', 'config', 'errors', 'examples', 'flows', 'generatedAt', 'kpis', 'net', 'problems', 'push', 'teams', 'timeZone', 'window'].sort());
+    // (Events) The event's team names by id (telemetry's team keys) and its time zone, for the page's labels.
+    expect(res.body.teams).toEqual([
+      { id: 'transpo', short: 'GCHX Med Transpo' },
+      { id: 'dispatch', short: 'Dispatch' },
+      { id: 'base', short: 'GCHX Base' },
+      { id: 'medical', short: 'Medical' },
+    ]);
+    expect(res.body.timeZone).toBe('America/New_York');
     const mine = (res.body.problems as Array<{ area: string; n: number; devices: number }>).filter((p) => p.area.startsWith(area));
     expect(mine.map((p) => [p.area, p.n, p.devices])).toEqual([
       [`${area}-b`, 2, 2],
@@ -361,6 +370,11 @@ describe('the SQL', () => {
       expect(psql(`select count(*) from cron.job where jobname = 'lp-tel-retention'`)).toBe('1');
     } finally {
       rmSync(dir, { recursive: true, force: true });
+      // The paste is the rework file's section 10 (its lp_tel_config still stops at off_at): paste the events file
+      // again (it is re-runnable and redefines every lp_tel_* function), or the stack keeps the off-date version and
+      // telemetry turns off once the seeded off date passes.
+      const events = spawnSync('psql', [dbUrl(), '-v', 'ON_ERROR_STOP=1', '-q', '-f', join(ROOT, 'supabase/migrations/20261110000000_events.sql')], { encoding: 'utf8', env: { ...process.env, PGOPTIONS: '-c client_min_messages=warning' } });
+      expect(events.status, events.stderr).toBe(0);
     }
   });
 });

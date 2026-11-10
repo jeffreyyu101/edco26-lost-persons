@@ -180,6 +180,7 @@ export function swapEvent(
   row: Pick<RequestSummary, 'id' | 'postShort' | 'swapPlace'>,
   actor: string,
   parties: SwapParties,
+  mainMedical = '',
 ): { recipients: string[] | null; event: ActivityEvent } | null {
   const base = { requestId: row.id, actor };
   const answerer = parties.answerer && !sameStaff(parties.answerer, actor) ? [parties.answerer] : null;
@@ -193,7 +194,7 @@ export function swapEvent(
   if (action === 'request') return { recipients: answerer, event: requested };
   if (action === 'approve') {
     const place = row.swapPlace === 'fa' ? 'fa' : 'mm';
-    return { recipients: null, event: { ...base, kind: 'swap_approved', detail: swapApprovedDetail(place, row.postShort) } };
+    return { recipients: null, event: { ...base, kind: 'swap_approved', detail: swapApprovedDetail(place, row.postShort, mainMedical) } };
   }
   if (action === 'decline') {
     const list = [parties.requester, parties.creator].filter((s): s is string => !!s);
@@ -214,9 +215,10 @@ export async function swapNotice(
   action: SwapNoticeAction,
   row: Pick<RequestSummary, 'id' | 'postShort' | 'swapPlace'>,
   actor: string,
+  mainMedical: string,
   parties: SwapParties,
 ): Promise<void> {
-  const plan = swapEvent(action, row, actor, parties);
+  const plan = swapEvent(action, row, actor, parties, mainMedical);
   if (!plan) return;
   const fixed = plan.recipients;
   await notifyLater(eventId, () => (fixed ? Promise.resolve(fixed) : involvedStaff(eventId, row.id)), () => plan.event);

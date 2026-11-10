@@ -393,32 +393,11 @@ export interface Stats {
   inactive?: number;
   /** (Companion, additive) Requests 'Closed – Friend Informed' now. Absent on a database before the companion migration. */
   friendInformed?: number;
-  // ---- Dashboard v4 (GET /api/stats?range=…, lp_stats(p_range), 20261108000000_dashboard_v4.sql). Absent without a
-  // range or on a database before that migration (the dashboard then falls back to the fields above).
-  range?: { key: StatsRange; from: IsoDateTime; step: number; compare: boolean };
-  /** Open, split: no first check yet / on a re-check hold / Located, friend not here yet. */
-  live?: { waiting: number; pending: number; located: number };
-  attention?: { total: number; items: AttentionItem[] };
-  speed?: SpeedStat[];
-  calls?: { total: number; prevTotal: number | null; buckets: CallsBucket[] };
-  heat?: { step: number; cols: HeatCol[] };
-  recap?: {
-    reunited: number;
-    notLocated: number;
-    fastest: number | null;
-    prevReunited: number | null;
-    prevNotLocated: number | null;
-    prevFastest: number | null;
-    lastReunionAt: IsoDateTime | null;
-  };
-  /** People with activity in the last 10 minutes, per team (counts only). */
-  team?: Array<{ team: string; on: number }>;
 }
 
-export type StatsRange = '1h' | '2h' | '6h' | 'tonight' | 'event';
-
-// ---- (Events) GET /api/stats → lp_stats(p_event, p_range). The server's shape; the current dashboard still reads Stats
-// above through lib/client/stats-shim.ts (PHASE2: the dashboard reads this directly and the shim goes).
+// ---- (Events) GET /api/stats?range=… → lp_stats(p_event, p_range): the base snapshot above plus the dashboard's fields,
+// in the event's time zone and show day. Post breakdowns are arrays ordered by count (the four busiest posts of the range
+// by short name, then 'Other'), never fixed post keys.
 /** '1h' | '2h' | '6h' | 'today' (since the current show day began) | 'event' | 'day:N' (show day N, from 1). */
 export type EventStatsRange = '1h' | '2h' | '6h' | 'today' | 'event' | `day:${number}`;
 /** One post of a breakdown: its short label, or 'Other' (everything past the four busiest, Other locations, legacy values). */
@@ -426,42 +405,11 @@ export interface PostCount {
   post: string;
   n: number;
 }
-export interface EventStats extends Omit<Stats, 'range' | 'attention' | 'speed' | 'calls' | 'heat' | 'team'> {
-  range?: {
-    key: EventStatsRange;
-    from: IsoDateTime;
-    /** The end of a 'day:N' range; null for the others (they run to now). */
-    to: IsoDateTime | null;
-    step: number;
-    compare: boolean;
-    /** N for 'day:N', else null. */
-    day: number | null;
-    /** The posts of this range, by count (the four busiest by name, then 'Other' when it has rows). Every breakdown below follows this order. */
-    posts: PostCount[];
-  };
-  attention?: { total: number; items: Array<Omit<AttentionItem, 'tent'> & { post: string }> };
-  speed?: Array<
-    Omit<SpeedStat, 'byTent' | 'spark'> & {
-      byPost: Array<{ post: string; n: number; median: number | null }>;
-      spark: Array<{ at: IsoDateTime; day: string | null; n: number; median: number | null; p90: number | null }>;
-    }
-  >;
-  calls?: {
-    total: number;
-    prevTotal: number | null;
-    /** `day`: the show day (YYYY-MM-DD) of an 'event' bucket, else null. */
-    buckets: Array<{ at: IsoDateTime; day: string | null; n: number; posts: PostCount[]; prev: number | null }>;
-  };
-  /** 'event': `hour` (local clock hour, summed over every show day); otherwise `at`. */
-  heat?: { step: number; cols: Array<{ at?: IsoDateTime; hour?: number; n: number; posts: PostCount[] }> };
-  /** The event's team ids in setup order, plus 'other' when someone outside them is on. */
-  team?: Array<{ team: string; on: number }>;
-}
-export type TentCounts = { fa4: number; fa3: number; other: number };
 export interface AttentionItem {
   id: string;
   caseNumber: number;
-  tent: string;
+  /** The request's post (short), or 'Other'. */
+  post: string;
   kind: 'wait' | 'recheck' | 'located' | 'swap';
   /**
    * Logged (wait), the re-check due time (recheck), the Located answer (located) or (Companion) when the friend
@@ -478,20 +426,57 @@ export interface SpeedStat {
   median: number | null;
   p90: number | null;
   prevMedian: number | null;
-  byTent: Record<'FA 4' | 'FA 3' | 'Other', number | null>;
-  spark: Array<{ at: IsoDateTime; night: string | null; n: number; median: number | null; p90: number | null }>;
+  /** The range's posts, in EventStats.range.posts order. */
+  byPost: Array<{ post: string; n: number; median: number | null }>;
+  /** `day`: the show day (YYYY-MM-DD) of an 'event' bucket, else null. */
+  spark: Array<{ at: IsoDateTime; day: string | null; n: number; median: number | null; p90: number | null }>;
 }
-export interface CallsBucket extends TentCounts {
+export interface CallsBucket {
   at: IsoDateTime;
-  /** 'event' only: the night (ET date of its noon). */
-  night: string | null;
-  /** The same clock bucket the night before (null for 'event'). */
+  /** 'event' only: the show day (YYYY-MM-DD). */
+  day: string | null;
+  n: number;
+  posts: PostCount[];
+  /** The same clock bucket the show day before (null when not compared). */
   prev: number | null;
 }
-export interface HeatCol extends TentCounts {
-  /** A bucket start; for 'event' an ET clock hour (0–23) summed over every night instead. */
+export interface HeatCol {
+  /** A bucket start; for 'event' a local clock hour (0–23) summed over every show day instead. */
   at?: IsoDateTime;
   hour?: number;
+  n: number;
+  posts: PostCount[];
+}
+export interface EventStats extends Stats {
+  range?: {
+    key: EventStatsRange;
+    from: IsoDateTime;
+    /** The end of a 'day:N' range; null for the others (they run to now). */
+    to: IsoDateTime | null;
+    step: number;
+    compare: boolean;
+    /** N for 'day:N', else null. */
+    day: number | null;
+    /** The posts of this range, by count (the four busiest by name, then 'Other' when it has rows). Every breakdown below follows this order. */
+    posts: PostCount[];
+  };
+  /** Open, split: no first check yet / on a re-check hold / Located, friend not here yet. */
+  live?: { waiting: number; pending: number; located: number };
+  attention?: { total: number; items: AttentionItem[] };
+  speed?: SpeedStat[];
+  calls?: { total: number; prevTotal: number | null; buckets: CallsBucket[] };
+  heat?: { step: number; cols: HeatCol[] };
+  recap?: {
+    reunited: number;
+    notLocated: number;
+    fastest: number | null;
+    prevReunited: number | null;
+    prevNotLocated: number | null;
+    prevFastest: number | null;
+    lastReunionAt: IsoDateTime | null;
+  };
+  /** People with activity in the last 10 minutes, per team: the event's team ids in setup order, plus 'other'. */
+  team?: Array<{ team: string; on: number }>;
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -542,6 +527,11 @@ export interface EventTeam {
   short: string;
   /** Exactly one team may be the medical team (needs-info, push defaults, isMedicalTeam). */
   medical: boolean;
+  /**
+   * (Phase 2, additive) Labels this team had before it was renamed under the same id: what was stored, and sessions
+   * signed in, under them still belong to it. Kept by the server; never sent by a lead.
+   */
+  aliases?: string[];
 }
 
 /**
@@ -591,6 +581,8 @@ export interface EventAdmin extends EventConfig {
 
 /** What a staff member sees when their event has ended (410 event_ended from sign-in or any write). */
 export interface EndedEvent {
+  /** (Phase 2, additive) The event's id: the client drops that event's local data (cache, outbox). */
+  id?: string;
   name: string;
   logoUrl: string | null;
   stage: 'archived';
@@ -619,10 +611,16 @@ export type ApiErrorCode =
   | 'photo_limit'
   | 'rate_limited'
   | 'unavailable'
-  /** (Events) 410: the event is archived; every write is refused (reads still work). */
+  /** (Events) 410: the event is archived. Staff are refused on every route (reads too); a lead only on writes. */
   | 'event_ended'
   /** (Events) 409: a lead session with no event open called an event route. */
-  | 'no_event';
+  | 'no_event'
+  /**
+   * (Phase 2) 409: the request says it is for another event (X-LP-Event) than the session's cookie: this tab's data,
+   * queued requests and messages are another event's, and nothing of them may reach this one. The client re-reads its
+   * session (GET /api/session) and switches to the cookie's event.
+   */
+  | 'wrong_event';
 
 export interface ApiError {
   error: {
@@ -696,6 +694,14 @@ export interface OutboxItem {
   createdAt: number;
   /** 'legacy' = imported from Jeffrey's localStorage['edc_pending_queue']. */
   source: 'app' | 'legacy';
+  /**
+   * (Events, additive) The event it was saved in: it only ever goes to that event (absent: before events). A job saved
+   * while that event was in practice (`wentLiveAt` then) is dropped once the event goes live: its request was a
+   * practice one.
+   */
+  eventId?: string;
+  /** (Events) The event's wentLiveAt when the job was saved (null: in practice). */
+  wentLiveAt?: string | null;
 }
 
 export type { CreateRequestBody, RequestPatch };

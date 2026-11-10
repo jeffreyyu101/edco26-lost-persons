@@ -35,6 +35,7 @@ import {
   type Ranges,
 } from './list-helpers';
 import s from './list.module.css';
+import { useEventConfig } from '@/lib/client/event-config';
 
 export function Highlight({ text, ranges }: { text: string; ranges: Ranges }) {
   if (ranges.length === 0) return <>{text}</>;
@@ -172,7 +173,7 @@ export interface LogRowProps {
 export const LogRow = memo(function LogRow({ row, created, updated, updatedSaid, timeZone, now = 0 }: LogRowProps) {
   const closed = isClosed(row.status);
   // (F5) The stage: Needs info, Not found yet, Recheck due, Friend en route… over the stored status.
-  const look = stageLook(row, now);
+  const look = stageLook(row, now, useEventConfig()?.mainMedical);
   return (
     <button
       type="button"
@@ -213,7 +214,7 @@ export interface SearchLogRowProps extends Omit<LogRowProps, 'row'> {
 export const SearchLogRow = memo(function SearchLogRow({ hit, created, updated, updatedSaid, timeZone, now = 0, nameRanges, caseRanges, line, lineRanges }: SearchLogRowProps) {
   const { row } = hit;
   const closed = isClosed(row.status);
-  const look = stageLook(row, now);
+  const look = stageLook(row, now, useEventConfig()?.mainMedical);
   // The matched text, else the LP number when it is what matched (caseRanges are in formatCaseNumber's text).
   const shown = line ? { text: line, ranges: lineRanges } : caseRanges.length > 0 ? { text: formatCaseNumber(row.caseNumber), ranges: caseRanges } : null;
   return (
@@ -249,7 +250,7 @@ export const SearchLogRow = memo(function SearchLogRow({ hit, created, updated, 
  * "Needs attention", which opens its editor). No LP number yet, and nothing has updated it.
  */
 export function OutboxLogRow({ item, created }: { item: OutboxItem; created: string }) {
-  const d = outboxDisplay(item);
+  const d = outboxDisplay(item, useEventConfig()?.posts);
   // "Kayla, 19 F, 11:02 PM. Waiting to send, FA 3, Not sent." (+ "Open to fix and resend.")
   const label = outboxRowLabel(d, created);
   const cells = (

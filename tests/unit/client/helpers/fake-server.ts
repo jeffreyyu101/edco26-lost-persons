@@ -2,6 +2,7 @@
 // database-style cursors ("…+00:00", microseconds), creates idempotent on clientMutationId, status changes
 // with version checks and the §4 transitions, edits, cancel, photos idempotent on photoId, detail, stats.
 // Synthetic data only. Every request is recorded; `override` can hang, drop or answer any request.
+import { STUB_EVENT } from '@/lib/client/stub-data';
 import type { PhotoInfo, RequestSummary, SessionInfo, SyncResponse } from '@/lib/api-types';
 import { STATUS, canTransition, joinName, postShort, splitName } from '@/lib/domain';
 
@@ -72,7 +73,8 @@ export function makeRow(n: number, patch: Partial<RequestSummary> = {}): Request
   };
   const row = { ...base, ...patch };
   row.name = patch.name ?? joinName(row.firstName, row.lastName);
-  row.postShort = postShort(row.reportingLocation, row.otherLocation);
+  // (Events) The server derives postShort from its event's posts (the local test event's, as the stub's).
+  row.postShort = postShort(row.reportingLocation, row.otherLocation, STUB_EVENT.posts);
   return row;
 }
 
@@ -85,13 +87,19 @@ export class FakeServer {
   readonly rows = new Map<string, Stored>();
   readonly log: FakeRequest[] = [];
   readonly photos = new Map<string, { requestId: string; info: PhotoInfo }>();
-  session: SessionInfo | null = { ...STAFF.dana, role: 'staff', eventId: null, event: null, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
+  // (Events) A staff session of the local test event (the stub's config: its posts, teams, Main Med and zone).
+  session: SessionInfo | null = { ...STAFF.dana, role: 'staff', eventId: STUB_EVENT.id, event: STUB_EVENT, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
   pageSize = 500;
   /** How many seq units each delta repeats (the 30 s overlap). */
   overlap = 2;
   override: Override | null = null;
   /** Extra fields of every sync response (F4: activityUnread / activityKey). */
   syncExtras: Record<string, unknown> | null = null;
+  /**
+   * (Events) The session's event has ended: every route answers 410 event_ended with this block (the Ended screen's),
+   * except DELETE /api/session (sign-out still works after the end), as lib/server/route.ts does for staff.
+   */
+  ended: { id?: string; name: string; logoUrl: string | null; stage: 'archived' } | null = null;
   private seq = 0;
   private nextCase = 2000;
   /** serverTime strings this server issued → seq at that moment (a mangled '+' won't be found → 400). */
@@ -163,6 +171,9 @@ export class FakeServer {
 
   private route(req: FakeRequest): Response {
     const { method, path } = req;
+    if (this.ended && this.session && !(path === '/api/session' && method === 'DELETE')) {
+      return apiError(410, 'event_ended', 'This event has ended', { event: this.ended });
+    }
     if (path === '/api/session') {
       if (method === 'DELETE') {
         this.session = null;
@@ -320,6 +331,10 @@ export class FakeServer {
     }
     const res: SyncResponse = { serverTime: now, rows: page.map((s) => s.row), hasMore, next };
     if (q.get('reconcile') === '1') res.versions = [...this.rows.values()].map((s) => [s.row.id, s.row.rowVersion]);
+    // (Events) ?ev=<version the client holds>: the event's stage and version, only when they moved.
+    const ev = q.get('ev');
+    const event = this.session?.event;
+    if (ev !== null && event && ev !== event.updatedAt) res.event = { id: event.id, stage: event.stage, version: event.updatedAt };
     return json(200, this.syncExtras ? { ...res, ...this.syncExtras } : res);
   }
 }

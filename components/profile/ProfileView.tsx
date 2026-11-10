@@ -62,6 +62,8 @@ import {
   type StoreState,
 } from '@/lib/client/store-contract';
 import { FIELD_LABELS, MAX_PHOTOS, PHOTO_TIMING_LABEL, STATUS, canCancel, isHeld, isInMedical, isStatus, menuActions, parseStaff, postFull, primaryActions, sameStaff, statusMeta, telHref, waitTone, type PhotoTiming, type SettableStatus, type StatusAction, type StatusKind } from '@/lib/domain';
+import { EventStageChip, PRACTICE } from '@/components/ui/EventStageChip';
+import { medicalLabel, useEventConfig } from '@/lib/client/event-config';
 import { displayStage, holdAnsweredAt, isMedicalTeam, notFoundAnswer, recheckCountdown, shortStaffName } from '@/lib/stages';
 import { formatCaseNumber, formatCreatedTime, formatDuration, formatListTime, minutesSince } from '@/lib/format';
 import { threadPreviewShown, unreadOf } from '@/lib/messaging';
@@ -190,13 +192,15 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
   const session = useSession();
   const { connection } = useConnection();
   const timeZone = useEventTimezone();
+  const event = useEventConfig();
+  const mainMedical = event?.mainMedical ?? '';
   const now = useNow();
   const offline = connection === 'offline';
   const label = formatCaseNumber(row.caseNumber);
   const isCreator = sameStaff(row.createdBy, session.staff);
   const cancellable = canCancel(row.status, row.createdBy, session.staff);
 
-  const trail = useMemo(() => (detail ? buildAuditTrail(detail.audit, timeZone) : null), [detail, timeZone]);
+  const trail = useMemo(() => (detail ? buildAuditTrail(detail.audit, timeZone, event?.teams) : null), [detail, timeZone, event?.teams]);
   // (F5) A request on a "Not found yet" hold shows who gave that first Not found.
   const held = isHeld(row);
   const origin = useMemo(
@@ -224,7 +228,7 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
   const unread = unreadOf(row) > 0 && (synced || detail !== null || threadLoaded);
   const [seenUnread, setSeenUnread] = useState(unread);
   if (unread && !seenUnread) setSeenUnread(true);
-  const shownStage = displayStage(row, { now, timeZone });
+  const shownStage = displayStage(row, { now, timeZone, mainMedical });
   const needsInfo = shownStage.key === 'needsInfo' ? shownStage : null;
   const preview = threadPreviewShown(needsInfo !== null, seenUnread, row.lastMessage) ? (
     // (2026-11-08, T1) No chip on the line: the status block above it already says Needs info, in words and glyph.
@@ -390,7 +394,7 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
   };
   // (F5) Medical side, Waiting for check (held or not): the two answers sit inside the status block
   // (design/screens/clarify-7.png, recheck-3.png); front of house keeps them in the bar as before.
-  const answersInBlock = isMedicalTeam(session.team) && row.status === STATUS.waiting;
+  const answersInBlock = isMedicalTeam(session.team, medicalLabel(event)) && row.status === STATUS.waiting;
   const footer = answersInBlock ? [] : primaryActions(row.status);
   // (Companion) Accompanied: Request swap | Friend informed; swap requested: the decision; swap approved: Swap done.
   const companionFooter: ReactNode =
@@ -466,9 +470,12 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
     <div className={s.app} data-testid="profile" data-status={row.status} data-presentation={panel ? 'panel' : undefined}>
       <div className={s.nav} style={panel ? HIDDEN : undefined}>
         <CloseButton />
-        <Text size="2" weight="medium" color="gray" data-testid="profile-case">
-          {label}
-        </Text>
+        <span className={s.navMid}>
+          <Text size="2" weight="medium" color="gray" data-testid="profile-case">
+            {label}
+          </Text>
+          <EventStageChip only={PRACTICE} />
+        </span>
         <DropdownMenu.Root>
           <DropdownMenu.Trigger>
             <IconButton variant="soft" color="gray" radius="full" aria-label="More actions" className={s.hit}>
@@ -802,8 +809,9 @@ function StatusBlock({
 }) {
   // (F5) The stage (lib/stages displayStage): Needs info, Not found yet, … over the stored status. The block
   // keeps In medical's look while a friend is en route or has arrived: F3's en route row says that under it.
-  const shown = displayStage(row, { now, timeZone });
-  const stage = shown.key === 'enroute' || shown.key === 'arrived' ? displayStage({ ...row, enroute: null }, { now, timeZone }) : shown;
+  const mainMedical = useEventConfig()?.mainMedical ?? '';
+  const shown = displayStage(row, { now, timeZone, mainMedical });
+  const stage = shown.key === 'enroute' || shown.key === 'arrived' ? displayStage({ ...row, enroute: null }, { now, timeZone, mainMedical }) : shown;
   const waiting = stage.key === 'waiting';
   const inMedical = isInMedical(row.status);
   // (2026-11-08, Pending clarity) A hold's block says it in full: "Pending · not located yet", "First check · Rae C. ·

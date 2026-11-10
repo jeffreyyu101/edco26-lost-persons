@@ -31,8 +31,8 @@ screenshots.
   actionabile improvements"): taps, swipes that move nothing, rage taps, dead taps, sheets opened and closed, slow
   requests, errors, sync and push health, and timed flows (open, resume, answer, message, new request, alert), as
   numbers and attribute names only, by team. A desktop-only **`/health`** page shows the problem spots with their
-  breadcrumb trails, the critical paths, request failure rates, push delivery and alert coverage. It stops by itself at
-  **2026-11-10 06:00 ET**; the kill switch is on `/health` (off only) and in SQL (off and back on). (Events, 2026-11-10: the switch on
+  breadcrumb trails, the critical paths, request failure rates, push delivery and alert coverage. (Events: it runs while an event is in
+  practice or live; the fixed 2026-11-10 06:00 ET off date no longer applies, on the server or the phone.) The kill switch is on `/health` (off only) and in SQL (off and back on). (Events, 2026-11-10: the switch on
   `/health` is a lead's, off and back on; staff see it disabled.) See "Telemetry in
   production" below. Reading it after the message lane and the phone thread in the page: on a phone a swipe on the
   thread is the request page's (area `profile`; its trail still says `w!:thread:…`), the desk pane's thread is still
@@ -302,8 +302,7 @@ answers 204 and every phone turns itself off; a transient database error is a 50
 
 **Turn it off** (any of these): the switch on `/health` (with a confirm), or
 `update public.lp_tel_settings set enabled = false, updated_at = now();` (server instances answer 204 within 30 s; each
-phone stops at its next send, restores everything it attached, and probes once every 30 minutes). Move the auto-off:
-`update public.lp_tel_settings set off_at = timestamptz '2026-11-09 06:00-05', updated_at = now();`. **Back on is SQL
+phone stops at its next send, restores everything it attached, and probes once every 30 minutes). (Events: `off_at` no longer stops anything; collection follows the events' stages.) **Back on is SQL
 only** (the `/health` switch can only turn it off, so nobody restarts a collection stopped for a reason):
 `update public.lp_tel_settings set enabled = true, updated_at = now();`. Pause retention:
 `select cron.unschedule('lp-tel-retention');`.

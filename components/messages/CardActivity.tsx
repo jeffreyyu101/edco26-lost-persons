@@ -29,6 +29,7 @@ import type { DisplayStage } from '@/lib/stages';
 import { StageChip } from '@/components/list/StageChips';
 import { EnrouteFailed, EnrouteRow, useEnrouteControl } from './Enroute';
 import s from './messages.module.css';
+import { medicalLabel, useEventConfig } from '@/lib/client/event-config';
 
 function who(row: RequestSummary): string {
   return alertName(row.name) || 'this request';
@@ -176,8 +177,9 @@ export function MineActivity({ row }: { row: RequestSummary }) {
   const session = useSession();
   const enroute = useEnrouteControl(row);
   const { offline, tap } = useStatusTap();
+  const medical = medicalLabel(useEventConfig());
   if (!api) return null;
-  const foh = sideOfTeam(session.team) === 'foh';
+  const foh = sideOfTeam(session.team, medical) === 'foh';
   const inMedical = isInMedical(row.status);
   const arrived = enroute.enroute?.state === 'arrived';
   const action = foh && inMedical ? (

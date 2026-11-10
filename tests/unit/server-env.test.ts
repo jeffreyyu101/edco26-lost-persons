@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { EnvError, eventTimezone, normalizeSupabaseUrl, resetServerEnvCache, serverEnv } from '@/lib/server/env';
+import { EnvError, normalizeSupabaseUrl, resetServerEnvCache, serverEnv } from '@/lib/server/env';
 import { sessionSecretFromEnv } from '@/lib/server/session-token';
 
 // Ported from Jeffrey's tests/supabase-url.test.cjs.
@@ -60,7 +60,8 @@ describe('serverEnv', () => {
     const env = serverEnv();
     expect(env.supabaseUrl).toBe('http://127.0.0.1:54421');
     expect(env.supabaseOrigin).toBe('http://127.0.0.1:54421');
-    expect(env.eventTimezone).toBe('America/New_York');
+    // (Events) The display time zone is each event's (EventConfig.timezone): the env holds none.
+    expect(env).not.toHaveProperty('eventTimezone');
   });
 
   it('falls back to SUPABASE_SERVICE_ROLE_KEY', () => {
@@ -93,7 +94,8 @@ describe('serverEnv', () => {
     expect(message).toContain('SUPABASE_SECRET_KEY');
     expect(message).toContain('SESSION_SECRET must be at least 32 characters');
     expect(message).not.toContain('APP_SHARED_PASSWORD');
-    expect(message).toContain('EVENT_TIMEZONE is not a valid IANA time zone');
+    // (Events) EVENT_TIMEZONE is no longer read, so a bad one is no problem.
+    expect(message).not.toContain('EVENT_TIMEZONE');
     expect(message).not.toContain('short-secret-value');
   });
 
@@ -113,10 +115,4 @@ describe('serverEnv', () => {
     expect(() => serverEnv()).toThrow(/SUPABASE_SECRET_KEY/);
   });
 
-  it('eventTimezone() falls back to the default on bad input', () => {
-    process.env.EVENT_TIMEZONE = 'Nope/Nope';
-    expect(eventTimezone()).toBe('America/New_York');
-    process.env.EVENT_TIMEZONE = 'America/Chicago';
-    expect(eventTimezone()).toBe('America/Chicago');
-  });
 });

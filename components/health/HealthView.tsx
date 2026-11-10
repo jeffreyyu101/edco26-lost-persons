@@ -17,7 +17,7 @@ import { PathTable } from './PathTable';
 import { ProblemTable } from './ProblemTable';
 import { PushPanel } from './PushPanel';
 import { TrailDrawer } from './TrailDrawer';
-import { DASH, HEALTH_SEEN_KEY, WINDOWS, fmtClock, fmtMs, fmtUntil, num, pct, trend, type HealthData, type Problem } from './health-model';
+import { DASH, HEALTH_SEEN_KEY, WINDOWS, fmtClock, fmtMs, num, pct, trend, applyHealthEvent, type HealthData, type Problem } from './health-model';
 import s from './health.module.css';
 
 const DESK_QUERY = '(min-width: 768px)';
@@ -78,6 +78,7 @@ function Panel({ title, children, wide, testid }: { title: string; children: Rea
 
 /** The dashboard for one answer of GET /api/telemetry/health (pure: the tests render it with fixtures). */
 export function HealthDashboard({ data, onTrail }: { data: HealthData; onTrail: (p: Problem) => void }) {
+  applyHealthEvent(data);
   const now = Date.parse(data.generatedAt) || 0;
   const k = data.kpis;
   const syncTotal = (k?.syncOk ?? 0) + (k?.syncFail ?? 0);
@@ -228,9 +229,10 @@ export function HealthView({ lead }: { lead: boolean }) {
             </span>
           ) : null}
         </span>
-        <span className={s.status} data-testid="health-status" role="img" aria-label={on ? `Collecting until ${cfg ? fmtUntil(cfg.until) : 'the auto-off'}` : 'Collection is off'}>
+        {/* (Events) Collection runs while an event is in practice or live: no off date any more. */}
+        <span className={s.status} data-testid="health-status" role="img" aria-label={on ? 'Collecting while an event is in practice or live' : 'Collection is off'}>
           <span className={s.dot} data-off={on ? undefined : ''} />
-          {on ? `Collecting · ${cfg ? fmtUntil(cfg.until) : DASH}` : 'Off'}
+          {on ? 'Collecting' : 'Off'}
         </span>
         <button
           type="button"

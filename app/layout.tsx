@@ -13,7 +13,7 @@ import { HydrationMarker } from './hydration-marker';
 
 export const metadata: Metadata = {
   title: 'Is my friend in medical?',
-  description: 'EDC Orlando 2026 · Ground Control / Headliner Experience',
+  description: 'Ground Control / Headliner Experience',
   applicationName: 'Is my friend in medical?',
   manifest: '/manifest.webmanifest',
   appleWebApp: { capable: true, title: 'In medical?', statusBarStyle: 'default' },

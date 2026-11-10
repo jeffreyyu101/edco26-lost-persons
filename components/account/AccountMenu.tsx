@@ -20,6 +20,7 @@ import { navigate } from '@/lib/client/nav';
 import { useActions, usePrefs, useSession, type ThemePref } from '@/lib/client/store-contract';
 import { avatarInitials, teamShort } from '@/lib/domain';
 import s from './account.module.css';
+import { useEventConfig } from '@/lib/client/event-config';
 
 export interface AccountMenuProps {
   /** Radix avatar size for the trigger (header uses "2"). */
@@ -59,6 +60,7 @@ export function AccountMenu({ size = '2', onShowHeader }: AccountMenuProps) {
   // Offline the session may not be confirmed yet: fall back to who signed in last on this phone.
   const name = session.staffName ?? prefs.rememberedName ?? '';
   const team = session.team ?? prefs.rememberedTeam ?? '';
+  const event = useEventConfig();
   const initials = avatarInitials(name) || '?';
 
   const signOut = async (discardOutbox: boolean) => {
@@ -115,7 +117,7 @@ export function AccountMenu({ size = '2', onShowHeader }: AccountMenuProps) {
               </Text>
               {team ? (
                 <Text as="div" size="2" color="gray">
-                  {teamShort(team)}
+                  {teamShort(team, event?.teams)}
                 </Text>
               ) : null}
             </div>

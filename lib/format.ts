@@ -1,8 +1,8 @@
-// Display formatting. Every time is shown in the EVENT timezone (spec §3 EVENT_TIMEZONE, default
-// America/New_York), never the phone's. Pure and isomorphic.
-// FROZEN after Phase 1a: later phases may ADD exports, never change existing ones.
+// Display formatting. Every time is shown in the EVENT's time zone (EventConfig.timezone), never the phone's. Pure and
+// isomorphic. Callers pass the zone; the default (UTC) is only for a caller with no event at all.
 
-export const DEFAULT_EVENT_TIMEZONE = 'America/New_York';
+/** (Events) Only when no event's zone is known: every screen passes its event's (EventConfig.timezone). */
+export const FALLBACK_TIMEZONE = 'UTC';
 
 type Instant = string | number | Date;
 
@@ -37,23 +37,23 @@ export function parseCaseNumberQuery(query: string): number | null {
 }
 
 /** Calendar date in the event timezone, "2026-11-06". */
-export function eventDate(value: Instant, timeZone = DEFAULT_EVENT_TIMEZONE): string {
+export function eventDate(value: Instant, timeZone = FALLBACK_TIMEZONE): string {
   const p = parts(value, timeZone, { year: 'numeric', month: '2-digit', day: '2-digit' });
   return `${p.year}-${p.month}-${p.day}`;
 }
 
-export function isSameEventDay(a: Instant, b: Instant, timeZone = DEFAULT_EVENT_TIMEZONE): boolean {
+export function isSameEventDay(a: Instant, b: Instant, timeZone = FALLBACK_TIMEZONE): boolean {
   return eventDate(a, timeZone) === eventDate(b, timeZone);
 }
 
 /** "11:10", "9:58" — 12-hour clock without AM/PM, as in the mockups. */
-export function formatClock(value: Instant, timeZone = DEFAULT_EVENT_TIMEZONE): string {
+export function formatClock(value: Instant, timeZone = FALLBACK_TIMEZONE): string {
   const p = parts(value, timeZone, { hour: 'numeric', minute: '2-digit', hour12: true });
   return `${p.hour}:${p.minute}`;
 }
 
 /** List time: "h:mm" for today; weekday-prefixed for an earlier day, e.g. "Fri 9:58". */
-export function formatListTime(value: Instant, now: Instant = Date.now(), timeZone = DEFAULT_EVENT_TIMEZONE): string {
+export function formatListTime(value: Instant, now: Instant = Date.now(), timeZone = FALLBACK_TIMEZONE): string {
   const clock = formatClock(value, timeZone);
   if (isSameEventDay(value, now, timeZone)) return clock;
   const { weekday } = parts(value, timeZone, { weekday: 'short' });
@@ -61,7 +61,7 @@ export function formatListTime(value: Instant, now: Instant = Date.now(), timeZo
 }
 
 /** Audit trail / photo viewer time: "Nov 6, 11:10 PM". */
-export function formatAuditTime(value: Instant, timeZone = DEFAULT_EVENT_TIMEZONE): string {
+export function formatAuditTime(value: Instant, timeZone = FALLBACK_TIMEZONE): string {
   const p = parts(value, timeZone, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
   return `${p.month} ${p.day}, ${p.hour}:${p.minute} ${p.dayPeriod}`;
 }
@@ -89,7 +89,7 @@ export function retryMinutes(seconds: number): number {
 // ---------------------------------------------------------------------------------------------------
 
 /** "11:02 PM", "12:05 AM", "12:30 PM": 12-hour clock with AM/PM, in the event timezone. */
-export function formatClockAmPm(value: Instant, timeZone = DEFAULT_EVENT_TIMEZONE): string {
+export function formatClockAmPm(value: Instant, timeZone = FALLBACK_TIMEZONE): string {
   const p = parts(value, timeZone, { hour: 'numeric', minute: '2-digit', hour12: true });
   return `${p.hour}:${p.minute} ${(p.dayPeriod ?? '').toUpperCase()}`;
 }
@@ -108,7 +108,7 @@ function eventDayGap(earlier: Instant, later: Instant, timeZone: string): number
  * the last week (a request logged before midnight and seen after it gets its weekday); "Oct 30 9:41 PM"
  * before that.
  */
-export function formatCreatedTime(value: Instant, now: Instant = Date.now(), timeZone = DEFAULT_EVENT_TIMEZONE): string {
+export function formatCreatedTime(value: Instant, now: Instant = Date.now(), timeZone = FALLBACK_TIMEZONE): string {
   const clock = formatClockAmPm(value, timeZone);
   if (isSameEventDay(value, now, timeZone)) return clock;
   const gap = eventDayGap(value, now, timeZone);

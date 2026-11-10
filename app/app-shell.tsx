@@ -75,7 +75,6 @@ const DeskMineTable = dynamic(() => loadDeskTable().then((m) => m.DeskMineTable)
 const DeskSearchTable = dynamic(() => loadDeskTable().then((m) => m.DeskSearchTable), { ssr: false, loading: listLoading });
 
 export interface AppShellProps {
-  eventTimezone: string;
   /**
    * The desk's brand row, rendered by the page (a server component): <BrandCard logoLoading="lazy" />. Shown
    * above the top bar on All requests from 768 px, unless its X hid it on this device.
@@ -83,9 +82,9 @@ export interface AppShellProps {
   brand?: ReactNode;
 }
 
-export function AppShell({ eventTimezone, brand = null }: AppShellProps) {
+export function AppShell({ brand = null }: AppShellProps) {
   return (
-    <StoreProvider eventTimezone={eventTimezone}>
+    <StoreProvider>
       <Suspense fallback={<RowSkeletons />}>
         <ShellBanners />
         <ViewRouter brand={brand} />

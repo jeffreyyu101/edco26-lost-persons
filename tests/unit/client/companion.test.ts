@@ -39,8 +39,10 @@ describe('status meta (companion)', () => {
     const at = { createdAt: '2026-11-08T20:00:00Z' };
     expect(displayStage({ ...at, status: STATUS.accompanied }, { now: 0 })).toMatchObject({ key: 'accompanied', tone: 'amber', fullLabel: 'Located · already accompanied' });
     expect(displayStage({ ...at, status: STATUS.accompanied, swapRequestedAt: '2026-11-08T20:10:00Z' }, { now: 0 })).toMatchObject({ key: 'swapRequested', tone: 'blue', label: 'Friend swap requested', glyph: 'swapBlue' });
-    expect(displayStage({ ...at, status: STATUS.inMedical, swapPlace: 'mm' }, { now: 0 })).toMatchObject({ key: 'swapApproved', tone: 'green', label: 'Swap at Main Med' });
-    expect(displayStage({ ...at, status: STATUS.inMedical, swapPlace: 'fa', postShort: 'FA 4' }, { now: 0 })).toMatchObject({ key: 'swapApproved', label: 'Swap at FA 4' });
+    expect(displayStage({ ...at, status: STATUS.inMedical, swapPlace: 'mm' }, { now: 0, mainMedical: 'Main Med' })).toMatchObject({ key: 'swapApproved', tone: 'green', label: 'Swap at Main Med' });
+    // (Events) 'mm' is the event's own main medical.
+    expect(displayStage({ ...at, status: STATUS.inMedical, swapPlace: 'mm' }, { now: 0, mainMedical: 'Med Tent' })).toMatchObject({ label: 'Swap at Med Tent' });
+    expect(displayStage({ ...at, status: STATUS.inMedical, swapPlace: 'fa', postShort: 'FA 4' }, { now: 0, mainMedical: 'Main Med' })).toMatchObject({ key: 'swapApproved', label: 'Swap at FA 4' });
     expect(displayStage({ ...at, status: STATUS.friendInformed }, { now: 0 })).toMatchObject({ key: 'friendInformed', tone: 'gray', bucket: 'closed' });
   });
 });
@@ -53,19 +55,19 @@ describe('swap rules (lib/client/swap.ts)', () => {
     expect(isSwapRequested({ ...row, swapRequestedAt: '2026-11-08T20:10:00Z' })).toBe(true);
     expect(isSwapApproved({ ...row, status: STATUS.inMedical, swapPlace: 'fa' })).toBe(true);
     expect(isSwapApproved({ ...row, status: STATUS.inMedical, swapPlace: null })).toBe(false);
-    expect(swapPlaceLabel('fa', row)).toBe('FA 4');
-    expect(swapPlaceLabel('mm', row)).toBe('Main Med');
-    expect(swapPlaceLabel('fa', { reportingLocation: 'Other', otherLocation: 'Command', postShort: '' })).toBe('Command');
-    expect(swapDisplay({ ...row, swapRequestedAt: 'x' })).toEqual({ label: 'Friend swap requested', tone: 'blue' });
-    expect(swapDisplay({ ...row, status: STATUS.inMedical, swapPlace: 'mm' })).toEqual({ label: 'Swap at Main Med', tone: 'green' });
+    expect(swapPlaceLabel('fa', row, 'Main Med')).toBe('FA 4');
+    expect(swapPlaceLabel('mm', row, 'Main Med')).toBe('Main Med');
+    expect(swapPlaceLabel('fa', { reportingLocation: 'Other', otherLocation: 'Command', postShort: '' }, 'Main Med')).toBe('Command');
+    expect(swapDisplay({ ...row, swapRequestedAt: 'x' }, 'Main Med')).toEqual({ label: 'Friend swap requested', tone: 'blue' });
+    expect(swapDisplay({ ...row, status: STATUS.inMedical, swapPlace: 'mm' }, 'Main Med')).toEqual({ label: 'Swap at Main Med', tone: 'green' });
   });
 
   it('overlays and toast titles', () => {
     expect(swapOverlayFields({ action: 'request' }, 'Rae · Medical', 'T')).toEqual({ swapRequestedAt: 'T', swapRequestedBy: 'Rae · Medical' });
     expect(swapOverlayFields({ action: 'approve', place: 'mm' }, null, 'T')).toEqual({ status: STATUS.inMedical, swapPlace: 'mm', swapRequestedAt: null, swapRequestedBy: null });
     expect(swapOverlayFields({ action: 'decline' }, null, 'T')).toEqual({ swapRequestedAt: null, swapRequestedBy: null });
-    expect(swapToastTitle({ action: 'approve', place: 'fa' }, row)).toBe('LP-1001 · Swap at FA 4');
-    expect(swapToastTitle({ action: 'decline' }, row)).toBe('LP-1001 · Swap declined');
+    expect(swapToastTitle({ action: 'approve', place: 'fa' }, row, 'Main Med')).toBe('LP-1001 · Swap at FA 4');
+    expect(swapToastTitle({ action: 'decline' }, row, 'Main Med')).toBe('LP-1001 · Swap declined');
   });
 
   it('the intake row shows only while Waiting with Yes', () => {
@@ -121,7 +123,7 @@ describe('alerts (companion)', () => {
     const r = makeRow(1, { status: STATUS.accompanied, name: '' });
     expect(statusAlert(r)).toMatchObject({ kind: 'accompanied', title: 'LP-1001 · Located · already accompanied', subtitle: ACCOMPANIED_SUBTITLE });
     expect(statusAlert({ ...r, status: STATUS.friendInformed })).toMatchObject({ kind: 'friend_informed', title: 'LP-1001 · Friend informed' });
-    expect(statusAlert({ ...r, status: STATUS.inMedical, swapPlace: 'mm' })).toMatchObject({ kind: 'swap_approved', title: 'LP-1001 · Swap at Main Med' });
+    expect(statusAlert({ ...r, status: STATUS.inMedical, swapPlace: 'mm' }, undefined, 'Main Med')).toMatchObject({ kind: 'swap_approved', title: 'LP-1001 · Swap at Main Med' });
   });
 
   it('swapAlert: opened and declined requests; diffAlerts tells the involved answerer', () => {

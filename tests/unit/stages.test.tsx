@@ -198,10 +198,14 @@ describe('displayStage', () => {
     expect(holdAnsweredAt({ status: STATUS.inMedical, recheckAt: at(20) })).toBeNull();
     expect(isRecheckDue({ status: STATUS.waiting, recheckAt: at(0) }, NOW)).toBe(true);
     expect(isRecheckDue({ status: STATUS.waiting, recheckAt: at(1) }, NOW)).toBe(false);
-    expect(isMedicalTeam('Medical')).toBe(true);
-    expect(isMedicalTeam('medical')).toBe(true);
-    expect(isMedicalTeam('GC/HX - Base')).toBe(false);
-    expect(isMedicalTeam(null)).toBe(false);
+    expect(isMedicalTeam('Medical', 'Medical')).toBe(true);
+    expect(isMedicalTeam('medical', 'Medical')).toBe(true);
+    expect(isMedicalTeam('GC/HX - Base', 'Medical')).toBe(false);
+    expect(isMedicalTeam(null, 'Medical')).toBe(false);
+    // (Events) The event's medical team, whatever it is called (and the labels it had before a rename).
+    expect(isMedicalTeam('First Aid', ['First Aid', 'Medical'])).toBe(true);
+    expect(isMedicalTeam('Medical', ['First Aid', 'Medical'])).toBe(true);
+    expect(isMedicalTeam('Medical', 'First Aid')).toBe(false);
   });
 
   it('the row sentence names the stage, with the status words for status stages (no recheck time)', () => {

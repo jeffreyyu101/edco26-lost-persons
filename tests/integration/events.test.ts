@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { EventAdmin, EventStats, RequestSummary, SessionInfo, SyncResponse } from '@/lib/api-types';
 import { STATUS } from '@/lib/domain';
 import { ROOT, ensureTestEvent, loadTestEnv } from '../../scripts/test-env.mjs';
-import { EVENT_ID, PASSWORD, admin, api, clearAttempts, cookieFor, createBody, freshIp, newStaff, pii, psql, randomUUID, setCookies, uniq, withTestServer, type Staff } from './harness';
+import { BASE, EVENT_ID, PASSWORD, admin, api, clearAttempts, cookieFor, createBody, freshIp, newStaff, pii, psql, randomUUID, setCookies, uniq, withTestServer, type Staff } from './harness';
 
 withTestServer();
 
@@ -797,6 +797,69 @@ describe('event settings and the requests that use them', () => {
   });
 });
 
+describe('(phase 2) X-LP-Event: a tab never writes into another event than the one it works', () => {
+  it("a request naming another event than the cookie's is refused (409 wrong_event); its own, none, or GET /api/session are not", async () => {
+    const a = await makeEvent();
+    const b = await makeEvent();
+    archivedAtEnd.push(a.event.id, b.event.id);
+    const cookie = (await signIn(newStaff('Site Ops'), b.password)).cookie;
+    const as = (event: string) => ({ cookie, headers: { 'x-lp-event': event } });
+    const wrong = await api('/api/requests', { json: createBody({ reportingLocation: 'Main Stage Tent' }), ...as(a.event.id) });
+    expect(wrong.status).toBe(409);
+    expect(wrong.body.error.code).toBe('wrong_event');
+    expect((await sync(cookie)).rows).toHaveLength(0);
+    expect((await api('/api/sync', as(a.event.id))).body.error.code).toBe('wrong_event');
+    // The session check answers whatever the header says: that is how the tab learns the cookie's event.
+    const who = await api<SessionInfo>('/api/session', as(a.event.id));
+    expect(who.status).toBe(200);
+    expect(who.body.eventId).toBe(b.event.id);
+    // Its own event, or no header / 'none' (a tab that knows no event yet), go through.
+    expect((await api('/api/requests', { json: createBody({ reportingLocation: 'Main Stage Tent' }), ...as(b.event.id) })).status).toBe(201);
+    expect((await api('/api/sync', as('none'))).status).toBe(200);
+  });
+});
+
+describe('(phase 2) a renamed team stays that team', () => {
+  it('renaming the medical team (same id) keeps "Medical asked" for messages stored, and sessions signed in, under the old label', async () => {
+    const lead = await leadCookie();
+    const e = await makeEvent();
+    archivedAtEnd.push(e.event.id);
+    const patch = (json: unknown) => api<{ event: EventAdmin }>(`/api/events/${e.event.id}`, { method: 'PATCH', json, cookie: lead });
+    const foh = (await signIn(newStaff('Site Ops'), e.password)).cookie;
+    // Signed in under the medical team's label before the rename (the session keeps it).
+    const medic = (await signIn(newStaff('Medics'), e.password)).cookie;
+    const r1 = await create(foh);
+    const r2 = await create(foh);
+    const ask = (cookie: string, id: string) =>
+      api(`/api/requests/${id}/messages`, { json: { body: 'Wristband colour?', clientMutationId: randomUUID() }, cookie });
+    expect((await ask(medic, r1.id)).status).toBe(201);
+    const needsInfo = async (id: string) => (await sync(foh)).rows.find((x) => x.id === id)?.needsInfo;
+    expect(await needsInfo(r1.id)).toBe(true);
+
+    // Rename it under the same id.
+    const renamed = await patch({ teams: [TEAMS[0], { id: 'med', label: 'First Aid', short: 'Aid', medical: true }] });
+    expect(renamed.status, renamed.text).toBe(200);
+    expect(renamed.body.event.teams.find((t) => t.id === 'med')).toMatchObject({ label: 'First Aid', aliases: ['Medics'] });
+    // The message stored under "Medics" still counts as Medical asked.
+    expect(await needsInfo(r1.id)).toBe(true);
+    // A session still signed in as "Medics" asks again: it counts too.
+    expect((await ask(medic, r2.id)).status).toBe(201);
+    expect(await needsInfo(r2.id)).toBe(true);
+    // A new sign-in with the old label lands in the renamed team, spelled the new way.
+    expect((await signIn(newStaff('Medics'), e.password)).info.team).toBe('First Aid');
+    // Staff see the earlier label in their config (the medical side of the app knows it).
+    expect((await api<SessionInfo>('/api/session', { cookie: foh })).body.event?.teams.find((t) => t.id === 'med')?.aliases).toEqual(['Medics']);
+    // The team (old label in use) can't be removed; sending the teams back as read (aliases included) is fine.
+    const current = (await api<{ event: EventAdmin }>(`/api/events/${e.event.id}`, { cookie: lead })).body.event;
+    expect((await patch({ teams: current.teams })).status).toBe(200);
+    const gone = await patch({ teams: [TEAMS[0]] });
+    expect(gone.status).toBe(422);
+    // Renamed back: no alias left for its own label.
+    const back = await patch({ teams: [TEAMS[0], { id: 'med', label: 'Medics', short: 'Med', medical: true }] });
+    expect(back.body.event.teams.find((t) => t.id === 'med')).toMatchObject({ label: 'Medics', aliases: ['First Aid'] });
+  });
+});
+
 describe('the auto-close after a reopen', () => {
   it('counts inactivity from the reopen, not from before the end', async () => {
     const lead = await leadCookie();
@@ -922,7 +985,7 @@ describe('scripts/bootstrap-events.mjs (the one-time bootstrap, run here against
 });
 
 describe('event logo', () => {
-  it('a lead uploads a PNG / WebP / JPEG logo; the public logo route redirects to it; replacing or removing it deletes the old object', async () => {
+  it('a lead uploads a PNG / WebP / JPEG logo; the public logo route serves its bytes from this origin; replacing or removing it deletes the old object', async () => {
     const lead = await leadCookie();
     const made = await makeEvent({ practice: true });
     archivedAtEnd.push(made.event.id);
@@ -938,9 +1001,11 @@ describe('event logo', () => {
     expect(first.status, first.text).toBe(200);
     expect(first.body.event.logoUrl).toMatch(new RegExp(`^/api/events/logo/${made.event.slug}\\?v=`));
     expect(await objects()).toHaveLength(1);
-    const served = await api(first.body.event.logoUrl!);
-    expect(served.status).toBe(302);
-    expect(served.headers.get('location')).toContain('/storage/v1/object/sign/event-logos/');
+    // (Phase 2) Same-origin bytes, not a redirect: the client reads the logo's pixels and masks the rainbow with it.
+    const served = await fetch(new URL(first.body.event.logoUrl!, BASE), { redirect: 'manual' });
+    expect(served.status).toBe(200);
+    expect(served.headers.get('content-type')).toBe('image/png');
+    expect(Buffer.from(await served.arrayBuffer()).equals(syntheticPng(32, 32))).toBe(true);
     // Staff see it in their config too.
     expect((await signIn(newStaff('Site Ops'), made.password)).info.event?.logoUrl).toBe(first.body.event.logoUrl);
 

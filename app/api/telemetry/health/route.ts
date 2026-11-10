@@ -58,10 +58,12 @@ function sectionsFor(eventId: string, window: HealthWindow, now: number): { at: 
   return entry;
 }
 
-export const GET = authedRoute('GET /api/telemetry/health', {}, async ({ request, eventId }) => {
+export const GET = authedRoute('GET /api/telemetry/health', {}, async ({ request, eventId, event }) => {
   const asked = new URL(request.url).searchParams.get('window');
   const window: HealthWindow = (HEALTH_WINDOWS as readonly string[]).includes(asked ?? '') ? (asked as HealthWindow) : '3h';
   const read = sectionsFor(eventId, window, Date.now());
   const [config, sections] = await Promise.all([telemetryConfig().catch(() => null), read.value]);
-  return json({ generatedAt: new Date(read.at).toISOString(), window, config, ...sections });
+  // (Events) The event's team names (the sections key teams by EventTeam.id) and its time zone, for the page's labels.
+  const teams = (event?.teams ?? []).map((t) => ({ id: String(t.id ?? ''), short: String(t.short || t.label || t.id || '') })).filter((t) => t.id);
+  return json({ generatedAt: new Date(read.at).toISOString(), window, config, ...sections, teams, timeZone: event?.timezone ?? null });
 });

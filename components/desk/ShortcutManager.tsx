@@ -8,6 +8,7 @@
 // request, the row, the pane's ⋯). Renders nothing.
 import { useEffect, useRef } from 'react';
 import { navigate, parseView, type View } from '@/lib/client/nav';
+import { useAppStore } from '@/lib/client/store-contract';
 import { requestThreadJump } from '@/lib/client/thread-jump';
 import { closePane, forgetHistoryEntries, noteHistoryEntry, openInPane, takeClosedPane } from './DetailPane';
 import {
@@ -77,6 +78,7 @@ function refocusWhenFree(fn: () => HTMLElement | null): () => void {
 const shown = (el: HTMLElement | null | undefined): el is HTMLElement => !!el && el.isConnected && el.getClientRects().length > 0;
 
 export function DeskKeys({ view, main }: DeskKeysProps) {
+  const store = useAppStore();
   const paneId = paneRequestId(view);
   const formOpen = isFormView(view);
   const latest = useRef(main);
@@ -104,7 +106,8 @@ export function DeskKeys({ view, main }: DeskKeysProps) {
           return;
         }
         case 'new':
-          navigate({ new: true });
+          // (Events) An archived event takes no new request.
+          if (store.getState().event?.stage !== 'archived') navigate({ new: true });
           return;
         case 'close':
           closePane(latest.current);
@@ -196,7 +199,7 @@ export function DeskKeys({ view, main }: DeskKeysProps) {
       document.removeEventListener('focusout', onFocusOut);
       forgetHistoryEntries();
     };
-  }, []);
+  }, [store]);
 
   // What each history entry shows, so a close can step back past requests opened over requests.
   useEffect(() => {

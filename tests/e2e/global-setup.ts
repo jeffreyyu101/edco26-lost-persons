@@ -7,7 +7,7 @@
 // Released in global-teardown.ts. Nobody truncates tables globally; specs create unique synthetic rows.
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { DEFAULT_E2E_LOCK_DIR, E2E_LOCK_WAIT_MS, e2eLockDir, e2eLockHolder, ensureTestEvent, loadTestEnv, pauseInactiveJob } from '../../scripts/test-env.mjs';
+import { DEFAULT_E2E_LOCK_DIR, E2E_LOCK_WAIT_MS, archiveOtherEvents, e2eLockDir, e2eLockHolder, ensureTestEvent, loadTestEnv, pauseInactiveJob } from '../../scripts/test-env.mjs';
 
 /** The shared local stack's lock (scripts/test-env.mjs DEFAULT_E2E_LOCK_DIR). */
 export const DEFAULT_LOCK_DIR = DEFAULT_E2E_LOCK_DIR;
@@ -117,6 +117,8 @@ export default async function globalSetup(): Promise<void> {
   if (!lockHeldForUs()) await acquireLock();
   // (F6) The specs make their own auto-closes (lp_close_inactive on their rows); the 5-minute job stays paused.
   pauseInactiveJob();
-  // (Events) The live local event the specs sign in to (staff password, join link, lead passcode).
+  // (Events) The live local event the specs sign in to (staff password, join link, lead passcode), and no other
+  // running event (the sign-in cards are every running event's teams).
   await ensureTestEvent();
+  archiveOtherEvents();
 }

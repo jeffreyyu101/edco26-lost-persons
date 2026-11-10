@@ -1,6 +1,6 @@
 // Synthetic rows for the stub store, mirroring supabase/seed.sql and the mockups (all invented).
 // Times are relative to `now` so wait badges look right.
-import type { RequestDetail, RequestSummary } from '../api-types';
+import type { EventConfig, RequestDetail, RequestSummary } from '../api-types';
 import { STATUS, joinName, postShort, type StatusValue } from '../domain';
 
 const STAFF = {
@@ -10,6 +10,36 @@ const STAFF = {
   sam: 'Sam Ortiz · Medical',
   alex: 'Alex Rivera · GC/HX - Dispatch',
 } as const;
+
+/** (Events) The stub's event: the same posts, teams and chips as the local test event (scripts/test-env.mjs). */
+export const STUB_EVENT: EventConfig = {
+  id: '10ca1000-0000-4000-8000-000000000001',
+  slug: 'local',
+  name: 'Local test event',
+  startsOn: '2026-11-06',
+  endsOn: '2026-11-08',
+  timezone: 'America/New_York',
+  dayStartHour: 12,
+  stage: 'live',
+  logoUrl: null,
+  posts: [
+    { id: 'fa3', label: 'FA 3 – Kinetic', short: 'FA 3' },
+    { id: 'fa4', label: 'FA 4 – Oasis', short: 'FA 4' },
+    { id: 'command', label: 'Command', short: 'Command' },
+    { id: 'base', label: 'Base', short: 'Base' },
+  ],
+  mainMedical: 'Main Med',
+  teams: [
+    { id: 'transpo', label: 'GC/HX - Special Operations/Med Transpo', short: 'GCHX Med Transpo', medical: false },
+    { id: 'dispatch', label: 'GC/HX - Dispatch', short: 'Dispatch', medical: false },
+    { id: 'base', label: 'GC/HX - Base', short: 'GCHX Base', medical: false },
+    { id: 'medical', label: 'Medical', short: 'Medical', medical: true },
+  ],
+  lastSeen: ['kineticFIELD', 'circuitGROUNDS', 'neonGARDEN', 'stereoBLOOM', 'Taken to medical'],
+  wentLiveAt: '2026-11-06T17:00:00Z',
+  endedAt: null,
+  updatedAt: '2026-11-06T17:00:00Z',
+};
 
 /** The stub's signed-in staff (front of house, like the mockups' "DK"). */
 export const STUB_SESSION = { staffName: 'Dana Kim', team: 'GC/HX - Dispatch', staff: STAFF.dana } as const;
@@ -103,7 +133,7 @@ export function stubRows(now: number = Date.now()): RequestSummary[] {
     firstPhotoId: s.photos ? stubPhotoId(s.n, 1) : null,
     photoCount: s.photos ?? 0,
     name: joinName(s.first, s.last ?? null),
-    postShort: postShort(s.post, s.other ?? null),
+    postShort: postShort(s.post, s.other ?? null, STUB_EVENT.posts),
   }));
 }
 
