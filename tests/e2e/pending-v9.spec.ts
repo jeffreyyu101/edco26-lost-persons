@@ -204,6 +204,12 @@ async function withPage<T>(browser: Browser, staff: TestStaff, options: BrowserC
   }
 }
 
+/**
+ * F4's alerts reminder (an iPhone Safari tab here) comes in when /api/push/prefs answers, which can be after the
+ * list's first paint, and moves everything under it (90 px on the desk): measure once it is there.
+ */
+const alertsIn = (page: Page) => expect(page.getByTestId('alerts-banner').filter({ visible: true })).toHaveCount(1, { timeout: 20_000 });
+
 /** The ids of the cards under a locator, in order. */
 const cardIds = (scope: Locator, testId: string) => scope.locator(`[data-testid="${testId}"]`).evaluateAll((els) => els.map((el) => el.getAttribute('data-pending-card')));
 /** The ids of the log / table rows under a locator, in order. */
@@ -349,6 +355,7 @@ test.describe('fixture', () => {
       const left = page.getByTestId('pending-column-check');
       const right = page.getByTestId('pending-column-coming');
       await expect(left.locator('[data-testid="check-card"]').first()).toBeVisible({ timeout: 20_000 });
+      await alertsIn(page);
       const l = (await left.boundingBox())!;
       const r = (await right.boundingBox())!;
       expect(r.x).toBeGreaterThan(l.x + l.width);
@@ -426,6 +433,7 @@ test.describe('fixture', () => {
         const left = page.getByTestId('pending-column-check');
         const right = page.getByTestId('pending-column-coming');
         await expect(left.locator('[data-testid="check-card"]').first()).toBeVisible({ timeout: 20_000 });
+        await alertsIn(page);
         if (docked) {
           await page.locator(`[data-pending-card="${idOf('B.W.')}"] [data-request-id]`).click();
           await expect(page.getByTestId('profile')).toBeVisible();
