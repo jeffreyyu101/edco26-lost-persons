@@ -5,7 +5,7 @@
 // logger and the answerer, whether or not lp_involved_staff (the Messages release) is there.
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RequestSummary } from '@/lib/api-types';
-import { EVENT_ID, admin, api, cookieFor, createRequest, newStaff, staffOf, withTestServer, type Staff } from './harness';
+import { EVENT_ID, admin, api, cookieFor, createRequest, newStaff, staffOf, withTestServer, withoutIds, type Staff } from './harness';
 
 interface Sent {
   endpoint: string;
@@ -124,7 +124,7 @@ describe('notifyStaff', () => {
       expect(typeof x.payload.sentAt).toBe('number');
       const text = JSON.stringify({ ...x.payload, sentAt: undefined });
       expect(text).not.toMatch(/LP-?\d/);
-      expect(text).not.toContain('555');
+      expect(withoutIds(text)).not.toContain('555');
       expect(Buffer.byteLength(text)).toBeLessThan(4_000);
       expect(x.options).toMatchObject({ TTL: 3_600, urgency: 'high' });
       expect((x.options.vapidDetails as { subject?: string }).subject).toBe(process.env.VAPID_SUBJECT);

@@ -18,7 +18,7 @@ import { apiRequest } from '@/lib/client/http';
 import { forgetBell, forgetBellForOtherStaff, readPrefs, setBell, setBellIntroSeen, writeRememberedIdentity } from '@/lib/client/prefs';
 import { createPushClient, type PushHost } from '@/lib/client/push-client';
 import { STATUS_META } from '@/lib/domain';
-import { EVENT_ID, BASE, ORIGIN, admin, api, cookieFor, createRequest, newStaff, staffOf, withTestServer, type Staff } from './harness';
+import { EVENT_ID, BASE, ORIGIN, admin, api, cookieFor, createRequest, newStaff, staffOf, withTestServer, withoutIds, type Staff } from './harness';
 import { eventually, startPushService, type FakeDevice, type PushService } from './push-service';
 
 withTestServer();
@@ -457,7 +457,7 @@ describe('the routes notify (contract D)', () => {
     // (Telemetry) sentAt is the server clock, a 13-digit number: left out of the text check.
     const text = JSON.stringify({ ...p.payload, sentAt: undefined });
     expect(text).not.toMatch(/LP-?\d/);
-    expect(text).not.toContain('555');
+    expect(withoutIds(text)).not.toContain('555');
     // The actor never hears about their own answer (the new-request push Rae's switch asked for is another event).
     expect(raePhone.deliveries.filter((d) => d.payload.requestId === r.id && d.payload.kind !== 'new_request')).toHaveLength(0);
     // The where completes the answer ("Located · Chair 9"), then a move reads "Chair 9 → Bed 3".
@@ -544,7 +544,7 @@ describe('the routes notify (contract D)', () => {
     await eventually(() => raePhone.deliveries.some((d) => d.payload.requestId === id));
     const p = raePhone.deliveries.find((d) => d.payload.requestId === id)!;
     expect(p.payload).toMatchObject({ title: 'New request', body: 'Tara TEST-S Ruiz · 24 M · FA 4', kind: 'new_request' });
-    expect(JSON.stringify({ ...p.payload, sentAt: undefined })).not.toContain('555');
+    expect(withoutIds(JSON.stringify({ ...p.payload, sentAt: undefined }))).not.toContain('555');
     expect(await activityOf(rae, id)).toMatchObject({ kind: 'new_request', detail: 'Tara TEST-S Ruiz · 24 M · FA 4' });
     expect(await activityOf(dana, id)).toBeNull();
     expect(offPhone.deliveries.some((d) => d.payload.requestId === id)).toBe(false);
@@ -591,7 +591,7 @@ describe('the routes notify (contract D)', () => {
     // Fay's lock screen: the new request, no contact details.
     const p = await eventually(() => fayPhone.deliveries.find((d) => d.payload.requestId === id));
     expect(p.payload).toMatchObject({ title: 'New request', kind: 'new_request' });
-    expect(JSON.stringify({ ...p.payload, sentAt: undefined })).not.toContain('555');
+    expect(withoutIds(JSON.stringify({ ...p.payload, sentAt: undefined }))).not.toContain('555');
     // The push only: no Activity row, so Fay's bell and badge never count every request logged.
     expect(await activityOf(fay, id)).toBeNull();
     expect((await api('/api/activity/unread', { cookie: fayCookie })).body.count).toBe(unreadBefore);
@@ -666,7 +666,7 @@ describe('Activity routes', () => {
     expect(rows[0]).toMatchObject({ title: 'Ben TEST-S Wu', detail: 'Located', kind: 'in_medical', read: false });
     expect(rows[1]).toMatchObject({ title: 'Ava TEST-S Lane' });
     const listed = JSON.stringify(res.body);
-    for (const secret of ['TEST-S Friend', 'TEST-S red hoodie', '555']) expect(listed).not.toContain(secret);
+    for (const secret of ['TEST-S Friend', 'TEST-S red hoodie', '555']) expect(withoutIds(listed)).not.toContain(secret);
     expect(listed).not.toMatch(/LP-?\d/);
     const sync = (await api('/api/sync', { cookie })).body as SyncResponse & Record<string, unknown>;
     expect(sync.activityUnread).toBe(2);

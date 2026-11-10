@@ -307,15 +307,23 @@ export function dbUrl(): string {
 }
 
 /**
- * Runs SQL through psql (local only); returns stdout (unaligned, tuples only). The buffer is 64 MB, not Node's
- * 1 MB default: the shared local stack keeps every agent's TEST rows, and a whole-table json_agg (stats.test)
- * outgrows 1 MB (ENOBUFS).
+ * `text` with every UUID replaced: a check that a phone number ('555') never appears must not trip on a random request
+ * id that happens to contain those digits.
  */
+export function withoutIds(text: string): string {
+  return text.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<id>');
+}
+
 /** (Events) lp_org.lead_passcode_version now (what a lead's token must carry). */
 export function leadPasscodeVersion(): number {
   return Number(psql('select coalesce((select lead_passcode_version from public.lp_org where id), 0)'));
 }
 
+/**
+ * Runs SQL through psql (local only); returns stdout (unaligned, tuples only). The buffer is 64 MB, not Node's
+ * 1 MB default: the shared local stack keeps every agent's TEST rows, and a whole-table json_agg (stats.test)
+ * outgrows 1 MB (ENOBUFS).
+ */
 export function psql(sql: string): string {
   return execFileSync('psql', [dbUrl(), '-v', 'ON_ERROR_STOP=1', '-q', '-At', '-c', sql], {
     encoding: 'utf8',

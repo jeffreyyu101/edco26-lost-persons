@@ -106,6 +106,12 @@ afterAll(async () => {
   // Leave nothing of this file running: its events end (their requests stay frozen, as at a real event's end).
   const lead = await leadCookie();
   for (const id of archivedAtEnd) await api(`/api/events/${id}/end`, { json: {}, cookie: lead });
+  // And sign-in stops looking at them: every staff password is a bcrypt compare on every sign-in, so test events
+  // that keep theirs make each later run's sign-ins slower (login-limits times out after a few runs on one stack).
+  if (archivedAtEnd.length) {
+    psql(`update public.events set staff_password_hash = null, invite_code_sha256 = null, invite_expires_at = null
+          where id = any (array[${archivedAtEnd.map((id) => `'${id}'`).join(', ')}]::uuid[])`);
+  }
   await ensureTestEvent();
 });
 
