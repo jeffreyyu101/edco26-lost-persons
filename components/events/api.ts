@@ -3,6 +3,7 @@
 // /api/org/lead-passcode. Every call has a timeout and never throws. A 401 (the session ended, or another lead changed
 // the passcode) goes to sign-in and comes back here. Never logs anything: bodies hold passwords and passcodes.
 import type { ApiError, EventAdmin, SessionInfo } from '@/lib/api-types';
+import { markSignedInEvent } from '@/lib/client/signed-in-at';
 
 export type ApiResult<T> =
   | { ok: true; status: number; data: T }
@@ -102,9 +103,14 @@ export const api = {
 /** Opens `eventId` in this session and goes to the app (`/`), its log. False when it could not be opened. */
 export async function openEvent(eventId: string): Promise<ApiResult<SessionInfo>> {
   const res = await api.open(eventId);
-  // A full navigation: `/` starts its store afresh on the event now open.
-  // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-  if (res.ok) window.location.assign('/');
+  if (res.ok) {
+    // (Phase 3) `/` starts from this event's cache, never the previous event's, while GET /api/session is in flight
+    // (the store reads it at boot: lib/client/signed-in-at.ts).
+    markSignedInEvent(res.data.eventId ?? eventId);
+    // A full navigation: `/` starts its store afresh on the event now open.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+    window.location.assign('/');
+  }
   return res;
 }
 
