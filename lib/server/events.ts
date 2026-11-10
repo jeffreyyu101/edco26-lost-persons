@@ -32,6 +32,9 @@ export interface EventRow {
   endedAt: string | null;
   recordsDeleteAt: string | null;
   recordsDeletedAt: string | null;
+  department?: string | null;
+  staffing?: unknown[];
+  preparedBy?: string | null;
   createdAt: string;
   updatedAt: string;
   requests?: number;
@@ -77,6 +80,12 @@ export function eventAdmin(row: EventRow): EventAdmin {
     caseSeq: Number(row.caseSeq),
     recordsDeleteAt: row.recordsDeleteAt,
     recordsDeletedAt: row.recordsDeletedAt,
+    department: row.department ?? null,
+    staffing: (Array.isArray(row.staffing) ? row.staffing : []).map((r) => {
+      const o = (r ?? {}) as { role?: unknown; name?: unknown };
+      return { role: str(o.role), name: str(o.name) };
+    }),
+    preparedBy: row.preparedBy ?? null,
     createdAt: row.createdAt,
     ...(row.requests !== undefined ? { requests: Number(row.requests) } : {}),
     ...(row.open !== undefined ? { open: Number(row.open) } : {}),
@@ -269,6 +278,7 @@ export function settingsPayload(input: Record<string, unknown>): Record<string, 
   const keys: Record<string, string> = {
     slug: 'slug', name: 'name', startsOn: 'starts_on', endsOn: 'ends_on', timezone: 'timezone', dayStartHour: 'day_start_hour',
     posts: 'posts', mainMedical: 'main_medical', teams: 'teams', lastSeen: 'last_seen',
+    department: 'department', staffing: 'staffing', preparedBy: 'prepared_by',
   };
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(input)) if (v !== undefined && keys[k]) out[keys[k]] = v;

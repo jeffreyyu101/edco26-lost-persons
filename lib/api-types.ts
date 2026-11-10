@@ -583,10 +583,20 @@ export interface EventAdmin extends EventConfig {
   caseSeq: number;
   recordsDeleteAt: IsoDateTime | null;
   recordsDeletedAt: IsoDateTime | null;
+  /** The report's lines (spec "Report"): the department it is written for, the staffing table, "Prepared by …". */
+  department: string | null;
+  staffing: EventStaffingRow[];
+  preparedBy: string | null;
   createdAt: IsoDateTime;
   /** GET /api/events only. */
   requests?: number;
   open?: number;
+}
+
+/** A row of the report's staffing table. */
+export interface EventStaffingRow {
+  role: string;
+  name: string;
 }
 
 /** What a staff member sees when their event has ended (410 event_ended from sign-in or any write). */
