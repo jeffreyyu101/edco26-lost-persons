@@ -3,6 +3,7 @@
 // most mistakes show before a round trip), list editing (posts, teams, "Last seen" chips, staffing rows) and where a
 // server error goes on the form. Unit-tested in tests/unit/events/setup-model.test.ts.
 import type { EventAdmin, EventStage } from '@/lib/api-types';
+import { deriveShort, effectiveShort } from '@/lib/short-label';
 
 /** A post or team (or a "Last seen" chip, which has only a label) as the form edits it. */
 export interface ListItem {
@@ -126,8 +127,9 @@ export function formFromEvent(e: EventAdmin): SetupForm {
     timezone: e.timezone,
     dayStartHour: e.dayStartHour,
     mainMedical: e.mainMedical,
-    posts: e.posts.map((p) => ({ key: newKey('p'), id: p.id, label: p.label, short: p.short === p.label ? '' : p.short })),
-    teams: e.teams.map((t) => ({ key: newKey('t'), id: t.id, label: t.label, short: t.short === t.label ? '' : t.short, medical: t.medical })),
+    // A short the server derived (or the label itself) shows as an empty Short field: it follows the label.
+    posts: e.posts.map((p) => ({ key: newKey('p'), id: p.id, label: p.label, short: p.short === deriveShort(p.label, LIMITS.postShort) ? '' : p.short })),
+    teams: e.teams.map((t) => ({ key: newKey('t'), id: t.id, label: t.label, short: t.short === deriveShort(t.label, LIMITS.teamShort) ? '' : t.short, medical: t.medical })),
     lastSeen: e.lastSeen.map((label) => ({ key: newKey('l'), label, short: '' })),
     department: e.department ?? '',
     staffing: (e.staffing ?? []).map((r) => ({ key: newKey('s'), role: r.role, name: r.name })),
@@ -183,19 +185,94 @@ export function isDirty(base: SetupForm, form: SetupForm, stage: EventStage): bo
 const daysBetween = (a: string, b: string) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
 const isDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`));
 
-/** The problem with one post, team or chip label among `list`, or null. */
-export function itemError(kind: 'post' | 'team' | 'lastSeen', list: readonly ListItem[], item: Pick<ListItem, 'key' | 'label' | 'short'>): string | null {
+/** The longest Short a post or team takes. */
+export function shortMaxOf(kind: 'post' | 'team'): number {
+  return kind === 'post' ? LIMITS.postShort : LIMITS.teamShort;
+}
+
+/** The Short a post or team will be stored with: the typed one, or the one derived from its label. */
+export function shortOf(kind: 'post' | 'team', item: Pick<ListItem, 'label' | 'short'>): string {
+  return effectiveShort(item.label, item.short, shortMaxOf(kind));
+}
+
+/** Which field of an item is wrong, and how. */
+export interface ItemProblem {
+  part: 'label' | 'short';
+  message: string;
+}
+
+/** The problem with one post, team or chip among `list` (its label, or its Short), or null. */
+export function itemProblem(kind: 'post' | 'team' | 'lastSeen', list: readonly ListItem[], item: Pick<ListItem, 'key' | 'label' | 'short'>): ItemProblem | null {
   const label = clean(item.label);
   const max = kind === 'post' ? LIMITS.post : kind === 'team' ? LIMITS.team : LIMITS.lastSeen;
   const min = kind === 'team' ? 2 : 1;
-  if (label.length < min) return kind === 'team' ? 'At least 2 characters' : 'Required';
-  if (label.length > max) return `At most ${max} characters`;
-  if (kind !== 'lastSeen' && label.toLowerCase() === 'other') return '"Other" is always there';
-  if (kind === 'team' && TEAM_FORBIDDEN.test(label)) return 'No "·"';
-  const shortMax = kind === 'post' ? LIMITS.postShort : LIMITS.teamShort;
-  if (kind !== 'lastSeen' && clean(item.short).length > shortMax) return `Short: at most ${shortMax} characters`;
-  if (list.some((o) => o.key !== item.key && clean(o.label).toLowerCase() === label.toLowerCase())) return 'Already there';
+  const onLabel = (message: string): ItemProblem => ({ part: 'label', message });
+  if (label.length < min) return onLabel(kind === 'team' ? 'At least 2 characters' : 'Required');
+  if (label.length > max) return onLabel(`At most ${max} characters`);
+  if (kind !== 'lastSeen' && label.toLowerCase() === 'other') return onLabel('"Other" is always there');
+  if (kind === 'team' && TEAM_FORBIDDEN.test(label)) return onLabel('No "·"');
+  const others = list.filter((o) => o.key !== item.key);
+  if (kind !== 'lastSeen') {
+    const shortMax = shortMaxOf(kind);
+    if (clean(item.short).length > shortMax) return { part: 'short', message: `Short: at most ${shortMax} characters` };
+  }
+  if (others.some((o) => clean(o.label).toLowerCase() === label.toLowerCase())) return onLabel('Already there');
+  if (kind !== 'lastSeen') {
+    const short = shortOf(kind, item).toLowerCase();
+    if (others.some((o) => shortOf(kind, o).toLowerCase() === short)) return { part: 'short', message: 'Short already used' };
+  }
   return null;
+}
+
+/** The problem with one post, team or chip label among `list`, or null (itemProblem's message). */
+export function itemError(kind: 'post' | 'team' | 'lastSeen', list: readonly ListItem[], item: Pick<ListItem, 'key' | 'label' | 'short'>): string | null {
+  return itemProblem(kind, list, item)?.message ?? null;
+}
+
+/** A list item the form marks (its chip, and the field in its sheet). */
+export interface ItemFlag extends ItemProblem {
+  key: string;
+}
+
+export type ListField = 'posts' | 'teams' | 'lastSeen';
+export type ItemFlags = Partial<Record<ListField, ItemFlag>>;
+
+const KIND_OF: Readonly<Record<ListField, 'post' | 'team' | 'lastSeen'>> = { posts: 'post', teams: 'team', lastSeen: 'lastSeen' };
+
+/** The first item with a problem in each list. */
+export function itemFlags(form: SetupForm): ItemFlags {
+  const out: ItemFlags = {};
+  for (const field of ['posts', 'teams', 'lastSeen'] as const) {
+    const list = form[field];
+    for (const [i, item] of list.entries()) {
+      // Against the items before it (as the server): of two with the same label or Short, the second is marked.
+      const problem = itemProblem(KIND_OF[field], list.slice(0, i + 1), item);
+      if (problem) {
+        out[field] = { key: item.key, ...problem };
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** The section line for a marked item: "FA 1 – Main Stage: Short already used". */
+export function flagLine(form: SetupForm, field: ListField, flag: ItemFlag): string {
+  const item = form[field].find((i) => i.key === flag.key);
+  return `${(item && clean(item.label)) || '—'}: ${flag.message}`;
+}
+
+/**
+ * A server refusal that names an item ({field: 'posts', index: 3, part: 'short'}) → the flag on that item of the form
+ * (the payload sends the lists in the form's order). Null when it names no item of a list.
+ */
+export function flagFromServer(form: SetupForm, err: { field?: string; index?: number; part?: 'label' | 'short'; message: string }): { field: ListField; flag: ItemFlag } | null {
+  const field = err.field;
+  if (field !== 'posts' && field !== 'teams' && field !== 'lastSeen') return null;
+  if (typeof err.index !== 'number') return null;
+  const item = form[field][err.index];
+  if (!item) return null;
+  return { field, flag: { key: item.key, part: err.part ?? 'label', message: err.message } };
 }
 
 /** The lead's own checks, before the server's. Empty when the form can be sent. */
@@ -214,19 +291,12 @@ export function validateForm(form: SetupForm): FieldErrors {
   const mm = clean(form.mainMedical);
   if (!mm) errors.mainMedical = 'Required';
   else if (mm.length > LIMITS.mainMedical) errors.mainMedical = `At most ${LIMITS.mainMedical} characters`;
-  const listCheck = (kind: 'post' | 'team' | 'lastSeen', list: ListItem[], key: FieldKey) => {
-    if (list.length > LIMITS.items) errors[key] = `At most ${LIMITS.items}`;
-    for (const item of list) {
-      const e = itemError(kind, list, item);
-      if (e) {
-        errors[key] = `${clean(item.label) || '—'}: ${e}`;
-        return;
-      }
-    }
-  };
-  listCheck('post', form.posts, 'posts');
-  listCheck('team', form.teams, 'teams');
-  listCheck('lastSeen', form.lastSeen, 'lastSeen');
+  const flags = itemFlags(form);
+  for (const key of ['posts', 'teams', 'lastSeen'] as const) {
+    if (form[key].length > LIMITS.items) errors[key] = `At most ${LIMITS.items}`;
+    const flag = flags[key];
+    if (flag) errors[key] = flagLine(form, key, flag);
+  }
   if (!errors.teams && form.teams.filter((t) => t.medical).length > 1) errors.teams = 'Only one medical team';
   if (clean(form.department).length > LIMITS.department) errors.department = `At most ${LIMITS.department} characters`;
   if (clean(form.preparedBy).length > LIMITS.preparedBy) errors.preparedBy = `At most ${LIMITS.preparedBy} characters`;

@@ -7,7 +7,7 @@ import { markSignedInEvent } from '@/lib/client/signed-in-at';
 
 export type ApiResult<T> =
   | { ok: true; status: number; data: T }
-  | { ok: false; status: number; code: string; message: string; field?: string };
+  | { ok: false; status: number; code: string; message: string; field?: string; index?: number; part?: 'label' | 'short' };
 
 const TIMEOUT_MS = 15_000;
 
@@ -56,6 +56,8 @@ async function send<T>(path: string, opts: CallOptions): Promise<ApiResult<T>> {
       code: typeof err?.code === 'string' ? err.code : 'http',
       message: typeof err?.message === 'string' ? err.message : "Couldn't save. Try again",
       ...(typeof err?.field === 'string' ? { field: err.field } : {}),
+      ...(typeof err?.index === 'number' ? { index: err.index } : {}),
+      ...(err?.part === 'label' || err?.part === 'short' ? { part: err.part } : {}),
     };
   } catch {
     return { ok: false, status: 0, code: 'network', message: "Couldn't reach the server" };

@@ -20,7 +20,10 @@ import {
   changedPayload,
   emptyForm,
   fieldKeyOf,
+  flagFromServer,
+  flagLine,
   formFromEvent,
+  itemFlags,
   newKey,
   payloadFromForm,
   suggestSlug,
@@ -28,6 +31,7 @@ import {
   LIMITS,
   type FieldErrors,
   type FieldKey,
+  type ItemFlags,
   type SetupForm,
 } from './setup-model';
 import { StageSheet, type StageAction } from './StageSheets';
@@ -53,6 +57,8 @@ export function SetupScreen({ id, fromApp }: SetupScreenProps) {
   const [form, setForm] = useState<SetupForm>(base);
   const [slugTouched, setSlugTouched] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
+  // The post, team or chip each list's error is about (its chip shows the error state).
+  const [flags, setFlags] = useState<ItemFlags>({});
   const [saving, setSaving] = useState(false);
   const [announce, setAnnounce] = useState('');
   const [sheet, setSheet] = useState<OpenSheet>(null);
@@ -97,12 +103,15 @@ export function SetupScreen({ id, fromApp }: SetupScreenProps) {
       return next;
     });
     if (errors[field]) setErrors((e) => ({ ...e, [field]: undefined }));
+    if (field === 'posts' || field === 'teams' || field === 'lastSeen') setFlags((f) => (f[field] ? { ...f, [field]: undefined } : f));
   };
 
   const focusField = (key: FieldKey) => {
     requestAnimationFrame(() => {
       const el = document.querySelector<HTMLElement>(`[data-field="${key}"]`);
-      const target = el?.matches('input, select, button') ? el : el?.querySelector<HTMLElement>('input, select, button');
+      // A list with a marked chip: that chip.
+      const flagged = el?.querySelector<HTMLElement>('[data-invalid] button');
+      const target = el?.matches('input, select, button') ? el : (flagged ?? el?.querySelector<HTMLElement>('input, select, button'));
       target?.focus();
     });
   };
@@ -115,16 +124,27 @@ export function SetupScreen({ id, fromApp }: SetupScreenProps) {
 
   const save = async () => {
     const problems = validateForm(form);
-    if (Object.values(problems).some(Boolean)) return showErrors(problems);
+    if (Object.values(problems).some(Boolean)) {
+      setFlags(itemFlags(form));
+      return showErrors(problems);
+    }
     setSaving(true);
     const res = creating || !event ? await api.create(payloadFromForm(form)) : await api.update(event.id, changedPayload(base, form, stage));
     setSaving(false);
     if (!res.ok) {
       if (res.status === 401) return;
+      // A refusal that names a post or team marks its chip (the lists are sent in the form's order).
+      const named = flagFromServer(form, res);
+      if (named) {
+        setFlags({ [named.field]: named.flag });
+        return showErrors({ [named.field]: flagLine(form, named.field, named.flag) });
+      }
+      setFlags({});
       return showErrors({ [fieldKeyOf(res.field)]: res.message });
     }
     apply(res.data.event);
     setErrors({});
+    setFlags({});
     setAnnounce('Saved');
     if (creating) window.history.replaceState(null, '', `/events/${res.data.event.id}`);
   };
@@ -132,6 +152,7 @@ export function SetupScreen({ id, fromApp }: SetupScreenProps) {
   const discard = () => {
     setForm(base);
     setErrors({});
+    setFlags({});
   };
 
   const openStage = (action: StageAction) => {
@@ -363,7 +384,7 @@ export function SetupScreen({ id, fromApp }: SetupScreenProps) {
           Posts
         </h2>
         <div data-field="posts">
-          <ListEditor kind="post" items={form.posts} onChange={(v) => set('posts', v)} readOnly={archived} labelId={ids.posts} error={err('posts')} errorId={errId('posts')} testId="setup-posts" />
+          <ListEditor kind="post" items={form.posts} onChange={(v) => set('posts', v)} readOnly={archived} labelId={ids.posts} error={err('posts')} errorId={errId('posts')} flag={flags.posts} testId="setup-posts" />
         </div>
 
         <h2 className={s.lbl}>
@@ -390,14 +411,14 @@ export function SetupScreen({ id, fromApp }: SetupScreenProps) {
           Teams
         </h2>
         <div data-field="teams">
-          <ListEditor kind="team" items={form.teams} onChange={(v) => set('teams', v)} readOnly={archived} labelId={ids.teams} error={err('teams')} errorId={errId('teams')} testId="setup-teams" />
+          <ListEditor kind="team" items={form.teams} onChange={(v) => set('teams', v)} readOnly={archived} labelId={ids.teams} error={err('teams')} errorId={errId('teams')} flag={flags.teams} testId="setup-teams" />
         </div>
 
         <h2 className={s.lbl} id={ids.lastSeen}>
           Last seen
         </h2>
         <div data-field="lastSeen">
-          <ListEditor kind="lastSeen" items={form.lastSeen} onChange={(v) => set('lastSeen', v)} readOnly={archived} labelId={ids.lastSeen} error={err('lastSeen')} errorId={errId('lastSeen')} testId="setup-last-seen" />
+          <ListEditor kind="lastSeen" items={form.lastSeen} onChange={(v) => set('lastSeen', v)} readOnly={archived} labelId={ids.lastSeen} error={err('lastSeen')} errorId={errId('lastSeen')} flag={flags.lastSeen} testId="setup-last-seen" />
         </div>
 
         {event && !archived ? (
