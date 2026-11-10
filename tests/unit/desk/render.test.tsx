@@ -118,6 +118,19 @@ describe('DeskFrame', () => {
 describe('DeskNav', () => {
   const counts = viewCounts(stubRows(NOW), [], new Set(), null);
 
+  it('(events) an archived event: the lockup has no live dot and does not say Live', () => {
+    const lockOf = (html: string) => {
+      const from = html.indexOf('data-testid="desk-live"');
+      return html.slice(html.lastIndexOf('<button', from), html.indexOf('</button>', from));
+    };
+    const live = lockOf(render(<DeskNav main={ALL_VIEW} />, storeWith((s) => ({ ...s, myIds: new Set() }))));
+    expect(live).toContain('data-state=');
+    const archived = lockOf(render(<DeskNav main={ALL_VIEW} />, storeWith((s) => ({ ...s, myIds: new Set(), event: s.event && { ...s.event, stage: 'archived' } }))));
+    expect(archived).not.toContain('data-state=');
+    expect(archived).toContain('aria-label="Archived event. Tap to sync now"');
+    expect(archived).not.toMatch(/>Live</);
+  });
+
   it('one sidebar: the lockup, the views with live counts, a divider, Dashboard, then the person; no rail', () => {
     const store = storeWith((s) => ({ ...s, myIds: new Set() }));
     const html = render(<DeskNav main={ALL_VIEW} />, store);

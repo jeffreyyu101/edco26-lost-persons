@@ -686,8 +686,8 @@ function Calls({ stats, range, view, onView, phone, skew, tz, recap }: CallsProp
       ) : view === 'heat' ? (
         <HeatChart cols={heat.cols} step={heat.step} phone={phone} event={range === 'event'} series={series} tz={tz} />
       ) : (
-        // An archived event has no bucket still filling (no dashed bar): its clock stopped.
-        <CallsChart range={range} buckets={calls.buckets} step={step} compare={compare} prevName={prevName} byPost={view === 'post'} series={series} phone={phone} now={recap ? now : 0} tz={tz} />
+        // An archived event has no bucket still filling (no dashed bar): its clock is past every bucket.
+        <CallsChart range={range} buckets={calls.buckets} step={step} compare={compare} prevName={prevName} byPost={view === 'post'} series={series} phone={phone} now={recap ? now : Number.POSITIVE_INFINITY} tz={tz} />
       )}
       {recap ? <Recap stats={stats} compare={compare} prevName={prevName} skew={skew} /> : null}
     </section>

@@ -77,17 +77,21 @@ const MARK_TIP: Readonly<Record<string, string>> = { live: 'Live', off: 'Reconne
  * here: the button is named by the live state.
  */
 export function LiveMark() {
-  const logo = useEventConfig()?.logoUrl ?? null;
+  const event = useEventConfig();
+  const logo = event?.logoUrl ?? null;
+  // (Events) An archived event is not live: no corner dot and no "Live" (the top bar's Archived chip says it).
+  const archived = event?.stage === 'archived';
   const actions = useActions();
   const live = useLiveStatus();
   const loading = useIsLoading();
   const state = loading && live.state === 'healthy' ? 'loading' : MARK_STATE[live.state];
+  const name = archived && live.state === 'healthy' ? 'Archived event. Tap to sync now' : state === 'loading' ? 'Syncing' : LIVE_LABEL[live.state];
   return (
     <button
       type="button"
       className={d.lockup}
       onClick={actions.syncNow}
-      aria-label={state === 'loading' ? 'Syncing' : LIVE_LABEL[live.state]}
+      aria-label={name}
       data-testid="desk-live"
     >
       <span className={d.lockArt} data-event-logo={logo ? '' : undefined}>
@@ -101,8 +105,8 @@ export function LiveMark() {
         ) : null}
         <img className={d.lockGc} src="/logos/ground-control.png" alt="" width={313} height={120} decoding="async" draggable={false} />
       </span>
-      <span className={d.live} data-state={state} />
-      <Tip>{MARK_TIP[state] ?? 'Live'}</Tip>
+      {archived && live.state === 'healthy' ? null : <span className={d.live} data-state={state} />}
+      <Tip>{archived && live.state === 'healthy' ? 'Archived' : (MARK_TIP[state] ?? 'Live')}</Tip>
     </button>
   );
 }
