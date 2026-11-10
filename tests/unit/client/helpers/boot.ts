@@ -6,6 +6,9 @@ import type { DraftPhoto } from '@/lib/client/store-contract';
 import { EMPTY_FORM_VALUES, type RequestFormValues } from '@/lib/client/form-values';
 import { advance, fakeEnv, settle, useStoreTimers, type EnvOptions } from './env';
 import type { FakeServer } from './fake-server';
+// The store loads its event lifecycle (go-live check, Ended clean-up) with import() and the first confirmed session
+// waits for it. Loaded here first, so a cold test worker (CI) never times that import against settle()'s fixed turns.
+import '@/lib/client/event-lifecycle';
 
 export const TZ = 'America/New_York';
 const stops: Array<() => void> = [];

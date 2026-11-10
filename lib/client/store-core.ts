@@ -2947,6 +2947,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     running = true;
     // F4's clients send through this store (lib/client/f4-bridge.ts).
     provideApi(call);
+    // (Events) The first confirmed session runs the go-live check (event-lifecycle.ts, its own chunk): fetch it now,
+    // so the session never waits for that download once GET /api/session has answered.
+    void lifecycle().catch(() => undefined);
     runId += 1;
     const id = runId;
     if (signingOut && !resumeSignOut) return stop;
