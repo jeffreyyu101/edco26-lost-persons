@@ -96,11 +96,14 @@ export async function goLive(id: string): Promise<EventAdmin> {
 export async function endEvent(id: string): Promise<void> {
   const ctx = await lead();
   let res = await ctx.post(`/api/events/${id}/end`, { data: {} });
-  if (res.status() === 409 && JSON.stringify(await res.json().catch(() => ({}))).includes('practice')) {
-    await goLive(id);
+  if (res.status() === 409) {
+    // 409 "Not possible at this stage": still in practice (go live, then end), or already archived (go-live 409s too).
+    await ctx.post(`/api/events/${id}/go-live`, { data: {} });
     res = await ctx.post(`/api/events/${id}/end`, { data: {} });
   }
   expect([200, 409], await res.text()).toContain(res.status());
+  const after = await ctx.get(`/api/events/${id}`);
+  if (after.ok()) expect(((await after.json()) as { event: EventAdmin }).event.stage, `event ${id} still running`).toBe('archived');
 }
 
 /** Ends every event this file made (afterAll). */
