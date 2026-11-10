@@ -111,7 +111,9 @@ export function PasswordStep({ identity, onChange, next, autoFocus, teams = [], 
       // event's cache, never the previous event's.
       markSignedIn();
       markSignedInEvent(outcome.session?.eventId);
-      window.location.replace(safeNextPath(next) ?? '/');
+      // (Events) The Ground Control lead passcode signs in with no event open: the Events list.
+      const lead = outcome.session?.role === 'lead' && !outcome.session.eventId;
+      window.location.replace(safeNextPath(next) ?? (lead ? '/events' : '/'));
       return; // Stay busy while the app loads.
     }
 

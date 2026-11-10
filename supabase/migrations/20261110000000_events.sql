@@ -97,6 +97,11 @@ create table if not exists public.events (
   invite_code_sha256 text check (invite_code_sha256 is null or invite_code_sha256 ~ '^[0-9a-f]{64}$'),
   invite_expires_at timestamptz,
   report_to jsonb not null default '[]'::jsonb,
+  -- The report's own lines (spec "Report"): the department it is written for, the staffing table ([{role, name}],
+  -- ordered) and the "Prepared by …" line. Free text a lead sets; never frozen (the report is written after the end).
+  department text,
+  staffing jsonb not null default '[]'::jsonb check (pg_catalog.jsonb_typeof(staffing) = 'array'),
+  prepared_by text,
   case_seq bigint not null default 0 check (case_seq >= 0),
   went_live_at timestamptz,
   ended_at timestamptz,
@@ -120,6 +125,16 @@ create table if not exists public.lp_org (
 );
 -- Re-run on a database where the first version of this file made the tables.
 alter table public.events add column if not exists reopened_at timestamptz;
+alter table public.events add column if not exists department text;
+alter table public.events add column if not exists staffing jsonb not null default '[]'::jsonb;
+alter table public.events add column if not exists prepared_by text;
+do $chk$
+begin
+  if not exists (select 1 from pg_catalog.pg_constraint where conrelid = 'public.events'::regclass and conname = 'events_staffing_check') then
+    alter table public.events add constraint events_staffing_check check (pg_catalog.jsonb_typeof(staffing) = 'array');
+  end if;
+end
+$chk$;
 alter table public.lp_org add column if not exists lead_passcode_version integer not null default 0;
 insert into public.lp_org (id) values (true) on conflict (id) do nothing;
 
@@ -1946,6 +1961,7 @@ as $fn$
     'joinLinkExpiresAt', case when e.invite_code_sha256 is not null then e.invite_expires_at end,
     'caseSeq', e.case_seq, 'wentLiveAt', e.went_live_at, 'endedAt', e.ended_at, 'reopenedAt', e.reopened_at,
     'recordsDeleteAt', e.records_delete_at, 'recordsDeletedAt', e.records_deleted_at,
+    'department', e.department, 'staffing', e.staffing, 'preparedBy', e.prepared_by,
     'createdAt', e.created_at, 'updatedAt', e.updated_at)
 $fn$;
 
@@ -2075,6 +2091,24 @@ begin
                  where pg_catalog.jsonb_typeof(x) <> 'string' or pg_catalog.char_length(pg_catalog.btrim(x #>> '{}')) not between 1 and 40) then
     raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:last_seen';
   end if;
+
+  -- The report's lines: optional free text; the staffing table at most 40 rows of {role, name}, each 1-80 characters.
+  if e.department is not null and pg_catalog.char_length(e.department) > 120 then
+    raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:department';
+  end if;
+  if e.prepared_by is not null and pg_catalog.char_length(e.prepared_by) > 200 then
+    raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:prepared_by';
+  end if;
+  if e.staffing is null or pg_catalog.jsonb_typeof(e.staffing) <> 'array' or pg_catalog.jsonb_array_length(e.staffing) > 40
+     or exists (select 1 from pg_catalog.jsonb_array_elements(e.staffing) x
+                 where pg_catalog.jsonb_typeof(x) <> 'object'
+                    or exists (select 1 from pg_catalog.jsonb_object_keys(x) k where k not in ('role', 'name'))
+                    or pg_catalog.jsonb_typeof(x -> 'role') is distinct from 'string'
+                    or pg_catalog.jsonb_typeof(x -> 'name') is distinct from 'string'
+                    or pg_catalog.char_length(pg_catalog.btrim(x ->> 'role')) not between 1 and 80
+                    or pg_catalog.char_length(pg_catalog.btrim(x ->> 'name')) not between 1 and 80) then
+    raise exception using errcode = 'P0422', message = 'invalid_field', detail = 'field:staffing';
+  end if;
 end
 $fn$;
 
@@ -2094,7 +2128,7 @@ begin
   end if;
   for v_key in select pg_catalog.jsonb_object_keys(p) loop
     if v_key not in ('slug', 'name', 'starts_on', 'ends_on', 'timezone', 'day_start_hour', 'posts', 'main_medical',
-                     'teams', 'last_seen') then
+                     'teams', 'last_seen', 'department', 'staffing', 'prepared_by') then
       raise exception using errcode = 'P0422', message = 'unknown_field', detail = pg_catalog.format('field:%s', pg_catalog.left(v_key, 60));
     end if;
   end loop;
@@ -2106,6 +2140,10 @@ begin
   e.slug := pg_catalog.lower(pg_catalog.btrim(e.slug));
   e.name := pg_catalog.btrim(e.name);
   e.main_medical := pg_catalog.btrim(e.main_medical);
+  -- The report's lines: blank is none.
+  e.department := nullif(pg_catalog.btrim(e.department), '');
+  e.prepared_by := nullif(pg_catalog.btrim(e.prepared_by), '');
+  e.staffing := coalesce(e.staffing, '[]'::jsonb);
   perform public.lp_event_check(e);
   return e;
 end
@@ -2125,12 +2163,13 @@ declare
 begin
   v_new := public.lp_event_apply(
     pg_catalog.jsonb_populate_record(null::public.events,
-      '{"timezone": "America/New_York", "day_start_hour": 6, "main_medical": "Main Med", "posts": [], "teams": [], "last_seen": []}'::jsonb),
+      '{"timezone": "America/New_York", "day_start_hour": 6, "main_medical": "Main Med", "posts": [], "teams": [], "last_seen": [], "staffing": []}'::jsonb),
     p);
   begin
-    insert into public.events (slug, name, starts_on, ends_on, timezone, day_start_hour, stage, posts, main_medical, teams, last_seen)
+    insert into public.events (slug, name, starts_on, ends_on, timezone, day_start_hour, stage, posts, main_medical, teams, last_seen,
+                               department, staffing, prepared_by)
     values (v_new.slug, v_new.name, v_new.starts_on, v_new.ends_on, v_new.timezone, v_new.day_start_hour, 'practice',
-            v_new.posts, v_new.main_medical, v_new.teams, v_new.last_seen)
+            v_new.posts, v_new.main_medical, v_new.teams, v_new.last_seen, v_new.department, v_new.staffing, v_new.prepared_by)
     returning * into v_new;
   exception when unique_violation then
     raise exception using errcode = 'P0409', message = 'slug_taken', detail = 'field:slug';
@@ -2140,7 +2179,7 @@ end
 $fn$;
 
 -- Settings of an event. Requests keep what they stored, so:
---   * archived: only the name and the link name may change (the logo has its own route). Posts, teams, Main Med, the
+--   * archived: only the name, the link name and the report's lines may change (the logo has its own route). Posts, teams, Main Med, the
 --     "Last seen" chips, the time zone, the show-day start and the dates are what its records and stats were made
 --     with: a change is refused (P0409 bad_stage, field:<setting>), sending the same value again is fine;
 --   * a post renamed (same id, new label): the event's requests at the old label move to the new one in the same
@@ -2258,6 +2297,7 @@ begin
        set slug = v_row.slug, name = v_row.name, starts_on = v_row.starts_on, ends_on = v_row.ends_on,
            timezone = v_row.timezone, day_start_hour = v_row.day_start_hour, posts = v_row.posts,
            main_medical = v_row.main_medical, teams = v_row.teams, last_seen = v_row.last_seen,
+           department = v_row.department, staffing = v_row.staffing, prepared_by = v_row.prepared_by,
            updated_at = pg_catalog.now()
      where id = p_event
     returning * into v_row;

@@ -444,6 +444,14 @@ const listLabel = (max: number) =>
     .refine((v) => v.toLowerCase() !== 'other', { message: '"Other" is always there' })
     .refine(storable, { message: UNSTORABLE });
 
+/** A cell of the report's staffing table: trimmed, 1–max characters, storable. */
+const reportLine = (max: number) =>
+  z
+    .string()
+    .transform((v) => v.trim().replace(/\s+/g, ' '))
+    .refine((v) => v.length >= 1 && v.length <= max, { message: `1–${max} characters` })
+    .refine(storable, { message: UNSTORABLE });
+
 /** "FA 3 – Kinetic" → "fa-3-kinetic" (an id for a post or team that came without one). */
 export function listIdFrom(label: string, taken: ReadonlySet<string>): string {
   const base = label.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 20) || 'item';
@@ -505,6 +513,24 @@ const eventFields = {
   mainMedical: z.string().transform((v) => v.trim()).refine((v) => v.length >= 1 && v.length <= 40, { message: '1–40 characters' }),
   teams: eventTeamsSchema,
   lastSeen: z.array(z.string().transform((v) => v.trim()).refine((v) => v.length >= 1 && v.length <= 40)).max(12),
+  // The report's lines (spec "Report"): blank is none.
+  department: z
+    .string()
+    .transform((v) => v.trim().replace(/\s+/g, ' '))
+    .refine((v) => v.length <= 120, { message: 'At most 120 characters' })
+    .refine(storable, { message: UNSTORABLE })
+    .nullable()
+    .transform((v) => v || null),
+  staffing: z
+    .array(z.strictObject({ role: reportLine(80), name: reportLine(80) }))
+    .max(40, { message: 'At most 40 rows' }),
+  preparedBy: z
+    .string()
+    .transform((v) => v.trim().replace(/\s+/g, ' '))
+    .refine((v) => v.length <= 200, { message: 'At most 200 characters' })
+    .refine(storable, { message: UNSTORABLE })
+    .nullable()
+    .transform((v) => v || null),
 };
 
 const datesInOrder = (v: { startsOn?: string; endsOn?: string }) => !v.startsOn || !v.endsOn || v.endsOn >= v.startsOn;
@@ -522,6 +548,9 @@ export const eventCreateSchema = z
     mainMedical: eventFields.mainMedical.optional(),
     teams: eventFields.teams.optional(),
     lastSeen: eventFields.lastSeen.optional(),
+    department: eventFields.department.optional(),
+    staffing: eventFields.staffing.optional(),
+    preparedBy: eventFields.preparedBy.optional(),
   })
   .refine(datesInOrder, { message: 'The last day is before the first', path: ['endsOn'] });
 
@@ -538,6 +567,9 @@ export const eventPatchSchema = z
     mainMedical: eventFields.mainMedical.optional(),
     teams: eventFields.teams.optional(),
     lastSeen: eventFields.lastSeen.optional(),
+    department: eventFields.department.optional(),
+    staffing: eventFields.staffing.optional(),
+    preparedBy: eventFields.preparedBy.optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to change' })
   .refine(datesInOrder, { message: 'The last day is before the first', path: ['endsOn'] });

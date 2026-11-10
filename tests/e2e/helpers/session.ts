@@ -88,3 +88,11 @@ export async function sessionCookieHeader(staff: TestStaff): Promise<string> {
   if (!cookie) throw new Error('no lp_session cookie');
   return `${cookie.name}=${cookie.value}`;
 }
+
+/**
+ * (Events) Forgets every cached sign-in of this worker. A test that changes the lead passcode signs every lead session
+ * out (their cookies carry the old passcode version); files after it then sign in again.
+ */
+export function forgetSignedInStates(): void {
+  states.clear();
+}
