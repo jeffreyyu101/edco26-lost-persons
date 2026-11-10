@@ -830,8 +830,9 @@ describe('(grace period) End by mistake, Reopen inside 24 h: the same password a
     }
     psql(`update public.events set ended_at = ended_at - interval '24 hours 1 minute' where id = '${old.event.id}'`);
     psql(`update public.events set ended_at = ended_at - interval '23 hours 59 minutes' where id = '${young.event.id}'`);
-    // What pg_cron runs every 5 minutes.
-    psql('select public.lp_close_inactive()');
+    // The function pg_cron runs every 5 minutes; an empty request list so it closes no other test's (or the seed's)
+    // requests here. The clearing runs whatever the list.
+    psql(`select public.lp_close_inactive(array[]::uuid[])`);
     const state = (id: string) => psql(`select (staff_password_hash is null)::text || '/' || (ended_password_hash is null)::text || '/' || (invite_code_sha256 is null)::text || '/' || (invite_expires_at is null)::text from public.events where id = '${id}'`);
     expect(state(old.event.id)).toBe('true/false/true/true');
     expect(state(young.event.id)).toBe('false/true/false/false');
