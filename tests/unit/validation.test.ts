@@ -210,15 +210,12 @@ describe('signInSchema', () => {
     });
   });
 
-  it('resolves Other to the custom team text, canonicalising known aliases', () => {
+  it('(events) resolves Other to the custom team text as typed (whitespace collapsed): no event-specific aliases', () => {
     const team = (otherTeam: string) => signInSchema.parse({ staffName: 'Sam Lee', team: 'Other', otherTeam, password: 'pw' }).team;
     expect(team(' Info   booth ')).toBe('Info booth');
-    expect(team('dispatch')).toBe('GC/HX - Dispatch');
-    expect(team('Dispatch')).toBe('GC/HX - Dispatch');
-    expect(team('gchx base')).toBe('GC/HX - Base');
-    expect(team('Transport')).toBe('GC/HX - Special Operations/Med Transpo');
-    expect(team('prevent')).toBe('Prevent');
-    expect(team('MEDICAL')).toBe('Medical');
+    expect(team('dispatch')).toBe('dispatch');
+    expect(team('gchx base')).toBe('gchx base');
+    expect(team('MEDICAL')).toBe('MEDICAL');
     expect(signInSchema.safeParse({ staffName: 'Sam Lee', team: 'Other', password: 'pw' }).success).toBe(false);
     expect(signInSchema.safeParse({ staffName: 'Sam Lee', team: 'Other', otherTeam: 'x', password: 'pw' }).success).toBe(false);
   });

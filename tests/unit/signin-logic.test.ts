@@ -15,10 +15,12 @@ import {
   signInBody,
   type WhoDraft,
 } from '@/components/signin/logic';
-import { TEAMS } from '@/lib/domain';
+import { STUB_EVENT } from '@/lib/client/stub-data';
 import { signInSchema } from '@/lib/validation';
 
 const MED = 'GC/HX - Special Operations/Med Transpo';
+/** (Events) The sign-in cards: the running events' teams (here the local test event's). */
+const TEAMS = STUB_EVENT.teams.map((t) => ({ label: t.label, short: t.short, medical: t.medical }));
 const NOW = Date.parse('2026-11-06T23:00:00Z');
 
 const draft = (over: Partial<WhoDraft>): WhoDraft => ({ ...EMPTY_DRAFT, ...over });
@@ -38,9 +40,9 @@ describe('checkWho (step 1, Continue)', () => {
     expect(checkWho(draft({ name: 'Dana Kim', otherTeam: '  Site   Ops ' })).identity).toEqual({ name: 'Dana Kim', team: 'Site Ops' });
   });
 
-  it('maps a known alias typed as Other team to its canonical team (A28)', () => {
-    expect(checkWho(draft({ name: 'Dana Kim', otherTeam: 'dispatch' })).identity?.team).toBe('GC/HX - Dispatch');
-    expect(checkWho(draft({ name: 'Dana Kim', otherTeam: 'PREVENT' })).identity?.team).toBe('Prevent');
+  it('(events) keeps Other team text as typed: no event-specific alias list (the server spells an event team as the event does)', () => {
+    expect(checkWho(draft({ name: 'Dana Kim', otherTeam: 'dispatch' })).identity?.team).toBe('dispatch');
+    expect(checkWho(draft({ name: 'Dana Kim', otherTeam: 'PREVENT' })).identity?.team).toBe('PREVENT');
   });
 
   it('enforces the 60 / 80 code point limits', () => {
@@ -65,7 +67,7 @@ describe('checkWho (step 1, Continue)', () => {
   it('never enables Continue for something signInSchema refuses, and agrees on the stored identity', () => {
     const cases: WhoDraft[] = [
       draft({ name: 'Dana Kim', team: MED }),
-      ...TEAMS.map((t) => draft({ name: 'Sam Ortiz', team: t.value })),
+      ...TEAMS.map((t) => draft({ name: 'Sam Ortiz', team: t.label })),
       draft({ name: 'Rae', otherTeam: 'Site Ops' }),
       draft({ name: 'Rae', otherTeam: 'gchx base' }),
       draft({ name: 'Rae', otherTeam: 'Other' }),
@@ -78,7 +80,7 @@ describe('checkWho (step 1, Continue)', () => {
     for (const d of cases) {
       const { identity } = checkWho(d);
       if (!identity) continue;
-      const parsed = signInSchema.safeParse(signInBody(identity, 'pw'));
+      const parsed = signInSchema.safeParse(signInBody(identity, 'pw', TEAMS));
       expect(parsed.success, JSON.stringify(d)).toBe(true);
       if (parsed.success) {
         expect(parsed.data.staffName).toBe(identity.name);
@@ -90,10 +92,13 @@ describe('checkWho (step 1, Continue)', () => {
 
 describe('signInBody', () => {
   it('sends a card as the team', () => {
-    expect(signInBody({ name: 'Dana Kim', team: MED }, 'secret')).toEqual({ staffName: 'Dana Kim', team: MED, password: 'secret' });
+    expect(signInBody({ name: 'Dana Kim', team: MED }, 'secret', TEAMS)).toEqual({ staffName: 'Dana Kim', team: MED, password: 'secret' });
+    // A card is matched case-insensitively and sent as the card spells it.
+    expect(signInBody({ name: 'Dana Kim', team: 'medical' }, 'secret', TEAMS)).toEqual({ staffName: 'Dana Kim', team: 'Medical', password: 'secret' });
   });
-  it('sends anything else as Other + otherTeam', () => {
-    expect(signInBody({ name: 'Dana Kim', team: 'Prevent' }, 'secret')).toEqual({
+  it('sends anything else as Other + otherTeam (and every team when no card is known)', () => {
+    expect(signInBody({ name: 'Dana Kim', team: MED }, 'secret')).toEqual({ staffName: 'Dana Kim', team: 'Other', otherTeam: MED, password: 'secret' });
+    expect(signInBody({ name: 'Dana Kim', team: 'Prevent' }, 'secret', TEAMS)).toEqual({
       staffName: 'Dana Kim',
       team: 'Other',
       otherTeam: 'Prevent',
@@ -109,8 +114,10 @@ describe('remembered identity and Change', () => {
     expect(rememberedIdentity({ rememberedName: null, rememberedTeam: MED })).toBeNull();
   });
   it('prefills step 1 with the card, or the Other text', () => {
-    expect(draftFromIdentity({ name: 'Dana Kim', team: MED })).toEqual({ name: 'Dana Kim', team: MED, otherTeam: '' });
-    expect(draftFromIdentity({ name: 'Dana Kim', team: 'Site Ops' })).toEqual({ name: 'Dana Kim', team: null, otherTeam: 'Site Ops' });
+    expect(draftFromIdentity({ name: 'Dana Kim', team: MED }, TEAMS)).toEqual({ name: 'Dana Kim', team: MED, otherTeam: '' });
+    expect(draftFromIdentity({ name: 'Dana Kim', team: 'Site Ops' }, TEAMS)).toEqual({ name: 'Dana Kim', team: null, otherTeam: 'Site Ops' });
+    // (Events) A remembered team that is not one of the running events' cards is Other text.
+    expect(draftFromIdentity({ name: 'Dana Kim', team: MED }, [])).toEqual({ name: 'Dana Kim', team: null, otherTeam: MED });
     expect(draftFromIdentity(null)).toEqual(EMPTY_DRAFT);
   });
 });

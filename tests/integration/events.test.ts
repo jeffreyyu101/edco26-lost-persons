@@ -797,6 +797,47 @@ describe('event settings and the requests that use them', () => {
   });
 });
 
+describe('(phase 2) a renamed team stays that team', () => {
+  it('renaming the medical team (same id) keeps "Medical asked" for messages stored, and sessions signed in, under the old label', async () => {
+    const lead = await leadCookie();
+    const e = await makeEvent();
+    archivedAtEnd.push(e.event.id);
+    const patch = (json: unknown) => api<{ event: EventAdmin }>(`/api/events/${e.event.id}`, { method: 'PATCH', json, cookie: lead });
+    const foh = (await signIn(newStaff('Site Ops'), e.password)).cookie;
+    // Signed in under the medical team's label before the rename (the session keeps it).
+    const medic = (await signIn(newStaff('Medics'), e.password)).cookie;
+    const r1 = await create(foh);
+    const r2 = await create(foh);
+    const ask = (cookie: string, id: string) =>
+      api(`/api/requests/${id}/messages`, { json: { body: 'Wristband colour?', clientMutationId: randomUUID() }, cookie });
+    expect((await ask(medic, r1.id)).status).toBe(201);
+    const needsInfo = async (id: string) => (await sync(foh)).rows.find((x) => x.id === id)?.needsInfo;
+    expect(await needsInfo(r1.id)).toBe(true);
+
+    // Rename it under the same id.
+    const renamed = await patch({ teams: [TEAMS[0], { id: 'med', label: 'First Aid', short: 'Aid', medical: true }] });
+    expect(renamed.status, renamed.text).toBe(200);
+    expect(renamed.body.event.teams.find((t) => t.id === 'med')).toMatchObject({ label: 'First Aid', aliases: ['Medics'] });
+    // The message stored under "Medics" still counts as Medical asked.
+    expect(await needsInfo(r1.id)).toBe(true);
+    // A session still signed in as "Medics" asks again: it counts too.
+    expect((await ask(medic, r2.id)).status).toBe(201);
+    expect(await needsInfo(r2.id)).toBe(true);
+    // A new sign-in with the old label lands in the renamed team, spelled the new way.
+    expect((await signIn(newStaff('Medics'), e.password)).info.team).toBe('First Aid');
+    // Staff see the earlier label in their config (the medical side of the app knows it).
+    expect((await api<SessionInfo>('/api/session', { cookie: foh })).body.event?.teams.find((t) => t.id === 'med')?.aliases).toEqual(['Medics']);
+    // The team (old label in use) can't be removed; sending the teams back as read (aliases included) is fine.
+    const current = (await api<{ event: EventAdmin }>(`/api/events/${e.event.id}`, { cookie: lead })).body.event;
+    expect((await patch({ teams: current.teams })).status).toBe(200);
+    const gone = await patch({ teams: [TEAMS[0]] });
+    expect(gone.status).toBe(422);
+    // Renamed back: no alias left for its own label.
+    const back = await patch({ teams: [TEAMS[0], { id: 'med', label: 'Medics', short: 'Med', medical: true }] });
+    expect(back.body.event.teams.find((t) => t.id === 'med')).toMatchObject({ label: 'Medics', aliases: ['First Aid'] });
+  });
+});
+
 describe('the auto-close after a reopen', () => {
   it('counts inactivity from the reopen, not from before the end', async () => {
     const lead = await leadCookie();

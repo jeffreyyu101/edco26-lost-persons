@@ -26,7 +26,7 @@ import { SIDEBAR_ID } from './sidebar-model';
 import { toggleSidebar, useSidebar } from './sidebar-state';
 import type { MainView } from './views';
 import d from './desk.module.css';
-import { EventStageChip } from '@/components/ui/EventStageChip';
+import { DESK_STAGES, EventStageChip, PRACTICE } from '@/components/ui/EventStageChip';
 import { useEventConfig } from '@/lib/client/event-config';
 
 /** nav.parseView ignores a longer ?q=. */
@@ -67,8 +67,8 @@ export function DeskTop({ main, pane = false }: DeskTopProps) {
           </>
         )}
       </h1>
-      {/* (Events) The event's stage: every stage on the lists, practice everywhere (an archived dashboard draws its own). */}
-      <EventStageChip practiceOnly={main.name === 'dashboard'} className={d.stage} />
+      {/* (Events) The event's stage after the title: practice on every view (an archived dashboard draws its own chip). */}
+      {main.name === 'dashboard' ? <EventStageChip only={PRACTICE} className={d.stage} /> : null}
       {main.name === 'dashboard' ? (
         // Dashboard v4: who's on and the range control, portalled in by the dashboard (no search or New here), then the
         // Activity bell, as on every view (the sidebar has no Activity item, Brian 2026-11-08).
@@ -81,6 +81,8 @@ export function DeskTop({ main, pane = false }: DeskTopProps) {
       ) : (
         <>
           <ListLive />
+          {/* (Events) Practice and archived; live goes without (the line beside it already says live). */}
+          <EventStageChip only={DESK_STAGES} className={d.stage} />
           <span className={d.sp} />
           <SearchField main={main} />
           <IconButton

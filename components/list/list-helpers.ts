@@ -2,7 +2,7 @@
 // everything here is unit-tested in tests/unit/list-helpers.test.ts.
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
 import type { SearchHit } from '@/lib/client/selectors';
-import { STATUS, ageGender, isInMedical, isRecheckDue, postShort, sameStaff, statusMeta, type StatusTone } from '@/lib/domain';
+import { STATUS, ageGender, isInMedical, isRecheckDue, postShort, sameStaff, statusMeta, type StatusTone, type PostName } from '@/lib/domain';
 import { stagePhrase, type StageSource } from '@/lib/stages';
 import { formatCaseNumber } from '@/lib/format';
 import { unreadOf } from '@/lib/messaging-activity';
@@ -148,13 +148,14 @@ export interface OutboxDisplay {
   label: 'Waiting to send' | 'Needs attention';
 }
 
-export function outboxDisplay(item: Pick<OutboxItem, 'payload' | 'state' | 'caseNumber'>): OutboxDisplay {
+export function outboxDisplay(item: Pick<OutboxItem, 'payload' | 'state' | 'caseNumber'>, posts: readonly PostName[] = []): OutboxDisplay {
   const p = item.payload;
   const needsAttention = item.state === 'needs_attention';
   return {
     name: displayName(p.name ?? null),
     ageGender: ageGender(p.age ?? null, p.gender ?? null),
-    post: postShort(p.reportingLocation, p.otherLocation ?? null),
+    // (Events) The short form is the event's (EventConfig.posts).
+    post: postShort(p.reportingLocation, p.otherLocation ?? null, posts),
     caseText: item.caseNumber ? formatCaseNumber(item.caseNumber) : 'Not sent',
     needsAttention,
     label: needsAttention ? 'Needs attention' : 'Waiting to send',

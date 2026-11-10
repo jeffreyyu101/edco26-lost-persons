@@ -477,6 +477,9 @@ export const eventTeamsSchema = z
       label: listLabel(80).refine((v) => v.length >= 2 && !STAFF_FORBIDDEN_CHARS.test(v), { message: 'Team: 2–80 characters, no "·"' }),
       short: z.string().trim().min(1).max(24).optional(),
       medical: z.boolean().optional(),
+      // (Phase 2) A team's earlier labels (EventTeam.aliases): the server keeps them on a rename; what a lead sends back
+      // with the teams it read is accepted and ignored.
+      aliases: z.array(z.string().max(80)).max(24).optional(),
     }),
   )
   .max(12)

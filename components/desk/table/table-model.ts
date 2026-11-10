@@ -9,7 +9,7 @@
 // Post and Logged by show only with nothing docked beside the table, Post at every desk width and Logged by
 // on a table 1040 px or wider (the CSS decides); the row's sentence always says them. Times reuse F1's log helpers (lib/format.ts), so the desk and the phone never disagree.
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
-import { ageGender, canonicalTeam, parseStaff, postFilterLabel, teamShort, type TeamName } from '@/lib/domain';
+import { ageGender, canonicalTeam, parseStaff, postFilterLabel, teamShort, type PostName, type TeamName } from '@/lib/domain';
 import { stagePhrase } from '@/lib/stages';
 import { formatAuditTime, formatCaseNumber, formatCreatedTime, formatUpdatedAgo, updatedPhrase, wasUpdated } from '@/lib/format';
 import { displayName, outboxDisplay, outboxRowLabel, updatedSince, whoPhrase } from '@/components/list/list-helpers';
@@ -128,8 +128,8 @@ export interface OutboxRowModel {
 }
 
 /** A request saved on this device and not sent yet, as a table row. */
-export function outboxRow(item: OutboxItem, created: string, teams: readonly TeamName[] = []): OutboxRowModel {
-  const d = outboxDisplay(item);
+export function outboxRow(item: OutboxItem, created: string, teams: readonly TeamName[] = [], posts: readonly PostName[] = []): OutboxRowModel {
+  const d = outboxDisplay(item, posts);
   const p = item.payload;
   return {
     number: item.caseNumber ? String(item.caseNumber) : '',

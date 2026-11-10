@@ -61,7 +61,7 @@ describe('proxy CSP and matcher', () => {
       '/sw.js',
       '/manifest.webmanifest',
       '/icons/icon-192.png',
-      '/logos/edc-orlando.png',
+      '/logos/ground-control.png',
       '/fonts/inter.woff2',
       '/favicon.ico',
       '/favicon-32.png',
@@ -104,6 +104,17 @@ describe('proxy auth redirects', () => {
     const signin = await proxy(request('/signin', signed!.token));
     expect(signin.status).toBe(307);
     expect(new URL(signin.headers.get('location') ?? '').pathname).toBe('/');
+  });
+
+  it('(events) /signin?ended=1 (the Ended screen) renders even with a cookie that still verifies: no bounce back to /', async () => {
+    process.env.SESSION_SECRET = SECRET;
+    const signed = await signSessionToken({ staffName: 'Dana Kim', team: 'GC/HX - Dispatch', eventId: '10ca1000-0000-4000-8000-000000000001', role: 'staff' }, SECRET);
+    const ended = await proxy(request('/signin?ended=1', signed!.token));
+    expect(ended.status).toBe(200);
+    expect(ended.headers.get('x-middleware-next')).toBe('1');
+    // Plain /signin with that cookie still goes to the app (which then learns the event ended).
+    expect((await proxy(request('/signin?ended=0', signed!.token))).status).toBe(307);
+    expect((await proxy(request('/signin', signed!.token))).status).toBe(307);
   });
 
   it('(telemetry) /health without a cookie goes to sign-in and comes back; with one it renders', async () => {

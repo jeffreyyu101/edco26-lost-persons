@@ -504,7 +504,7 @@ export const MineCard = memo(function MineCard({
 });
 
 export function OutboxCard({ item, now }: { item: OutboxItem; now: number }) {
-  const d = outboxDisplay(item);
+  const d = outboxDisplay(item, useEventConfig()?.posts);
   const minutes = minutesSince(item.createdAt, now);
   const sub = `${d.caseText} · ${d.post}`;
   const label = `${d.ageGender ? `${d.name}, ${d.ageGender}` : d.name}. ${d.post}. ${d.label}, saved on this phone ${minutesPhrase(minutes)} ago.${d.needsAttention ? ' Open to fix and resend.' : ''}`;

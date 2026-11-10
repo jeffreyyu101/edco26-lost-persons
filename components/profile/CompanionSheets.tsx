@@ -130,7 +130,7 @@ export function LocatedSheet({ row, open, offline, onClose, onChoose }: LocatedS
             title="Already accompanied"
             icon={<Users size={22} strokeWidth={2} />}
             tone="amber"
-            said={`Someone with them: already accompanied. The friend does not walk over.${hinted ? ' The tent said a friend may be with them.' : ''}`}
+            said={`Someone with them: already accompanied. The friend does not walk over.${hinted ? ' The post said a friend may be with them.' : ''}`}
             hint={hinted}
             disabled={offline}
             testId="located-yes"

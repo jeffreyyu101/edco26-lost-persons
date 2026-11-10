@@ -23,7 +23,7 @@ import { WalkIcon } from '@/components/messages/WalkIcon';
 import { useInDesk } from '@/components/desk/desk-context';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { EventStageChip } from '@/components/ui/EventStageChip';
+import { EventStageChip, PRACTICE } from '@/components/ui/EventStageChip';
 import { StageChip } from '@/components/ui/StageChip';
 import { StatusGlyph, SwapGlyph } from '@/components/ui/StatusGlyph';
 import type { EventConfig, EventStats, EventStatsRange, SpeedStat } from '@/lib/api-types';
@@ -132,7 +132,7 @@ function LiveDashboard({ event, onRetry }: { event: EventConfig | null; onRetry:
               <ChevronLeft size={24} strokeWidth={2} aria-hidden />
             </button>
             <h1 className={s.title}>Dashboard</h1>
-            <EventStageChip practiceOnly />
+            <EventStageChip only={PRACTICE} />
             <span className={s.sp} />
             {who}
           </header>

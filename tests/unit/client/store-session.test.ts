@@ -1,6 +1,7 @@
 // Logout boundary (A14) including a sign-out the server never confirmed, alerts through the store
 // (baseline, someone else's change, own mutations, bell, bursts, a sync that fails half-way) and drafts
 // (A20). Synthetic data only.
+import { STUB_EVENT } from '@/lib/client/stub-data';
 import { describe, expect, it, vi } from 'vitest';
 import { openKv, K } from '@/lib/client/persist';
 import { COPY, type StoreEnv } from '@/lib/client/store-core';
@@ -326,7 +327,7 @@ describe('sign out vs answers still on their way (regression: a re-issued cookie
         if ((init.method ?? 'GET') === 'DELETE' && !landed) {
           landed = true;
           // An answer this tab could not abort (another tab's) re-issued the cookie after the clear.
-          server.session = { ...STAFF.dana, role: 'staff', eventId: null, event: null, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
+          server.session = { ...STAFF.dana, role: 'staff', eventId: STUB_EVENT.id, event: STUB_EVENT, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
         }
         return res;
       };

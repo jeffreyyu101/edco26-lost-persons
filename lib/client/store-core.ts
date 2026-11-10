@@ -1016,7 +1016,7 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     const event = error?.event ?? null;
     const eventId = event?.id ?? state.event?.id ?? eventKey;
     ending = true;
-    rememberEnded(event ? { ...event, id: eventId } : state.event ? { id: eventId, name: state.event.name, logoUrl: state.event.logoUrl, stage: 'archived' } : null);
+    rememberEnded(event ? { ...event, id: eventId } : state.event ? { id: eventId, name: state.event.name, logoUrl: state.event.logoUrl, stage: 'archived' } : null, env?.sessionStorage() ?? null);
     broadcast({ type: 'ended', eventId });
     void leaveEndedEvent(eventId);
   };
@@ -1354,6 +1354,8 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
   const syncPages = async (gen: number): Promise<PollOutcome> => {
     const e = env;
     if (!e) return 'stale';
+    // (Events) A lead with no event open has no log to sync (the event routes answer 409 no_event): idle until one is.
+    if (state.role === 'lead' && !state.event && state.session.status === 'active' && !sessionCheckDue) return 'ok';
     // When this tab can't be sure who is signed in (never checked, a 401, resumed, or a sign-in in another tab),
     // GET /api/session goes out with the first page, and nothing is applied until it confirms the session: the
     // cookie may now belong to someone else, and their session resets the cache and staffEpoch (stale() below).
@@ -1811,6 +1813,10 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
         if (!canFlush() && !sessionCheckDue) break;
         const sendable = state.outbox.some((j) => j.state !== 'needs_attention');
         if (sendable && now() - sessionCheckedAt > SESSION_FRESH_MS) sessionMayHaveChanged();
+        // (Events) A create saved in practice is a practice request: if the event went live since (which deletes every
+        // practice request on the server), it must not become a live one. Confirm the event first; applySession drops
+        // it then (checkWentLive).
+        if (state.outbox.some((j) => j.state !== 'needs_attention' && j.wentLiveAt === null)) sessionMayHaveChanged();
         if (sessionCheckDue) {
           if (!running || !env?.online() || networkHeld() || state.session.status === 'signed_out') break;
           // Who the cookie belongs to decides the operator prompt; confirm it before anything is sent.
@@ -2893,9 +2899,9 @@ export function createAppStore(options: CreateAppStoreOptions): AppStore {
     if (!isLive(id)) return;
     if (durable && kv) {
       // (Events) Ended events this phone learned of at sign-in (lib/client/ended.ts): their data goes first.
-      const drops = readEventDrops();
+      const drops = readEventDrops(e.localStorage());
       for (const eventId of drops) await dropEventData(eventId).catch(() => undefined);
-      if (drops.length) clearEventDrops(drops);
+      if (drops.length) clearEventDrops(drops, e.localStorage());
       if (!isLive(id)) return;
       try {
         const last = await kv.get<StoredStaff>(K.lastStaff);

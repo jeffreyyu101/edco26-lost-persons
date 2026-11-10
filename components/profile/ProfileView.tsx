@@ -62,7 +62,7 @@ import {
   type StoreState,
 } from '@/lib/client/store-contract';
 import { FIELD_LABELS, MAX_PHOTOS, PHOTO_TIMING_LABEL, STATUS, canCancel, isHeld, isInMedical, isStatus, menuActions, parseStaff, postFull, primaryActions, sameStaff, statusMeta, telHref, waitTone, type PhotoTiming, type SettableStatus, type StatusAction, type StatusKind } from '@/lib/domain';
-import { EventStageChip } from '@/components/ui/EventStageChip';
+import { EventStageChip, PRACTICE } from '@/components/ui/EventStageChip';
 import { medicalLabel, useEventConfig } from '@/lib/client/event-config';
 import { displayStage, holdAnsweredAt, isMedicalTeam, notFoundAnswer, recheckCountdown, shortStaffName } from '@/lib/stages';
 import { formatCaseNumber, formatCreatedTime, formatDuration, formatListTime, minutesSince } from '@/lib/format';
@@ -474,7 +474,7 @@ function Profile({ row, detail, detailLoading, detailFailed, refresh, panel }: P
           <Text size="2" weight="medium" color="gray" data-testid="profile-case">
             {label}
           </Text>
-          <EventStageChip practiceOnly />
+          <EventStageChip only={PRACTICE} />
         </span>
         <DropdownMenu.Root>
           <DropdownMenu.Trigger>

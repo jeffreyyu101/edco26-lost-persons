@@ -29,19 +29,19 @@ function local(): Storage | null {
 }
 
 /** Keeps what the Ended screen shows (best effort). */
-export function rememberEnded(event: EndedEvent | null): void {
+export function rememberEnded(event: EndedEvent | null, storage: Storage | null = session()): void {
   try {
-    if (event) session()?.setItem(ENDED_KEY, JSON.stringify({ name: event.name, logoUrl: event.logoUrl, ...(event.id ? { id: event.id } : {}) }));
-    else session()?.removeItem(ENDED_KEY);
+    if (event) storage?.setItem(ENDED_KEY, JSON.stringify({ name: event.name, logoUrl: event.logoUrl, ...(event.id ? { id: event.id } : {}) }));
+    else storage?.removeItem(ENDED_KEY);
   } catch {
     // the screen then shows Ground Control alone
   }
 }
 
 /** What the Ended screen shows, or null. */
-export function readEnded(): EndedEvent | null {
+export function readEnded(storage: Storage | null = session()): EndedEvent | null {
   try {
-    const v = JSON.parse(session()?.getItem(ENDED_KEY) ?? 'null') as { name?: unknown; logoUrl?: unknown; id?: unknown } | null;
+    const v = JSON.parse(storage?.getItem(ENDED_KEY) ?? 'null') as { name?: unknown; logoUrl?: unknown; id?: unknown } | null;
     if (!v || typeof v.name !== 'string') return null;
     return { name: v.name, logoUrl: typeof v.logoUrl === 'string' ? v.logoUrl : null, stage: 'archived', ...(typeof v.id === 'string' ? { id: v.id } : {}) };
   } catch {
@@ -60,20 +60,20 @@ export function markEventDrop(eventId: string): void {
   }
 }
 
-export function readEventDrops(): string[] {
+export function readEventDrops(storage: Storage | null = local()): string[] {
   try {
-    const v = JSON.parse(local()?.getItem(DROP_KEY) ?? '[]') as unknown;
+    const v = JSON.parse(storage?.getItem(DROP_KEY) ?? '[]') as unknown;
     return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
   } catch {
     return [];
   }
 }
 
-export function clearEventDrops(done: readonly string[]): void {
+export function clearEventDrops(done: readonly string[], storage: Storage | null = local()): void {
   try {
-    const left = readEventDrops().filter((id) => !done.includes(id));
-    if (left.length) local()?.setItem(DROP_KEY, JSON.stringify(left));
-    else local()?.removeItem(DROP_KEY);
+    const left = readEventDrops(storage).filter((id) => !done.includes(id));
+    if (left.length) storage?.setItem(DROP_KEY, JSON.stringify(left));
+    else storage?.removeItem(DROP_KEY);
   } catch {
     // best effort
   }

@@ -97,7 +97,9 @@ describe('DeskFrame', () => {
     const slot = real.slice(real.indexOf('data-testid="desk-brand"'), real.indexOf('data-slot="top"'));
     expect(slot).toContain('data-testid="brand-card"');
     expect(slot).toMatch(/<button type="button" class="[^"]*hide[^"]*" aria-label="Hide header" data-brand-hide="" data-testid="brand-hide">/);
-    expect(slot.match(/loading="lazy"/g)).toHaveLength(2);
+    // (Events) The event's logo (when it has one, client side) and Ground Control's: lazy; the stub's event has none.
+    expect(slot.match(/loading="lazy"/g)).toHaveLength(1);
+    expect(slot).not.toContain('edc-orlando');
     expect(slot).not.toContain('Built by');
     expect(slot).not.toMatch(/event op/i);
 
@@ -122,13 +124,15 @@ describe('DeskNav', () => {
     expect(html).not.toContain('desk-rail');
     expect(html.match(/data-testid="desk-sidebar"/g)).toHaveLength(1);
     const sidebar = text(html);
-    // The logo lockup first: EDC Orlando | Ground Control (decoration inside the sync button).
+    // The logo lockup first: (events) the event's logo | Ground Control (decoration inside the sync button). The
+    // hover rainbow is the event logo's (single-colour logos only, once its pixels are read in the browser).
     const lockup = html.slice(html.indexOf('data-testid="desk-live"'));
-    expect(lockup.indexOf('src="/logos/edc-orlando.png"')).toBeGreaterThan(0);
-    expect(lockup.indexOf('src="/logos/ground-control.png"')).toBeGreaterThan(lockup.indexOf('edc-orlando.png'));
-    // The hover rainbow sits on the EDC Orlando logo only, hidden from screen readers.
-    expect(lockup).toMatch(/src="\/logos\/edc-orlando.png"[^>]*\/?><span[^>]*aria-hidden="true"[^>]*data-testid="desk-live-rainbow"/);
-    expect(lockup.indexOf('desk-live-rainbow')).toBeLessThan(lockup.indexOf('ground-control.png'));
+    expect(lockup).not.toContain('edc-orlando');
+    expect(lockup.indexOf('src="/logos/ground-control.png"')).toBeGreaterThan(0);
+    const withLogo = render(<DeskNav main={ALL_VIEW} />, storeWith((s) => ({ ...s, myIds: new Set(), event: s.event && { ...s.event, logoUrl: '/api/events/logo/local?v=1' } })));
+    const lock2 = withLogo.slice(withLogo.indexOf('data-testid="desk-live"'));
+    expect(lock2.indexOf('src="/api/events/logo/local?v=1"')).toBeGreaterThan(0);
+    expect(lock2.indexOf('src="/logos/ground-control.png"')).toBeGreaterThan(lock2.indexOf('/api/events/logo/local'));
     expect(html.indexOf('data-testid="desk-live"')).toBeLessThan(html.indexOf('href="/"'));
     expect(sidebar).not.toContain('Is my friend in medical?');
     expect(sidebar).toContain(`All requests ${counts.all}`);

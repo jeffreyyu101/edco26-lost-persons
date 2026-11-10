@@ -250,7 +250,7 @@ export const SearchLogRow = memo(function SearchLogRow({ hit, created, updated, 
  * "Needs attention", which opens its editor). No LP number yet, and nothing has updated it.
  */
 export function OutboxLogRow({ item, created }: { item: OutboxItem; created: string }) {
-  const d = outboxDisplay(item);
+  const d = outboxDisplay(item, useEventConfig()?.posts);
   // "Kayla, 19 F, 11:02 PM. Waiting to send, FA 3, Not sent." (+ "Open to fix and resend.")
   const label = outboxRowLabel(d, created);
   const cells = (

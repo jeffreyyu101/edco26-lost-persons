@@ -421,7 +421,8 @@ export const SearchRow = memo(function SearchRow({ hit, times, selected, stage, 
  * send", no number and nothing updated. "Needs attention" opens its editor; a waiting one is not a control.
  */
 export function OutboxRow({ item, created }: { item: OutboxItem; created: string }) {
-  const m = outboxRow(item, created, useEventConfig()?.teams);
+  const event = useEventConfig();
+  const m = outboxRow(item, created, event?.teams, event?.posts);
   const cells = (
     <Cells
       number={m.number}

@@ -2,6 +2,7 @@
 // sent; offline / lie-fi queueing; flush after a reload; needs-attention and resend with the same
 // mutationId; photos (checkpoints, definitive rejection, retry); dedupe against confirmed rows; 401 pause;
 // the operator prompt; the legacy edc_pending_queue import; no IndexedDB → nothing kept in memory.
+import { STUB_EVENT } from '@/lib/client/stub-data';
 import { describe, expect, it } from 'vitest';
 import { openKv, K } from '@/lib/client/persist';
 import { COPY } from '@/lib/client/store-core';
@@ -291,7 +292,7 @@ describe('operator prompt (A13)', () => {
     await finish(first.a.create({ values: values(), clientMutationId: CMID(16), photos: [], photoTiming: 'today' }));
     first.stop();
     await settle();
-    server.session = { ...STAFF.sam, role: 'staff', eventId: null, event: null, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
+    server.session = { ...STAFF.sam, role: 'staff', eventId: STUB_EVENT.id, event: STUB_EVENT, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
     const second = boot(server, { dbName: first.fe.dbName });
     await ready();
     await advance(100);
@@ -321,7 +322,7 @@ describe('operator prompt (A13)', () => {
 });
 
 describe('legacy queue import', () => {
-  it("imports Jeffrey's edc_pending_queue keeping client_mutation_id, removes the key, and sends", async () => {
+  it("imports Jeffrey's edc_pending_queue keeping client_mutation_id and removes the key; (events) it is from before events, so it is never sent into an event", async () => {
     const server = new FakeServer([]);
     const legacy = [
       { client_mutation_id: CMID(17), first_name: 'Lena', last_name: 'O.', age: 18, gender: 'Female', reporting_location: 'FA 3 – Kinetic', clothing: 'Pink hat' },
@@ -334,10 +335,11 @@ describe('legacy queue import', () => {
     await ready();
     await advance(100);
     expect(fe.local.getItem(LEGACY_QUEUE_KEY)).toBeNull();
-    const kept = rowsWith(server, CMID(17));
-    expect(kept).toHaveLength(1);
-    expect(kept[0]?.row).toMatchObject({ firstName: 'Lena', lastName: 'O.', clothing: 'Pink hat' });
-    expect(creates(server)).toHaveLength(2);
+    // Kept on the phone (nothing is lost), with no event: the signed-in event's outbox never shows or sends it.
+    const stored = (await openKv(fe.dbName)?.get<{ payload: { clientMutationId: string; firstName?: string } }>(`outbox:${CMID(17)}`)) ?? null;
+    expect(stored?.payload.clientMutationId).toBe(CMID(17));
+    expect(rowsWith(server, CMID(17))).toHaveLength(0);
+    expect(creates(server)).toHaveLength(0);
     expect(s().outbox).toHaveLength(0);
   });
 

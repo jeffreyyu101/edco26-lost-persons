@@ -1,5 +1,6 @@
 // The real store's sync loop, connection state, session handling and purity (spec §7 Sync / Session,
 // A7, A37, A38), against the in-memory fake API with fake-indexeddb and fake timers. Synthetic data only.
+import { STUB_EVENT } from '@/lib/client/stub-data';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openKv } from '@/lib/client/persist';
 import { mergedRows, searchRequests } from '@/lib/client/selectors';
@@ -423,7 +424,7 @@ describe('session', () => {
     first.fe.setVisible(false);
     first.fe.fire('document', 'visibilitychange');
     await settle();
-    const rows = await openKv(first.fe.dbName)?.get<unknown[]>(`cache:edco26:${'dana kim · gc/hx - dispatch'}:rows`);
+    const rows = await openKv(first.fe.dbName)?.get<unknown[]>(`cache:${STUB_EVENT.id}:${'dana kim · gc/hx - dispatch'}:rows`);
     expect(rows).toHaveLength(2);
   });
 
@@ -433,7 +434,7 @@ describe('session', () => {
     await ready();
     await advance(3_500);
     first.stop();
-    server.session = { ...STAFF.sam, role: 'staff', eventId: null, event: null, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
+    server.session = { ...STAFF.sam, role: 'staff', eventId: STUB_EVENT.id, event: STUB_EVENT, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
     server.put(makeRow(2));
     const second = boot(server, { dbName: first.fe.dbName });
     await ready();
@@ -452,7 +453,7 @@ describe('session', () => {
     await advance(3_500); // the cache write
     first.stop();
     const kv = openKv(first.fe.dbName);
-    const key = `cache:edco26:${'dana kim · gc/hx - dispatch'}:rows`;
+    const key = `cache:${STUB_EVENT.id}:${'dana kim · gc/hx - dispatch'}:rows`;
     const cachedRows = (await kv?.get<Array<Record<string, unknown>>>(key)) ?? [];
     expect(cachedRows).toHaveLength(2);
     await kv?.set(key, cachedRows.map((r) => ({ ...r, age: 24 })));

@@ -355,6 +355,8 @@ export async function recordPushSend(
 ): Promise<void> {
   try {
     const kindToken = ENUM_RE.test(kind) ? kind : 'other';
+    // Off: nothing to write (and no event to read).
+    if (!(await telemetryConfig()).on) return;
     // (Events) Team keys are the event's team ids.
     const teams = (await loadEvent(eventId).catch(() => null))?.teams ?? [];
     const teamByEndpoint = new Map(targets.map((t) => [t.endpoint, teamKey(parseStaff(t.staff).team, teams)]));

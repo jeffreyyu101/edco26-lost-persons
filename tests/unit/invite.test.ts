@@ -23,9 +23,10 @@ describe('signInSchema: exactly one of password or invite', () => {
 
   it('invite only: {staffName, team, invite}, with the canonical team', () => {
     expect(signInSchema.parse({ ...who, invite: CODE })).toEqual({ staffName: 'Dana Kim', team: 'Medical', invite: CODE });
+    // (Events) Other team text stays as typed: the route spells one of the matched event's teams as the event does.
     expect(signInSchema.parse({ staffName: 'Sam Lee', team: 'Other', otherTeam: ' dispatch ', invite: CODE })).toEqual({
       staffName: 'Sam Lee',
-      team: 'GC/HX - Dispatch',
+      team: 'dispatch',
       invite: CODE,
     });
   });
