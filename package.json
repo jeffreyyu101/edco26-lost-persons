@@ -17,6 +17,7 @@
     "test": "vitest run --project unit",
     "test:int": "vitest run --project integration",
     "test:e2e": "playwright test",
+    "test:e2e:lanes": "node scripts/e2e-lanes.mjs",
     "db:reset": "bash scripts/db-reset.sh",
     "db:verify-migration": "bash scripts/verify-migration.sh",
     "assets": "node scripts/generate-assets.mjs"

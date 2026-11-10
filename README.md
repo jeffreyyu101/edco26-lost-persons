@@ -117,6 +117,7 @@ npm run start:test                       # http://127.0.0.1:3100
 | `node scripts/with-e2e-lock.mjs --migrate -- <command>` | Runs integration or e2e tests while holding the shared local-stack lock, after re-applying this branch's rework migration twice (several branches share one local stack). |
 | `npm run test:e2e` | Playwright on the production build: sign-in, lists, the two-phone flow (log → Pending → In medical → alert), system notifications on a desktop (hidden page notifies, visible page toasts), profile, edit and conflicts, dashboard, offline and lie-fi queueing, the service-worker update, the first-load JS budget, and accessibility (axe-core WCAG 2.1 A/AA in light and dark, plus 44 px tap targets). Run `npm run build:test` first. |
 | `node scripts/smoke-csp.mjs` | The production CSP and nonce in Chromium and WebKit: `/signin` hydrates with no violations, `/` redirects without a session, and with one the list, a profile and Back work. Needs the production build running on `PORT`. `npm run test:e2e` runs it too (`tests/e2e/smoke.spec.ts`). |
+| `npm run test:e2e:lanes` | The same Playwright suite in parallel lanes (default 3, about a third of the time); see Parallel e2e lanes below. |
 | `npm run db:verify-migration` | Applies the rework migration twice to the local database (`SUPABASE_DB_URL` when set, else the stack `supabase status` reports) and to an upgrade fixture built from Jeffrey's original schema, then smoke-tests the functions. |
 | `node scripts/load-test.mjs` | 30 simulated phones polling for 2 minutes against a running local production build (see the file header). |
 
@@ -126,6 +127,44 @@ fails naming the holder's pid and cwd. Every
 spec signs in through `POST /api/session` once per identity and reuses that session (`storageState`).
 Integration tests close the requests they create when each file ends, so nothing they leave shows in
 Pending.
+
+### Parallel e2e lanes
+
+`npm run test:e2e:lanes` runs the same specs, in both browser projects, in three lanes at once; a full pass takes
+roughly a third of the time of `npm run test:e2e`. Every lane has its own local Supabase stack and its own
+production build and `next start` on its own port, and runs its share with one worker, as a single run does, so the
+specs that assert on list contents and dashboard totals still see only their own lane's data. Nothing shared is
+rewritten: each lane runs in a copy of the checkout (APFS clone, so seconds and no disk) whose `.env.test` names its
+stack and port.
+
+```bash
+npm run test:e2e:lanes                              # 3 lanes, full suite
+npm run test:e2e:lanes -- --lanes 2                 # 1 to 6 lanes
+npm run test:e2e:lanes -- --files list.spec.ts,health.spec.ts
+npm run test:e2e:lanes -- --plan                    # print the split and start nothing
+npm run test:e2e:lanes -- -- --grep "dashboard"     # after a second `--`: passed to Playwright
+```
+
+It needs `~/.config/lp-stacks` (`claim.sh`, `make.sh`, `release.sh`) and at least three unclaimed stacks in
+`~/.lp-stacks`. Each lane's stack is rebuilt from this checkout's migrations (`supabase db reset`), seeded as
+`npm run db:reset` does, and has the `lp-close-inactive` job paused; the unused auth container is stopped. Before
+starting it checks free memory (this Mac and the Docker VM) and disk and refuses, naming the shortfall, when there
+is not enough. Plan on about 0.7 GB of Docker memory per lane.
+
+- **Split:** whole spec files per project, never single tests, so each file keeps its own order. Lanes are balanced
+  by seconds from `scripts/e2e-lane-timings.json` (spec file and project), which the runner refreshes after a run
+  that ran every test; a file with no entry is weighed by its test count.
+- **Result:** one summary with passed, failed and skipped over all lanes, the wall-clock and per-lane times, and each
+  failure as `file:line`, project and lane. The set of tests that ran is compared with `playwright test --list`;
+  a missing, duplicated or unexpected test fails the run. The exit code is non-zero on any failure. A failing lane
+  does not stop the others.
+- **Logs:** per-lane logs, server logs, Playwright's JSON and `results.json` are in a `lp-e2e-lanes-<time>` folder in
+  the temp directory (printed at the start and the end); a failing lane's traces and screenshots are copied there.
+- **Cleanup:** on exit, Ctrl-C or error, every server it started is stopped, every stack it claimed is released and
+  stopped (`--keep-stacks` leaves them running), and the lane copies are deleted.
+- **Trade-off:** a spec that depended on another spec file's leftovers would behave differently here, because lanes
+  start from a fresh seed and run files in a different order. None is known; if one fails only in lanes, run it
+  alone with `npm run test:e2e`.
 
 ## How it behaves
 
