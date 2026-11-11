@@ -1,5 +1,6 @@
 // (Events, cut-over fix A1) An event route refuses a call that does not say which event it is for: no X-LP-Event
-// header → 409 wrong_event, like a header naming another event (lib/server/route.ts). Only the old build's app, still
+// header → 409 wrong_event, like a header naming another event (lib/server/route.ts); the create (POST /api/requests)
+// gets a final 422 instead, so the old app shows it as not sent rather than retrying it forever. Only the old build's app, still
 // served by its service worker on phones after the release, sends none; it must neither write into nor read a new
 // event. A route whose calls cannot carry the header (an <img src>, sendBeacon, the service worker) opts out with
 // `headerless: '<reason>'`, and only the routes listed below may: a new route cannot forget the check, and a request,
@@ -125,6 +126,8 @@ describe('the wrapper (lib/server/route.ts)', () => {
     return {
       // (The origin check is not under test here.)
       write: authedRoute('POST /api/requests', { sameOrigin: false }, ok),
+      message: authedRoute('POST /api/requests/[id]/messages', { sameOrigin: false }, ok),
+      photoUpload: authedRoute('POST /api/requests/[id]/photos', { sameOrigin: false }, ok),
       sync: authedRoute('GET /api/sync', {}, ok),
       photo: authedRoute('GET /api/photos/[id]', { headerless: 'an <img src>' }, ok),
       session: authedRoute('GET /api/session', { event: 'optional' }, ok),
@@ -134,13 +137,29 @@ describe('the wrapper (lib/server/route.ts)', () => {
     const headers: Record<string, string> = { origin: 'https://lp.test' };
     if (header !== undefined) headers['x-lp-event'] = header;
     const res = await handler(new Request('https://lp.test/api/x', { method, headers, ...(method === 'GET' ? {} : { body: '{}' }) }), { params: Promise.resolve({}) });
-    const body = (await res.json()) as { error?: { code?: string } };
+    const body = (await res.json()) as { error?: { code?: string; message?: string; field?: string } };
+    lastError = body.error ?? null;
     return { status: res.status, code: body.error?.code ?? null };
   };
+  let lastError: { code?: string; message?: string; field?: string } | null = null;
 
-  it('no header: 409 wrong_event on a write and on GET /api/sync', async () => {
+  it("no header on the create (the old app's form or outbox): a final 422 with the message and no field", async () => {
+    // The old client treats 422 + our error body as definitive: "Not sent · needs attention", the message on the item;
+    // with no field it is not taken for a form error. A 409 it would retry forever, and the new build later drops it.
     const r = await routes();
-    expect(await call(r.write, 'POST')).toEqual({ status: 409, code: 'wrong_event' });
+    expect(await call(r.write, 'POST')).toEqual({ status: 422, code: 'invalid' });
+    expect(lastError).toEqual({
+      code: 'invalid',
+      message: 'Not sent. This screen is out of date. Close the app, open it again, sign in, then log the request again.',
+    });
+    // With a header, the create is unaffected (another event: still 409).
+    expect(await call(r.write, 'POST', OTHER)).toEqual({ status: 409, code: 'wrong_event' });
+  });
+
+  it('no header: 409 wrong_event on every other write and on GET /api/sync', async () => {
+    const r = await routes();
+    expect(await call(r.message, 'POST')).toEqual({ status: 409, code: 'wrong_event' });
+    expect(await call(r.photoUpload, 'POST')).toEqual({ status: 409, code: 'wrong_event' });
     expect(await call(r.sync, 'GET')).toEqual({ status: 409, code: 'wrong_event' });
     // An empty header is no claim either.
     expect(await call(r.sync, 'GET', '')).toEqual({ status: 409, code: 'wrong_event' });

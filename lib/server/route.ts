@@ -72,6 +72,11 @@ interface SessionState {
   event: EventRow | null;
 }
 
+/** (Cut-over) The one event route whose headerless call (the old build's app) is refused for good, not with 409. */
+const OLD_APP_CREATE = 'POST /api/requests';
+export const OLD_APP_CREATE_MESSAGE =
+  'Not sent. This screen is out of date. Close the app, open it again, sign in, then log the request again.';
+
 function failureFrom(error: unknown): ApiFailure {
   if (error instanceof ApiFailure) return error;
   if (error instanceof EnvError) {
@@ -133,7 +138,12 @@ function wrap<P extends Params>(
         const claimed = request.headers.get('x-lp-event');
         if ((options.event ?? 'required') === 'required') {
           // The log line tells the two apart: dbCode 'no_header' is the old build's app.
-          if (claimed === null && !options.headerless) throw new ApiFailure('wrong_event', undefined, { dbCode: 'no_header' });
+          if (claimed === null && !options.headerless) {
+            // The old app retries a 409 forever and later loses the item: its create gets a final 422 instead, which it
+            // shows on the item as "Not sent · needs attention" with this message (no field, so no form error).
+            if (name === OLD_APP_CREATE) throw new ApiFailure('invalid', OLD_APP_CREATE_MESSAGE, { dbCode: 'no_header' });
+            throw new ApiFailure('wrong_event', undefined, { dbCode: 'no_header' });
+          }
           if (claimed !== null && claimed !== 'none' && claimed !== session.eventId) throw new ApiFailure('wrong_event');
         }
       }

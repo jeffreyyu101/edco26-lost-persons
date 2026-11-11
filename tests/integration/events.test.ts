@@ -1030,15 +1030,19 @@ describe('(phase 2) X-LP-Event: a tab never writes into another event than the o
     expect((await api('/api/sync', as('none'))).status).toBe(200);
   });
 
-  it("(cut-over fix A1) no header at all (the old build's app) is refused like a wrong one; the headerless routes still answer", async () => {
+  it("(cut-over fix A1) no header at all (the old build's app) is refused; its create for good, everything else like a wrong one; the headerless routes still answer", async () => {
     const e = await makeEvent();
     archivedAtEnd.push(e.event.id);
     const cookie = (await signIn(newStaff('Site Ops'), e.password)).cookie;
     const bare = { cookie, event: false as const };
-    // A write (the old outbox's create, with a post this event has) and the old app's poll.
+    // The old outbox's create (with a post this event has): a final 422 with no field, which the old app shows on the
+    // item as "Not sent · needs attention" with the message (a 409 it would retry forever, then lose the item).
     const write = await api('/api/requests', { json: createBody({ reportingLocation: 'Main Stage Tent' }), ...bare });
-    expect(write.status).toBe(409);
-    expect(write.body.error.code).toBe('wrong_event');
+    expect(write.status).toBe(422);
+    expect(write.body.error).toEqual({
+      code: 'invalid',
+      message: 'Not sent. This screen is out of date. Close the app, open it again, sign in, then log the request again.',
+    });
     const poll = await api('/api/sync', bare);
     expect(poll.status).toBe(409);
     expect(poll.body.error.code).toBe('wrong_event');
@@ -1046,8 +1050,16 @@ describe('(phase 2) X-LP-Event: a tab never writes into another event than the o
     // The session check needs no event: the old app still learns who is signed in (and the new app which event).
     expect((await api<SessionInfo>('/api/session', bare)).body.eventId).toBe(e.event.id);
     // With the cookie's event, as the new client sends it: as before.
-    expect((await api('/api/requests', { json: createBody({ reportingLocation: 'Main Stage Tent' }), cookie, event: e.event.id })).status).toBe(201);
+    const made = await api<{ request: { id: string } }>('/api/requests', { json: createBody({ reportingLocation: 'Main Stage Tent' }), cookie, event: e.event.id });
+    expect(made.status).toBe(201);
     expect((await api('/api/sync', { cookie, event: e.event.id })).status).toBe(200);
+    // Every other write without the header stays a quiet 409 (a final status on a photo would make the old app drop it).
+    const message = await api(`/api/requests/${made.body.request.id}/messages`, { json: { body: 'Wristband colour?', clientMutationId: randomUUID() }, ...bare });
+    expect([message.status, message.body.error.code]).toEqual([409, 'wrong_event']);
+    const form = new FormData();
+    form.set('photoId', randomUUID());
+    const photoUp = await api(`/api/requests/${made.body.request.id}/photos`, { body: form, ...bare });
+    expect([photoUp.status, photoUp.body.error.code]).toEqual([409, 'wrong_event']);
     // The routes whose calls cannot carry the header (an <img src>, sendBeacon, the service worker) answer without it.
     const photo = await api(`/api/photos/${randomUUID()}`, bare);
     expect(photo.status).toBe(404);
