@@ -105,6 +105,15 @@ export function draftFromIdentity(identity: Identity | null, teams: readonly Sig
   return { name: identity.name, team: card, otherTeam: card ? '' : identity.team };
 }
 
+/**
+ * Step 1 prefilled for a team join link: the remembered name, and the remembered team only when it is one of the
+ * link's cards (a team remembered from another event is never carried into this one as Other).
+ */
+export function linkDraftFromIdentity(identity: Identity | null, cards: readonly SignInTeam[]): WhoDraft {
+  const draft = draftFromIdentity(identity, cards);
+  return draft.team ? draft : { ...draft, otherTeam: '' };
+}
+
 /** The card a team is (by its label or short name, case-insensitive), or null. */
 export function cardFor(team: string, teams: readonly SignInTeam[]): string | null {
   const t = collapse(team).toLowerCase();

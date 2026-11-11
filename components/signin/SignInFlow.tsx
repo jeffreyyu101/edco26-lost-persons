@@ -32,7 +32,7 @@ import { markSignedIn, markSignedInEvent } from '@/lib/client/signed-in-at';
 import { captureJoinCode, forgetJoinCode } from '@/lib/join-link';
 import { isWide } from './desktop';
 import { EndedScreen } from './Ended';
-import { MESSAGES, cardsFor, draftFromIdentity, inviteSignInBody, rememberedIdentity, retryMinutes, type Identity, type SignInTeam, type WhoDraft } from './logic';
+import { MESSAGES, cardsFor, draftFromIdentity, inviteSignInBody, linkDraftFromIdentity, rememberedIdentity, retryMinutes, type Identity, type SignInTeam, type WhoDraft } from './logic';
 import { Credit, ThemeToggle } from './parts';
 import { PasswordStep } from './PasswordStep';
 import { postSession } from './session-api';
@@ -98,8 +98,9 @@ function initialState(withLink: boolean, teams: readonly SignInTeam[]): StepStat
   const remembered = rememberedIdentity(readPrefs());
   // From 768 px the step's first field is focused on load (desktop-sign-in.html); the phone waits for a tap.
   const focus = isWide();
-  // A team join link signs in from step 1, so a remembered identity prefills it instead of skipping it.
-  if (withLink) return { step: 1, draft: draftFromIdentity(remembered, teams), focus };
+  // A team join link signs in from step 1, so a remembered identity prefills it instead of skipping it (its team only
+  // when it is one of the link's cards).
+  if (withLink) return { step: 1, draft: linkDraftFromIdentity(remembered, teams), focus };
   return remembered ? { step: 2, identity: remembered, focus } : { step: 1, draft: draftFromIdentity(null, teams), focus };
 }
 
@@ -152,7 +153,7 @@ function Steps({ next, teams: allTeams, onEnded }: { next: string | null; teams:
       setJoinCode(code);
       setMessage(null);
       const cards = cardsFor(allTeams, linkSlug(code));
-      setState((s) => (s.step === 1 ? s : { step: 1, draft: draftFromIdentity(s.identity, cards), focus: isWide() }));
+      setState((s) => (s.step === 1 ? s : { step: 1, draft: linkDraftFromIdentity(s.identity, cards), focus: isWide() }));
     };
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);

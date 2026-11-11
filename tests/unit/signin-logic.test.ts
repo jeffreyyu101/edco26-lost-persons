@@ -10,6 +10,7 @@ import {
   checkWho,
   draftFromIdentity,
   interpretSignInResponse,
+  linkDraftFromIdentity,
   parseRetryAfter,
   rememberedIdentity,
   retryMinutes,
@@ -200,6 +201,13 @@ describe('(events) cardsFor: a join link shows only its event\'s teams', () => {
   it('with a link: its event only', () => {
     expect(cardsFor(teams, 'warped').map((t) => t.label)).toEqual(['Medical', 'Dispatch']);
     expect(cardsFor(teams, 'release-check').map((t) => t.label)).toEqual(['Medics', 'Rovers', 'dispatch']);
+  });
+  it('a join link keeps the remembered name, and the remembered team only when it is one of the link\'s cards', () => {
+    const warped = cardsFor(teams, 'warped');
+    // "Rovers" was remembered from another event: not carried into Warped as Other.
+    expect(linkDraftFromIdentity({ name: 'Rita Rover', team: 'Rovers' }, warped)).toEqual({ name: 'Rita Rover', team: null, otherTeam: '' });
+    expect(linkDraftFromIdentity({ name: 'Rita Rover', team: 'med' }, warped)).toEqual({ name: 'Rita Rover', team: 'Medical', otherTeam: '' });
+    expect(linkDraftFromIdentity(null, warped)).toEqual(EMPTY_DRAFT);
   });
   it('without a link, or a link whose event is not running: every running event\'s, each label once', () => {
     expect(cardsFor(teams, null).map((t) => t.label)).toEqual(['Medical', 'Dispatch', 'Medics', 'Rovers']);
