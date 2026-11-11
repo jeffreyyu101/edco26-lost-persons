@@ -2,7 +2,7 @@
 // IndexedDB. It follows the same domain rules (transitions, creator checks, versions, undo) so screens
 // behave plausibly. Phase 1b (C) replaces its use in lib/client/store.tsx with the real store; after that
 // only tests import it (v2.2 A25: the stub and stub-data must not be in the production first load).
-import type { RequestDetail, RequestSummary, Stats } from '../api-types';
+import type { EventConfig, RequestDetail, RequestSummary, SessionRole, Stats } from '../api-types';
 import {
   STATUS,
   canTransition,
@@ -36,7 +36,7 @@ import {
 } from './store-contract';
 import { UNDO_MS } from './constants';
 import { readPrefs, writePref } from './prefs';
-import { STUB_SESSION, stubDetail, stubRows } from './stub-data';
+import { STUB_EVENT, STUB_SESSION, stubDetail, stubRows } from './stub-data';
 
 let seq = 0;
 const nextId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${(seq += 1)}`;
@@ -46,6 +46,9 @@ export interface StubOptions {
   now?: number;
   /** Start with no rows (to render empty states). */
   empty?: boolean;
+  /** (Events) The event config (default: STUB_EVENT in options.eventTimezone; null: none open). */
+  event?: EventConfig | null;
+  role?: SessionRole;
 }
 
 type PostCount = Stats['byPost'][number];
@@ -88,6 +91,8 @@ export function createStubStore(options: StubOptions): AppStore {
     generation: 0,
     eventTimezone: options.eventTimezone,
     durableStorage: true,
+    event: options.event === undefined ? { ...STUB_EVENT, timezone: options.eventTimezone } : options.event,
+    role: options.role ?? 'staff',
   };
 
   const listeners = new Set<() => void>();
@@ -236,7 +241,7 @@ export function createStubStore(options: StubOptions): AppStore {
         firstPhotoId: input.photos[0]?.photoId ?? null,
         photoCount: input.photos.length,
         name: joinName(firstName, lastName),
-        postShort: postShort(body.reportingLocation, body.otherLocation ?? null),
+        postShort: postShort(body.reportingLocation, body.otherLocation ?? null, state.event?.posts),
       };
       putRow(row);
       set({ myIds: new Set([...state.myIds, row.id]) });
@@ -252,7 +257,7 @@ export function createStubStore(options: StubOptions): AppStore {
       for (const [key, value] of Object.entries(patch)) {
         if (key !== 'name') (next as unknown as Record<string, unknown>)[key] = value ?? null;
       }
-      next.postShort = postShort(next.reportingLocation, next.otherLocation);
+      next.postShort = postShort(next.reportingLocation, next.otherLocation, state.event?.posts);
       next.updatedBy = staff();
       next.updatedAt = stamp();
       next.rowVersion = row.rowVersion + 1;
@@ -313,7 +318,8 @@ export function createStubStore(options: StubOptions): AppStore {
       const all = [...state.confirmed.values()];
       const open = all.filter((r) => r.status === STATUS.waiting || isInMedical(r.status));
       const oldest = all.filter((r) => r.status === STATUS.waiting).sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
-      const fixed = ['FA 3 – Kinetic', 'FA 4 – Oasis', 'Command', 'Base'];
+      const posts = state.event?.posts ?? [];
+      const fixed = posts.map((p) => p.label);
       return {
         open: { waiting: all.filter((r) => r.status === STATUS.waiting).length, inMedical: all.filter((r) => isInMedical(r.status)).length },
         notInMedical: all.filter((r) => r.status === STATUS.notInMedical).length,
@@ -328,7 +334,7 @@ export function createStubStore(options: StubOptions): AppStore {
         avgReuniteMinutes: 18,
         loggedLastHour: 6,
         byPost: [
-          ...fixed.map((loc) => ({ reportingLocation: loc, otherLocation: null, postShort: postShort(loc), count: open.filter((r) => r.reportingLocation === loc).length })),
+          ...fixed.map((loc) => ({ reportingLocation: loc, otherLocation: null, postShort: postShort(loc, null, posts), count: open.filter((r) => r.reportingLocation === loc).length })),
           ...otherPosts(open.filter((r) => !fixed.includes(r.reportingLocation))),
         ],
         recent: [...all]

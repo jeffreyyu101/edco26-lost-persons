@@ -7,7 +7,7 @@ import {
   STATUS,
   STATUS_META,
   NOT_FOUND_YET_LABEL,
-  canonicalTeam,
+  swapLabel,
   notFoundHolds,
   isHeld,
   isInMedical,
@@ -17,7 +17,7 @@ import {
   type Status,
   type StatusBucket,
 } from './domain';
-import { DEFAULT_EVENT_TIMEZONE, formatClockAmPm, formatDuration, minutesSince } from './format';
+import { FALLBACK_TIMEZONE, formatClockAmPm, formatDuration, minutesSince } from './format';
 
 export { RECHECK_MINUTES, isHeld, isRecheckDue } from './domain';
 
@@ -148,7 +148,7 @@ export const STAGE_META: Readonly<Record<Exclude<StageKey, 'legacy'>, StageMeta>
   inactive: fromStatus(STATUS.inactive),
   accompanied: fromStatus(STATUS.accompanied),
   swapRequested: { label: 'Friend swap requested', narrow: 'Swap asked', tone: 'blue', glyph: 'swapBlue', bucket: 'open' },
-  swapApproved: { label: 'Swap at Main Med', narrow: 'Swapping', tone: 'green', glyph: 'swapGreen', bucket: 'open' },
+  swapApproved: { label: 'Swap approved', narrow: 'Swapping', tone: 'green', glyph: 'swapGreen', bucket: 'open' },
   friendInformed: fromStatus(STATUS.friendInformed),
 };
 
@@ -222,6 +222,8 @@ export interface StageOptions {
   now: number;
   /** IANA zone for times ("4:40 PM"). */
   timeZone?: string;
+  /** (Events) What a swap place 'mm' is called at this event (EventConfig.mainMedical). */
+  mainMedical?: string;
 }
 
 const epoch = (iso: string | null | undefined): number => {
@@ -229,9 +231,14 @@ const epoch = (iso: string | null | undefined): number => {
   return Number.isFinite(t) ? t : NaN;
 };
 
-/** Medical side (contract E): staff of the Medical team; every other team is front of house. */
-export function isMedicalTeam(team: string | null | undefined): boolean {
-  return !!team && canonicalTeam(team) === 'Medical';
+/**
+ * Medical side (contract E): staff of the event's medical team (`medical`: its label, EventTeam.medical); every other
+ * team is front of house. Case-insensitive, as the server matches a team to the event's.
+ */
+export function isMedicalTeam(team: string | null | undefined, medical: string | readonly string[] | null | undefined): boolean {
+  const t = (team ?? '').trim().toLowerCase();
+  const names = typeof medical === 'string' ? [medical] : (medical ?? []);
+  return !!t && names.some((m) => m.trim().toLowerCase() === t);
 }
 
 /** When a held request got its first Not found: RECHECK_MINUTES before its recheck time. Null when not held. */
@@ -298,7 +305,7 @@ function spanOf(minutes: number): { shown: string; said: string } {
  * once due, "Medical recheck was due 1:12 AM" with "3 min ago". The minutes round up while waiting (never "in 0
  * min") and down once due. Null for an unreadable time.
  */
-export function recheckCountdown(recheckAt: string, now: number, timeZone: string = DEFAULT_EVENT_TIMEZONE): RecheckCountdown | null {
+export function recheckCountdown(recheckAt: string, now: number, timeZone: string = FALLBACK_TIMEZONE): RecheckCountdown | null {
   const at = epoch(recheckAt);
   if (!Number.isFinite(at)) return null;
   const time = formatClockAmPm(recheckAt, timeZone);
@@ -340,8 +347,8 @@ export function displayStage(row: StageSource, opts: StageOptions): DisplayStage
  * A request's stage key, label, colour and glyph (a list's status cell). With no clock a hold reads Not found yet;
  * pass `now` to tell Recheck due from it (Pending v9.1).
  */
-export function stageLook(row: StageSource, now = 0): StageMeta & { key: StageKey } {
-  const { key, label, tone, glyph, bucket } = stageOf(row, { now });
+export function stageLook(row: StageSource, now = 0, mainMedical = ''): StageMeta & { key: StageKey } {
+  const { key, label, tone, glyph, bucket } = stageOf(row, { now, mainMedical });
   return { key, label, tone, glyph, bucket };
 }
 
@@ -350,8 +357,8 @@ export function stageLook(row: StageSource, now = 0): StageMeta & { key: StageKe
  * friend coming"), else the stage ("Not found yet", "Recheck due", "Friend en route"). Pass `now` to tell Recheck
  * due from Not found yet; with no clock a hold reads Not found yet.
  */
-export function stagePhrase(row: StageSource, timeZone: string = DEFAULT_EVENT_TIMEZONE, now = 0): string {
-  const stage = stageOf(row, { now, timeZone });
+export function stagePhrase(row: StageSource, timeZone: string = FALLBACK_TIMEZONE, now = 0, mainMedical = ''): string {
+  const stage = stageOf(row, { now, timeZone, mainMedical });
   const words = (s: string) => s.replace(/\s*·\s*/g, ', ');
   switch (stage.key) {
     case 'notFoundYet':
@@ -367,7 +374,7 @@ export function stagePhrase(row: StageSource, timeZone: string = DEFAULT_EVENT_T
 }
 
 function stageOf(row: StageSource, opts: StageOptions): DisplayStage {
-  const tz = opts.timeZone ?? DEFAULT_EVENT_TIMEZONE;
+  const tz = opts.timeZone ?? FALLBACK_TIMEZONE;
   const status = row.status;
   const of = (key: Exclude<StageKey, 'legacy'>, rest: Partial<DisplayStage> = {}): DisplayStage => {
     const meta = STAGE_META[key];
@@ -411,7 +418,7 @@ function stageOf(row: StageSource, opts: StageOptions): DisplayStage {
   }
   if (status === STATUS.friendInformed) return of('friendInformed');
   if (isInMedical(status) && (row.swapPlace === 'fa' || row.swapPlace === 'mm') && row.enroute?.state !== 'enroute' && row.enroute?.state !== 'arrived') {
-    const label = `Swap at ${row.swapPlace === 'mm' ? 'Main Med' : row.postShort || 'FA'}`;
+    const label = swapLabel(row.swapPlace, row.postShort ?? '', opts.mainMedical ?? '');
     return of('swapApproved', { label, fullLabel: label, said: label });
   }
   if (isInMedical(status)) {

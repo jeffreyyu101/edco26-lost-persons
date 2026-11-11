@@ -1,5 +1,6 @@
 import { deflateSync } from 'node:zlib';
 import { expect, test, type APIRequestContext, type Page, type Route } from '@playwright/test';
+import { buildIdFrom, scriptSrcsFromHtml } from '../../lib/client/sw-client';
 import { confirmCrop } from './helpers/photo';
 import { signedInAs } from './helpers/session';
 import { syncRows } from './helpers/sync';
@@ -230,33 +231,85 @@ test.describe('lie-fi', () => {
 // ---- Service worker update ---------------------------------------------------------------------------
 
 test('a new service worker waiting shows "Update ready · Reload"; Reload hands the page to it', async ({ page }) => {
-  await loadOfflineReady(page);
-  expect(await controllerUrl(page)).toMatch(/\/sw\.js\?v=/);
-
-  const next = `e2e-update-${RUN}`;
-  await deployNewWorker(page, next);
-  await expect(updateToast(page)).toBeVisible({ timeout: 30_000 });
-
-  await updateToast(page).getByRole('button', { name: 'Reload' }).click();
-  await expect.poll(() => controllerUrl(page), { timeout: 30_000 }).toContain(`v=${next}`);
-  await expect(page.locator('html')).toHaveAttribute('data-hydrated', 'true');
+  test.setTimeout(120_000);
+  // The page runs an earlier build under that build's worker; this build's worker is deployed and waits (toast shown).
+  // (Not this build under another version name: after Reload the page would register its own build's worker again,
+  // which takes over quietly (A3), so the controller would not stay on the deployed one.)
+  const older = (await loadOnOlderWorker(page)).id;
+  const current = await currentBuildId(page);
+  await reloadIntoUpdate(page, older);
+  await expect.poll(() => controllerUrl(page), { timeout: 30_000 }).toContain(`v=${current}`);
   await expect(page.getByTestId('request-list')).toBeVisible();
+  // It stays on the deployed worker, with no further toast.
+  await page.waitForTimeout(3_000);
+  expect(await controllerUrl(page)).toContain(`v=${current}`);
+  await expect(updateToast(page)).toHaveCount(0);
 });
 
+/** An earlier build's app page: its build id, and the text and headers stored under `/`. */
+interface OlderShell {
+  id: string;
+  html: string;
+  headers: [string, string][];
+}
+
 /**
- * A phone still on an earlier deploy's worker: `older` installs and takes over first (from a page that is
- * not the app, so nothing registers this build's worker yet). Loading `/` then registers this build's
- * worker, which installs over it and waits, as after a real deploy: "Update ready".
+ * The app page of an EARLIER build, made from this one: the same HTML with one more script element that is never
+ * fetched or run (type text/plain, naming one of this build's chunks under a query), which gives it another script
+ * set and so another build id. Returns that id and the page's text and headers (its stored CSP stays valid).
  */
-async function loadOnOlderWorker(page: Page, older: string) {
+async function olderShell(page: Page): Promise<OlderShell> {
+  const fetched = await page.evaluate(async () => {
+    const res = await fetch('/', { credentials: 'same-origin', cache: 'no-store' });
+    return { html: await res.text(), headers: [...res.headers.entries()] as [string, string][] };
+  });
+  const shellScripts = scriptSrcsFromHtml(fetched.html).filter((u) => u.includes('/_next/static/'));
+  expect(shellScripts.length).toBeGreaterThan(0);
+  const extra = `<script type="text/plain" src="${shellScripts[0]}?e2e-older=${RUN}"></script>`;
+  const html = fetched.html.replace('</head>', `${extra}</head>`);
+  expect(html).not.toBe(fetched.html);
+  const id = buildIdFrom(scriptSrcsFromHtml(html));
+  expect(id).not.toBe(buildIdFrom(scriptSrcsFromHtml(fetched.html)));
+  return { id, html, headers: fetched.headers };
+}
+
+/** Puts the earlier build's page under `/` in its worker's cache (as that worker stored it at install). */
+async function storeOlderShell(page: Page, shell: OlderShell) {
+  await page.evaluate(async ({ id, html, headers }) => {
+    const cache = await caches.open(`lp-${id}`);
+    await cache.put('/', new Response(html, { status: 200, headers }));
+  }, shell);
+}
+
+/**
+ * A phone still on an earlier deploy: that build's worker controls it and its stored `/` IS that build (another
+ * script set, so another build id). It installs and takes over first, from a page that is not the app. Loading `/`
+ * then runs the earlier build from the stored page; this build's worker is then deployed and installs over it and
+ * waits, as after a real deploy: "Update ready" (another build than the page runs). Returns the earlier build's id.
+ */
+async function loadOnOlderWorker(page: Page, beforeDeploy?: (shell: OlderShell) => Promise<void>): Promise<OlderShell> {
   await page.goto('/icons/icon-192.png');
+  const shell = await olderShell(page);
   await page.evaluate(async (v) => {
     await navigator.serviceWorker.register(`/sw.js?v=${v}`, { scope: '/' });
     await navigator.serviceWorker.ready;
-  }, older);
+  }, shell.id);
+  await storeOlderShell(page, shell);
   await loadOfflineReady(page);
-  expect(await controllerUrl(page)).toContain(`v=${older}`);
+  expect(await controllerUrl(page)).toContain(`v=${shell.id}`);
+  // The page runs the earlier build: it registers nothing new itself (its own worker is the one in control).
+  const current = await currentBuildId(page);
+  expect(current).not.toBe(shell.id);
+  await beforeDeploy?.(shell);
+  await deployNewWorker(page, current);
   await expect(updateToast(page)).toBeVisible({ timeout: 30_000 });
+  return shell;
+}
+
+/** This build's id, from the live `/` (the id its page registers its worker with). */
+async function currentBuildId(page: Page): Promise<string> {
+  const html = await (await page.request.get('/')).text();
+  return buildIdFrom(scriptSrcsFromHtml(html));
 }
 
 /** Taps Reload and waits until a fresh document, controlled by this build's worker, has hydrated. */
@@ -274,6 +327,31 @@ async function reloadIntoUpdate(page: Page, older: string) {
   await expect(page.locator('html')).toHaveAttribute('data-hydrated', 'true');
 }
 
+test("(cut-over fix A3) this build's worker waiting under an older one takes over quietly: no toast, no reload", async ({ page }) => {
+  test.setTimeout(120_000);
+  // The earlier worker stored THIS build's `/` (a sign-in fetched it from the network): the page runs this build.
+  const older = `e2e-older-${RUN}-quiet`;
+  await page.goto('/icons/icon-192.png');
+  await page.evaluate(async (v) => {
+    await navigator.serviceWorker.register(`/sw.js?v=${v}`, { scope: '/' });
+    await navigator.serviceWorker.ready;
+  }, older);
+  await page.goto('/');
+  await expect(page.getByTestId('request-list')).toBeVisible();
+  await page.evaluate(() => {
+    (window as unknown as { lpBeforeUpdate?: boolean }).lpBeforeUpdate = true;
+  });
+  const current = await currentBuildId(page);
+  // The page registers its own build's worker; it installs over the older one and takes over without asking.
+  await expect.poll(() => controllerUrl(page), { timeout: 30_000 }).toContain(`v=${current}`);
+  await expect(page.locator('html')).toHaveAttribute('data-offline-ready', 'true', { timeout: 30_000 });
+  await page.waitForTimeout(2_000);
+  await expect(updateToast(page)).toHaveCount(0);
+  // The same document: no reload happened.
+  expect(await page.evaluate(() => (window as unknown as { lpBeforeUpdate?: boolean }).lpBeforeUpdate)).toBe(true);
+  await expect(page.getByTestId('request-list')).toBeVisible();
+});
+
 const cacheNames = (page: Page) => page.evaluate(() => caches.keys()).catch(() => [] as string[]);
 
 /** Every /_next/static file of this build (public/sw-manifest.json, written by `next build`). */
@@ -285,8 +363,7 @@ async function buildAssets(page: Page): Promise<string[]> {
 
 test('an update applied with no signal reloads from its own cache and opens every view', async ({ page, context, browserName }) => {
   test.setTimeout(120_000);
-  const older = `e2e-older-${RUN}-offline`;
-  await loadOnOlderWorker(page, older);
+  const older = (await loadOnOlderWorker(page)).id;
 
   // "Update ready" means the waiting worker already holds the whole build, view chunks included.
   const assets = await buildAssets(page);
@@ -353,10 +430,16 @@ test.describe('desk 1180 × 820, offline', () => {
 
 test('activating an update keeps the old cache while an older tab is open, then lets it go', async ({ page, context }) => {
   test.setTimeout(120_000);
-  const older = `e2e-older-${RUN}-retain`;
-  await loadOnOlderWorker(page, older);
+  // The older tab opens the earlier build too, before this build's worker is deployed (a tab that starts later would
+  // register its own build's worker again, over the waiting one). Its worker may have refreshed the stored page from
+  // the network meanwhile: the earlier page goes back first.
   const olderTab = await context.newPage();
-  await loadOfflineReady(olderTab);
+  const shell = await loadOnOlderWorker(page, async (s) => {
+    await storeOlderShell(page, s);
+    await loadOfflineReady(olderTab);
+    expect(await controllerUrl(olderTab)).toContain(`v=${s.id}`);
+  });
+  const older = shell.id;
 
   await reloadIntoUpdate(page, older);
   await expect(page.getByTestId('request-list')).toBeVisible();

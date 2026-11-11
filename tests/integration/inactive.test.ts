@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest';
 import type { RequestDetail, RequestSummary, Stats, SyncResponse } from '@/lib/api-types';
 import { INACTIVE_MINUTES, STATUS, STATUS_META, SYSTEM_STAFF } from '@/lib/domain';
 import { ROOT } from '../../scripts/test-env.mjs';
-import { admin, api, cookieFor, createRequest, dbUrl, forceStatus, newStaff, psql, staffOf, withTestServer, type Staff } from './harness';
+import { EVENT_ID, admin, api, cookieFor, createRequest, dbUrl, forceStatus, newStaff, psql, staffOf, withTestServer, type Staff } from './harness';
 import { eventually } from './push-service';
 
 withTestServer();
@@ -176,9 +176,10 @@ describe('lp_close_inactive', () => {
     const stale = randomUUID();
     const by = staffOf(FOH);
     psql(
-      `insert into public.patients (id, first_name, reporting_location, status, created_by, updated_by, created_at) values ` +
-        `(${lit(fresh)}, 'TEST-S no audit fresh', 'Base', 'Found – Awaiting Reunion', ${lit(by)}, ${lit(by)}, now() - interval '30 minutes'), ` +
-        `(${lit(stale)}, 'TEST-S no audit stale', 'Base', 'Found – Awaiting Reunion', ${lit(by)}, ${lit(by)}, now() - interval '61 minutes')`,
+      // (Events) Rows of the test event, numbered by hand (well above any request the app numbers).
+      `insert into public.patients (id, event_id, case_number, first_name, reporting_location, status, created_by, updated_by, created_at) values ` +
+        `(${lit(fresh)}, ${lit(EVENT_ID)}, 900000000 + (random() * 99999999)::bigint, 'TEST-S no audit fresh', 'Base', 'Found – Awaiting Reunion', ${lit(by)}, ${lit(by)}, now() - interval '30 minutes'), ` +
+        `(${lit(stale)}, ${lit(EVENT_ID)}, 900000000 + (random() * 99999999)::bigint, 'TEST-S no audit stale', 'Base', 'Found – Awaiting Reunion', ${lit(by)}, ${lit(by)}, now() - interval '61 minutes')`,
     );
     expect(closeInactive([fresh, stale])).toBe(1);
     expect((await dbRow(fresh)).status).toBe(IN_MEDICAL);
@@ -303,7 +304,7 @@ rollback;`).split('\n');
     expect(cfg).toContain('statement_timeout=4s');
     expect(cfg).toContain('lock_timeout=2s');
     expect(cfg).toContain('search_path=public, pg_temp');
-    for (const fn of ['lp_close_inactive(uuid[])', 'lp_inactive_claim(uuid[])', 'lp_inactive_minutes()']) {
+    for (const fn of ['lp_close_inactive(uuid[])', 'lp_inactive_claim(uuid, uuid[])', 'lp_inactive_minutes()']) {
       expect(psql(`select has_function_privilege('anon', 'public.${fn}', 'execute')::text || has_function_privilege('authenticated', 'public.${fn}', 'execute')::text || has_function_privilege('service_role', 'public.${fn}', 'execute')::text`), fn).toBe('falsefalsetrue');
     }
     expect(psql('select public.lp_inactive_minutes()')).toBe(String(INACTIVE_MINUTES));
@@ -397,9 +398,9 @@ describe('the dashboard and the export', () => {
     backdate(r.id, INACTIVE_MINUTES + 1);
     // Before and after in one transaction (rolled back), so nothing else moves the numbers in between.
     const [before, closed, after] = psqlScript(`begin;
-select public.lp_stats()::text;
+select public.lp_stats(${lit(EVENT_ID)})::text;
 select public.lp_close_inactive(${uuidArray([r.id])});
-select public.lp_stats()::text;
+select public.lp_stats(${lit(EVENT_ID)})::text;
 rollback;`).split('\n') as [string, string, string];
     expect(closed).toBe('1');
     const s0 = JSON.parse(before) as Stats;
@@ -423,7 +424,8 @@ rollback;`).split('\n') as [string, string, string];
     const r = await answered();
     backdate(r.id, INACTIVE_MINUTES + 1);
     closeInactive([r.id]);
-    const sql = readFileSync(join(ROOT, 'docs', 'export.sql'), 'utf8');
+    // (Events) The file exports one event (EDC's by default): here the local test event.
+    const sql = readFileSync(join(ROOT, 'docs', 'export.sql'), 'utf8').replaceAll("ev.slug = 'edco26'", "ev.slug = 'local'");
     const [q1, rest] = sql.split(/^-- Query 2: audit trail$/m) as [string, string];
     const [q2] = rest.split(/^-- Query 3: messages and en route$/m) as [string, string];
     const caseLabel = `LP-${String(r.caseNumber).padStart(4, '0')}`;
@@ -495,12 +497,12 @@ describe('telling the staff involved (F4 Activity + push, once)', () => {
     backdate(a.id, INACTIVE_MINUTES + 1);
     backdate(b.id, INACTIVE_MINUTES + 1);
     const out = psqlScript(`begin;
-select public.lp_inactive_claim(null)::text;
-select public.lp_inactive_claim('{}'::uuid[])::text;
+select public.lp_inactive_claim(${lit(EVENT_ID)}, null)::text;
+select public.lp_inactive_claim(${lit(EVENT_ID)}, '{}'::uuid[])::text;
 select public.lp_close_inactive(${uuidArray([a.id, b.id])});
 update public.patients set status = 'Found – Awaiting Reunion', closed_at = null where id = ${lit(b.id)};
-select public.lp_inactive_claim(${uuidArray([a.id, b.id])})::text;
-select public.lp_inactive_claim(${uuidArray([a.id, b.id])})::text;
+select public.lp_inactive_claim(${lit(EVENT_ID)}, ${uuidArray([a.id, b.id])})::text;
+select public.lp_inactive_claim(${lit(EVENT_ID)}, ${uuidArray([a.id, b.id])})::text;
 rollback;`).split('\n');
     expect(out).toEqual(['[]', '[]', '2', `["${a.id}"]`, '[]']);
   });

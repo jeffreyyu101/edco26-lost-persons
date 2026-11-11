@@ -12,7 +12,7 @@ import { pushEndpointSchema } from '@/lib/validation';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export const POST = authedRoute('POST /api/push/test', {}, async ({ request, session }) => {
+export const POST = authedRoute('POST /api/push/test', { event: 'optional' }, async ({ request, session }) => {
   const body = await readJson(request, pushEndpointSchema);
   if (!pushEnabled()) throw new ApiFailure('not_found');
   const target = await rpc<PushTarget | null>('lp_push_test_target', { p_endpoint: body.endpoint, p_staff: session.staff });

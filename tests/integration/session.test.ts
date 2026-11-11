@@ -79,7 +79,7 @@ describe('POST /api/session', () => {
     expect(cookieAttrs(setCookies(res.headers)[0] as string).secure).toBe(true);
   });
 
-  it('stores the canonical team: Other "dispatch" → GC/HX - Dispatch, unknown text kept (A28)', async () => {
+  it("(events) Other text naming one of the event's teams (label or short name, any case) stores that team: 'dispatch' → GC/HX - Dispatch; unknown text is kept", async () => {
     const a = await api('/api/session', {
       json: { staffName: pii(`TEST-S Other ${uniq()}`), team: 'Other', otherTeam: ' dispatch ', password: PASSWORD },
       headers: { 'x-real-ip': await ip() },
@@ -107,7 +107,8 @@ describe('POST /api/session', () => {
   it.each([
     ['short name', { staffName: 'A', team: 'Medical' }, 'staffName'],
     ['name with the separator', { staffName: 'Dana · Kim', team: 'Medical' }, 'staffName'],
-    ['unknown team', { staffName: 'TEST-S Val', team: 'Security' }, 'team'],
+    // (Events) A team outside the event's is free text like Other's, so only its shape is checked here.
+    ['team too short', { staffName: 'TEST-S Val', team: 'S' }, 'team'],
     ['Other without text', { staffName: 'TEST-S Val', team: 'Other' }, 'otherTeam'],
     ['extra key', { staffName: 'TEST-S Val', team: 'Medical', admin: true }, undefined],
   ])('validation: %s → 422', async (_label, body, field) => {

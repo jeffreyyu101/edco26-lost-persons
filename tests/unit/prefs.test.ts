@@ -82,8 +82,8 @@ describe('prefs (remembered on this phone)', () => {
       expect(readPrefs()).toEqual(DEFAULT_PREFS);
     });
 
-    it('remembers the name and canonical team for sign-in, and Change clears them', () => {
-      writeRememberedIdentity('  Dana   Kim ', 'dispatch');
+    it('remembers the name and team (as the server stored it) for sign-in, and Change clears them', () => {
+      writeRememberedIdentity('  Dana   Kim ', ' GC/HX  - Dispatch');
       expect(readPrefs()).toMatchObject({ rememberedName: 'Dana Kim', rememberedTeam: 'GC/HX - Dispatch' });
       expect(JSON.parse(browser.data.get(PREF_STORAGE_KEYS.identity)!)).toEqual({ name: 'Dana Kim', team: 'GC/HX - Dispatch' });
       writeRememberedIdentity('Sam Lee', 'Info booth');
@@ -98,7 +98,8 @@ describe('prefs (remembered on this phone)', () => {
 
     it('ignores corrupt or tampered stored values', () => {
       browser.data.set(PREF_STORAGE_KEYS.identity, '{not json');
-      browser.data.set(PREF_STORAGE_KEYS.lastPost, JSON.stringify({ reportingLocation: 'FA 9', otherLocation: null }));
+      // (Events) Any post label is kept (the form checks it against the open event's posts); a non-string is not.
+      browser.data.set(PREF_STORAGE_KEYS.lastPost, JSON.stringify({ reportingLocation: 42, otherLocation: null }));
       browser.data.set(PREF_STORAGE_KEYS.bell, 'yes');
       browser.data.set(THEME_STORAGE_KEY, 'purple');
       expect(readPrefs()).toEqual(DEFAULT_PREFS);

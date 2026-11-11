@@ -14,6 +14,7 @@ import type { ChangeResponse } from '@/lib/api-types';
 import { idParam, json, readJson } from '@/lib/server/http';
 import { mapRow } from '@/lib/server/mappers';
 import { withReclassify } from '@/lib/server/reclassify';
+import { mainMedicalOf, postNames } from '@/lib/server/events';
 import { authedRoute } from '@/lib/server/route';
 import { rpc } from '@/lib/server/supabase';
 import { swapSchema } from '@/lib/validation';
@@ -31,11 +32,12 @@ interface SwapResult {
   undid?: unknown;
 }
 
-export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/swap', {}, async ({ request, params, session }) => {
+export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/swap', {}, async ({ request, params, session, eventId, event }) => {
   const id = idParam(params);
   const body = await readJson(request, swapSchema);
-  const data = await withReclassify(id, { fn: 'swap', expectedVersion: body.expectedVersion, action: body.action }, () =>
+  const data = await withReclassify(eventId, id, { fn: 'swap', expectedVersion: body.expectedVersion, action: body.action }, () =>
     rpc<SwapResult>('lp_swap', {
+      p_event: eventId,
       p_id: id,
       p_expected_version: body.expectedVersion,
       p_action: body.action,
@@ -43,10 +45,10 @@ export const POST = authedRoute<{ id: string }>('POST /api/requests/[id]/swap', 
       p_staff: session.staff,
     }),
   );
-  const out: ChangeResponse = { changed: data.changed === true, request: mapRow(data.row) };
+  const out: ChangeResponse = { changed: data.changed === true, request: mapRow(data.row, postNames(event)) };
   if (out.changed) {
     const str = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v : null);
-    await swapNotice(body.action, out.request, session.staff, {
+    await swapNotice(eventId, body.action, out.request, session.staff, mainMedicalOf(event), {
       answerer: str(data.answerer),
       requester: str(data.requester),
       creator: str(data.creator),

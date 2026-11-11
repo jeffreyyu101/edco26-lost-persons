@@ -34,10 +34,10 @@ message.
 | `NEXT_PUBLIC_SUPABASE_URL` | yes | The project URL. Used by the server only (the name is kept from the existing Vercel env). A trailing `/rest/v1/` is stripped. |
 | `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY` | yes | Server-only. Never give it a `NEXT_PUBLIC_` prefix. |
 | `SESSION_SECRET` | yes | 32 characters or more. Changing it signs everyone out. |
-| `APP_SHARED_PASSWORD_HASH_B64` or `APP_SHARED_PASSWORD` | one of them | The event password, as a base64 bcrypt hash or as plain text. If both are set, the hash wins. |
+| `APP_SHARED_PASSWORD_HASH_B64` or `APP_SHARED_PASSWORD` | bootstrap only | Read once by `scripts/bootstrap-events.mjs` (the EDC staff password, kept as retired: never a way in, never allowed as the lead passcode). Keep it for a rollback to the pre-events build. Since the events migration, every staff password, the lead passcode and every join link live in the database and are set by a lead in the app. |
 | `EVENT_TIMEZONE` | no | Defaults to `America/New_York`. Every displayed time uses it. |
-| `INVITE_CODE_SHA256` | no | The team join link: hex SHA-256 of the code (`node scripts/make-invite.mjs`). Unset: password only. |
-| `INVITE_EXPIRES_AT` | with the one above | ISO time the team join link stops working, e.g. `2026-11-09T12:00:00Z`. Unset: the link is off. |
+| `INVITE_CODE_SHA256` | rollback only | No longer read (join links live in the database; an archived event keeps its link only for 24 h after its end). Keep it for a rollback to the pre-events build. New links: `POST /api/events/:id/join-link`. |
+| `INVITE_EXPIRES_AT` | with the one above | Its expiry (rollback only, like the one above). |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | for lock-screen alerts | Web Push (already set in production). All three switch it on; `VAPID_SUBJECT` is `mailto:` or `https:`. Missing or invalid: push is off, silently (no alerts banner, no pushes; Activity and in-app alerts still work). A new pair makes every device subscribe again on its next open. |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | no | The same public key at build time. The app reads the key from the server anyway (`POST /api/push/prefs`). |
 
@@ -66,6 +66,7 @@ and `.env.test`, which holds local-only values that work against `127.0.0.1` and
 | `20261108120000_companion.sql` | Companion: `friend_in_medical*` and `swap_*` columns, statuses `Found – Accompanied` / `Closed – Friend Informed`, `lp_swap`, the new Activity kinds, and every status list (transitions, involved, stats, inactive close) updated. Additive. | Paste it **alone** (after dashboard v4) **before** deploying the companion build: `node scripts/companion-sql.mjs` writes `migration.sql` and `dry-run.sql`. |
 | `20261108190000_companion_cancel.sql` | Companion follow-up: `lp_swap` action `cancel` (swap requested → cleared; swap approved → back to `Found – Accompanied`), Activity kind `swap_cancelled`. Additive, same signatures. | Paste it **alone** (after companion) **before** deploying the cancel build. |
 | `20261109120000_companion_post_event.sql` | Companion fixes after the event: new nullable `patients.swap_closed` (+ CHECK, added only when missing) returned by `lp_row`; `lp_swap` (approve needs an open request, except an older app's Undo of its own Cancel swap; `restore`, the Undo of Cancel swap / Decline / Swap at …, keeps the original requester; withdraw tells the answerer; Undo / Reopen no longer count as "who answered"); `lp_set_status` (Reopen of an Accompanied request closed as inactive or discharged returns to Accompanied; Friend informed over an open swap request is a conflict; Undo of a change brings back the swap request it ended); `lp_stats()` / `lp_stats(text)` (a swap approval or Change answer out of Accompanied restarts the friend's clock). Additive, same signatures, no row rewritten, nothing dropped; safe to run twice. | Paste it **alone** (after the cancel file) **before** deploying this build. |
+| `20261110000000_events.sql` | Multi-event foundation (phase 1): tables `events` and `lp_org`; `event_id` on requests and the staff/device tables; every existing request becomes the archived `edco26` event (case numbers kept, nothing else changed); per-event LP numbers; the write guard (`lp_require_writable` + a patients trigger: an archived event answers 410 `event_ended`); every RPC takes the event; `lp_stats(p_event, p_range)`; lead RPCs. End keeps the staff password and join link for 24 h (a Reopen within them keeps both; while held they answer Ended and the password stays taken), then clears them at the next sign-in, Reopen or `lp-close-inactive` run. Additive except the retired RPC signatures (dropped or made internal). Safe to run twice. | Paste it **alone** (after the post-event file), then deploy this build at once and run `scripts/bootstrap-events.mjs` once (lead passcode; EDC's old staff password from the env, kept as retired). Full runbook: `docs/RELEASE-events.md`. |
 
 Without `20261106000000_rework.sql`, every API route fails, because each one calls an `lp_*` function. The
 file is one transaction, is safe to run twice (also on a database that already has every `lp_*` function),
@@ -117,6 +118,7 @@ npm run start:test                       # http://127.0.0.1:3100
 | `node scripts/with-e2e-lock.mjs --migrate -- <command>` | Runs integration or e2e tests while holding the shared local-stack lock, after re-applying this branch's rework migration twice (several branches share one local stack). |
 | `npm run test:e2e` | Playwright on the production build: sign-in, lists, the two-phone flow (log → Pending → In medical → alert), system notifications on a desktop (hidden page notifies, visible page toasts), profile, edit and conflicts, dashboard, offline and lie-fi queueing, the service-worker update, the first-load JS budget, and accessibility (axe-core WCAG 2.1 A/AA in light and dark, plus 44 px tap targets). Run `npm run build:test` first. |
 | `node scripts/smoke-csp.mjs` | The production CSP and nonce in Chromium and WebKit: `/signin` hydrates with no violations, `/` redirects without a session, and with one the list, a profile and Back work. Needs the production build running on `PORT`. `npm run test:e2e` runs it too (`tests/e2e/smoke.spec.ts`). |
+| `npm run test:e2e:lanes` | The same Playwright suite in parallel lanes (default 3, about a third of the time); see Parallel e2e lanes below. |
 | `npm run db:verify-migration` | Applies the rework migration twice to the local database (`SUPABASE_DB_URL` when set, else the stack `supabase status` reports) and to an upgrade fixture built from Jeffrey's original schema, then smoke-tests the functions. |
 | `node scripts/load-test.mjs` | 30 simulated phones polling for 2 minutes against a running local production build (see the file header). |
 
@@ -126,6 +128,46 @@ fails naming the holder's pid and cwd. Every
 spec signs in through `POST /api/session` once per identity and reuses that session (`storageState`).
 Integration tests close the requests they create when each file ends, so nothing they leave shows in
 Pending.
+
+### Parallel e2e lanes
+
+`npm run test:e2e:lanes` runs the same specs, in both browser projects, in three lanes at once; a full pass takes
+roughly a third of the time of `npm run test:e2e`. Every lane has its own local Supabase stack and its own
+production build and `next start` on its own port, and runs its share with one worker, as a single run does, so the
+specs that assert on list contents and dashboard totals still see only their own lane's data. Nothing shared is
+rewritten: each lane runs in a copy of the checkout (APFS clone, so seconds and no disk) whose `.env.test` names its
+stack and port.
+
+```bash
+npm run test:e2e:lanes                              # 3 lanes, full suite
+npm run test:e2e:lanes -- --lanes 2                 # 1 to 6 lanes
+npm run test:e2e:lanes -- --files list.spec.ts,health.spec.ts
+npm run test:e2e:lanes -- --plan                    # print the split and start nothing
+npm run test:e2e:lanes -- -- --grep "dashboard"     # after a second `--`: passed to Playwright
+```
+
+It needs `~/.config/lp-stacks` (`claim.sh`, `make.sh`, `release.sh`) and at least three unclaimed stacks in
+`~/.lp-stacks`. It claims a stack the way `claim.sh` does, but a stopped one first: a stack that is running without
+a claim is taken only when no stopped one is free, and the log says so. Each lane's stack is rebuilt from this checkout's migrations (`supabase db reset`), seeded as
+`npm run db:reset` does, and has the `lp-close-inactive` job paused; the unused auth container is stopped. Before
+starting it checks free memory (this Mac and the Docker VM) and disk and refuses, naming the shortfall, when there
+is not enough. Plan on about 0.7 GB of Docker memory per lane.
+
+- **Split:** whole spec files per project, never single tests, so each file keeps its own order. Lanes are balanced
+  by seconds from `scripts/e2e-lane-timings.json` (spec file and project), which the runner refreshes after a run
+  that ran every test; a file with no entry is weighed by its test count.
+- **Result:** one summary with passed, failed and skipped over all lanes, the wall-clock and per-lane times, and each
+  failure as `file:line`, project and lane. The set of tests that ran is compared with `playwright test --list`;
+  a missing, duplicated or unexpected test fails the run. The exit code is non-zero on any failure. A failing lane
+  does not stop the others.
+- **Logs:** per-lane logs, server logs, Playwright's JSON and `results.json` are in a `lp-e2e-lanes-<time>` folder in
+  the temp directory (printed at the start and the end); a failing lane's traces and screenshots are copied there.
+- **Cleanup:** on exit, Ctrl-C or error, every server it started is stopped, every stack it claimed is released and
+  left as it was found: one that was running stays running (its auth container started again), one that was stopped
+  is stopped (`--keep-stacks` leaves it running too), and the lane copies are deleted.
+- **Trade-off:** a spec that depended on another spec file's leftovers would behave differently here, because lanes
+  start from a fresh seed and run files in a different order. None is known; if one fails only in lanes, run it
+  alone with `npm run test:e2e`.
 
 ## How it behaves
 

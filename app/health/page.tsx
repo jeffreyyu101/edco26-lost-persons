@@ -14,5 +14,7 @@ export default async function HealthPage() {
   await connection();
   const claims = await verifySessionToken((await cookies()).get(SESSION_COOKIE)?.value, sessionSecretFromEnv());
   if (!claims) redirect('/signin?next=/health');
-  return <HealthEntry />;
+  // (Events) Only a lead may switch collection off or back on (POST /api/telemetry/settings checks it too).
+  // (Events) The event this page reads (X-LP-Event): the cookie's as the page was served; 'none' for a lead with none open.
+  return <HealthEntry lead={claims.role === 'lead'} event={claims.eventId ?? 'none'} />;
 }

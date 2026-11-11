@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createClient } from '@supabase/supabase-js';
 import { describe, expect, it } from 'vitest';
 import { canonStaff } from '@/lib/domain';
+import { TEST_EVENT_ID as EVENT_ID } from '../../scripts/test-env.mjs';
 
 const fixtures = JSON.parse(readFileSync(join(__dirname, '..', 'fixtures', 'canon-staff.json'), 'utf8')) as Array<{
   input: string;
@@ -31,7 +32,7 @@ describe('function privileges', () => {
     const anon = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL as string, key, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
-    const { error } = await anon.rpc('lp_stats');
+    const { error } = await anon.rpc('lp_stats', { p_event: EVENT_ID });
     expect(error?.code).toBe('42501');
   });
 });

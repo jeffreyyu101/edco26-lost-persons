@@ -33,7 +33,11 @@ export const dynamic = 'force-dynamic';
 
 const off = () => new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
 
-export const POST = authedRoute('POST /api/telemetry', { refresh: false, sameOrigin: false }, async ({ request, session }) => {
+export const POST = authedRoute('POST /api/telemetry', {
+  refresh: false,
+  sameOrigin: false,
+  headerless: 'a hidden page sends its batch with sendBeacon (no headers); diagnostics only, no request data',
+}, async ({ request, session, eventId, event }) => {
   assertTelemetryOrigin(request);
   const cfg = await telemetryConfig();
   if (!cfg.on) return off();
@@ -44,10 +48,11 @@ export const POST = authedRoute('POST /api/telemetry', { refresh: false, sameOri
   // The probe after an "off": nothing to write, only whether collection is back on.
   if (batch.ev.length === 0) return answer();
   const res = await rpc<IngestResult | null>('lp_tel_ingest', {
+    p_event: eventId,
     p_batch: batch.b,
     p_device: batch.d,
     p_session: batch.s,
-    p_team: teamKey(session.claims.team),
+    p_team: teamKey(session.claims.team, event?.teams),
     p_skew_ms: clampSkew(Date.now() - batch.sent),
     p_ctx: batch.ctx,
     p_events: batch.ev,

@@ -43,7 +43,10 @@ describe('createRequestSchema', () => {
     expect(createRequestSchema.safeParse({ reportingLocation: 'Base' }).success).toBe(false);
     expect(createRequestSchema.safeParse({ clientMutationId: 'nope', reportingLocation: 'Base' }).success).toBe(false);
     expect(createRequestSchema.safeParse({ clientMutationId: CMID }).success).toBe(false);
-    expect(createRequestSchema.safeParse({ clientMutationId: CMID, reportingLocation: 'FA 3' }).success).toBe(false);
+    // (Events) Which posts exist is the event's (lp_clean_fields(p_event, …) refuses the rest with 422); here only the shape.
+    expect(createRequestSchema.safeParse({ clientMutationId: CMID, reportingLocation: 'FA 3' }).success).toBe(true);
+    expect(createRequestSchema.safeParse({ clientMutationId: CMID, reportingLocation: ' FA 3' }).success).toBe(false);
+    expect(createRequestSchema.safeParse({ clientMutationId: CMID, reportingLocation: 'x'.repeat(41) }).success).toBe(false);
   });
 
   it('Other needs a location; other posts drop it', () => {
@@ -207,15 +210,12 @@ describe('signInSchema', () => {
     });
   });
 
-  it('resolves Other to the custom team text, canonicalising known aliases', () => {
+  it('(events) resolves Other to the custom team text as typed (whitespace collapsed): no event-specific aliases', () => {
     const team = (otherTeam: string) => signInSchema.parse({ staffName: 'Sam Lee', team: 'Other', otherTeam, password: 'pw' }).team;
     expect(team(' Info   booth ')).toBe('Info booth');
-    expect(team('dispatch')).toBe('GC/HX - Dispatch');
-    expect(team('Dispatch')).toBe('GC/HX - Dispatch');
-    expect(team('gchx base')).toBe('GC/HX - Base');
-    expect(team('Transport')).toBe('GC/HX - Special Operations/Med Transpo');
-    expect(team('prevent')).toBe('Prevent');
-    expect(team('MEDICAL')).toBe('Medical');
+    expect(team('dispatch')).toBe('dispatch');
+    expect(team('gchx base')).toBe('gchx base');
+    expect(team('MEDICAL')).toBe('MEDICAL');
     expect(signInSchema.safeParse({ staffName: 'Sam Lee', team: 'Other', password: 'pw' }).success).toBe(false);
     expect(signInSchema.safeParse({ staffName: 'Sam Lee', team: 'Other', otherTeam: 'x', password: 'pw' }).success).toBe(false);
   });
@@ -225,7 +225,10 @@ describe('signInSchema', () => {
     expect(signInSchema.safeParse({ staffName: 'x'.repeat(61), team: 'Medical', password: 'pw' }).success).toBe(false);
     expect(signInSchema.safeParse({ staffName: 'Dana · Kim', team: 'Medical', password: 'pw' }).success).toBe(false);
     expect(signInSchema.safeParse({ staffName: 'Dana Kim', team: 'Medical', password: '' }).success).toBe(false);
-    expect(signInSchema.safeParse({ staffName: 'Dana Kim', team: 'Prevent', password: 'pw' }).success).toBe(false);
+    // (Events) A team is the event's (the route matches it) or free text, so any 2–80 characters without "·" parse.
+    expect(signInSchema.safeParse({ staffName: 'Dana Kim', team: 'Prevent', password: 'pw' }).success).toBe(true);
+    expect(signInSchema.safeParse({ staffName: 'Dana Kim', team: 'P', password: 'pw' }).success).toBe(false);
+    expect(signInSchema.safeParse({ staffName: 'Dana Kim', team: 'Pre · vent', password: 'pw' }).success).toBe(false);
   });
 });
 

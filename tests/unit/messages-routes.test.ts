@@ -12,7 +12,7 @@ vi.mock('next/server', () => ({ after: (task: () => unknown) => void afterTasks.
 vi.mock('@/lib/server/supabase', () => ({ rpc: async () => rpcResult }));
 vi.mock('@/lib/server/notify', () => ({
   // A notifier that never finishes: if the route awaited it, the response would never come.
-  notifyStaff: (recipients: readonly string[], event: { detail: string; kind: string }) => {
+  notifyStaff: (_eventId: string, recipients: readonly string[], event: { detail: string; kind: string }) => {
     notified.push({ recipients, detail: event.detail, kind: event.kind });
     return new Promise<void>(() => undefined);
   },
@@ -21,7 +21,12 @@ vi.mock('@/lib/server/route', () => ({
   authedRoute:
     (_name: string, _opts: unknown, handler: (ctx: unknown) => Promise<Response>) =>
     async (request: Request, ctx: { params: Promise<Record<string, string>> }) =>
-      handler({ request, params: await ctx.params, session: { staff: 'Dana Kent · GC/HX - Dispatch', claims: { team: 'GC/HX - Dispatch' } } }),
+      handler({
+        request,
+        params: await ctx.params,
+        eventId: '10ca1000-0000-4000-8000-000000000001',
+        session: { staff: 'Dana Kent · GC/HX - Dispatch', claims: { team: 'GC/HX - Dispatch' } },
+      }),
 }));
 
 const ID = '5eed0000-0000-4000-8000-0000000000f3';

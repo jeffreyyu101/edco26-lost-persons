@@ -2,6 +2,7 @@
 // message / en route outbox (saved before sending, offline "Sending…", sent exactly once, failures "Not
 // delivered", 429, a reload, another staff's jobs), the thread, read cursors, the en route Undo, the message
 // alert, and sign-out with queued messages. Synthetic data only.
+import { STUB_EVENT } from '@/lib/client/stub-data';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RequestSummary, ThreadMessage } from '@/lib/api-types';
 import { K, openKv } from '@/lib/client/persist';
@@ -237,7 +238,7 @@ describe('sending a message', () => {
     fe.setOnline(false);
     await finish(api.send(ROW, 'From Dana'));
     stop();
-    fe.server.session = { ...STAFF.sam, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
+    fe.server.session = { ...STAFF.sam, role: 'staff', eventId: STUB_EVENT.id, event: STUB_EVENT, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
     const sam = boot(fe.server, { dbName: fe.dbName });
     await ready();
     await advance(10_000);
@@ -353,7 +354,7 @@ describe('read, en route and the alert', () => {
     await advance(3_500);
     first.stop();
     // The cache as the old build left it, with a cursor well inside the 6 h full-fetch window.
-    await openKv(first.fe.dbName)?.set(K.rows(canonStaff(STAFF.dana.staff) ?? ''), [plain]);
+    await openKv(first.fe.dbName)?.set(K.rows(STUB_EVENT.id, canonStaff(STAFF.dana.staff) ?? ''), [plain]);
     server.overlap = 0; // the delta resends nothing: the cached row stays without activity
     const second = boot(server, { dbName: first.fe.dbName });
     await ready();
@@ -530,7 +531,7 @@ describe('an open thread when the page comes back into view (fix 4)', () => {
     await advance(50);
     away(fe);
     await advance(60_000);
-    server.session = { ...STAFF.rae, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
+    server.session = { ...STAFF.rae, role: 'staff', eventId: STUB_EVENT.id, event: STUB_EVENT, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
     // Rae's own message, as Rae's cookie sees it.
     threads.messages.push({ id: '00000000-0000-4000-8000-0000000000ba', requestId: ROW, staff: STAFF.rae.staff, by: 'Rae C.', team: 'Medical', body: 'from rae', createdAt: server.stamp(5000), mine: true, clientMutationId: '00000000-0000-4000-8000-0000000000bb' });
     const base = threads.handle;

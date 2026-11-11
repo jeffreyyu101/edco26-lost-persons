@@ -19,7 +19,9 @@ import { pushEndpointSchema, pushSubscribeSchema } from '@/lib/validation';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export const POST = authedRoute('POST /api/push/subscribe', {}, async ({ request, session }) => {
+export const POST = authedRoute('POST /api/push/subscribe', {
+  headerless: "the service worker re-subscribes on pushsubscriptionchange (it knows no event); binds this device to the session's own staff and event",
+}, async ({ request, session, eventId }) => {
   const body = await readJson(request, pushSubscribeSchema);
   const vapid = vapidConfig();
   if (!vapid) {
@@ -28,6 +30,7 @@ export const POST = authedRoute('POST /api/push/subscribe', {}, async ({ request
   }
   if (!isAllowedEndpoint(body.endpoint)) throw new ApiFailure('invalid', 'Unknown push service', { extra: { field: 'endpoint' } });
   const prefs = await rpc<{ newRequests?: unknown; myUpdates?: unknown } | null>('lp_push_subscribe', {
+    p_event: eventId,
     p_endpoint: body.endpoint,
     p_p256dh: body.keys.p256dh,
     p_auth: body.keys.auth,
@@ -46,7 +49,7 @@ export const POST = authedRoute('POST /api/push/subscribe', {}, async ({ request
   return json(out);
 });
 
-export const DELETE = authedRoute('DELETE /api/push/subscribe', { refresh: false }, async ({ request, session }) => {
+export const DELETE = authedRoute('DELETE /api/push/subscribe', { refresh: false, event: 'optional', afterEnd: true }, async ({ request, session }) => {
   const body = await readJson(request, pushEndpointSchema);
   const removed = await rpc<unknown>('lp_push_unsubscribe', { p_endpoint: body.endpoint, p_staff: session.staff });
   return json({ removed: removed === true });

@@ -11,7 +11,8 @@ import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { telemetryPaste } from '../../scripts/telemetry-sql.mjs';
-import { api, cookieFor, dbUrl, newStaff, psql, setCookies, uniq, withTestServer } from './harness';
+import { ROOT } from '../../scripts/test-env.mjs';
+import { EVENT_ID, api, cookieFor, dbUrl, newStaff, psql, setCookies, uniq, withTestServer } from './harness';
 
 withTestServer();
 
@@ -37,18 +38,21 @@ const setSettings = (sql: string) => psql(`update public.lp_tel_settings set ${s
 
 let medic: string;
 let dispatcher: string;
+/** (Events) The kill switch is a lead's: a lead with the local event open, on the Dispatch team. */
+let lead: string;
 
 beforeAll(async () => {
   medic = await cookieFor(newStaff('Medical'));
   dispatcher = await cookieFor(newStaff('GC/HX - Dispatch'));
+  lead = await cookieFor(newStaff('GC/HX - Dispatch'), { role: 'lead', eventId: EVENT_ID });
   setSettings(`enabled = true, off_at = timestamptz '2026-11-10 06:00:00-05', device_hour_cap = 3000, device_hour_bytes = 2097152`);
   // Collection must be on in the server's cache (it may have read "off" in an earlier file).
-  await api('/api/telemetry/settings', { json: { enabled: true }, cookie: medic });
+  await api('/api/telemetry/settings', { json: { enabled: true }, cookie: lead });
 });
 
 afterAll(async () => {
   setSettings(`enabled = true, off_at = timestamptz '2026-11-10 06:00:00-05', device_hour_cap = 3000, device_hour_bytes = 2097152`);
-  await api('/api/telemetry/settings', { json: { enabled: true }, cookie: medic });
+  await api('/api/telemetry/settings', { json: { enabled: true }, cookie: lead });
   psql(`delete from public.lp_tel_events where device like 'ti%'; delete from public.lp_tel_devices where device like 'ti%';
         delete from public.lp_tel_quota where device like 'ti%'; delete from public.lp_tel_batches where device like 'ti%'`);
   setSettings('fleet_hour_cap = 60000, fleet_hour_bytes = 50331648');
@@ -193,7 +197,7 @@ describe('POST /api/telemetry', () => {
     }
   });
 
-  it('the kill switch: 204 and nothing written (the next ones without a database call); back on in SQL only', async () => {
+  it('the kill switch: 204 and nothing written (the next ones without a database call); a lead turns it back on', async () => {
     const d = device();
     setSettings('enabled = false');
     const first = await post(batch(d, [{ n: 'view', at: Date.now() }]), medic);
@@ -202,46 +206,57 @@ describe('POST /api/telemetry', () => {
     expect(again.status).toBe(204);
     expect(rows(d)).toBe('');
     // lp_tel_ingest itself says off and writes nothing.
-    expect(psql(`set role service_role; select public.lp_tel_ingest('direct00001', '${d}', 'sessint001', 'medical', 0, '{}', '[{"n":"view","at":1}]', 10)::text`)).toBe('{"on": false}');
+    expect(psql(`set role service_role; select public.lp_tel_ingest('${EVENT_ID}', 'direct00001', '${d}', 'sessint001', 'medical', 0, '{}', '[{"n":"view","at":1}]', 10)::text`)).toBe('{"on": false}');
     expect(rows(d)).toBe('');
-    // The route never turns it back on: 403, and it stays off.
+    // (Events) Staff never turn it back on: 403, and it stays off.
     const refused = await api('/api/telemetry/settings', { json: { enabled: true }, cookie: medic });
     expect(refused.status).toBe(403);
     expect(psql(`select enabled from public.lp_tel_settings`)).toBe('f');
     expect((await post(batch(d, [{ n: 'view', at: Date.now() }]), medic)).status).toBe(204);
-    // Back on in SQL; {enabled: true} then only re-reads the settings for this server instance.
-    setSettings('enabled = true');
-    const on = await api('/api/telemetry/settings', { json: { enabled: true }, cookie: medic });
+    // A lead does, through the route (lp_tel_set(true)); this instance forgets its cached "off" at once.
+    const on = await api('/api/telemetry/settings', { json: { enabled: true }, cookie: lead });
     expect(on.status).toBe(200);
     expect(on.body).toMatchObject({ on: true, enabled: true });
+    expect(psql(`select enabled from public.lp_tel_settings`)).toBe('t');
     expect((await post(batch(d, [{ n: 'view', at: Date.now() }]), medic)).status).toBe(200);
     expect(rows(d)).toBe('view');
   });
 
-  it('past off_at: 204 and nothing written', async () => {
+  it('(events) a past off_at no longer turns it off; no practice or live event does (204, nothing written)', async () => {
     const d = device();
     setSettings(`off_at = now() - interval '1 minute'`);
+    await api('/api/telemetry/settings', { json: { enabled: true }, cookie: lead });
     try {
-      expect((await post(batch(d, [{ n: 'view', at: Date.now() }]), medic)).status).toBe(204);
-      expect(rows(d)).toBe('');
+      expect((await post(batch(d, [{ n: 'view', at: Date.now() }]), medic)).status).toBe(200);
+      expect(rows(d)).toBe('view');
     } finally {
       setSettings(`off_at = timestamptz '2026-11-10 06:00:00-05'`);
-      await api('/api/telemetry/settings', { json: { enabled: true }, cookie: medic });
     }
+    // Every running event archived (this transaction only): lp_tel_ingest says off and writes nothing.
+    const d2 = device();
+    expect(psql(`begin; update public.events set stage = 'archived' where stage in ('practice', 'live');
+      set local role service_role;
+      select public.lp_tel_ingest('${EVENT_ID}', 'direct00002', '${d2}', 'sessint001', 'medical', 0, '{}', '[{"n":"view","at":1}]', 10)::text;
+      select public.lp_tel_config() ->> 'on';
+      rollback;`)).toBe('{"on": false}\nfalse');
+    expect(rows(d2)).toBe('');
   });
 
-  it('the switch route turns it off, records tel_switch (team only, before the flip) and needs a session', async () => {
+  it('the switch route turns it off, records tel_switch (team only, before the flip) and needs a lead session', async () => {
     expect((await api('/api/telemetry/settings', { json: { enabled: false }, cookie: null })).status).toBe(401);
+    // (Events) Staff may not switch it, either way.
+    expect((await api('/api/telemetry/settings', { json: { enabled: false }, cookie: dispatcher })).status).toBe(403);
+    expect(psql(`select enabled from public.lp_tel_settings`)).toBe('t');
     const before = Number(psql(`select count(*) from public.lp_tel_events where name = 'tel_switch' and team = 'dispatch' and ok = false`));
     try {
-      const res = await api('/api/telemetry/settings', { json: { enabled: false }, cookie: dispatcher });
+      const res = await api('/api/telemetry/settings', { json: { enabled: false }, cookie: lead });
       expect(res.status).toBe(200);
       expect(res.body).toMatchObject({ on: false, enabled: false });
       expect(psql(`select enabled from public.lp_tel_settings`)).toBe('f');
       expect(Number(psql(`select count(*) from public.lp_tel_events where name = 'tel_switch' and team = 'dispatch' and ok = false`))).toBe(before + 1);
     } finally {
       setSettings('enabled = true');
-      await api('/api/telemetry/settings', { json: { enabled: true }, cookie: medic });
+      await api('/api/telemetry/settings', { json: { enabled: true }, cookie: lead });
       psql(`delete from public.lp_tel_events where name = 'tel_switch' and device = 'server' and received_at > now() - interval '1 minute'`);
     }
   });
@@ -252,7 +267,7 @@ describe('GET /api/telemetry/health and the aggregates', () => {
     // Letters only: a stored string can't hold 4 digits in a row (lp_tel_events_no_digit_run).
     const area = `tiarea${uniq().replace(/[^a-z0-9]/g, '').replace(/\d/g, (c) => 'abcdefghij'[Number(c)] ?? 'a').slice(0, 10)}`;
     const ins = (d: string, name: string, extra: string) =>
-      `insert into public.lp_tel_events (at, device, session, team, name, view, area, ctl, ms, n, ok, props) values (now(), '${d}', 'sessint001', 'medical', '${name}', ${extra});`;
+      `insert into public.lp_tel_events (event_id, at, device, session, team, name, view, area, ctl, ms, n, ok, props) values ('${EVENT_ID}', now(), '${d}', 'sessint001', 'medical', '${name}', ${extra});`;
     const d1 = device();
     const d2 = device();
     const d3 = device();
@@ -272,7 +287,15 @@ describe('GET /api/telemetry/health and the aggregates', () => {
     const res = await api('/api/telemetry/health?window=1h', { cookie: medic });
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
-    expect(Object.keys(res.body).sort()).toEqual(['coverage', 'config', 'errors', 'examples', 'flows', 'generatedAt', 'kpis', 'net', 'problems', 'push', 'window'].sort());
+    expect(Object.keys(res.body).sort()).toEqual(['coverage', 'config', 'errors', 'examples', 'flows', 'generatedAt', 'kpis', 'net', 'problems', 'push', 'teams', 'timeZone', 'window'].sort());
+    // (Events) The event's team names by id (telemetry's team keys) and its time zone, for the page's labels.
+    expect(res.body.teams).toEqual([
+      { id: 'transpo', short: 'GCHX Med Transpo' },
+      { id: 'dispatch', short: 'Dispatch' },
+      { id: 'base', short: 'GCHX Base' },
+      { id: 'medical', short: 'Medical' },
+    ]);
+    expect(res.body.timeZone).toBe('America/New_York');
     const mine = (res.body.problems as Array<{ area: string; n: number; devices: number }>).filter((p) => p.area.startsWith(area));
     expect(mine.map((p) => [p.area, p.n, p.devices])).toEqual([
       [`${area}-b`, 2, 2],
@@ -347,6 +370,11 @@ describe('the SQL', () => {
       expect(psql(`select count(*) from cron.job where jobname = 'lp-tel-retention'`)).toBe('1');
     } finally {
       rmSync(dir, { recursive: true, force: true });
+      // The paste is the rework file's section 10 (its lp_tel_config still stops at off_at): paste the events file
+      // again (it is re-runnable and redefines every lp_tel_* function), or the stack keeps the off-date version and
+      // telemetry turns off once the seeded off date passes.
+      const events = spawnSync('psql', [dbUrl(), '-v', 'ON_ERROR_STOP=1', '-q', '-f', join(ROOT, 'supabase/migrations/20261110000000_events.sql')], { encoding: 'utf8', env: { ...process.env, PGOPTIONS: '-c client_min_messages=warning' } });
+      expect(events.status, events.stderr).toBe(0);
     }
   });
 });

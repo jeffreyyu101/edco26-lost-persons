@@ -65,9 +65,11 @@ describe('statuses', () => {
     expect(isSwapRequested({ status: STATUS.accompanied, swapRequestedAt: null })).toBe(false);
     expect(isSwapApproved({ status: STATUS.inMedical, swapPlace: 'fa' })).toBe(true);
     expect(isSwapApproved({ status: STATUS.inMedical, swapPlace: null })).toBe(false);
-    expect(swapLabel('mm', 'FA 4')).toBe('Swap at Main Med');
-    expect(swapLabel('fa', 'FA 4')).toBe('Swap at FA 4');
-    expect(swapLabel('fa', 'Command')).toBe('Swap at Command');
+    expect(swapLabel('mm', 'FA 4', 'Main Med')).toBe('Swap at Main Med');
+    expect(swapLabel('fa', 'FA 4', 'Main Med')).toBe('Swap at FA 4');
+    expect(swapLabel('fa', 'Command', 'Main Med')).toBe('Swap at Command');
+    // (Events) 'mm' is the event's own name for its main medical.
+    expect(swapLabel('mm', 'Stage A', 'Med Tent')).toBe('Swap at Med Tent');
   });
 });
 
@@ -84,13 +86,13 @@ describe('activity', () => {
     expect(ACTIVITY_GLYPH.friend_informed).toEqual({ icon: 'users', tone: 'gray' });
     expect(accompaniedDetail()).toBe("Located · already accompanied · Don't send the friend");
     expect(swapRequestedDetail('FA 4')).toBe('Friend swap requested · FA 4 · decide where');
-    expect(swapApprovedDetail('mm', 'FA 4')).toBe('Swap at Main Med');
-    expect(swapApprovedDetail('fa', 'FA 3')).toBe('Swap at FA 3');
+    expect(swapApprovedDetail('mm', 'FA 4', 'Main Med')).toBe('Swap at Main Med');
+    expect(swapApprovedDetail('fa', 'FA 3', 'Main Med')).toBe('Swap at FA 3');
     expect(statusChangeEvent(STATUS.accompanied, null)).toEqual({ kind: 'accompanied', detail: accompaniedDetail() });
     expect(statusChangeEvent(STATUS.friendInformed, null)).toEqual({ kind: 'friend_informed', detail: 'Friend informed' });
     // (Post-event) Back to an approved swap (the Undo of Swap done) says the swap, never "Located".
-    expect(statusChangeEvent(STATUS.inMedical, null, { place: 'fa', post: 'FA 4' })).toEqual({ kind: 'swap_approved', detail: 'Swap at FA 4' });
-    expect(statusChangeEvent(STATUS.inMedical, null, { place: null, post: 'FA 4' })?.kind).toBe('in_medical');
+    expect(statusChangeEvent(STATUS.inMedical, null, { place: 'fa', post: 'FA 4', mainMedical: 'Main Med' })).toEqual({ kind: 'swap_approved', detail: 'Swap at FA 4' });
+    expect(statusChangeEvent(STATUS.inMedical, null, { place: null, post: 'FA 4', mainMedical: 'Main Med' })?.kind).toBe('in_medical');
     expect(pushUrgency('accompanied')).toBe('high');
     expect(pushUrgency('swap_requested')).toBe('high');
     expect(pushPayload({ requestId: ID, kind: 'accompanied', detail: 'x' }, 'Jane Doe', null).requireInteraction).toBe(true);
@@ -115,7 +117,7 @@ describe('notify swapEvent recipients', async () => {
       event: { requestId: ID, actor: 'Cy · Command', kind: 'swap_requested', detail: 'Friend swap requested · FA 4 · decide where' },
     });
     expect(swapEvent('request', row, 'Cy · Command', { ...parties, answerer: null })?.recipients).toBeNull();
-    expect(swapEvent('approve', { ...row, swapPlace: 'mm' }, 'Bob · Special Ops', parties)).toMatchObject({
+    expect(swapEvent('approve', { ...row, swapPlace: 'mm' }, 'Bob · Special Ops', parties, 'Main Med')).toMatchObject({
       recipients: null,
       event: { kind: 'swap_approved', detail: 'Swap at Main Med' },
     });

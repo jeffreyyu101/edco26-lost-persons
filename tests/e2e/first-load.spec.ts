@@ -16,6 +16,10 @@ const KB = 1024;
 // A123 (2026-11-09, post-event brief: raise route-only to at most 44 KB if a trim is not possible): route-only 43 → 44 KB.
 // main after #30 was already over (44,268 B against 44,032); with the post-event fixes 44,352 B. The total stays 235 KB
 // (240,388 B against 240,640).
+// Events phase 2 measured 241,019 B against 240,640 and raised the total to 236 KB pending the owner's approval, which
+// was not given. Phase 3 (2026-11-10) is back under the original limits instead: the toasts and the Undo bar
+// (components/ui/Toast.tsx and its icons) load with the dialogs chunk right after hydration (app/app-shell.tsx), and the
+// alerts banner's new first-paint place (components/alerts/banner-slot.tsx) is only in the view chunks.
 const BUDGET = {
   /** Everything `/` loads first: framework + Radix baseline (~192 KB at Phase 1a) + app code. */
   homeTotal: 235 * KB,

@@ -1,11 +1,14 @@
 // Boots the real store against the fake API (fake-indexeddb, fake timers with no poll jitter).
 import { afterEach, beforeEach, vi } from 'vitest';
 import { createMessaging } from '@/lib/client/messages-core';
-import { createAppStore, type StoreEnv } from '@/lib/client/store-core';
+import { createAppStore, type LifecycleModule, type StoreEnv } from '@/lib/client/store-core';
 import type { DraftPhoto } from '@/lib/client/store-contract';
 import { EMPTY_FORM_VALUES, type RequestFormValues } from '@/lib/client/form-values';
 import { advance, fakeEnv, settle, useStoreTimers, type EnvOptions } from './env';
 import type { FakeServer } from './fake-server';
+// The store loads its event lifecycle (go-live check, Ended clean-up) with import() and the first confirmed session
+// waits for it. Loaded here first, so a cold test worker (CI) never times that import against settle()'s fixed turns.
+import '@/lib/client/event-lifecycle';
 
 export const TZ = 'America/New_York';
 const stops: Array<() => void> = [];
@@ -26,14 +29,16 @@ export function installStoreHooks(): void {
 export interface BootOptions extends EnvOptions {
   /** How the messages engine loads (default: at once, without the dynamic import). */
   loadMessaging?: () => Promise<typeof createMessaging>;
+  /** How the event lifecycle loads (default: the store's dynamic import). A test makes it fail like a lost chunk. */
+  loadLifecycle?: () => Promise<LifecycleModule>;
 }
 
 export function boot(server: FakeServer, opts: BootOptions = {}, tweak?: (env: StoreEnv) => void) {
-  const { loadMessaging, ...envOpts } = opts;
+  const { loadMessaging, loadLifecycle, ...envOpts } = opts;
   const fe = fakeEnv(server, envOpts);
   tweak?.(fe.env);
   // The messages engine without the dynamic import, so its load settles with the fake timers.
-  const store = createAppStore({ eventTimezone: TZ, env: () => fe.env, loadMessaging: loadMessaging ?? (() => Promise.resolve(createMessaging)) });
+  const store = createAppStore({ eventTimezone: TZ, env: () => fe.env, loadMessaging: loadMessaging ?? (() => Promise.resolve(createMessaging)), ...(loadLifecycle ? { loadLifecycle } : {}) });
   const stop = store.start?.() ?? (() => {});
   stops.push(stop);
   return { store, fe, stop, s: () => store.getState(), a: store.actions };

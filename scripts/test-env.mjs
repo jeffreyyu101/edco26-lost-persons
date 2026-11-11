@@ -241,3 +241,63 @@ export function pauseInactiveJob(url = localDbUrl()) {
   assertLocalUrl('database URL', url);
   execFileSync('psql', [url, '-v', 'ON_ERROR_STOP=1', '-q', '-c', PAUSE_INACTIVE_JOB_SQL], { stdio: ['ignore', 'ignore', 'pipe'] });
 }
+
+// --- (Events) The local test event ------------------------------------------------------------------------------
+
+/**
+ * LOCAL ONLY. (Phase 2) Every other event still in practice or live (left by an earlier run, e.g. an integration test's
+ * practice event, which cannot be ended without going live) is archived, so the sign-in cards (every running event's
+ * teams) and the running events are the local test event's alone when the e2e suite starts. Rows are kept.
+ */
+export function archiveOtherEvents(url = localDbUrl()) {
+  assertLocalUrl('database URL', url);
+  const sql = `update public.events set stage = 'archived', ended_at = coalesce(ended_at, now()), updated_at = now() where id <> '${TEST_EVENT_ID}' and stage in ('practice', 'live');`;
+  execFileSync('psql', [url, '-v', 'ON_ERROR_STOP=1', '-q', '-c', sql], { stdio: ['ignore', 'ignore', 'pipe'] });
+}
+
+/** The seed's live local event (supabase/seed.sql): every test row belongs to it unless a test makes its own event. */
+export const TEST_EVENT_ID = '10ca1000-0000-4000-8000-000000000001';
+export const TEST_EVENT_SLUG = 'local';
+
+/** The seed's event config (EDC's posts, teams and chips; the show day starts at noon). */
+export const TEST_EVENT_SQL = `
+insert into public.events (id, slug, name, starts_on, ends_on, timezone, day_start_hour, stage, posts, main_medical, teams, last_seen, went_live_at)
+values ('${TEST_EVENT_ID}', '${TEST_EVENT_SLUG}', 'Local test event', current_date - 1, current_date + 1, 'America/New_York', 12, 'live',
+  '[{"id":"fa3","label":"FA 3 – Kinetic","short":"FA 3"},{"id":"fa4","label":"FA 4 – Oasis","short":"FA 4"},{"id":"command","label":"Command","short":"Command"},{"id":"base","label":"Base","short":"Base"}]'::jsonb,
+  'Main Med',
+  '[{"id":"transpo","label":"GC/HX - Special Operations/Med Transpo","short":"GCHX Med Transpo","medical":false},{"id":"dispatch","label":"GC/HX - Dispatch","short":"Dispatch","medical":false},{"id":"base","label":"GC/HX - Base","short":"GCHX Base","medical":false},{"id":"medical","label":"Medical","short":"Medical","medical":true}]'::jsonb,
+  '["kineticFIELD","circuitGROUNDS","neonGARDEN","stereoBLOOM","Taken to medical"]'::jsonb, now() - interval '2 days')
+on conflict (id) do nothing;`;
+
+/**
+ * LOCAL ONLY. Makes the local test event usable for sign-in: it exists, it is live, its dates cover today, its staff
+ * password is .env.test's APP_SHARED_PASSWORD, its join link is TEST_INVITE_CODE (TEST_INVITE_ENV's hash and expiry),
+ * and the lead passcode is LP_LEAD_PASSCODE. Hashes are only rewritten when they no longer match. Both test setups
+ * call it (and the seed creates the same event).
+ */
+export async function ensureTestEvent(url = localDbUrl()) {
+  assertLocalUrl('database URL', url);
+  const env = loadTestEnv({ keys: false });
+  const { default: bcrypt } = await import('bcryptjs');
+  const run = (sql) => execFileSync('psql', [url, '-v', 'ON_ERROR_STOP=1', '-q', '-At', '-c', sql], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  run(TEST_EVENT_SQL);
+  const [staffHash = '', leadHash = ''] = run(
+    `select coalesce((select staff_password_hash from public.events where id = '${TEST_EVENT_ID}'), '') || '|' || coalesce((select lead_passcode_hash from public.lp_org where id), '')`,
+  ).split('|');
+  const sets = [];
+  const quote = (v) => `'${String(v).replace(/'/g, "''")}'`;
+  if (env.APP_SHARED_PASSWORD && !(staffHash && (await bcrypt.compare(env.APP_SHARED_PASSWORD, staffHash)))) {
+    sets.push(`update public.events set staff_password_hash = ${quote(await bcrypt.hash(env.APP_SHARED_PASSWORD, 10))} where id = '${TEST_EVENT_ID}';`);
+  }
+  if (env.LP_LEAD_PASSCODE && !(leadHash && (await bcrypt.compare(env.LP_LEAD_PASSCODE, leadHash)))) {
+    sets.push(`insert into public.lp_org (id, lead_passcode_hash) values (true, ${quote(await bcrypt.hash(env.LP_LEAD_PASSCODE, 10))}) on conflict (id) do update set lead_passcode_hash = excluded.lead_passcode_hash;`);
+  }
+  const invite = env.INVITE_CODE_SHA256 && env.INVITE_EXPIRES_AT ? env : TEST_INVITE_ENV;
+  sets.push(
+    `update public.events set stage = 'live', starts_on = least(starts_on, current_date), ends_on = greatest(ends_on, current_date),` +
+      ` invite_code_sha256 = ${quote(invite.INVITE_CODE_SHA256.toLowerCase())}, invite_expires_at = ${quote(invite.INVITE_EXPIRES_AT)}` +
+      ` where id = '${TEST_EVENT_ID}' and (stage <> 'live' or starts_on > current_date or ends_on < current_date` +
+      ` or invite_code_sha256 is distinct from ${quote(invite.INVITE_CODE_SHA256.toLowerCase())} or invite_expires_at is distinct from ${quote(invite.INVITE_EXPIRES_AT)}::timestamptz);`,
+  );
+  run(sets.join('\n'));
+}

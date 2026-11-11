@@ -51,15 +51,20 @@ const NOW = Date.parse('2026-11-07T03:00:00Z');
 const at = (min: number) => new Date(NOW + min * 60_000).toISOString();
 
 describe('sides and names', () => {
-  it('the Medical team is medical, every other team is front of house', () => {
-    expect(sideOfTeam('Medical')).toBe('medical');
-    expect(sideOfTeam('medical')).toBe('medical');
-    expect(sideOfTeam('GC/HX - Dispatch')).toBe('foh');
-    expect(sideOfTeam('GC/HX - Special Operations/Med Transpo')).toBe('foh');
-    expect(sideOfTeam('Prevent')).toBe('foh');
-    expect(sideOfTeam('')).toBe('foh');
-    expect(sideOfStaff('Rae Chen · Medical')).toBe('medical');
-    expect(sideOfStaff('Dana Kim · GC/HX - Base')).toBe('foh');
+  it("the event's medical team is medical (by its label, or one it had before a rename), every other team is front of house", () => {
+    expect(sideOfTeam('Medical', 'Medical')).toBe('medical');
+    expect(sideOfTeam('medical', 'Medical')).toBe('medical');
+    expect(sideOfTeam('GC/HX - Dispatch', 'Medical')).toBe('foh');
+    expect(sideOfTeam('GC/HX - Special Operations/Med Transpo', 'Medical')).toBe('foh');
+    expect(sideOfTeam('Prevent', 'Medical')).toBe('foh');
+    expect(sideOfTeam('', 'Medical')).toBe('foh');
+    expect(sideOfStaff('Rae Chen · Medical', 'Medical')).toBe('medical');
+    expect(sideOfStaff('Dana Kim · GC/HX - Base', 'Medical')).toBe('foh');
+    // (Events) Another event names its medical team otherwise; the word Medical means nothing there.
+    expect(sideOfTeam('Med Tent', ['Med Tent'])).toBe('medical');
+    expect(sideOfTeam('Medical', ['Med Tent'])).toBe('foh');
+    expect(sideOfTeam('Old Medical', ['Med Tent', 'Old Medical'])).toBe('medical');
+    expect(sideOfTeam('Medical', [])).toBe('foh');
   });
 
   it('a sender is first name + last initial, never the full name', () => {
@@ -331,6 +336,8 @@ describe('the message / en route outbox', () => {
     expect(classifyJobFailure({ ok: false, kind: 'http', status: 401, error: null })).toEqual({ type: 'unauthorized' });
     expect(classifyJobFailure({ ok: false, kind: 'http', status: 429, error: { code: 'rate_limited', message: 'x', retryAfterSeconds: 12 } })).toEqual({ type: 'rate_limited', retryAfterMs: 12_000 });
     expect(classifyJobFailure({ ok: false, kind: 'http', status: 422, error: { code: 'invalid', message: 'Too long' } })).toEqual({ type: 'rejected', code: 'invalid', message: 'Too long' });
+    // The event ended (any role): never retried.
+    expect(classifyJobFailure({ ok: false, kind: 'http', status: 410, error: { code: 'event_ended', message: 'x' } })).toEqual({ type: 'rejected', code: 'event_ended', message: 'x' });
     // A portal's HTML 404 is not ours: retry, never fail the message.
     expect(classifyJobFailure({ ok: false, kind: 'http', status: 404, error: null })).toEqual({ type: 'retry' });
   });

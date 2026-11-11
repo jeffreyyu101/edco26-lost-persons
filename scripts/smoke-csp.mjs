@@ -8,7 +8,7 @@
 // tests/e2e/smoke.spec.ts runs this script as part of `npm run test:e2e`, so its selectors can't go stale.
 import { chromium, webkit } from '@playwright/test';
 import { SignJWT } from 'jose';
-import { loadTestEnv, testBaseUrl } from './test-env.mjs';
+import { TEST_EVENT_ID, loadTestEnv, testBaseUrl } from './test-env.mjs';
 
 const env = loadTestEnv();
 const base = testBaseUrl();
@@ -16,7 +16,8 @@ const base = testBaseUrl();
 async function sessionCookie() {
   const now = Math.floor(Date.now() / 1000);
   const sid = `${now}.${'ab'.repeat(12)}`;
-  const token = await new SignJWT({ staffName: 'TEST-1a Smoke', team: 'GC/HX - Dispatch', sid })
+  // (Events) A staff session of the local test event.
+  const token = await new SignJWT({ staffName: 'TEST-1a Smoke', team: 'GC/HX - Dispatch', sid, eventId: TEST_EVENT_ID, role: 'staff' })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setIssuedAt(now)
     .setExpirationTime(now + 3600)

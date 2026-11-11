@@ -6,6 +6,7 @@
 //
 // POST /api/session is mocked with page.route, so this runs against any build with no database. Synthetic
 // names only; the console must never show them or the passwords.
+import './helpers/api-event';
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 import { axeViolations, overlappingTargets, smallTargets } from './helpers/a11y';
 
@@ -85,7 +86,8 @@ for (const size of SIZES) {
 
       // The logos sit above the card, outside it.
       await expect(card(page).getByRole('img')).toHaveCount(0);
-      for (const alt of ['EDC Orlando', 'Ground Control']) {
+      // (Events) Ground Control alone (a password says which event it is only once it signs in).
+      for (const alt of ['Ground Control']) {
         const logo = await box(page.getByRole('img', { name: alt }));
         expect(logo.y + logo.height).toBeLessThan(c.y);
       }

@@ -3,7 +3,8 @@
 //   * /signin#join=<code>: the fragment is gone from the address bar, the code is in sessionStorage only;
 //     name + team → Continue → the app, with no password screen at any point.
 //   * /#join=<code> signed out: the proxy's redirect keeps the fragment, then the same.
-//   * a remembered name and team: step 1 prefilled (not step 2), Continue → the app.
+//   * a remembered name and team: step 1 prefilled (not step 2), Continue → the app; a remembered team that is not one
+//     of the link's cards is left out (the name stays).
 //   * a bad code: Continue → the password step, with no message; the password works as always.
 //   * no signal: the code is kept and Continue tries again.
 //   * too many attempts (429): the code is kept, step 1 stays with the lock above Continue, then it signs in.
@@ -160,6 +161,21 @@ test.describe('team join link, signed out', () => {
     await continueButton(page).click();
     await expect(page).toHaveURL(/\/\?view=mine$/);
     expect(await sawPasswordStep(page)).toBe(false);
+  });
+
+  test("a remembered team that is not one of the link's cards: the name is prefilled, the team is not", async ({ page }) => {
+    // (Events) "Rovers" remembered from another event must not sign this person in to the link's event as Other.
+    const name = `TEST-B join other team ${uniq()}`;
+    await page.goto('/signin');
+    await hydrated(page);
+    await page.evaluate((n) => localStorage.setItem('lp-identity', JSON.stringify({ name: n, team: 'Rovers' })), name);
+    // A fresh load (not only a fragment change), as when the link is opened from a message.
+    await page.goto(`/signin?next=${encodeURIComponent('/')}#join=${CODE}`);
+    await hydrated(page);
+    await expect(nameField(page)).toHaveValue(name);
+    await expect(page.getByRole('textbox', { name: 'Other team' })).toHaveValue('');
+    await expect(page.getByRole('radio', { checked: true })).toHaveCount(0);
+    await expect(continueButton(page)).toBeDisabled();
   });
 
   test('a bad code: Continue → the password step with no message; the password signs in', async ({ page }) => {

@@ -7,7 +7,7 @@ import { createClient } from '@supabase/supabase-js';
 import { describe, expect, it } from 'vitest';
 import { STATUS } from '@/lib/domain';
 import { ROOT } from '../../scripts/test-env.mjs';
-import { ORIGIN, api, cookieFor, createBody, createRequest, newStaff, psql, randomUUID, withTestServer } from './harness';
+import { EVENT_ID, ORIGIN, api, cookieFor, createBody, createRequest, newStaff, psql, randomUUID, withTestServer } from './harness';
 
 withTestServer();
 
@@ -150,11 +150,13 @@ describe('database exposure', () => {
       expect(error !== null || (Array.isArray(data) && data.length === 0), table).toBe(true);
     }
     const calls: Array<[string, Record<string, unknown>]> = [
-      ['lp_stats', {}],
-      ['lp_sync', { p_since: null, p_ids: null, p_reconcile: false, p_after_at: null, p_after_id: null, p_limit: 1 }],
-      ['lp_detail', { p_id: SEED_ID }],
-      ['lp_create_request', { p: createBody(), p_staff: 'X · Medical' }],
-      ['lp_set_status', { p_id: SEED_ID, p_expected_version: 0, p_status: STATUS.inMedical, p_staff: 'X · Medical', p_kind: 'answer' }],
+      ['lp_stats', { p_event: EVENT_ID }],
+      ['lp_sync', { p_event: EVENT_ID, p_since: null, p_ids: null, p_reconcile: false, p_after_at: null, p_after_id: null, p_limit: 1 }],
+      ['lp_detail', { p_event: EVENT_ID, p_id: SEED_ID }],
+      ['lp_create_request', { p_event: EVENT_ID, p: createBody(), p_staff: 'X · Medical' }],
+      ['lp_event_create', { p: { slug: 'nope' } }],
+      ['lp_auth_secrets', {}],
+      ['lp_set_status', { p_event: EVENT_ID, p_id: SEED_ID, p_expected_version: 0, p_status: STATUS.inMedical, p_staff: 'X · Medical', p_kind: 'answer' }],
       ['lp_login_begin', { p_ip: '198.18.0.1', p_name_key: 'x' }],
     ];
     for (const [fn, args] of calls) {

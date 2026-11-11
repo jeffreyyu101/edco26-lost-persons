@@ -61,7 +61,7 @@ describe('proxy CSP and matcher', () => {
       '/sw.js',
       '/manifest.webmanifest',
       '/icons/icon-192.png',
-      '/logos/edc-orlando.png',
+      '/logos/ground-control.png',
       '/fonts/inter.woff2',
       '/favicon.ico',
       '/favicon-32.png',
@@ -97,13 +97,24 @@ describe('proxy auth redirects', () => {
     // The session routes sign with serverEnv().sessionSecret, which is trimmed. A value pasted into Vercel
     // with a trailing newline must not turn every sign-in into a redirect loop.
     process.env.SESSION_SECRET = ` ${SECRET}\n`;
-    const signed = await signSessionToken({ staffName: 'Dana Kim', team: 'GC/HX - Dispatch' }, SECRET);
+    const signed = await signSessionToken({ staffName: 'Dana Kim', team: 'GC/HX - Dispatch', eventId: '10ca1000-0000-4000-8000-000000000001', role: 'staff' }, SECRET);
     const home = await proxy(request('/', signed!.token));
     expect(home.status).toBe(200);
     expect(home.headers.get('x-middleware-next')).toBe('1');
     const signin = await proxy(request('/signin', signed!.token));
     expect(signin.status).toBe(307);
     expect(new URL(signin.headers.get('location') ?? '').pathname).toBe('/');
+  });
+
+  it('(events) /signin?ended=1 (the Ended screen) renders even with a cookie that still verifies: no bounce back to /', async () => {
+    process.env.SESSION_SECRET = SECRET;
+    const signed = await signSessionToken({ staffName: 'Dana Kim', team: 'GC/HX - Dispatch', eventId: '10ca1000-0000-4000-8000-000000000001', role: 'staff' }, SECRET);
+    const ended = await proxy(request('/signin?ended=1', signed!.token));
+    expect(ended.status).toBe(200);
+    expect(ended.headers.get('x-middleware-next')).toBe('1');
+    // Plain /signin with that cookie still goes to the app (which then learns the event ended).
+    expect((await proxy(request('/signin?ended=0', signed!.token))).status).toBe(307);
+    expect((await proxy(request('/signin', signed!.token))).status).toBe(307);
   });
 
   it('(telemetry) /health without a cookie goes to sign-in and comes back; with one it renders', async () => {
@@ -113,13 +124,26 @@ describe('proxy auth redirects', () => {
     const location = new URL(response.headers.get('location') ?? '');
     expect(`${location.pathname}${location.search}`).toBe('/signin?next=%2Fhealth');
     expect(safeNextPath('/health')).toBe('/health');
-    const signed = await signSessionToken({ staffName: 'Dana Kim', team: 'GC/HX - Dispatch' }, SECRET);
+    const signed = await signSessionToken({ staffName: 'Dana Kim', team: 'GC/HX - Dispatch', eventId: '10ca1000-0000-4000-8000-000000000001', role: 'staff' }, SECRET);
     expect((await proxy(request('/health', signed!.token))).headers.get('x-middleware-next')).toBe('1');
+  });
+
+  it('(events) sends a lead with no event open from / to the Events list; a lead with one open gets the log', async () => {
+    process.env.SESSION_SECRET = SECRET;
+    const noEvent = await signSessionToken({ staffName: 'Dana Kim', team: 'GC/HX - Dispatch', eventId: null, role: 'lead', pv: 1 }, SECRET);
+    const home = await proxy(request('/?r=x', noEvent!.token));
+    expect(home.status).toBe(307);
+    expect(new URL(home.headers.get('location') ?? '').pathname).toBe('/events');
+    expect(home.headers.get('cache-control')).toBe('no-store');
+    expect((await proxy(request('/events', noEvent!.token))).headers.get('x-middleware-next')).toBe('1');
+    expect(safeNextPath('/events')).toBe('/events');
+    const withEvent = await signSessionToken({ staffName: 'Dana Kim', team: 'GC/HX - Dispatch', eventId: '10ca1000-0000-4000-8000-000000000001', role: 'lead', pv: 1 }, SECRET);
+    expect((await proxy(request('/', withEvent!.token))).headers.get('x-middleware-next')).toBe('1');
   });
 
   it('rejects a cookie signed with a different secret', async () => {
     process.env.SESSION_SECRET = SECRET;
-    const signed = await signSessionToken({ staffName: 'Dana Kim', team: 'Medical' }, `${SECRET}-other`);
+    const signed = await signSessionToken({ staffName: 'Dana Kim', team: 'Medical', eventId: '10ca1000-0000-4000-8000-000000000001', role: 'staff' }, `${SECRET}-other`);
     expect((await proxy(request('/', signed!.token))).status).toBe(307);
   });
 });

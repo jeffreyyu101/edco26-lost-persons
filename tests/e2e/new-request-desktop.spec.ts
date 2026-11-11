@@ -383,6 +383,44 @@ test.describe('desktop, 1440 × 900', () => {
     expect((await patch).postDataJSON()).toEqual({ patch: { identifyingFeatures: 'TEST-form glitter on cheeks' }, expectedVersion: row.rowVersion });
     await expect(form(page)).toHaveCount(0);
   });
+
+  // (Phase 3) On a cold load the edit waits for the first sync behind a frame with the same title (A10); on a stack
+  // with a lot of data that sync is slow. The form used to mount a second dialog when it came, which opened again
+  // (overlay fade, content scale-in) under the user and under the layout checks above (511-518 px wide mid-animation).
+  test('edit on a cold load with a slow first sync: the dialog opens once; the form takes the frame\'s place', async ({ page }) => {
+    const name = uniqueName('edit-slow-sync');
+    const row = await apiCreate(page.request, { name, contactName: 'TEST-form Jo', contactPhone: '407 555 0100' });
+    await page.route('**/api/sync**', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      await route.continue().catch(() => undefined);
+    });
+    await page.addInitScript(() => {
+      const w = window as unknown as { __opens: string[] };
+      w.__opens = [];
+      document.addEventListener(
+        'animationstart',
+        (e) => {
+          const t = e.target as Element;
+          if (t.classList.contains('lp-rf-dlg')) w.__opens.push('content');
+          else if (t.classList.contains('rt-BaseDialogOverlay')) w.__opens.push('overlay');
+        },
+        true,
+      );
+    });
+    const title = `Edit LP-${String(row.caseNumber).padStart(4, '0')}`;
+    await page.goto(`/?r=${row.id}&edit=friend`);
+    await expect(modal(page, title)).toBeVisible();
+    await expect(friend(page).getByLabel('Phone')).toHaveValue('407 555 0100', { timeout: 20_000 });
+    expect(Math.round((await box(page, modal(page, title))).width)).toBe(520);
+    const opens = await page.evaluate(() => (window as unknown as { __opens: string[] }).__opens);
+    expect(opens.filter((n) => n === 'content')).toHaveLength(1);
+    expect(opens.filter((n) => n === 'overlay')).toHaveLength(1);
+    // And it edits as always.
+    await friend(page).getByLabel('Phone').fill('407 555 0199');
+    const patch = page.waitForRequest((r) => r.method() === 'PATCH' && r.url().endsWith(`/api/requests/${row.id}`));
+    await page.keyboard.press('ControlOrMeta+Enter');
+    expect((await patch).postDataJSON()).toEqual({ patch: { contactPhone: '407 555 0199' }, expectedVersion: row.rowVersion });
+  });
 });
 
 // ---- Accessibility: axe in both themes, no overlapping targets ---------------------------------------

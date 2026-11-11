@@ -1,7 +1,7 @@
 // Pure sign-in logic (spec §8 Sign-in, §6 POST /api/session, A27/A28/A29). No React, no fetch, no zod:
 // /signin stays light. tests/unit/signin-logic.test.ts checks these rules against lib/validation's
 // signInSchema so the client never enables Continue for something the server would refuse.
-import type { SessionInfo } from '@/lib/api-types';
+import type { EndedEvent, SessionInfo } from '@/lib/api-types';
 import {
   OTHER_TEAM,
   OTHER_TEAM_MAX,
@@ -9,9 +9,6 @@ import {
   STAFF_FORBIDDEN_CHARS,
   STAFF_NAME_MAX,
   STAFF_NAME_MIN,
-  TEAMS,
-  canonicalTeam,
-  type TeamValue,
 } from '@/lib/domain';
 import type { Prefs } from '@/lib/client/prefs';
 import type { SignInBody } from '@/lib/validation';
@@ -22,10 +19,41 @@ export interface Identity {
   team: string;
 }
 
-/** Step 1 as typed. `team` is the chosen card; `otherTeam` the free text (they are mutually exclusive). */
+/**
+ * (Events) A sign-in card: one team of the events running now (the server page reads them; no event is known before a
+ * password or join link signs in). `label` is what the session stores.
+ */
+export interface SignInTeam {
+  label: string;
+  short: string;
+  medical: boolean;
+  /** The slug of the event the team belongs to. */
+  event?: string;
+}
+
+/**
+ * The cards to show. A join link (its event's slug): that event's teams only, so nobody signs in to one event under
+ * another's team. Without one (a password, or a link whose event is not running): every running event's teams, each
+ * label once (oldest event first). Known follow-up: the password path still offers every running event's teams.
+ */
+export function cardsFor(teams: readonly SignInTeam[], linkSlug: string | null): readonly SignInTeam[] {
+  if (linkSlug) {
+    const own = teams.filter((t) => t.event === linkSlug);
+    if (own.length > 0) return own;
+  }
+  const seen = new Set<string>();
+  return teams.filter((t) => {
+    const key = t.label.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** Step 1 as typed. `team` is the chosen card's label; `otherTeam` the free text (they are mutually exclusive). */
 export interface WhoDraft {
   name: string;
-  team: TeamValue | null;
+  team: string | null;
   otherTeam: string;
 }
 
@@ -53,7 +81,7 @@ export interface WhoCheck {
  * Step 1 validity (spec §8: Continue is disabled until the name has 2+ characters and a team is chosen).
  * Mirrors signInSchema: name 2–60 code points, Other team 2–80, no "·"/"•" or control characters.
  */
-export function checkWho(draft: WhoDraft): WhoCheck {
+export function checkWho(draft: WhoDraft, teams: readonly SignInTeam[] = []): WhoCheck {
   const name = collapse(draft.name);
   const other = collapse(draft.otherTeam);
   const nameError = STAFF_FORBIDDEN_CHARS.test(name) ? FORBIDDEN_CHAR_MESSAGE : null;
@@ -63,20 +91,33 @@ export function checkWho(draft: WhoDraft): WhoCheck {
   let team: string | null = null;
   if (draft.team) team = draft.team;
   else if (!otherTeamError && codePoints(other) >= OTHER_TEAM_MIN && codePoints(other) <= OTHER_TEAM_MAX) {
-    team = canonicalTeam(other);
+    // (Events) Text naming one of the cards (its label or short name, any case: "dispatch") is that card; anything else
+    // stays as typed (the server then spells it as the matched event does when it is one of its teams).
+    team = cardFor(other, teams) ?? other;
   }
   return { identity: nameOk && team ? { name, team } : null, nameError, otherTeamError };
 }
 
 /** Step 1 prefilled from an identity (after "Change"): a card when the team is one, else the Other text. */
-export function draftFromIdentity(identity: Identity | null): WhoDraft {
+export function draftFromIdentity(identity: Identity | null, teams: readonly SignInTeam[] = []): WhoDraft {
   if (!identity) return { ...EMPTY_DRAFT };
-  const card = cardFor(identity.team);
+  const card = cardFor(identity.team, teams);
   return { name: identity.name, team: card, otherTeam: card ? '' : identity.team };
 }
 
-function cardFor(team: string): TeamValue | null {
-  return TEAMS.find((t) => t.value === team)?.value ?? null;
+/**
+ * Step 1 prefilled for a team join link: the remembered name, and the remembered team only when it is one of the
+ * link's cards (a team remembered from another event is never carried into this one as Other).
+ */
+export function linkDraftFromIdentity(identity: Identity | null, cards: readonly SignInTeam[]): WhoDraft {
+  const draft = draftFromIdentity(identity, cards);
+  return draft.team ? draft : { ...draft, otherTeam: '' };
+}
+
+/** The card a team is (by its label or short name, case-insensitive), or null. */
+export function cardFor(team: string, teams: readonly SignInTeam[]): string | null {
+  const t = collapse(team).toLowerCase();
+  return teams.find((x) => x.label.toLowerCase() === t || x.short.toLowerCase() === t)?.label ?? null;
 }
 
 /** Remembered name and team (both or neither) skip straight to step 2 (spec §8, A29). */
@@ -84,20 +125,20 @@ export function rememberedIdentity(prefs: Pick<Prefs, 'rememberedName' | 'rememb
   return prefs.rememberedName && prefs.rememberedTeam ? { name: prefs.rememberedName, team: prefs.rememberedTeam } : null;
 }
 
-/** The identity part of a POST /api/session body: a card value as `team`, anything else as Other + `otherTeam`. */
-function identityBody(identity: Identity): Pick<SignInBody, 'staffName' | 'team' | 'otherTeam'> {
-  const card = cardFor(identity.team);
+/** The identity part of a POST /api/session body: a card label as `team`, anything else as Other + `otherTeam`. */
+function identityBody(identity: Identity, teams: readonly SignInTeam[]): Pick<SignInBody, 'staffName' | 'team' | 'otherTeam'> {
+  const card = cardFor(identity.team, teams);
   return card ? { staffName: identity.name, team: card } : { staffName: identity.name, team: OTHER_TEAM, otherTeam: identity.team };
 }
 
 /** The POST /api/session body with the event password. */
-export function signInBody(identity: Identity, password: string): SignInBody {
-  return { ...identityBody(identity), password };
+export function signInBody(identity: Identity, password: string, teams: readonly SignInTeam[] = []): SignInBody {
+  return { ...identityBody(identity, teams), password };
 }
 
 /** The POST /api/session body with a team join link's code instead of the password (J1). */
-export function inviteSignInBody(identity: Identity, invite: string): SignInBody {
-  return { ...identityBody(identity), invite };
+export function inviteSignInBody(identity: Identity, invite: string, teams: readonly SignInTeam[] = []): SignInBody {
+  return { ...identityBody(identity, teams), invite };
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -118,6 +159,8 @@ export type SignInOutcome =
   | { kind: 'invalid'; message: string }
   /** 403 (Origin check) — a stale or proxied page. */
   | { kind: 'forbidden' }
+  /** (Events) 410 event_ended: the password or link is an archived event's. `event`: what the Ended screen shows. */
+  | { kind: 'ended'; event: EndedEvent | null }
   /** 5xx or anything unexpected. */
   | { kind: 'server' }
   /** No response (offline, timeout, DNS…). */
@@ -129,13 +172,27 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readSession(body: unknown): SessionInfo | null {
   if (!isRecord(body)) return null;
-  const { staffName, team, staff, expiresAt } = body;
+  const { staffName, team, staff, expiresAt, role, eventId, event } = body;
   if (typeof staffName !== 'string' || typeof team !== 'string') return null;
   return {
+    role: role === 'lead' ? 'lead' : 'staff',
+    eventId: typeof eventId === 'string' ? eventId : null,
+    event: isRecord(event) ? (event as unknown as SessionInfo['event']) : null,
     staffName,
     team,
     staff: typeof staff === 'string' ? staff : `${staffName} · ${team}`,
     expiresAt: typeof expiresAt === 'string' ? expiresAt : '',
+  };
+}
+
+/** The ended event an `event_ended` answer carries (id, name, logo), or null. The id marks its local data for removal. */
+export function readEnded(value: unknown): EndedEvent | null {
+  if (!isRecord(value) || typeof value.name !== 'string') return null;
+  return {
+    ...(typeof value.id === 'string' ? { id: value.id } : {}),
+    name: value.name,
+    logoUrl: typeof value.logoUrl === 'string' ? value.logoUrl : null,
+    stage: 'archived',
   };
 }
 
@@ -169,6 +226,7 @@ export function interpretSignInResponse(status: number, body: unknown, retryAfte
     return { kind: 'invalid', message: message && message.length <= MAX_SHOWN_MESSAGE ? message : 'Check your name and team' };
   }
   if (status === 403) return { kind: 'forbidden' };
+  if (status === 410 && error?.code === 'event_ended') return { kind: 'ended', event: readEnded(error.event) };
   return { kind: 'server' };
 }
 

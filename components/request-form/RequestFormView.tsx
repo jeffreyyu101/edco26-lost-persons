@@ -46,7 +46,8 @@ import {
   type StoreState,
 } from '@/lib/client/store-contract';
 import type { OutboxItem, RequestSummary } from '@/lib/api-types';
-import { isPostValue, isUuid, type EditSection, type PhotoTiming } from '@/lib/domain';
+import { isPostValue, isUuid, type EditSection, type PhotoTiming, type PostName } from '@/lib/domain';
+import { eventPosts, useEventConfig } from '@/lib/client/event-config';
 import { formatCaseNumber } from '@/lib/format';
 import {
   canSaveEdit,
@@ -179,7 +180,7 @@ function FormFrame({ title, columns = 2, children }: { title: string; columns?: 
   const leave = useLeaveOnce();
   const close = () => leave();
   return (
-    <FormSurface presentation={presentation} title={title} onCancel={close} onDismiss={close} columns={columns}>
+    <FormSurface presentation={presentation} title={title} onCancel={close} onDismiss={close} columns={columns} placeholder>
       <div className="lp-rf-scroll lp-rf-frame" style={{ display: 'flex', flexDirection: 'column' }}>
         {children}
       </div>
@@ -230,15 +231,17 @@ function NewRequest() {
   useEffect(() => {
     let live = true;
     const lastPost = store.getState().prefs.lastPost;
+    // (Events) Only a post of this event (the last one picked on this phone may be another event's).
+    const posts = eventPosts(store.getState().event);
     const withPost = (v: RequestFormValues): RequestFormValues =>
-      v.reportingLocation || !lastPost
+      v.reportingLocation || !lastPost || !isPostValue(lastPost.reportingLocation, posts)
         ? v
         : { ...v, reportingLocation: lastPost.reportingLocation, otherLocation: lastPost.otherLocation ?? '' };
     const start = (draft: RequestDraft | null) => {
       if (!live) return;
       if (draft && isUuid(draft.clientMutationId)) {
         const values = { ...EMPTY_FORM_VALUES, ...draft.values };
-        if (values.reportingLocation && !isPostValue(values.reportingLocation)) values.reportingLocation = '';
+        if (values.reportingLocation && !isPostValue(values.reportingLocation, posts)) values.reportingLocation = '';
         saved.current = true;
         setForm({
           clientMutationId: draft.clientMutationId,
@@ -442,17 +445,18 @@ interface EditState {
   legacyPost: string | null;
 }
 
-function editStateFrom(row: RequestSummary): EditState {
-  const values = formValuesFromRequest(row);
-  return { baseVersion: row.rowVersion, base: values, values, legacyPost: legacyPostOf(row) };
+function editStateFrom(row: RequestSummary, posts: readonly PostName[]): EditState {
+  const values = formValuesFromRequest(row, posts);
+  return { baseVersion: row.rowVersion, base: values, values, legacyPost: legacyPostOf(row, posts) };
 }
 
 function EditForm({ id, section, row }: { id: string; section: EditSection; row: RequestSummary }) {
   const store = useAppStore();
   const { actions } = store;
   const offline = useStoreSelector(selectOffline);
+  const posts = eventPosts(useEventConfig());
   // Captured once, when editing starts (A10): later syncs never touch what the user is editing.
-  const [form, setForm] = useState<EditState>(() => editStateFrom(row));
+  const [form, setForm] = useState<EditState>(() => editStateFrom(row, posts));
   const [review, setReview] = useState<TheirChange[] | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -465,9 +469,9 @@ function EditForm({ id, section, row }: { id: string; section: EditSection; row:
   const close = () => leave({ r: id });
 
   const startReview = (latestRow: RequestSummary) => {
-    const latestValues = formValuesFromRequest(latestRow);
+    const latestValues = formValuesFromRequest(latestRow, posts);
     const next = rebaseOnConflict(form.base, form.values, latestValues, section);
-    setForm({ baseVersion: latestRow.rowVersion, base: latestValues, values: next.values, legacyPost: legacyPostOf(latestRow) });
+    setForm({ baseVersion: latestRow.rowVersion, base: latestValues, values: next.values, legacyPost: legacyPostOf(latestRow, posts) });
     setReview(next.theirs);
     setFailure(null);
     setRevision((n) => n + 1);
@@ -497,7 +501,7 @@ function EditForm({ id, section, row }: { id: string; section: EditSection; row:
       // Only a status or a photo moved on since editing started: nothing to review, so send once more on
       // the newer version (the server diffs per key, so nobody's change is overwritten).
       const latest = result.latest ?? store.getState().confirmed.get(id);
-      if (latest && latest.rowVersion !== version && onlyOutsideFormChanged(form.base, form.legacyPost, latest)) {
+      if (latest && latest.rowVersion !== version && onlyOutsideFormChanged(form.base, form.legacyPost, latest, posts)) {
         version = latest.rowVersion;
         result = await send(version);
       }
@@ -532,7 +536,7 @@ function EditForm({ id, section, row }: { id: string; section: EditSection; row:
 
   // A newer version that changed nothing this form holds (a status answer, a photo): carry on from it,
   // silently. Otherwise someone else changed a field while this was open: offer the review.
-  const outsideOnly = row.rowVersion !== form.baseVersion && !busy && review === null && onlyOutsideFormChanged(form.base, form.legacyPost, row);
+  const outsideOnly = row.rowVersion !== form.baseVersion && !busy && review === null && onlyOutsideFormChanged(form.base, form.legacyPost, row, posts);
   if (outsideOnly) setForm((f) => ({ ...f, baseVersion: row.rowVersion }));
   const movedOn = row.rowVersion !== form.baseVersion && !busy && !outsideOnly;
 
@@ -679,7 +683,8 @@ function OutboxForm({ item, onLeave }: { item: OutboxItem; onLeave: () => void }
   const { actions } = useAppStore();
   const id = item.mutationId;
   // What the server rejected: errors show on fields until they are edited.
-  const [rejected] = useState(() => formValuesFromCreateBody(item.payload));
+  const posts = eventPosts(useEventConfig());
+  const [rejected] = useState(() => formValuesFromCreateBody(item.payload, posts));
   const [values, setValues] = useState(rejected);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);

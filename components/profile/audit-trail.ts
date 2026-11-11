@@ -13,7 +13,7 @@
 //   other                          → the raw action, humanised (never dropped)
 // Who = "name · short team"; when = "Nov 6, 11:10 PM" in the event timezone.
 import type { AuditEvent } from '@/lib/api-types';
-import { PHOTO_TIMING_LABEL, STATUS, canonStaff, displayChanges, isInMedical, parseStaff, postFull, statusMeta, type PhotoTimingAny, type StatusValue } from '@/lib/domain';
+import { PHOTO_TIMING_LABEL, STATUS, canonStaff, displayChanges, isInMedical, parseStaff, postFull, statusMeta, type PhotoTimingAny, type StatusValue, type TeamName } from '@/lib/domain';
 import { STAGE_META, type StageGlyphKind, type StageTone } from '@/lib/stages';
 import { formatAuditTime, formatClockAmPm } from '@/lib/format';
 
@@ -71,8 +71,8 @@ function clip(value: string | null): string {
 }
 
 /** "Rae Chen · GC/HX - Special Operations/Med Transpo" → "Rae Chen · GCHX Med Transpo". */
-export function auditWho(staff: string | null | undefined): string {
-  const p = parseStaff(staff);
+export function auditWho(staff: string | null | undefined, teams: readonly TeamName[] = []): string {
+  const p = parseStaff(staff, teams);
   if (!p.name) return p.teamShort;
   return p.teamShort ? `${p.name} · ${p.teamShort}` : p.name;
 }
@@ -113,24 +113,24 @@ function chronological(audit: readonly AuditEvent[]): AuditEvent[] {
     .map((x) => x.event);
 }
 
-function base(event: AuditEvent, timeZone: string): Omit<AuditItem, 'status' | 'title' | 'note' | 'changes' | 'labelChanges'> {
+function base(event: AuditEvent, timeZone: string, teams: readonly TeamName[]): Omit<AuditItem, 'status' | 'title' | 'note' | 'changes' | 'labelChanges'> {
   return {
     key: event.id,
     at: event.at,
-    who: auditWho(event.staff),
+    who: auditWho(event.staff, teams),
     when: formatAuditTime(event.at, timeZone),
     notes: event.notes?.trim() || null,
   };
 }
 
 /** Display items for the trail, newest first. */
-export function buildAuditTrail(audit: readonly AuditEvent[], timeZone: string): AuditItem[] {
+export function buildAuditTrail(audit: readonly AuditEvent[], timeZone: string, teams: readonly TeamName[] = []): AuditItem[] {
   const items: AuditItem[] = [];
   // Photo merging state: the open photo item and what it merges on.
   let photo: { item: AuditItem; staff: string | null; timing: PhotoTimingAny | null; last: number; count: number } | null = null;
 
   for (const event of chronological(audit)) {
-    const common = base(event, timeZone);
+    const common = base(event, timeZone, teams);
     const plain = { status: null, title: null, changes: [], labelChanges: false, note: null } satisfies Partial<AuditItem>;
 
     if (event.action === 'photo') {

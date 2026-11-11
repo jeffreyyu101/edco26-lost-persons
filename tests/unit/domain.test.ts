@@ -1,3 +1,4 @@
+import { STUB_EVENT } from '@/lib/client/stub-data';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -236,35 +237,42 @@ describe('staff identity', () => {
 
   it('builds and parses attribution strings', () => {
     expect(staffString('  Dana  Kim ', 'GC/HX - Dispatch')).toBe('Dana Kim · GC/HX - Dispatch');
-    expect(parseStaff('Rae Chen · GC/HX - Special Operations/Med Transpo')).toEqual({
+    // (Events) The short name is the event's (EventConfig.teams); without them the team itself.
+    expect(parseStaff('Rae Chen · GC/HX - Special Operations/Med Transpo', STUB_EVENT.teams)).toEqual({
       name: 'Rae Chen',
       team: 'GC/HX - Special Operations/Med Transpo',
       teamShort: 'GCHX Med Transpo',
     });
-    expect(parseStaff('Dana Kim · GC/HX - Dispatch').teamShort).toBe('Dispatch');
+    expect(parseStaff('Dana Kim · GC/HX - Dispatch', STUB_EVENT.teams).teamShort).toBe('Dispatch');
+    expect(parseStaff('Dana Kim · GC/HX - Dispatch').teamShort).toBe('GC/HX - Dispatch');
     expect(parseStaff('Old · Prevent')).toEqual({ name: 'Old', team: 'Prevent', teamShort: 'Prevent' });
     expect(parseStaff('Just a name')).toEqual({ name: 'Just a name', team: '', teamShort: '' });
     expect(parseStaff(null).name).toBe('');
   });
 
-  it('maps teams to canonical values and short labels', () => {
-    expect(canonicalTeam('gchx base')).toBe('GC/HX - Base');
+  it("(events) a team is stored as typed (whitespace collapsed); its short name is the event's", () => {
+    // No event-specific alias list any more: the server spells one of the event's teams as the event does.
+    expect(canonicalTeam('gchx base')).toBe('gchx base');
     expect(canonicalTeam('GC/HX - Dispatch')).toBe('GC/HX - Dispatch');
-    expect(canonicalTeam('transport')).toBe('GC/HX - Special Operations/Med Transpo');
-    expect(canonicalTeam('prevent')).toBe('Prevent');
-    expect(canonicalTeam('  Info Booth ')).toBe('Info Booth');
-    expect(teamShort('GC/HX - Special Operations/Med Transpo')).toBe('GCHX Med Transpo');
-    expect(teamShort('Medical')).toBe('Medical');
-    expect(teamShort('Info Booth')).toBe('Info Booth');
+    expect(canonicalTeam('  Info   Booth ')).toBe('Info Booth');
+    expect(teamShort('GC/HX - Special Operations/Med Transpo', STUB_EVENT.teams)).toBe('GCHX Med Transpo');
+    expect(teamShort('gc/hx - base', STUB_EVENT.teams)).toBe('GCHX Base');
+    expect(teamShort('Medical', STUB_EVENT.teams)).toBe('Medical');
+    expect(teamShort('Info Booth', STUB_EVENT.teams)).toBe('Info Booth');
+    expect(teamShort('Gate Team', [{ label: 'Gate Team', short: 'Gate' }])).toBe('Gate');
   });
 });
 
 describe('posts', () => {
   it('postShort', () => {
-    expect(postShort('FA 3 – Kinetic')).toBe('FA 3');
-    expect(postShort('FA 4 – Oasis')).toBe('FA 4');
-    expect(postShort('Command')).toBe('Command');
-    expect(postShort('Base')).toBe('Base');
+    // (Events) The event's posts give the short form (any event's: here the local test event's).
+    const posts = STUB_EVENT.posts;
+    expect(postShort('FA 3 – Kinetic', null, posts)).toBe('FA 3');
+    expect(postShort('FA 4 – Oasis', null, posts)).toBe('FA 4');
+    expect(postShort('Command', null, posts)).toBe('Command');
+    expect(postShort('Base', null, posts)).toBe('Base');
+    expect(postShort('FA 3 – Kinetic')).toBe('FA 3 – Kinetic'); // no event: the label
+    expect(postShort('North Gate Medical', null, [{ label: 'North Gate Medical', short: 'North' }])).toBe('North');
     expect(postShort('Other', ' Info booth ')).toBe('Info booth');
     expect(postShort('Other', null)).toBe('Other');
     expect(postShort('Other', '  ')).toBe('Other');

@@ -2,9 +2,9 @@
 // the friend swap (POST /api/requests/:id/swap: request → the answerer, approve → everyone involved, decline → the
 // requester and the creator), Friend informed and its Undo, sync / detail payloads, stats and the inactive close.
 import { describe, expect, it } from 'vitest';
-import type { RequestDetail, RequestSummary, Stats, SyncResponse } from '@/lib/api-types';
+import type { RequestDetail, RequestSummary, EventStats, SyncResponse } from '@/lib/api-types';
 import { STATUS } from '@/lib/domain';
-import { admin, api, cookieFor, createRequest, newStaff, psql, staffOf, withTestServer, type Staff } from './harness';
+import { EVENT_ID, admin, api, cookieFor, createRequest, newStaff, psql, staffOf, withTestServer, type Staff } from './harness';
 import { eventually } from './push-service';
 
 withTestServer();
@@ -96,7 +96,7 @@ describe('Located · already accompanied', () => {
     const row = await activityOf(r.id, FOH, 'accompanied');
     expect(row.detail).toBe("Located · already accompanied · Don't send the friend");
     // The answerer is involved now.
-    const { data } = await admin().rpc('lp_involved_staff', { p_request: r.id });
+    const { data } = await admin().rpc('lp_involved_staff', { p_event: EVENT_ID, p_request: r.id });
     expect(data as string[]).toContain(canon(ANSWERER));
   });
 
@@ -270,14 +270,14 @@ describe('payloads, stats, inactive close', () => {
   it('stats: Accompanied is In medical / located; a swap request needs attention (kind swap); Friend informed is counted', async () => {
     const r = await accompanied();
     await swap(ASKER, r, { action: 'request' });
-    const stats = (await api('/api/stats?range=tonight', { cookie: await cookieFor(FOH) })).body as Stats;
+    const stats = (await api('/api/stats?range=today', { cookie: await cookieFor(FOH) })).body as EventStats;
     expect(stats.open.inMedical).toBeGreaterThanOrEqual(1);
     expect(typeof stats.friendInformed).toBe('number');
     expect(stats.live?.located).toBeGreaterThanOrEqual(1);
     // This request's swap is among the needs-attention rows (aggregates only: its id and kind).
     const kind = psql(
-      `select x ->> 'kind' from public.lp_stats('event') s, jsonb_array_elements(s #> '{attention,items}') x where x ->> 'id' = ${lit(r.id)}` +
-        ` union all select 'swap-not-top-5' where (public.lp_stats('event') #>> '{attention,total}')::int > 5 limit 1`,
+      `select x ->> 'kind' from public.lp_stats('${EVENT_ID}', 'event') s, jsonb_array_elements(s #> '{attention,items}') x where x ->> 'id' = ${lit(r.id)}` +
+        ` union all select 'swap-not-top-5' where (public.lp_stats('${EVENT_ID}', 'event') #>> '{attention,total}')::int > 5 limit 1`,
     );
     expect(['swap', 'swap-not-top-5']).toContain(kind);
   });
@@ -475,7 +475,7 @@ describe('post-event fixes', () => {
     await body(await swap(ANSWERER, asked, { action: 'approve', place: 'mm' }));
     const minutes = Number(
       psql(
-        `select coalesce(max(extract(epoch from now() - (x ->> 'since')::timestamptz) / 60), -1) from public.lp_stats('event') s,` +
+        `select coalesce(max(extract(epoch from now() - (x ->> 'since')::timestamptz) / 60), -1) from public.lp_stats('${EVENT_ID}', 'event') s,` +
           ` jsonb_array_elements(s #> '{attention,items}') x where x ->> 'id' = ${lit(r.id)}`,
       ),
     );

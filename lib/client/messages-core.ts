@@ -33,7 +33,7 @@ import {
   type EnrouteAction,
   type MessageJob,
 } from './messages-logic';
-import { EVENT_KEY, type Kv } from './persist';
+import type { Kv } from './persist';
 import type { ToastItem } from './store-contract';
 import { uuid } from './uuid';
 
@@ -46,7 +46,8 @@ export const THREAD_POLL_MS = 6_000;
 /** A thread fetched less than this long ago is not fetched again on open. */
 const THREAD_FRESH_MS = 3_000;
 const JOB_KEY = (id: string) => `mjob:${id}`;
-const THREAD_KEY = (staffCanon: string, id: string) => `cache:${EVENT_KEY}:${staffCanon}:thread:${id}`;
+/** `cacheKey`: the store's "<event id>:<canonical staff>" (MessagingHost.cacheStaff). */
+const THREAD_KEY = (cacheKey: string, id: string) => `cache:${cacheKey}:thread:${id}`;
 
 export interface ThreadState {
   status: 'loading' | 'ready' | 'error';
@@ -75,8 +76,10 @@ export interface MessagingHost {
   sessionExpired(): void;
   /** Attribution "Name · Team" of the signed-in staff (null before it is known). */
   staff(): string | null;
-  /** Canonical staff whose cache is loaded (the thread cache key), or null. */
+  /** "<event id>:<canonical staff>" whose cache is loaded (the thread cache key), or null. */
   cacheStaff(): string | null;
+  /** (Events) The event this tab works ('none' before one is known): jobs are queued in it and only sent to it. */
+  eventId(): string;
   generation(): number;
   kv(): Kv | null;
   enqueue<T>(op: (store: Kv) => Promise<T>): Promise<T | undefined>;
@@ -197,7 +200,9 @@ export function createMessaging(host: MessagingHost): MessagingEngine {
       const keys = (await store.keys()).filter((k) => k.startsWith('mjob:'));
       return keys.length === 0 ? [] : store.getMany<unknown>(keys);
     });
-    return (values ?? []).map(storedJob).filter((j): j is MessageJob => j !== null);
+    // (Events) Only this event's: another event's queued messages are never shown or sent here.
+    const event = host.eventId();
+    return (values ?? []).map(storedJob).filter((j): j is MessageJob => j !== null && (j.eventId ?? 'none') === event);
   };
 
   const writeThreadCache = (id: string, t: ThreadState) => {
@@ -555,6 +560,7 @@ export function createMessaging(host: MessagingHost): MessagingEngine {
       const text = cleanMessage(body);
       if (!text || messageLength(text) > MESSAGE_MAX) return false;
       const job: MessageJob = {
+        eventId: host.eventId(),
         id: uuid(),
         kind: 'message',
         requestId,
@@ -628,6 +634,7 @@ export function createMessaging(host: MessagingHost): MessagingEngine {
         if (j.kind === 'enroute' && j.requestId === requestId && j.state === 'failed' && jobIsMine(j, me)) await removeJob(j.id);
       }
       const job: MessageJob = {
+        eventId: host.eventId(),
         id: uuid(),
         kind: 'enroute',
         requestId,
@@ -729,8 +736,8 @@ export function createMessaging(host: MessagingHost): MessagingEngine {
 }
 
 /** "Rae C." / team short for a session staff string (my own queued bubbles). */
-export function meFor(staff: string | null): { by: string; team: string } {
-  const p = parseStaff(staff);
+export function meFor(staff: string | null, teams: ReadonlyArray<{ label: string; short: string }> = []): { by: string; team: string } {
+  const p = parseStaff(staff, teams);
   return { by: senderShort(staff), team: p.teamShort || p.team };
 }
 

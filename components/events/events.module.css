@@ -1,0 +1,971 @@
+/* (Events, lead screens) Events list, Event setup and their sheets: design/screens/events-v1-a (list), events-v2-b
+   (setup), events-v2-h (Go live), events-v1-e (End event), events-v1-d (desk switcher). The grouped rows are the
+   request profile's (components/profile/profile.module.css .lbl / .grp / .r / .k / .v), the chips the list's stage
+   chips (components/list/list.module.css .stageChip), the large title the list header's (.ttx). */
+
+.screen,
+.screen *,
+.screen *::before,
+.screen *::after {
+  box-sizing: border-box;
+}
+
+.screen {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-background);
+  color: var(--gray-12);
+}
+
+/* ---- Header: the large title, a back chevron on setup, the stage chip or the account button on the right ---- */
+
+.head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 60px;
+  padding: 14px 16px 10px;
+  padding-top: max(14px, env(safe-area-inset-top));
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
+  background: var(--color-background);
+}
+
+.headInner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 648px;
+  margin: 0 auto;
+}
+
+.headList {
+  border-bottom: 1px solid var(--gray-a4);
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 700;
+  letter-spacing: -0.022em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 400px) {
+  .title {
+    font-size: 24px;
+    line-height: 30px;
+  }
+}
+
+.back {
+  position: relative;
+  flex: none;
+  margin-left: -6px;
+}
+
+.back::after,
+.hit::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+
+.hit {
+  position: relative;
+}
+
+.column {
+  width: 100%;
+  max-width: 680px;
+  margin: 0 auto;
+}
+
+/* ---- Grouped rows (the profile's) ---- */
+
+.body {
+  flex: 1 0 auto;
+  width: 100%;
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 0 16px 32px;
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
+}
+
+.lbl {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  margin: 0;
+  padding: 16px 4px 6px;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--gray-11);
+}
+
+.grp {
+  border-radius: var(--radius-4);
+  background: var(--gray-a2);
+  box-shadow: inset 0 0 0 1px var(--gray-a4);
+  overflow: hidden;
+}
+
+.grp > * + * {
+  border-top: 1px solid var(--gray-a4);
+}
+
+.grp[data-invalid] {
+  box-shadow: inset 0 0 0 1px var(--red-8);
+}
+
+.r {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 12px 0 14px;
+}
+
+.k {
+  width: 96px;
+  flex: none;
+  font-size: 15px;
+  line-height: 20px;
+  color: var(--gray-11);
+  white-space: nowrap;
+}
+
+.v {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  line-height: 22px;
+  color: var(--gray-12);
+  overflow-wrap: anywhere;
+}
+
+.muted {
+  color: var(--gray-11);
+}
+
+.zoneShort {
+  margin-left: 6px;
+  font-size: 14px;
+  color: var(--gray-10);
+}
+
+/* A field that is the row's value: no box of its own (the group is the field). 16 px, so iOS never zooms. */
+.input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  height: 46px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--gray-12);
+  font: inherit;
+  font-size: 16px;
+  line-height: 22px;
+}
+
+.input::placeholder {
+  color: var(--gray-9);
+}
+
+.input[type='date'] {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 0;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.input:read-only {
+  color: var(--gray-12);
+}
+
+.r:focus-within {
+  box-shadow: inset 0 0 0 2px var(--focus-8);
+  border-radius: inherit;
+}
+
+.dates {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.dash {
+  color: var(--gray-10);
+}
+
+.selectWrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.select {
+  flex: 1;
+  min-width: 0;
+  height: 46px;
+  margin: 0;
+  padding: 0 28px 0 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--gray-12);
+  font: inherit;
+  font-size: 16px;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+
+.select option {
+  color: initial;
+}
+
+.chev {
+  position: absolute;
+  right: 0;
+  pointer-events: none;
+  color: var(--gray-10);
+}
+
+.err {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 4px 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--red-11);
+}
+
+.err svg {
+  flex: none;
+}
+
+/* ---- Logo ---- */
+
+.logoRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 12px 12px 14px;
+}
+
+.logoActs {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.tile {
+  flex: none;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--gray-a3);
+  box-shadow: inset 0 0 0 1px var(--gray-a4);
+  color: var(--gray-12);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.tile > span {
+  max-width: 100%;
+}
+
+.tile img {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+/* ---- Chip lists: posts, teams, "Last seen" ---- */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--gray-a3);
+  color: var(--gray-12);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.chipLabel {
+  position: relative;
+  flex: 0 1 auto;
+  display: block;
+  line-height: 34px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 4px 0 12px;
+  border: 0;
+  border-radius: 8px 0 0 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chipLabel:only-child,
+.chipStatic {
+  padding: 0 12px;
+  border-radius: 8px;
+}
+
+.chipStatic {
+  display: block;
+  min-width: 0;
+  line-height: 34px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chipLabel > svg,
+.chipStatic > svg {
+  vertical-align: -2px;
+  margin-right: 6px;
+}
+
+.chipShort {
+  margin-left: 6px;
+}
+
+/* A chip with a problem: the invalid outline of the fields, and the error glyph before its label. */
+.chip[data-invalid] {
+  box-shadow: inset 0 0 0 1px var(--red-8);
+}
+
+.chipLabel > .chipAlert {
+  color: var(--red-11);
+}
+
+/* A row whose value opens a sheet (Dates): the whole row is the button. */
+.valueBtn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 46px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.valueBtn:focus-visible {
+  outline: none;
+}
+
+.chipShort {
+  color: var(--gray-10);
+  font-weight: 400;
+}
+
+.chipX {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 100%;
+  padding: 0 6px 0 2px;
+  border: 0;
+  border-radius: 0 8px 8px 0;
+  background: none;
+  color: var(--gray-10);
+  cursor: pointer;
+}
+
+.chipX::after {
+  content: '';
+  position: absolute;
+  inset: -5px -4px;
+}
+
+.chipX:hover,
+.chipLabel:hover {
+  color: var(--gray-12);
+}
+
+.chipLabel:focus-visible,
+.chipX:focus-visible,
+.addChip:focus-visible,
+.rowBtn:focus-visible,
+.section:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+
+.addChip {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--gray-a7);
+  border-radius: 8px;
+  background: none;
+  color: var(--gray-12);
+  cursor: pointer;
+}
+
+.addChip::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+}
+
+.medical {
+  color: var(--red-11);
+}
+
+/* ---- Password and join link ---- */
+
+.dots {
+  letter-spacing: 0.18em;
+  font-size: 18px;
+}
+
+.linkField {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--code-font-family);
+  font-size: 13px;
+  color: var(--gray-12);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Staffing rows ---- */
+
+.staffRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 14px;
+}
+
+.staffRow .input {
+  height: 46px;
+}
+
+.addRow {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 8px;
+}
+
+/* ---- Footer: Save / Discard, or the stage action ---- */
+
+.foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  border-top: 1px solid var(--gray-a4);
+  background: var(--color-background);
+  padding: 12px 16px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+.footInner {
+  display: flex;
+  gap: 10px;
+  max-width: 648px;
+  margin: 0 auto;
+}
+
+.footInner > * {
+  flex: 1;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--green-9);
+  box-shadow: 0 0 0 3px var(--green-a5);
+}
+
+.endBtn.endBtn {
+  background: var(--red-a3);
+  color: var(--red-11);
+}
+
+.endBtn.endBtn:hover {
+  background: var(--red-a4);
+}
+
+/* ---- Stage chips: Practice (amber half-ring), Live (green dot), Archived (grey box) ---- */
+
+.stage {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.stage[data-stage='practice'] {
+  background: var(--amber-a4);
+  color: var(--amber-12);
+}
+
+.stage[data-stage='live'] {
+  background: var(--green-a4);
+  color: var(--green-12);
+}
+
+.stage[data-stage='archived'] {
+  background: var(--gray-a4);
+  color: var(--gray-12);
+}
+
+:global(.dark) .stage[data-stage='practice'] {
+  color: var(--amber-11);
+}
+
+:global(.dark) .stage[data-stage='live'] {
+  color: var(--green-11);
+}
+
+:global(.dark) .stage[data-stage='archived'] {
+  color: var(--gray-11);
+}
+
+.stageDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green-9);
+}
+
+/* ---- Events list ---- */
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  border-bottom: 1px solid var(--gray-a4);
+}
+
+.rowBtn {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 76px;
+  padding: 14px 16px;
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rowBtn:hover {
+  background: var(--gray-a2);
+}
+
+.rowBtn[aria-busy='true'] {
+  opacity: 0.6;
+}
+
+.rowText {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.rowName {
+  font-size: 17px;
+  line-height: 22px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row[data-stage='archived'] .rowName {
+  font-weight: 500;
+  color: var(--gray-11);
+}
+
+.rowMeta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  column-gap: 6px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--gray-11);
+}
+
+.rowMeta b {
+  color: var(--gray-12);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.sepDot {
+  color: var(--gray-9);
+}
+
+.rowEnd {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--gray-11);
+  white-space: nowrap;
+}
+
+.section {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 60px;
+  padding: 0 16px;
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
+  border: 0;
+  border-bottom: 1px solid var(--gray-a4);
+  background: none;
+  color: var(--gray-11);
+  font: inherit;
+  font-size: 17px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 26px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 12px;
+  background: var(--gray-a3);
+  color: var(--gray-11);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sectionChev {
+  margin-left: auto;
+  transition: transform 150ms ease;
+}
+
+.section[aria-expanded='false'] .sectionChev {
+  transform: rotate(-90deg);
+}
+
+.fab {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(20px, calc(env(safe-area-inset-bottom) + 12px));
+  z-index: 4;
+  box-shadow: var(--shadow-4);
+}
+
+@media (min-width: 768px) {
+  .fab {
+    right: max(24px, calc((100vw - 680px) / 2 - 160px));
+  }
+}
+
+/* ---- Sheets: Go live, End event, Reopen ---- */
+
+.sheetHead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.sheetTitle {
+  margin: 0;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 700;
+}
+
+.sheetSub {
+  margin: 2px 0 0;
+  font-size: 15px;
+  color: var(--gray-11);
+}
+
+.transition {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  color: var(--gray-10);
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-radius: var(--radius-4);
+  background: var(--gray-a2);
+  box-shadow: inset 0 0 0 1px var(--gray-a4);
+  margin-bottom: 14px;
+}
+
+.tiles > * {
+  padding: 14px 16px;
+}
+
+.tiles > * + * {
+  border-left: 1px solid var(--gray-a4);
+}
+
+.tileK {
+  font-size: 14px;
+  color: var(--gray-11);
+}
+
+.tileRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.tileV {
+  font-size: 30px;
+  line-height: 36px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* (Grace period) Reopen: Password / Join link — Kept (✓) or New one needed (↻) — and the time left. */
+.keeps {
+  margin-bottom: 14px;
+}
+
+.keep {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+.keep[data-kept='true'] {
+  background: var(--green-a3);
+  color: var(--green-11);
+}
+
+.keep[data-kept='false'] {
+  background: var(--gray-a3);
+  color: var(--gray-12);
+}
+
+:global(.dark) .keep[data-kept='false'] {
+  color: var(--gray-11);
+}
+
+.left {
+  flex: none;
+  margin-left: auto;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.fact {
+  margin: 0 0 16px;
+  font-size: 15px;
+  line-height: 21px;
+  color: var(--gray-12);
+}
+
+.sheetActs {
+  display: flex;
+  gap: 10px;
+}
+
+.sheetActs > * {
+  flex: 1;
+}
+
+.sheetField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.fieldLabel {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--gray-11);
+}
+
+.inlineRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.switchRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  margin-bottom: 10px;
+  font-size: 15px;
+}
+
+/* ---- Desk switcher (sidebar lockup) ---- */
+
+.switcher {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  margin-top: 6px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-3);
+  background: none;
+  color: var(--gray-12);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.switcher:hover,
+.switcher[data-state='open'] {
+  background: var(--gray-a3);
+}
+
+.switcher:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -2px;
+}
+
+.switcherName {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A fixed width, so a long name is cut with an ellipsis and the stage chip and ✓ always show. */
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(330px, calc(100vw - 80px));
+}
+
+.menuName {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.menuContent {
+  max-width: calc(100vw - 32px);
+}
+
+.navIcon {
+  flex: none;
+}
+
+/* Collapsed sidebar (64 px): the switcher is its logo tile alone. */
+:global([data-state='collapsed']) .switcherName,
+:global([data-state='collapsed']) .switcherChev {
+  display: none;
+}
+
+.center {
+  display: grid;
+  place-items: center;
+  min-height: 40vh;
+  color: var(--gray-11);
+}

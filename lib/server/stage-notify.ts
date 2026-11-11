@@ -7,7 +7,8 @@ import 'server-only';
 import type { RequestSummary } from '../api-types';
 import { STATUS, canonStaff, isHeld, statusMeta } from '../domain';
 import { holdDetail } from '../hold-detail';
-import { eventTimezone } from './env';
+import { FALLBACK_TIMEZONE } from '../format';
+import { loadEvent } from './events';
 import { involvedStaff } from './involved';
 import { notifyStaff, type ActivityEvent } from './notify';
 
@@ -19,13 +20,14 @@ export function notFoundDetail(row: Pick<RequestSummary, 'status' | 'recheckAt'>
 }
 
 /** Tells everyone involved (but the actor) that `row` was answered Not found. Never throws. */
-export async function notifyNotFound(row: RequestSummary, actorStaff: string): Promise<void> {
+export async function notifyNotFound(eventId: string, row: RequestSummary, actorStaff: string): Promise<void> {
   try {
-    const detail = notFoundDetail(row, eventTimezone());
+    // (Events) The hold's time in the event's own zone (UTC only when the event can't be read).
+    const detail = notFoundDetail(row, (await loadEvent(eventId).catch(() => null))?.timezone ?? FALLBACK_TIMEZONE);
     if (!detail) return;
-    const recipients = await involvedStaff(row.id);
+    const recipients = await involvedStaff(eventId, row.id);
     const event: ActivityEvent = { requestId: row.id, kind: 'not_in_medical', actor: canonStaff(actorStaff) ?? actorStaff, detail };
-    await notifyStaff(recipients, event);
+    await notifyStaff(eventId, recipients, event);
   } catch {
     console.warn(JSON.stringify({ lp: 'notify', code: 'not_found_failed' }));
   }

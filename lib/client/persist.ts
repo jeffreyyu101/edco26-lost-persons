@@ -1,13 +1,19 @@
 // IndexedDB layout of the client (idb-keyval, one object store). Nothing here runs at import time: the
 // database is opened by openKv(), which the store calls from start() (server-render invariants).
 //
-//   cache:<event>:<canonical staff>:rows    RequestSummary[]            the data cache is per staff
-//   cache:<event>:<canonical staff>:cursor  {cursor, at}                sync cursor (verbatim) + local time
-//   last-staff                              {staffName, team, staff}    whose cache to open on an offline reload
-//   myids                                   string[]                    request ids created on this phone
-//   outbox:<mutationId>                     StoredJob                   one per create job (per phone)
-//   draft                                   StoredDraft                 the new-request draft (per phone)
-//   blob:<photoId>                          {full, thumb}               photo bytes, shared by the draft and jobs
+//   cache:<event id>:<canonical staff>:rows    RequestSummary[]          the data cache is per event and staff
+//   cache:<event id>:<canonical staff>:cursor  {cursor, at}              sync cursor (verbatim) + local time
+//   cache:<event id>:meta                      {wentLiveAt}              (events) when the cache's event went live
+//   last-staff                                 {staffName, team, staff, eventId, role, event}  whose cache (and
+//                                              event config) to open on an offline reload
+//   myids                                      string[]                  request ids created on this phone
+//   outbox:<mutationId>                        StoredJob                 one per create job, stamped with its event
+//   draft                                      StoredDraft               the new-request draft, stamped with its event
+//   blob:<photoId>                             {full, thumb}             photo bytes, shared by the draft and jobs
+//
+// (Events) Everything about requests is per event: a phone used for event A never shows A's rows in B (the cache key)
+// and never sends A's queued requests or messages to B (every job carries its eventId and only goes to that event).
+// The event id 'none' stands for "no event known" (a session without one, or data from before events).
 //
 // Photos are stored as ArrayBuffers, not Blobs (older iOS Safari failed to store Blobs in IndexedDB), and
 // under their own keys so frequent draft / checkpoint writes never re-copy megabytes of image data.
@@ -18,7 +24,7 @@
 // at the same time, across tabs too, so a collection in another tab sees either none of a save or all of
 // it: it can never delete bytes whose reference is about to be written.
 import { createStore, del, get, getMany, keys, set, setMany, type UseStore } from 'idb-keyval';
-import type { OutboxItem, OutboxPhoto, RequestSummary } from '../api-types';
+import type { EventConfig, OutboxItem, OutboxPhoto, RequestSummary, SessionRole } from '../api-types';
 import type { DraftPhoto, RequestDraft } from './store-contract';
 
 export interface Kv {
@@ -36,8 +42,9 @@ export interface Kv {
   collectBlobs(keep: ReadonlySet<string>): Promise<number>;
 }
 
-export const EVENT_KEY = 'edco26';
 export const DB_NAME = 'lp-client';
+/** (Events) The event key of data with no event: never sent anywhere, dropped with it. */
+export const NO_EVENT = 'none';
 
 /** Opens (lazily creates) the database. Null when IndexedDB is missing or blocked. */
 export function openKv(dbName: string = DB_NAME): Kv | null {
@@ -115,8 +122,11 @@ function collectInTransaction(os: IDBObjectStore, keep: ReadonlySet<string>): Pr
 }
 
 export const K = {
-  rows: (staffCanon: string) => `cache:${EVENT_KEY}:${staffCanon}:rows`,
-  cursor: (staffCanon: string) => `cache:${EVENT_KEY}:${staffCanon}:cursor`,
+  rows: (eventId: string, staffCanon: string) => `cache:${eventId}:${staffCanon}:rows`,
+  cursor: (eventId: string, staffCanon: string) => `cache:${eventId}:${staffCanon}:cursor`,
+  meta: (eventId: string) => `cache:${eventId}:meta`,
+  /** Every cache key of one event starts with this. */
+  eventCache: (eventId: string) => `cache:${eventId}:`,
   lastStaff: 'last-staff',
   myIds: 'myids',
   job: (mutationId: string) => `outbox:${mutationId}`,
@@ -134,6 +144,16 @@ export interface StoredStaff {
   staffName: string;
   team: string;
   staff: string;
+  /** (Events) The event whose cache to open (absent before events). */
+  eventId?: string;
+  /** (Events) The session's role and event config, for an offline reload (GET /api/session refreshes them). */
+  role?: SessionRole;
+  event?: EventConfig | null;
+}
+
+/** (Events) What the cache of one event was made under: rows from before it went live are practice rows. */
+export interface StoredEventMeta {
+  wentLiveAt: string | null;
 }
 
 interface StoredBytes {
@@ -150,6 +170,8 @@ export type StoredJobPhoto = Omit<OutboxPhoto, 'blob' | 'thumbBlob'>;
 export type StoredJob = Omit<OutboxItem, 'photos'> & { photos: StoredJobPhoto[] };
 
 export interface StoredDraft {
+  /** (Events) The event it was started in (absent before events). */
+  eventId?: string;
   clientMutationId: string;
   values: RequestDraft['values'];
   photos: Array<{ photoId: string; width: number; height: number }>;
@@ -186,14 +208,18 @@ export function jobToStored(job: OutboxItem): StoredJob {
   };
 }
 
-/** Reads every job with its photo bytes. Jobs whose bytes are gone keep their photos as already handled. */
-export async function readJobs(kv: Kv): Promise<OutboxItem[]> {
+/**
+ * Reads the jobs of one event (absent eventId: NO_EVENT) with their photo bytes. Jobs whose bytes are gone keep their
+ * photos as already handled. `eventId` null: every job, whatever its event.
+ */
+export async function readJobs(kv: Kv, eventId: string | null = null): Promise<OutboxItem[]> {
   const jobKeys = (await kv.keys()).filter((k) => k.startsWith('outbox:'));
   if (jobKeys.length === 0) return [];
   const stored = await kv.getMany<StoredJob>(jobKeys);
   const out: OutboxItem[] = [];
   for (const job of stored) {
     if (!job || typeof job !== 'object' || typeof job.mutationId !== 'string' || !job.payload) continue;
+    if (eventId !== null && (job.eventId ?? NO_EVENT) !== eventId) continue;
     const photos: OutboxPhoto[] = [];
     for (const p of job.photos ?? []) {
       const blobs = p.acked ? null : await readPhotoBlobs(kv, p.photoId);
@@ -209,9 +235,11 @@ export async function readJobs(kv: Kv): Promise<OutboxItem[]> {
   return out.sort((a, b) => a.createdAt - b.createdAt);
 }
 
-export async function readDraft(kv: Kv): Promise<RequestDraft | null> {
+export async function readDraft(kv: Kv, eventId: string | null = null): Promise<RequestDraft | null> {
   const d = await kv.get<StoredDraft>(K.draft);
   if (!d || typeof d.clientMutationId !== 'string' || !d.values) return null;
+  // (Events) Another event's draft (its post may not exist here) is not this event's to finish.
+  if (eventId !== null && (d.eventId ?? NO_EVENT) !== eventId) return null;
   const photos: DraftPhoto[] = [];
   for (const p of d.photos ?? []) {
     const blobs = await readPhotoBlobs(kv, p.photoId);
@@ -220,8 +248,9 @@ export async function readDraft(kv: Kv): Promise<RequestDraft | null> {
   return { clientMutationId: d.clientMutationId, values: d.values, photos, photoTiming: d.photoTiming === 'older' ? 'older' : 'today', updatedAt: d.updatedAt };
 }
 
-export function draftToStored(d: RequestDraft): StoredDraft {
+export function draftToStored(d: RequestDraft, eventId?: string): StoredDraft {
   return {
+    ...(eventId ? { eventId } : {}),
     clientMutationId: d.clientMutationId,
     values: d.values,
     photos: d.photos.map((p) => ({ photoId: p.photoId, width: p.width, height: p.height })),
@@ -230,7 +259,7 @@ export function draftToStored(d: RequestDraft): StoredDraft {
   };
 }
 
-export async function readRows(kv: Kv, staffCanon: string): Promise<RequestSummary[] | null> {
-  const rows = await kv.get<RequestSummary[]>(K.rows(staffCanon));
+export async function readRows(kv: Kv, eventId: string, staffCanon: string): Promise<RequestSummary[] | null> {
+  const rows = await kv.get<RequestSummary[]>(K.rows(eventId, staffCanon));
   return Array.isArray(rows) ? rows : null;
 }

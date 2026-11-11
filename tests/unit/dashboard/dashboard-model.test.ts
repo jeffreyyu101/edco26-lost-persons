@@ -1,5 +1,6 @@
 // Dashboard v4 pure helpers (components/dashboard/dashboard-model.ts): urgency order and colours, the status bar,
-// buckets and axis labels in ET, speed badges, recap deltas.
+// buckets and axis labels in the event's time zone, speed badges, recap deltas, (events) post series for any number
+// of posts, show days, team names.
 import { describe, expect, it } from 'vitest';
 import {
   ageSev,
@@ -16,10 +17,14 @@ import {
   heatLabel,
   isCurrent,
   mmss,
-  nightName,
+  dayName,
   overSev,
   peakIndex,
-  prevNightName,
+  postSeries,
+  prevDayName,
+  showDays,
+  teamName,
+  teamOrder,
   sparseStep,
   speedBadge,
   statusParts,
@@ -28,19 +33,32 @@ import {
 } from '@/components/dashboard/dashboard-model';
 import type { AttentionItem, CallsBucket } from '@/lib/api-types';
 
+const ET = 'America/New_York';
+
 const NOW = Date.parse('2026-11-09T03:40:00Z'); // Sun 22:40 ET
 const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
 const item = (caseNumber: number, kind: AttentionItem['kind'], minutes: number, extra: Partial<AttentionItem> = {}): AttentionItem => ({
   id: `id-${caseNumber}`,
   caseNumber,
-  tent: 'FA 3',
+  post: 'FA 3',
   kind,
   since: ago(minutes),
   enroute: false,
   etaAt: null,
   ...extra,
 });
-const bucket = (at: string, fa4 = 0, fa3 = 0, other = 0, extra: Partial<CallsBucket> = {}): CallsBucket => ({ at, night: null, fa4, fa3, other, prev: null, ...extra });
+const bucket = (at: string, fa4 = 0, fa3 = 0, other = 0, extra: Partial<CallsBucket> = {}): CallsBucket => ({
+  at,
+  day: null,
+  n: fa4 + fa3 + other,
+  posts: [
+    { post: 'FA 4', n: fa4 },
+    { post: 'FA 3', n: fa3 },
+    { post: 'Other', n: other },
+  ],
+  prev: null,
+  ...extra,
+});
 
 describe('severity: colour always comes with a glyph, and these decide which', () => {
   it('waiting / located age: ok < 10 ≤ warn < 30 ≤ crit; a re-check is late at once, red 10 min past due', () => {
@@ -125,24 +143,66 @@ describe('calls buckets and labels (ET)', () => {
     expect(isCurrent({ at: ago(10) }, 15, NOW)).toBe(true);
     expect(isCurrent({ at: ago(15) }, 15, NOW)).toBe(false);
   });
-  it('clock and labels in America/New_York, whatever the device zone', () => {
-    expect(etClock('2026-11-09T03:15:00Z')).toEqual({ h: 22, m: 15, wd: 'Sun' });
+  it("clock and labels in the event's time zone, whatever the device zone", () => {
+    expect(etClock('2026-11-09T03:15:00Z', ET)).toEqual({ h: 22, m: 15, wd: 'Sun' });
     const b = bucket('2026-11-09T03:00:00Z');
-    expect(axisLabel('tonight', b, 0, [b], false)).toBe('10p');
-    expect(axisLabel('tonight', b, 0, [b], true)).toBeNull(); // every 3rd hour on a phone
-    expect(axisLabel('2h', b, 0, [b], false)).toBe('10:00');
-    expect(axisLabel('1h', bucket('2026-11-09T03:30:00Z'), 0, [b], false)).toBe('10:30');
-    expect(axisLabel('6h', bucket('2026-11-09T02:00:00Z'), 0, [b], false)).toBeNull();
-    expect(bucketHead('tonight', bucket('2026-11-09T03:15:00Z'), 15)).toBe('10:15–10:30 PM');
-    expect(heatLabel({ fa4: 0, fa3: 0, other: 0, hour: 0 }, 60)).toBe('12a');
-    expect(heatLabel({ fa4: 0, fa3: 0, other: 0, at: '2026-11-09T03:15:00Z' }, 15)).toBe('10:15');
+    expect(axisLabel('today', b, 0, [b], false, ET)).toBe('10p');
+    expect(axisLabel('today', b, 0, [b], true, ET)).toBeNull(); // every 3rd hour on a phone
+    expect(axisLabel('day:2', b, 0, [b], false, ET)).toBe('10p'); // a show day of an archived event, like today
+    expect(axisLabel('2h', b, 0, [b], false, ET)).toBe('10:00');
+    expect(axisLabel('1h', bucket('2026-11-09T03:30:00Z'), 0, [b], false, ET)).toBe('10:30');
+    expect(axisLabel('6h', bucket('2026-11-09T02:00:00Z'), 0, [b], false, ET)).toBeNull();
+    expect(bucketHead('today', bucket('2026-11-09T03:15:00Z'), 15, ET)).toBe('10:15–10:30 PM');
+    expect(heatLabel({ hour: 0 }, 60, ET)).toBe('12a');
+    expect(heatLabel({ at: '2026-11-09T03:15:00Z' }, 15, ET)).toBe('10:15');
   });
-  it('event: a label at the first bucket of each night, named by its weekday; the night before a range', () => {
-    const bs = [bucket('2026-11-07T18:00:00Z', 0, 0, 0, { night: '2026-11-07' }), bucket('2026-11-07T19:00:00Z', 0, 0, 0, { night: '2026-11-07' }), bucket('2026-11-08T18:00:00Z', 0, 0, 0, { night: '2026-11-08' })];
-    expect(bs.map((b, i) => axisLabel('event', b, i, bs, false))).toEqual(['Sat', null, 'Sun']);
-    expect(nightName('2026-11-06')).toBe('Fri');
-    expect(prevNightName('2026-11-08T17:00:00Z')).toBe('Sat'); // Tonight (Sun from noon) → Saturday
-    expect(prevNightName('2026-11-09T05:30:00Z')).toBe('Sat'); // 00:30 Mon is still Sunday night
+  it('(events) another time zone: the same instant reads in that zone (Los Angeles, Berlin)', () => {
+    expect(etClock('2026-11-09T03:15:00Z', 'America/Los_Angeles')).toEqual({ h: 19, m: 15, wd: 'Sun' });
+    expect(etClock('2026-11-09T03:15:00Z', 'Europe/Berlin')).toEqual({ h: 4, m: 15, wd: 'Mon' });
+    expect(bucketHead('today', bucket('2026-11-09T03:15:00Z'), 15, 'Europe/Berlin')).toBe('4:15–4:30 AM');
+    expect(axisLabel('today', bucket('2026-11-09T05:00:00Z'), 0, [], false, 'Europe/Berlin')).toBe('6a');
+  });
+  it('event: a label at the first bucket of each show day, named by its weekday; the day before a range', () => {
+    const bs = [bucket('2026-11-07T18:00:00Z', 0, 0, 0, { day: '2026-11-07' }), bucket('2026-11-07T19:00:00Z', 0, 0, 0, { day: '2026-11-07' }), bucket('2026-11-08T18:00:00Z', 0, 0, 0, { day: '2026-11-08' })];
+    expect(bs.map((b, i) => axisLabel('event', b, i, bs, false, ET))).toEqual(['Sat', null, 'Sun']);
+    expect(dayName('2026-11-06')).toBe('Fri');
+    // A show day from 6 AM local: the range of Sunday's day starts Sun 06:00 ET; the day before is Saturday.
+    expect(prevDayName('2026-11-08T11:00:00Z', ET)).toBe('Sat');
+    // From noon (the local test event's day start), the same.
+    expect(prevDayName('2026-11-08T17:00:00Z', ET)).toBe('Sat');
+  });
+});
+
+describe('(events) posts, show days and teams come from the event', () => {
+  it("any number of posts: the range's order (busiest first), one fixed colour per place, Other its own", () => {
+    expect(postSeries([{ post: 'Gate A', n: 9 }])).toEqual([{ post: 'Gate A', color: 'var(--dv-post-1)' }]);
+    const six = postSeries([
+      { post: 'P2', n: 12 },
+      { post: 'P5', n: 9 },
+      { post: 'P1', n: 7 },
+      { post: 'P6', n: 3 },
+      { post: 'Other', n: 4 },
+    ]);
+    expect(six.map((x) => x.post)).toEqual(['P2', 'P5', 'P1', 'P6', 'Other']);
+    expect(six.map((x) => x.color)).toEqual(['var(--dv-post-1)', 'var(--dv-post-2)', 'var(--dv-post-3)', 'var(--dv-post-4)', 'var(--dv-post-other)']);
+    expect(postSeries(undefined)).toEqual([]);
+  });
+  it("the show days of an event's dates, at most a month", () => {
+    expect(showDays({ startsOn: '2026-11-06', endsOn: '2026-11-08' })).toEqual([
+      { n: 1, day: '2026-11-06', name: 'Fri' },
+      { n: 2, day: '2026-11-07', name: 'Sat' },
+      { n: 3, day: '2026-11-08', name: 'Sun' },
+    ]);
+    expect(showDays({ startsOn: '2026-11-14', endsOn: '2026-11-14' })).toHaveLength(1);
+    expect(showDays({ startsOn: '2026-11-14', endsOn: '2026-11-13' })).toEqual([]);
+    expect(showDays(null)).toEqual([]);
+  });
+  it("who's on names the event's teams by id (setup order, then Other)", () => {
+    const event = { teams: [{ id: 'medics', label: 'Medics Crew', short: 'Medics', medical: true }, { id: 'gate', label: 'Gate Team', short: 'Gate', medical: false }] };
+    expect(teamOrder(event)).toEqual(['medics', 'gate', 'other']);
+    expect(teamName('gate', event)).toBe('Gate');
+    expect(teamName('other', event)).toBe('Other');
+    expect(teamName('dispatch', event)).toBe('dispatch');
   });
 });
 

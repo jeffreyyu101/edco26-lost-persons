@@ -1,7 +1,8 @@
 // Proxy (spec §6 Proxy): per-request CSP nonce, security headers and the auth redirects for page routes.
 //   * `/` without a valid session cookie → /signin?next=<path+query>
-//   * `/signin` with a valid session cookie → the safe `next`, else `/`
+//   * `/signin` with a valid session cookie → the safe `next`, else `/` (not `/signin?ended=1`, the Ended screen)
 //   * `/health` (the telemetry dashboard) without a valid session cookie → /signin?next=/health
+//   * (Events) `/` for a lead with no event open → /events (the lead pages check their own session: app/events)
 // API routes, static assets, the service worker, the manifest, icons, logos and fonts never run through
 // here (see `config.matcher`). Runs on the Node.js runtime (the Next.js 16 default for proxy).
 import { NextResponse, type NextRequest } from 'next/server';
@@ -73,6 +74,13 @@ export async function proxy(request: NextRequest) {
       return withHeaders(response, csp);
     }
 
+    // (Events) A lead with no event open works on the Events list (an open event's log is `/`).
+    if (pathname === '/' && claims?.role === 'lead' && !claims.eventId) {
+      const response = NextResponse.redirect(new URL('/events', request.url), 307);
+      response.headers.set('Cache-Control', 'no-store');
+      return withHeaders(response, csp);
+    }
+
     if (pathname === '/health' && !claims) {
       const target = new URL('/signin', request.url);
       target.searchParams.set('next', '/health');
@@ -81,7 +89,9 @@ export async function proxy(request: NextRequest) {
       return withHeaders(response, csp);
     }
 
-    if (pathname === '/signin' && claims) {
+    // (Events) /signin?ended=1 is the Ended screen: a cookie that still verifies belongs to an ended event's session
+    // (every API call answers it 410), so it must not bounce back to the app.
+    if (pathname === '/signin' && claims && request.nextUrl.searchParams.get('ended') !== '1') {
       const next = safeNextPath(request.nextUrl.searchParams.get('next')) ?? '/';
       const response = NextResponse.redirect(new URL(next, request.url), 307);
       response.headers.set('Cache-Control', 'no-store');

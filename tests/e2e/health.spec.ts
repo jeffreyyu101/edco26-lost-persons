@@ -1,17 +1,18 @@
 import { execFileSync } from 'node:child_process';
 import { expect, test, type Page } from '@playwright/test';
-import { localDbUrl, testBaseUrl } from '../../scripts/test-env.mjs';
+import { TEST_EVENT_ID, localDbUrl, testBaseUrl } from '../../scripts/test-env.mjs';
 import { axeViolations } from './helpers/a11y';
-import { sessionCookieHeader, signedInAs, signedInState } from './helpers/session';
+import { newSignedInContext, sessionCookieHeader, signedInAs, signedInState } from './helpers/session';
 
 // The Health page (/health, design/references/observability-design.md §5), at a laptop's 1440 × 900 in both projects:
 // without a session it goes to sign-in and back; seeded rows render every panel; Refresh makes exactly one request and
 // nothing polls; a phone width says Desktop only; the desk sidebar's Health link shows only on a device that opened
-// /health; the switch (behind its confirm) turns collection off, and then can't turn it back on (SQL only); axe finds
-// nothing.
+// /health; (Events) the switch is a lead's: behind its confirm it turns collection off and with one tap back on, while
+// for staff it is disabled and the route refuses them; axe finds nothing.
 
 const BASE = testBaseUrl();
 const STAFF = { staffName: 'TEST-e2e Health', team: 'GC/HX - Dispatch' };
+const LEAD = { staffName: 'TEST-e2e Health Lead', team: 'GC/HX - Dispatch', lead: true };
 // Letters only: a stored string can't hold 4 digits in a row (lp_tel_events_no_digit_run).
 const AREA = `tie${Date.now().toString(36).replace(/\d/g, (c) => 'abcdefghij'[Number(c)] ?? 'a')}`;
 const DEVICE = `tie2e${Date.now().toString(36)}`.padEnd(16, '0').slice(0, 16);
@@ -23,7 +24,8 @@ const psql = (sql: string) => execFileSync('psql', [localDbUrl(), '-v', 'ON_ERRO
 
 test.beforeAll(() => {
   const ins = (name: string, extra: string) =>
-    `insert into public.lp_tel_events (at, device, session, team, name, view, area, ctl, ms, n, props, trail) values (now(), '${DEVICE}', 'sesse2e001', 'dispatch', '${name}', ${extra});`;
+    // (Events) Telemetry is per event: these rows are the local test event's (the session's).
+    `insert into public.lp_tel_events (event_id, at, device, session, team, name, view, area, ctl, ms, n, props, trail) values ('${TEST_EVENT_ID}', now(), '${DEVICE}', 'sesse2e001', 'dispatch', '${name}', ${extra});`;
   psql(
     [
       ins('stuck_scroll', `'profile', '${AREA}', null, null, 3, '{"dir":"up","edge":"top"}', '[[-2400, "v>profile"], [-900, "w!:thread:u"]]'`),
@@ -38,7 +40,7 @@ test.beforeAll(() => {
 test.afterAll(async () => {
   psql(`delete from public.lp_tel_events where device = '${DEVICE}'`);
   psql(`update public.lp_tel_settings set enabled = true, updated_at = now()`);
-  const cookie = await sessionCookieHeader(STAFF);
+  const cookie = await sessionCookieHeader(LEAD);
   await fetch(`${BASE}/api/telemetry/settings`, { method: 'POST', headers: { cookie, origin: BASE, 'content-type': 'application/json' }, body: JSON.stringify({ enabled: true }) });
 });
 
@@ -114,32 +116,44 @@ test('the desk sidebar shows Health only on a device that opened /health', async
   }
 });
 
-test('the switch turns collection off behind its confirm (ingest then 204); back on is SQL only', async ({ page }) => {
+test('staff see the switch disabled, and the route refuses them', async ({ page }) => {
   await openHealth(page);
   const sw = page.getByTestId('health-switch');
   await expect(sw).toHaveAttribute('aria-checked', 'true');
-  await sw.click();
-  await expect(page.getByTestId('health-confirm')).toBeVisible();
-  await page.getByTestId('health-turn-off').click();
-  await expect(sw).toHaveAttribute('aria-checked', 'false');
-  await expect(page.getByTestId('health-status')).toContainText('Off');
-  expect(psql(`select enabled from public.lp_tel_settings`)).toBe('f');
-  const ingest = await page.request.post('/api/telemetry', {
-    headers: { origin: BASE, 'content-type': 'application/json' },
-    data: { v: 1, b: 'e2eoffbatch01', d: DEVICE, s: 'sesse2e001', sent: Date.now(), ctx: { plat: 'mac', osv: 0, eng: 'blink', sa: false, lay: 'desktop', dpr: 2, touch: false, build: 'none', eff: 'na', mem: -1 }, ev: [{ n: 'view', at: Date.now() }] },
-  });
-  expect(ingest.status()).toBe(204);
-  // Off, the switch can't be used, and the route refuses to turn it back on.
   await expect(sw).toBeDisabled();
-  const on = await page.request.post('/api/telemetry/settings', { headers: { origin: BASE, 'content-type': 'application/json' }, data: { enabled: true } });
-  expect(on.status()).toBe(403);
-  expect(psql(`select enabled from public.lp_tel_settings`)).toBe('f');
-  // Back on in SQL: the next load shows it on (the route's {enabled: true} only re-reads the settings).
-  psql(`update public.lp_tel_settings set enabled = true, updated_at = now()`);
-  expect((await page.request.post('/api/telemetry/settings', { headers: { origin: BASE, 'content-type': 'application/json' }, data: { enabled: true } })).status()).toBe(200);
-  await page.getByTestId('health-refresh').click();
-  await expect(sw).toHaveAttribute('aria-checked', 'true');
-  await expect(sw).toBeEnabled();
+  const off = await page.request.post('/api/telemetry/settings', { headers: { origin: BASE, 'content-type': 'application/json' }, data: { enabled: false } });
+  expect(off.status()).toBe(403);
+  expect(psql(`select enabled from public.lp_tel_settings`)).toBe('t');
+});
+
+test('a lead turns collection off behind its confirm (ingest then 204) and back on with one tap', async ({ browser }) => {
+  const ctx = await newSignedInContext(browser, LEAD, { baseURL: BASE });
+  const page = await ctx.newPage();
+  try {
+    await openHealth(page);
+    const sw = page.getByTestId('health-switch');
+    await expect(sw).toHaveAttribute('aria-checked', 'true');
+    await sw.click();
+    await expect(page.getByTestId('health-confirm')).toBeVisible();
+    await page.getByTestId('health-turn-off').click();
+    await expect(sw).toHaveAttribute('aria-checked', 'false');
+    await expect(page.getByTestId('health-status')).toContainText('Off');
+    expect(psql(`select enabled from public.lp_tel_settings`)).toBe('f');
+    const ingest = await page.request.post('/api/telemetry', {
+      headers: { origin: BASE, 'content-type': 'application/json' },
+      data: { v: 1, b: 'e2eoffbatch01', d: DEVICE, s: 'sesse2e001', sent: Date.now(), ctx: { plat: 'mac', osv: 0, eng: 'blink', sa: false, lay: 'desktop', dpr: 2, touch: false, build: 'none', eff: 'na', mem: -1 }, ev: [{ n: 'view', at: Date.now() }] },
+    });
+    expect(ingest.status()).toBe(204);
+    // Off, one tap turns it back on (no confirm: turning it on loses nothing).
+    await expect(sw).toBeEnabled();
+    await sw.click();
+    await expect(sw).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByTestId('health-confirm')).toBeHidden();
+    expect(psql(`select enabled from public.lp_tel_settings`)).toBe('t');
+    await expect(sw).toBeEnabled();
+  } finally {
+    await ctx.close();
+  }
 });
 
 test('axe finds nothing on /health', async ({ page }) => {

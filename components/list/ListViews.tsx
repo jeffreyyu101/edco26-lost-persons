@@ -24,7 +24,7 @@ import { Button, Text } from '@radix-ui/themes';
 import { MapPin, Plus, Search as SearchIcon, X } from 'lucide-react';
 import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { AccountMenu } from '@/components/account/AccountMenu';
-import { AlertsBannerSlot as AlertsBanner } from '@/components/activity/slots';
+import { AlertsBannerSlot as AlertsBanner } from '@/components/alerts/banner-slot';
 import { ConnectionBanner } from '@/components/ui/Banner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LiveIndicator } from '@/components/ui/LiveIndicator';
@@ -73,11 +73,14 @@ import { AllSkeleton, MineSkeleton, PendingSkeleton } from './ListSkeletons';
 import { ArchivedFold, ArchivedRows, ColumnHeader, GroupDivider, LogGrid, LogRow, OutboxLogRow, SearchLogRow } from './rows';
 import type { ListViewName } from './ViewSwitcher';
 import s from './list.module.css';
+import { EventStageChip } from '@/components/ui/EventStageChip';
+import { useEventConfig } from '@/lib/client/event-config';
 
 const selectHydrated = (state: StoreState) => state.hydrated;
 
-/** "New request": the 50 px capsule floating over the list (polish-v7.html .fab). */
+/** "New request": the 50 px capsule floating over the list (polish-v7.html .fab). (Events) None in an archived event. */
 function NewRequestButton() {
+  if (useEventConfig()?.stage === 'archived') return null;
   return (
     <button type="button" className={s.fab} onClick={() => navigate({ new: true })}>
       <Plus size={18} strokeWidth={2.25} aria-hidden />
@@ -162,7 +165,7 @@ function Chrome({ view, sort = null, chips, filtered = false, skeleton, children
     <div className={s.root} data-view={view} ref={rootRef}>
       {brand ? <BrandCard onHide={hideBrand} /> : null}
       {/* F4: until lock-screen alerts work on this phone (on the desk it sits in the main column). */}
-      {inDesk ? null : <AlertsBanner />}
+      {inDesk ? null : <AlertsBanner place="list" />}
       <div className={s.sticky} ref={stickyRef}>
         <AppHeader
           view={view}
@@ -180,11 +183,18 @@ function Chrome({ view, sort = null, chips, filtered = false, skeleton, children
           <div className={s.liveRow} data-testid="live-row">
             <div className={s.liveIn}>
               <LiveIndicator className={s.liveLead} line={live} onRefresh={refresh} />
+              {/* (Events) The event's stage, on the header's second line (the title keeps its room). */}
+              <EventStageChip className={s.stage} />
               {sort}
             </div>
           </div>
         ) : (
-          <LiveIndicator className={s.live} line={live} onRefresh={refresh} />
+          <div className={s.liveRow}>
+            <div className={s.liveIn}>
+              <LiveIndicator className={s.liveLead} line={live} onRefresh={refresh} />
+              <EventStageChip className={s.stage} />
+            </div>
+          </div>
         )}
         {loading ? null : <ConnectionBanner status={live} />}
         {chips}
@@ -192,7 +202,7 @@ function Chrome({ view, sort = null, chips, filtered = false, skeleton, children
       <main className={s.body}>
         {inDesk ? (
           <div className={s.alertsWrap} ref={alertsRef}>
-            <AlertsBanner />
+            <AlertsBanner place="desk-main" />
           </div>
         ) : null}
         {body}

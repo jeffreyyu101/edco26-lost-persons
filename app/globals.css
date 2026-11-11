@@ -54,9 +54,16 @@ select {
   color: var(--gray-1);
 }
 
-/* The EDC Orlando logo is black; invert it in dark mode (the Ground Control logo stays full colour). */
-.dark .lp-logo-edc {
-  filter: invert(1);
+/* (Events) An event's single-colour transparent logo (components/ui/EventLogo.tsx): white on the dark brand surfaces,
+   the theme's ink on the page (black in light, white in dark). Any other logo is shown as uploaded. */
+.lp-logo-white {
+  filter: brightness(0) invert(1);
+}
+.lp-logo-ink {
+  filter: brightness(0);
+}
+.dark .lp-logo-ink {
+  filter: brightness(0) invert(1);
 }
 
 @media (prefers-reduced-motion: reduce) {

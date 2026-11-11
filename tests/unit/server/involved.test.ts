@@ -30,6 +30,7 @@ vi.mock('@/lib/server/supabase', () => ({
 }));
 
 const { involvedStaff, newRequestStaff, staffList } = await import('@/lib/server/involved');
+const EVENT = '10ca1000-0000-4000-8000-000000000001';
 const ID = '0f0f0f0f-0000-4000-8000-0000000000d4';
 
 beforeEach(() => {
@@ -42,10 +43,10 @@ beforeEach(() => {
 describe('involvedStaff', () => {
   it('uses lp_involved_staff when it answers (setof text, or rows of one column)', async () => {
     db.involved.data = ['Dana Kim · GC/HX - Dispatch', 'Sam Lee · GC/HX - Base'];
-    expect(await involvedStaff(ID)).toEqual(['Dana Kim · GC/HX - Dispatch', 'Sam Lee · GC/HX - Base']);
+    expect(await involvedStaff(EVENT, ID)).toEqual(['Dana Kim · GC/HX - Dispatch', 'Sam Lee · GC/HX - Base']);
     expect(db.calls).toEqual(['lp_involved_staff']);
     db.involved.data = [{ lp_involved_staff: 'Dana Kim · GC/HX - Dispatch' }];
-    expect(await involvedStaff(ID)).toEqual(['Dana Kim · GC/HX - Dispatch']);
+    expect(await involvedStaff(EVENT, ID)).toEqual(['Dana Kim · GC/HX - Dispatch']);
   });
 
   it.each([
@@ -54,25 +55,25 @@ describe('involvedStaff', () => {
     ['any other error', { code: 'XX000', message: 'boom' }],
   ])('falls back to logger + answerer on %s', async (_name, error) => {
     db.involved.error = error;
-    expect(await involvedStaff(ID)).toEqual(['Dana Kim · GC/HX - Dispatch', 'Rae Chen · Medical']);
+    expect(await involvedStaff(EVENT, ID)).toEqual(['Dana Kim · GC/HX - Dispatch', 'Rae Chen · Medical']);
     expect(db.calls).toEqual(['lp_involved_staff', 'lp_activity_fallback_staff']);
   });
 
   it('falls back on a network failure and on an empty answer', async () => {
     db.involved.throws = true;
-    expect(await involvedStaff(ID)).toHaveLength(2);
+    expect(await involvedStaff(EVENT, ID)).toHaveLength(2);
     db.involved = { data: [], error: null, throws: false };
-    expect(await involvedStaff(ID)).toHaveLength(2);
+    expect(await involvedStaff(EVENT, ID)).toHaveLength(2);
   });
 
   it('never throws, even when the fallback fails too', async () => {
     db.involved.error = { code: 'PGRST202' };
     db.fallbackThrows = true;
-    await expect(involvedStaff(ID)).resolves.toEqual([]);
+    await expect(involvedStaff(EVENT, ID)).resolves.toEqual([]);
   });
 
   it('newRequestStaff reads the New requests switch', async () => {
-    expect(await newRequestStaff()).toEqual(['rae chen · medical']);
+    expect(await newRequestStaff(EVENT)).toEqual(['rae chen · medical']);
   });
 
   it('staffList keeps strings only', () => {

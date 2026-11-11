@@ -8,19 +8,30 @@ import { randomBytes } from 'node:crypto';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import type { Stats } from '@/lib/api-types';
-import { POSTS, STATUS } from '@/lib/domain';
-import { ROOT } from '../../scripts/test-env.mjs';
-import { admin, api, cookieFor, createBody, createRequest, dbUrl, newStaff, pii, psql, uniq, withTestServer } from './harness';
+import type { EventStats, Stats } from '@/lib/api-types';
+import { STATUS } from '@/lib/domain';
+import { ROOT, TEST_EVENT_ID, TEST_EVENT_SQL } from '../../scripts/test-env.mjs';
+import { EVENT_ID, admin, api, cookieFor, createBody, createRequest, dbUrl, newStaff, pii, psql, uniq, withTestServer } from './harness';
+
+/** (Phase 2) The local test event's posts (scripts/test-env.mjs TEST_EVENT_SQL): no post list is built into the app. */
+const TEST_POSTS = [
+  { value: 'FA 3 – Kinetic', short: 'FA 3' },
+  { value: 'FA 4 – Oasis', short: 'FA 4' },
+  { value: 'Command', short: 'Command' },
+  { value: 'Base', short: 'Base' },
+] as const;
 
 withTestServer();
 
 const lit = (v: string) => `'${v.replace(/'/g, "''")}'`;
 const OPEN_SQL = `status in (${[STATUS.waiting, STATUS.inMedical, STATUS.legacyBringFriend, STATUS.accompanied].map(lit).join(', ')})`;
 
-/** count(*) of patients matching a SQL condition (local database, test-only). */
+/** (Events) Stats are the session's event's: every database check below reads the test event only. */
+const IN_EVENT = `event_id = '${EVENT_ID}'`;
+
+/** count(*) of the test event's patients matching a SQL condition (local database, test-only). */
 async function count(where = 'true'): Promise<number> {
-  return Number(psql(`select count(*) from public.patients where ${where}`));
+  return Number(psql(`select count(*) from public.patients where ${IN_EVENT} and (${where})`));
 }
 
 async function stats(): Promise<Stats> {
@@ -38,7 +49,7 @@ function expectedAvgAnswerMinutes(): number | null {
       'next', e.new_value ->> 'status', 'outcome', e.new_value ->> 'outcome', 'held', e.new_value ->> 'held',
       'at', extract(epoch from e.occurred_at), 'created', extract(epoch from p.created_at),
       'now', extract(epoch from clock_timestamp()))), '[]')
-    from public.audit_events e join public.patients p on p.id = e.patient_id`);
+    from public.audit_events e join public.patients p on p.id = e.patient_id where p.${IN_EVENT}`);
   const events = JSON.parse(raw) as Array<{ pid: string; type: string; prev: string | null; next: string | null; outcome: string | null; held: string | null; at: number; created: number; now: number }>;
   const answers = new Set([STATUS.notInMedical, STATUS.inMedical, STATUS.legacyBringFriend, STATUS.accompanied] as string[]);
   const first = new Map<string, { at: number; created: number }>();
@@ -68,7 +79,7 @@ function rawAudit() {
       'pid', e.patient_id, 'type', e.action_type, 'prev', e.previous_value ->> 'status',
       'next', e.new_value ->> 'status', 'status', p.status,
       'at', extract(epoch from e.occurred_at), 'now', extract(epoch from clock_timestamp()))), '[]')
-    from public.audit_events e join public.patients p on p.id = e.patient_id`);
+    from public.audit_events e join public.patients p on p.id = e.patient_id where p.${IN_EVENT}`);
   return JSON.parse(raw) as Array<{ pid: string; type: string; prev: string | null; next: string | null; status: string; at: number; now: number }>;
 }
 
@@ -107,7 +118,7 @@ function expectedAvgReuniteMinutes(): number | null {
 
 /** Requests created in the last 60 minutes, by the database clock. */
 function loggedLastHourNow(): number {
-  return Number(psql(`select count(*) from public.patients where created_at > clock_timestamp() - interval '60 minutes'`));
+  return Number(psql(`select count(*) from public.patients where ${IN_EVENT} and created_at > clock_timestamp() - interval '60 minutes'`));
 }
 
 describe('GET /api/stats', () => {
@@ -132,14 +143,16 @@ describe('GET /api/stats', () => {
     expect(s.total).toBe(await count());
     expect(s.serverTime).toMatch(/[+-]\d\d:\d\d$/);
 
-    // byPost: the 4 fixed posts first (always present), then other locations with open rows; sums to open.
-    const fixed = POSTS.filter((p) => p.value !== 'Other');
-    expect(s.byPost.slice(0, 4).map((b) => b.reportingLocation)).toEqual(fixed.map((p) => p.value));
-    expect(s.byPost.slice(0, 4).map((b) => b.postShort)).toEqual(fixed.map((p) => p.short));
-    for (const b of s.byPost.slice(0, 4)) {
-      expect(b.count).toBe(await count(`reporting_location = ${lit(b.reportingLocation)} and ${OPEN_SQL}`));
+    // byPost: (Events) the event's posts (always present, also at 0) and other locations with open rows, ordered by
+    // count; sums to open.
+    const fixed = TEST_POSTS;
+    for (const p of fixed) {
+      const b = s.byPost.find((x) => x.reportingLocation === p.value);
+      expect(b, p.value).toMatchObject({ postShort: p.short, otherLocation: null });
+      expect(b!.count).toBe(await count(`reporting_location = ${lit(p.value)} and ${OPEN_SQL}`));
     }
-    for (const b of s.byPost.slice(4)) expect(b.count).toBeGreaterThan(0);
+    for (const b of s.byPost.filter((x) => !fixed.some((p) => p.value === x.reportingLocation))) expect(b.count).toBeGreaterThan(0);
+    expect(s.byPost.map((b) => b.count)).toEqual([...s.byPost.map((b) => b.count)].sort((a, b) => b - a));
     expect(s.byPost.reduce((n, b) => n + b.count, 0)).toBe(waiting + inMedical);
 
     // longestWait: the oldest Waiting row, leaving out holds that are not due (F5: this test's own request is
@@ -147,6 +160,7 @@ describe('GET /api/stats', () => {
     const { data: oldest } = await admin()
       .from('patients')
       .select('id, case_number, created_at')
+      .eq('event_id', EVENT_ID)
       .eq('status', STATUS.waiting)
       .or(`recheck_at.is.null,recheck_at.lte.${new Date(Date.parse(s.serverTime)).toISOString()}`)
       .order('created_at', { ascending: true })
@@ -165,6 +179,7 @@ describe('GET /api/stats', () => {
     const { data: recent } = await admin()
       .from('patients')
       .select('id')
+      .eq('event_id', EVENT_ID)
       .order('updated_at', { ascending: false })
       .order('case_number', { ascending: false })
       .limit(5);
@@ -252,8 +267,8 @@ describe('GET /api/stats?range= (Dashboard v4)', () => {
     const plain = await api<Stats>('/api/stats', { cookie });
     expect(plain.status).toBe(200);
     for (const k of V4_KEYS) expect(plain.body, k).not.toHaveProperty(k);
-    for (const range of ['1h', '2h', '6h', 'tonight', 'event'] as const) {
-      const res = await api<Stats>(`/api/stats?range=${range}`, { cookie });
+    for (const range of ['1h', '2h', '6h', 'today', 'event', 'day:1'] as const) {
+      const res = await api<EventStats>(`/api/stats?range=${range}`, { cookie });
       expect(res.status, range).toBe(200);
       expect(res.headers.get('cache-control')).toBe('no-store');
       expect(res.headers.get('etag'), range).toMatch(/^W\/"[\w-]{27}"$/);
@@ -264,7 +279,14 @@ describe('GET /api/stats?range= (Dashboard v4)', () => {
       expect(res.body.recent.every((r) => r.name === null), range).toBe(true);
       const a = res.body.attention!;
       expect(a.items.length).toBeLessThanOrEqual(5);
-      for (const it of a.items) expect(Object.keys(it).sort()).toEqual(['caseNumber', 'enroute', 'etaAt', 'id', 'kind', 'since', 'tent']);
+      for (const it of a.items) expect(Object.keys(it).sort()).toEqual(['caseNumber', 'enroute', 'etaAt', 'id', 'kind', 'post', 'since']);
+      // (Events) Post breakdowns are arrays in the range's post order, never fixed FA 3 / FA 4 keys.
+      const order = res.body.range!.posts.map((p) => p.post);
+      for (const b of res.body.calls!.buckets) {
+        expect(b.posts.map((p) => p.post), range).toEqual(order);
+        expect(b.posts.reduce((n, p) => n + p.n, 0), range).toBe(b.n);
+        expect(b).not.toHaveProperty('fa4');
+      }
       expect(res.body.live!.waiting + res.body.live!.pending + res.body.live!.located).toBe(res.body.open.waiting + res.body.open.inMedical);
     }
   });
@@ -272,6 +294,9 @@ describe('GET /api/stats?range= (Dashboard v4)', () => {
   it('a range the server does not know is a 400; no range is the old answer', async () => {
     const cookie = await cookieFor(newStaff());
     expect((await api('/api/stats?range=3d', { cookie })).status).toBe(400);
+    // (Events) 'tonight' became 'today' (the show day); day:0 is not a show day.
+    expect((await api('/api/stats?range=tonight', { cookie })).status).toBe(400);
+    expect((await api('/api/stats?range=day:0', { cookie })).status).toBe(400);
     expect((await api('/api/stats?range=', { cookie })).status).toBe(400);
   });
 
@@ -322,9 +347,18 @@ function scratch(args: string[]): string {
   }).trim();
 }
 
-/** lp_stats() on the scratch database, called as service_role like the app server. */
+/**
+ * (Events) The scratch databases' one live event (EDC's posts and teams, show day from noon like the old nights), and
+ * defaults for the synthetic inserts below (test databases only): every row is that event's, numbered from a sequence.
+ */
+const SCRATCH_EVENT = '5c7a7c00-0000-4000-8000-000000000001';
+const SCRATCH_EVENT_SQL = `${TEST_EVENT_SQL.replaceAll(TEST_EVENT_ID, SCRATCH_EVENT)}
+  alter table public.patients alter column event_id set default '${SCRATCH_EVENT}';
+  alter table public.patients alter column case_number set default nextval('public.patient_case_number_seq');`;
+
+/** lp_stats(event) on the scratch database, called as service_role like the app server. */
 function scratchStats(): Stats {
-  return JSON.parse(scratch(['-c', 'set role service_role; select public.lp_stats()::text;'])) as Stats;
+  return JSON.parse(scratch(['-c', `set role service_role; select public.lp_stats('${SCRATCH_EVENT}')::text;`])) as Stats;
 }
 
 type Ev = [key: string, actionType: string, previous: object | null, next: object | null, minutesAgo: number];
@@ -363,8 +397,9 @@ describe('lp_stats avgReuniteMinutes and loggedLastHour: exact values on a scrat
     psql(`create database ${SCRATCH}`);
     scratchCreated = true;
     const chain = readdirSync(join(ROOT, 'supabase', 'migrations')).filter((f) => f.endsWith('.sql')).sort();
-    expect(chain.at(-1)).toBe('20261109120000_companion_post_event.sql');
+    expect(chain.at(-1)).toBe('20261110000000_events.sql');
     for (const file of chain) scratch(['-f', join(ROOT, 'supabase', 'migrations', file)]);
+    scratch(['-c', SCRATCH_EVENT_SQL]);
     expect(scratchStats()).toMatchObject({ total: 0, avgReuniteMinutes: null, loggedLastHour: 0, avgAnswerMinutes: null });
   }, 60_000);
 
@@ -478,7 +513,7 @@ describe('lp_stats avgReuniteMinutes and loggedLastHour: exact values on a scrat
     const since = scratch([
       '-c',
       `set role service_role; select x ->> 'kind', round(extract(epoch from now() - (x ->> 'since')::timestamptz) / 60)
-       from public.lp_stats('event') s, jsonb_array_elements(s #> '{attention,items}') x where x ->> 'id' = '${id}';`,
+       from public.lp_stats('${SCRATCH_EVENT}', 'event') s, jsonb_array_elements(s #> '{attention,items}') x where x ->> 'id' = '${id}';`,
     ]);
     expect(since).toBe('located|40');
   });
@@ -499,9 +534,12 @@ function scratch4(args: string[]): string {
   return execFileSync('psql', [url.toString(), '-v', 'ON_ERROR_STOP=1', '-q', '-At', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
-function scratchRanged(range: string): Stats {
-  return JSON.parse(scratch4(['-c', `set role service_role; select public.lp_stats('${range}')::text;`])) as Stats;
+function scratchRanged(range: string): EventStats {
+  return JSON.parse(scratch4(['-c', `set role service_role; select public.lp_stats('${SCRATCH_EVENT}', '${range}')::text;`])) as EventStats;
 }
+
+/** A post breakdown as {post: n} (or {post: median} for speed). */
+const byPost = <T extends { post: string }>(list: T[], value: (x: T) => number | null) => Object.fromEntries(list.map((x) => [x.post, value(x)]));
 
 describe('lp_stats(p_range): exact values on a scratch database (Dashboard v4)', () => {
   const S = STATUS;
@@ -517,6 +555,7 @@ describe('lp_stats(p_range): exact values on a scratch database (Dashboard v4)',
     scratch4Created = true;
     const chain = readdirSync(join(ROOT, 'supabase', 'migrations')).filter((f) => f.endsWith('.sql')).sort();
     for (const file of chain) scratch4(['-f', join(ROOT, 'supabase', 'migrations', file)]);
+    scratch4(['-c', SCRATCH_EVENT_SQL]);
     const staff = "'TEST-core Staff · Medical'";
     const rows: Array<[string, string, string, string, string]> = [
       // key, location, status, created_at, recheck_at
@@ -561,30 +600,35 @@ describe('lp_stats(p_range): exact values on a scratch database (Dashboard v4)',
     expect(new Date(s.range!.from).getUTCMinutes() % 15).toBe(0);
     expect(s.live).toEqual({ waiting: 1, pending: 2, located: 1 });
     expect(s.attention!.total).toBe(3);
-    expect(s.attention!.items.map((i) => [i.kind, i.tent])).toEqual([
+    expect(s.attention!.items.map((i) => [i.kind, i.post])).toEqual([
       ['wait', 'FA 4'],
       ['recheck', 'FA 3'],
       ['located', 'Other'],
     ]);
     expect(s.calls!.total).toBe(6);
     expect(s.calls!.prevTotal).toBe(1);
-    expect(s.calls!.buckets.reduce((a, b) => a + b.fa4 + b.fa3 + b.other, 0)).toBe(6);
+    expect(s.calls!.buckets.reduce((a, b) => a + b.n, 0)).toBe(6);
+    // (Events) The range's posts by count: FA 3 (3), FA 4 (2), then Other (1).
+    expect(s.range!.posts).toEqual([{ post: 'FA 3', n: 3 }, { post: 'FA 4', n: 2 }, { post: 'Other', n: 1 }]);
+    expect(s.calls!.buckets.reduce((a, b) => a + (b.posts.find((p) => p.post === 'FA 3')?.n ?? 0), 0)).toBe(3);
     expect(s.calls!.buckets.reduce((a, b) => a + (b.prev ?? 0), 0)).toBe(1);
     const sp = Object.fromEntries(s.speed!.map((x) => [x.key, x]));
     expect(sp.firstCheck).toMatchObject({ n: 3, median: 10, p90: 19.6, target: 10 });
-    expect(sp.firstCheck!.byTent).toEqual({ 'FA 4': 10, 'FA 3': 5, Other: 22 });
+    expect(byPost(sp.firstCheck!.byPost, (x) => x.median)).toEqual({ 'FA 4': 10, 'FA 3': 5, Other: 22 });
+    expect(sp.firstCheck!.byPost.map((x) => x.post)).toEqual(['FA 3', 'FA 4', 'Other']);
     expect(sp.located).toMatchObject({ n: 3, median: 10, target: 15 });
     expect(sp.reunited).toMatchObject({ n: 2, median: 19, target: 30, prevMedian: 20 });
     expect(s.recap).toMatchObject({ reunited: 2, notLocated: 0, fastest: 15, prevReunited: 1, prevFastest: 20 });
+    // (Events) The event's teams in setup order.
     expect(s.team).toEqual([
-      { team: 'medical', on: 1 },
+      { team: 'transpo', on: 0 },
       { team: 'dispatch', on: 0 },
       { team: 'base', on: 0 },
-      { team: 'transpo', on: 0 },
+      { team: 'medical', on: 1 },
     ]);
   });
 
-  it('2h and event widen the window; event has no night before; tonight starts at noon ET', () => {
+  it('2h and event widen the window; event has no day before; today starts at the show day start (noon here, ET)', () => {
     const two = scratchRanged('2h');
     expect([two.calls!.total, two.calls!.prevTotal, two.recap!.notLocated]).toEqual([7, 1, 1]);
     expect(two.speed!.find((x) => x.key === 'firstCheck')).toMatchObject({ n: 4, median: 10 });
@@ -592,10 +636,11 @@ describe('lp_stats(p_range): exact values on a scratch database (Dashboard v4)',
     expect(ev.range).toMatchObject({ key: 'event', step: 60, compare: false });
     expect(ev.calls!.total).toBe(9);
     expect(ev.calls!.prevTotal).toBeNull();
-    expect(ev.calls!.buckets.every((b) => b.prev === null && b.night !== null)).toBe(true);
-    expect(new Set(ev.calls!.buckets.map((b) => b.night)).size).toBeGreaterThanOrEqual(2);
-    expect(ev.heat!.cols.reduce((a, c) => a + c.fa4 + c.fa3 + c.other, 0)).toBe(9);
-    const t = scratchRanged('tonight');
+    expect(ev.calls!.buckets.every((b) => b.prev === null && b.day !== null)).toBe(true);
+    expect(new Set(ev.calls!.buckets.map((b) => b.day)).size).toBeGreaterThanOrEqual(2);
+    expect(ev.heat!.cols.reduce((a, c) => a + c.n, 0)).toBe(9);
+    expect(ev.heat!.cols.every((c) => c.posts.reduce((n, p) => n + p.n, 0) === c.n)).toBe(true);
+    const t = scratchRanged('today');
     const from = new Date(t.range!.from);
     const et = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' }).format(from);
     expect(et).toBe('12:00');
@@ -604,5 +649,24 @@ describe('lp_stats(p_range): exact values on a scratch database (Dashboard v4)',
 
   it('a bad range is refused', () => {
     expect(() => scratchRanged('3d')).toThrow(/bad_range/);
+    expect(() => scratchRanged('tonight')).toThrow(/bad_range/);
+    expect(() => scratchRanged('day:0')).toThrow(/bad_range/);
+  });
+
+  it('(events) day:N is show day N in the event\'s zone, from its start hour, 24 h, compared with the day before', () => {
+    // The scratch event starts yesterday (TEST_EVENT_SQL): today's show day is day 2 or, before noon ET, day 1.
+    const today = scratchRanged('today');
+    const d1 = scratchRanged('day:1');
+    const d2 = scratchRanged('day:2');
+    const current = Date.parse(d2.range!.from) <= Date.now() ? d2 : d1;
+    expect(current.range!.from).toBe(today.range!.from);
+    expect(current.calls!.total).toBe(today.calls!.total);
+    expect(d1.range).toMatchObject({ key: 'day:1', day: 1, compare: false, step: 15 });
+    expect(d2.range).toMatchObject({ key: 'day:2', day: 2, compare: true });
+    expect(Date.parse(d2.range!.from) - Date.parse(d1.range!.from)).toBe(24 * 3_600_000);
+    const et = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' });
+    expect(et.format(new Date(d1.range!.from))).toBe('12:00');
+    // A show day far in the future is empty, not an error.
+    expect(scratchRanged('day:300').calls!.total).toBe(0);
   });
 });

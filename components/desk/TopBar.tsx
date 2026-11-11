@@ -26,6 +26,8 @@ import { SIDEBAR_ID } from './sidebar-model';
 import { toggleSidebar, useSidebar } from './sidebar-state';
 import type { MainView } from './views';
 import d from './desk.module.css';
+import { EventStageChip, NOT_LIVE, PRACTICE } from '@/components/ui/EventStageChip';
+import { useEventConfig } from '@/lib/client/event-config';
 
 /** nav.parseView ignores a longer ?q=. */
 const MAX_QUERY = 200;
@@ -40,6 +42,7 @@ export function DeskTop({ main, pane = false }: DeskTopProps) {
   const count = useMainCount(main);
   const searching = main.name === 'search';
   const sidebar = useSidebar(pane);
+  const archived = useEventConfig()?.stage === 'archived';
   return (
     <div className={d.topbar} data-searching={searching ? '' : undefined} data-testid="desk-topbar">
       <button
@@ -64,6 +67,8 @@ export function DeskTop({ main, pane = false }: DeskTopProps) {
           </>
         )}
       </h1>
+      {/* (Events) The event's stage after the title: practice on every view (an archived dashboard draws its own chip). */}
+      {main.name === 'dashboard' ? <EventStageChip only={PRACTICE} className={d.stage} /> : null}
       {main.name === 'dashboard' ? (
         // Dashboard v4: who's on and the range control, portalled in by the dashboard (no search or New here), then the
         // Activity bell, as on every view (the sidebar has no Activity item, Brian 2026-11-08).
@@ -76,6 +81,9 @@ export function DeskTop({ main, pane = false }: DeskTopProps) {
       ) : (
         <>
           <ListLive />
+          {/* (Events) Practice and archived, after the line. Not Live: a running event is the normal case, and the top bar
+              gives its room to the title, its count and the line (they are never cut). */}
+          <EventStageChip only={NOT_LIVE} className={d.stage} />
           <span className={d.sp} />
           <SearchField main={main} />
           <IconButton
@@ -90,12 +98,14 @@ export function DeskTop({ main, pane = false }: DeskTopProps) {
           </IconButton>
           {/* Named by its visible text: "New request", or "New" when the column is narrow (an aria-label would
               not match the visible text, axe label-content-name-mismatch). */}
-          <button type="button" className={`${d.newb} lp-hit`} aria-keyshortcuts="N" onClick={() => navigate({ new: true })} data-testid="desk-new">
-            <Plus size={16} strokeWidth={2} aria-hidden />
-            <span className={d.newLong}>New request</span>
-            <span className={d.newShort}>New</span>
-            <Kbd className={d.newKbd}>N</Kbd>
-          </button>
+          {archived ? null : (
+            <button type="button" className={`${d.newb} lp-hit`} aria-keyshortcuts="N" onClick={() => navigate({ new: true })} data-testid="desk-new">
+              <Plus size={16} strokeWidth={2} aria-hidden />
+              <span className={d.newLong}>New request</span>
+              <span className={d.newShort}>New</span>
+              <Kbd className={d.newKbd}>N</Kbd>
+            </button>
+          )}
           {/* F4: the Activity bell, its popover anchored here. Its box keeps the bell's 28 px while the chunk loads. */}
           <span className={d.bellBox}>
             <ActivityBellSlot place="desk" />

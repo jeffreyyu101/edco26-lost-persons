@@ -5,6 +5,7 @@
 // "unchanged" and an explicit null means "clear". Lengths count Unicode code points, like SQL char_length.
 // Age and gender are free text (Jeffrey, 2026-11-06 10:31; design/DECISIONS.md "New request: free text").
 import { z } from 'zod';
+import { deriveShort } from './short-label';
 import {
   FRIEND_IN_MEDICAL,
   LIMITS,
@@ -14,7 +15,6 @@ import {
   OTHER_TEAM_MAX,
   OTHER_TEAM_MIN,
   PHOTO_TIMINGS,
-  POST_VALUES,
   SETTABLE_STATUSES,
   STAFF_FORBIDDEN_CHARS,
   SWAP_PLACES,
@@ -22,7 +22,6 @@ import {
   STAFF_NAME_MIN,
   STATUS,
   STATUS_KINDS,
-  TEAM_VALUES,
   canonicalTeam,
 } from './domain';
 
@@ -64,7 +63,9 @@ const ageField = z
 /** Free text (trimmed, '' → null, at most LIMITS.gender); Male / Female / Other are quick-fill options. */
 const genderField = optionalText(LIMITS.gender);
 
-const postField = z.enum(POST_VALUES);
+// (Events) Which posts are valid is the event's (lp_clean_fields(p_event, …) refuses anything else with 422
+// field reportingLocation); here only its shape.
+const postField = z.string().min(1).max(40).refine((v) => v === v.trim() && v !== '', { message: 'Choose a post' });
 const otherLocationField = optionalText(LIMITS.otherLocation);
 
 export const uuidSchema = z.uuid();
@@ -208,15 +209,16 @@ export type SignInCredential = { password: string } | { invite: string };
 /**
  * POST /api/session. `team` is a card value or "Other" with `otherTeam` (2–80 characters), and exactly one
  * of `password` (the event password) or `invite` (the team join link's code, J1).
- * Output: {staffName, team, password} or {staffName, team, invite}. `team` is always canonical (spec §4
- * "Data stores the canonical value"): a card value as is, and the Other text through domain.canonicalTeam(),
- * so a known alias typed there ("dispatch", "gchx base", "prevent") becomes its canonical team; anything else
- * stays as typed (whitespace collapsed).
+ * Output: {staffName, team, password} or {staffName, team, invite}. `team`: a card value as is, the Other text as
+ * typed (whitespace collapsed). (Events) The route then spells it as the matched event does when it is one of that
+ * event's teams (by label, case-insensitive); anything else stays Other text.
  */
 export const signInSchema = z
   .strictObject({
     staffName: staffText(STAFF_NAME_MIN, STAFF_NAME_MAX, 'Name'),
-    team: z.union([z.enum(TEAM_VALUES), z.literal(OTHER_TEAM)]),
+    // (Events) A team is one of the event's sign-in teams (checked by the route once it knows the event) or "Other"
+    // with free text; the card values are no longer a fixed list here.
+    team: z.union([z.literal(OTHER_TEAM), staffText(OTHER_TEAM_MIN, OTHER_TEAM_MAX, 'Team')]),
     otherTeam: z.union([staffText(OTHER_TEAM_MIN, OTHER_TEAM_MAX, 'Team'), z.literal(''), z.null()]).optional(),
     password: z.string().min(1).max(200).optional(),
     invite: z.string().min(1).max(200).optional(),
@@ -270,12 +272,18 @@ export const syncQuerySchema = z
       .transform((s) => s.split(',').map((x) => x.trim()).filter(Boolean))
       .pipe(z.array(uuidSchema).min(1).max(200))
       .optional(),
+    /**
+     * (Events) The event config version the client holds (sync's `event.version`, verbatim; '' when it has none). With
+     * it, the answer carries `event` whenever the event's version differs; without it (an older client) never, so an
+     * empty delta stays about 100 bytes.
+     */
+    ev: z.string().max(64).optional(),
   })
   .superRefine((v, ctx) => {
     if ((v.afterAt === undefined) !== (v.afterId === undefined)) {
       ctx.addIssue({ code: 'custom', path: ['afterAt'], message: 'afterAt and afterId go together' });
     }
-    if (v.ids && (v.since || v.reconcile || v.afterAt || v.afterId || v.limit)) {
+    if (v.ids && (v.since || v.reconcile || v.afterAt || v.afterId || v.limit || v.ev !== undefined)) {
       ctx.addIssue({ code: 'custom', path: ['ids'], message: 'ids cannot be combined with other parameters' });
     }
   });
@@ -422,3 +430,191 @@ export const enrouteSchema = z
     }
   });
 export type EnrouteBody = z.input<typeof enrouteSchema>;
+
+// ---------------------------------------------------------------------------------------------------
+// (Events) Lead routes: event settings, staff password, join link, lead passcode
+// ---------------------------------------------------------------------------------------------------
+
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, { message: 'Use YYYY-MM-DD' }).refine((v) => !Number.isNaN(Date.parse(`${v}T00:00:00Z`)), { message: 'Not a date' });
+const listId = z.string().regex(/^[a-z0-9_-]{1,24}$/);
+const listLabel = (max: number) =>
+  z
+    .string()
+    .transform((v) => v.trim().replace(/\s+/g, ' '))
+    .refine((v) => v.length >= 1 && v.length <= max, { message: `1–${max} characters` })
+    .refine((v) => v.toLowerCase() !== 'other', { message: '"Other" is always there' })
+    .refine(storable, { message: UNSTORABLE });
+
+/** A cell of the report's staffing table: trimmed, 1–max characters, storable. */
+const reportLine = (max: number) =>
+  z
+    .string()
+    .transform((v) => v.trim().replace(/\s+/g, ' '))
+    .refine((v) => v.length >= 1 && v.length <= max, { message: `1–${max} characters` })
+    .refine(storable, { message: UNSTORABLE });
+
+/** "FA 3 – Kinetic" → "fa-3-kinetic" (an id for a post or team that came without one). */
+export function listIdFrom(label: string, taken: ReadonlySet<string>): string {
+  const base = label.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 20) || 'item';
+  let id = base;
+  for (let n = 2; taken.has(id); n += 1) id = `${base}-${n}`.slice(0, 24);
+  return id;
+}
+
+function withIds<T extends { id?: string; label: string }>(items: T[]): Array<T & { id: string }> {
+  const taken = new Set<string>(items.flatMap((i) => (i.id ? [i.id] : [])));
+  return items.map((i) => {
+    if (i.id) return i as T & { id: string };
+    const id = listIdFrom(i.label, taken);
+    taken.add(id);
+    return { ...i, id };
+  });
+}
+
+/** A typed short (blank is none: the server derives one from the label, lib/short-label.ts). */
+const listShort = (max: number) =>
+  z
+    .string()
+    .transform((v) => v.trim().replace(/\s+/g, ' '))
+    .refine((v) => v.length <= max, { message: `Short: at most ${max} characters` })
+    .refine(storable, { message: UNSTORABLE })
+    .optional()
+    .transform((v) => v || undefined);
+
+/**
+ * Each label, id and (derived) short once, case-insensitively: two posts with the same short would be one series on
+ * the dashboard. The issue names the item (path [index, 'label' | 'short']), so the form marks that chip.
+ */
+function uniqueItems(items: ReadonlyArray<{ id: string; label: string; short: string }>, ctx: z.RefinementCtx, noun: 'post' | 'team') {
+  const labels = new Set<string>();
+  const shorts = new Set<string>();
+  const ids = new Set<string>();
+  items.forEach((item, i) => {
+    const label = item.label.toLowerCase();
+    const short = item.short.toLowerCase();
+    if (labels.has(label)) ctx.addIssue({ code: 'custom', message: `Each ${noun} once`, path: [i, 'label'] });
+    else if (shorts.has(short)) ctx.addIssue({ code: 'custom', message: 'Short already used', path: [i, 'short'] });
+    else if (ids.has(item.id)) ctx.addIssue({ code: 'custom', message: `Each ${noun} once`, path: [i, 'label'] });
+    labels.add(label);
+    shorts.add(short);
+    ids.add(item.id);
+  });
+}
+
+export const POST_SHORT_MAX = 16;
+export const TEAM_SHORT_MAX = 24;
+
+export const eventPostsSchema = z
+  .array(z.strictObject({ id: listId.optional(), label: listLabel(40), short: listShort(POST_SHORT_MAX) }))
+  .max(12)
+  .transform((items) => withIds(items).map((p) => ({ id: p.id, label: p.label, short: p.short ?? deriveShort(p.label, POST_SHORT_MAX) })))
+  .superRefine((items, ctx) => uniqueItems(items, ctx, 'post'));
+
+export const eventTeamsSchema = z
+  .array(
+    z.strictObject({
+      id: listId.optional(),
+      label: listLabel(80).refine((v) => v.length >= 2 && !STAFF_FORBIDDEN_CHARS.test(v), { message: 'Team: 2–80 characters, no "·"' }),
+      short: listShort(TEAM_SHORT_MAX),
+      medical: z.boolean().optional(),
+      // (Phase 2) A team's earlier labels (EventTeam.aliases): the server keeps them on a rename; what a lead sends back
+      // with the teams it read is accepted and ignored.
+      aliases: z.array(z.string().max(80)).max(24).optional(),
+    }),
+  )
+  .max(12)
+  .transform((items) =>
+    withIds(items).map((t) => ({ id: t.id, label: t.label, short: t.short ?? deriveShort(t.label, TEAM_SHORT_MAX), medical: t.medical === true })),
+  )
+  .superRefine((items, ctx) => uniqueItems(items, ctx, 'team'))
+  .refine((items) => items.filter((t) => t.medical).length <= 1, { message: 'Only one medical team' });
+
+const eventFields = {
+  slug: z.string().trim().toLowerCase().regex(/^[a-z0-9][a-z0-9-]{1,39}$/, { message: '2–40 lowercase letters, digits or dashes' }),
+  name: z.string().transform((v) => v.trim().replace(/\s+/g, ' ')).refine((v) => v.length >= 1 && v.length <= 80, { message: '1–80 characters' }).refine(storable, { message: UNSTORABLE }),
+  startsOn: isoDate,
+  endsOn: isoDate,
+  timezone: z.string().min(1).max(64).refine((tz) => {
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: tz });
+      return true;
+    } catch {
+      return false;
+    }
+  }, { message: 'Not a time zone' }),
+  dayStartHour: z.number().int().min(0).max(23),
+  posts: eventPostsSchema,
+  mainMedical: z.string().transform((v) => v.trim()).refine((v) => v.length >= 1 && v.length <= 40, { message: '1–40 characters' }),
+  teams: eventTeamsSchema,
+  lastSeen: z.array(z.string().transform((v) => v.trim()).refine((v) => v.length >= 1 && v.length <= 40)).max(12),
+  // The report's lines (spec "Report"): blank is none.
+  department: z
+    .string()
+    .transform((v) => v.trim().replace(/\s+/g, ' '))
+    .refine((v) => v.length <= 120, { message: 'At most 120 characters' })
+    .refine(storable, { message: UNSTORABLE })
+    .nullable()
+    .transform((v) => v || null),
+  staffing: z
+    .array(z.strictObject({ role: reportLine(80), name: reportLine(80) }))
+    .max(40, { message: 'At most 40 rows' }),
+  preparedBy: z
+    .string()
+    .transform((v) => v.trim().replace(/\s+/g, ' '))
+    .refine((v) => v.length <= 200, { message: 'At most 200 characters' })
+    .refine(storable, { message: UNSTORABLE })
+    .nullable()
+    .transform((v) => v || null),
+};
+
+const datesInOrder = (v: { startsOn?: string; endsOn?: string }) => !v.startsOn || !v.endsOn || v.endsOn >= v.startsOn;
+
+/** POST /api/events: slug, name and dates are required; the rest has defaults (America/New_York, 06:00, Main Med). */
+export const eventCreateSchema = z
+  .strictObject({
+    slug: eventFields.slug,
+    name: eventFields.name,
+    startsOn: eventFields.startsOn,
+    endsOn: eventFields.endsOn,
+    timezone: eventFields.timezone.optional(),
+    dayStartHour: eventFields.dayStartHour.optional(),
+    posts: eventFields.posts.optional(),
+    mainMedical: eventFields.mainMedical.optional(),
+    teams: eventFields.teams.optional(),
+    lastSeen: eventFields.lastSeen.optional(),
+    department: eventFields.department.optional(),
+    staffing: eventFields.staffing.optional(),
+    preparedBy: eventFields.preparedBy.optional(),
+  })
+  .refine(datesInOrder, { message: 'The last day is before the first', path: ['endsOn'] });
+
+/** PATCH /api/events/:id: any of the settings. */
+export const eventPatchSchema = z
+  .strictObject({
+    slug: eventFields.slug.optional(),
+    name: eventFields.name.optional(),
+    startsOn: eventFields.startsOn.optional(),
+    endsOn: eventFields.endsOn.optional(),
+    timezone: eventFields.timezone.optional(),
+    dayStartHour: eventFields.dayStartHour.optional(),
+    posts: eventFields.posts.optional(),
+    mainMedical: eventFields.mainMedical.optional(),
+    teams: eventFields.teams.optional(),
+    lastSeen: eventFields.lastSeen.optional(),
+    department: eventFields.department.optional(),
+    staffing: eventFields.staffing.optional(),
+    preparedBy: eventFields.preparedBy.optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to change' })
+  .refine(datesInOrder, { message: 'The last day is before the first', path: ['endsOn'] });
+
+export type EventSettingsInput = z.output<typeof eventPatchSchema>;
+
+/** A staff password or the lead passcode: 8–200 characters. */
+export const secretSchema = z.string().min(8, { message: 'At least 8 characters' }).max(200);
+export const eventPasswordSchema = z.strictObject({ password: secretSchema });
+export const leadPasscodeSchema = z.strictObject({ passcode: secretSchema });
+/** POST /api/events/:id/join-link: an optional expiry (default: two days after the last show day). */
+export const joinLinkSchema = z.strictObject({ expiresAt: z.iso.datetime({ offset: true }).optional() });
+/** POST /api/session/event: a lead opens an event (null: back to the Events list). */
+export const openEventSchema = z.strictObject({ eventId: z.uuid().nullable() });

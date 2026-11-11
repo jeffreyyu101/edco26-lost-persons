@@ -46,6 +46,31 @@ language sql immutable as $$
 $$;
 
 -- ---------------------------------------------------------------------------------------------------
+-- The event (Events, 20261110000000_events.sql): one live local event that every seed row belongs to. Same posts,
+-- teams and "Last seen" chips as EDC; the show day starts at noon, so the dashboard's Today matches the old
+-- noon-to-noon "Tonight" the tests were written against. Its staff password and the lead passcode are set by the
+-- test setups from .env.test (scripts/test-env.mjs ensureTestEvent), never here.
+-- ---------------------------------------------------------------------------------------------------
+insert into public.events (id, slug, name, starts_on, ends_on, timezone, day_start_hour, stage, posts, main_medical, teams,
+                           last_seen, went_live_at)
+values ('10ca1000-0000-4000-8000-000000000001', 'local', 'Local test event', current_date - 1, current_date + 1,
+        'America/New_York', 12, 'live',
+        '[{"id": "fa3", "label": "FA 3 – Kinetic", "short": "FA 3"},
+          {"id": "fa4", "label": "FA 4 – Oasis", "short": "FA 4"},
+          {"id": "command", "label": "Command", "short": "Command"},
+          {"id": "base", "label": "Base", "short": "Base"}]'::jsonb,
+        'Main Med',
+        '[{"id": "transpo", "label": "GC/HX - Special Operations/Med Transpo", "short": "GCHX Med Transpo", "medical": false},
+          {"id": "dispatch", "label": "GC/HX - Dispatch", "short": "Dispatch", "medical": false},
+          {"id": "base", "label": "GC/HX - Base", "short": "GCHX Base", "medical": false},
+          {"id": "medical", "label": "Medical", "short": "Medical", "medical": true}]'::jsonb,
+        '["kineticFIELD", "circuitGROUNDS", "neonGARDEN", "stereoBLOOM", "Taken to medical"]'::jsonb,
+        now() - interval '2 days')
+on conflict (id) do nothing;
+-- Every row below is the local event's (the default is dropped again after the inserts).
+alter table public.patients alter column event_id set default '10ca1000-0000-4000-8000-000000000001';
+
+-- ---------------------------------------------------------------------------------------------------
 -- Requests
 -- ---------------------------------------------------------------------------------------------------
 insert into public.patients (
@@ -150,8 +175,9 @@ insert into public.patients (
    null, null, null, null, 'Reunited – Closed', pg_temp.staff('lee'), pg_temp.staff('rae'),
    pg_temp.ago(1720), pg_temp.ago(1660), pg_temp.ago(1690), pg_temp.ago(1690), pg_temp.ago(1660), 2);
 
--- The next real request is LP-1014.
-select setval('public.patient_case_number_seq', 1013, true);
+-- The next real request is LP-1014 (the event's counter; the global sequence is retired).
+alter table public.patients alter column event_id drop default;
+update public.events set case_seq = 1013 where id = '10ca1000-0000-4000-8000-000000000001';
 
 -- ---------------------------------------------------------------------------------------------------
 -- Photos (objects are uploaded by scripts/db-reset.sh from supabase/seed-photos/)

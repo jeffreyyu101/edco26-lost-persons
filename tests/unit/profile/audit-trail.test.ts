@@ -1,3 +1,4 @@
+import { STUB_EVENT } from '@/lib/client/stub-data';
 import { describe, expect, it } from 'vitest';
 import type { AuditEvent } from '@/lib/api-types';
 import { STATUS } from '@/lib/domain';
@@ -24,7 +25,8 @@ const answer = ev('status', '04:10', RAE, { previous: { status: STATUS.waiting }
 
 describe('buildAuditTrail', () => {
   it('lists every event newest first with who (short team) and when (event timezone)', () => {
-    const items = buildAuditTrail([created, photo1, photo2, hair, answer], TZ);
+    // (Events) Short team names are the event's (the stub's: the local test event's).
+    const items = buildAuditTrail([created, photo1, photo2, hair, answer], TZ, STUB_EVENT.teams);
     expect(items.map((i) => i.status?.toLabel ?? i.title)).toEqual(['Located', 'Edited Hair', 'Photo added', 'Request logged']);
     expect(items[0]).toMatchObject({
       who: 'Rae Chen · GCHX Med Transpo',

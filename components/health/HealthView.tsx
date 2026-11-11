@@ -2,7 +2,8 @@
 // The Health page (/health, desktop only; design/references/observability-design.md §5): what staff ran into on the
 // floor, from the in-house telemetry. Data loads on mount and on Refresh only (no polling). Values first and large,
 // labels small; glyphs and colour carry state; screen readers hear full sentences. The switch turns collection off
-// (behind a confirm) through POST /api/telemetry/settings; once off it is disabled (back on is SQL only).
+// (behind a confirm) through POST /api/telemetry/settings, and back on with one tap. (Events) Leads only: for staff the
+// switch shows the state and is disabled.
 // Plain elements on Radix Themes' CSS variables, inline glyphs, no lib/telemetry: this chunk shares no module with
 // `/`'s first load, which the bundler otherwise regroups (+320 B gzipped, over A25's 42 KB).
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
@@ -16,7 +17,7 @@ import { PathTable } from './PathTable';
 import { ProblemTable } from './ProblemTable';
 import { PushPanel } from './PushPanel';
 import { TrailDrawer } from './TrailDrawer';
-import { DASH, HEALTH_SEEN_KEY, WINDOWS, fmtClock, fmtMs, fmtUntil, num, pct, trend, type HealthData, type Problem } from './health-model';
+import { DASH, HEALTH_SEEN_KEY, WINDOWS, fmtClock, fmtMs, num, pct, trend, applyHealthEvent, type HealthData, type Problem } from './health-model';
 import s from './health.module.css';
 
 const DESK_QUERY = '(min-width: 768px)';
@@ -77,6 +78,7 @@ function Panel({ title, children, wide, testid }: { title: string; children: Rea
 
 /** The dashboard for one answer of GET /api/telemetry/health (pure: the tests render it with fixtures). */
 export function HealthDashboard({ data, onTrail }: { data: HealthData; onTrail: (p: Problem) => void }) {
+  applyHealthEvent(data);
   const now = Date.parse(data.generatedAt) || 0;
   const k = data.kpis;
   const syncTotal = (k?.syncOk ?? 0) + (k?.syncFail ?? 0);
@@ -118,9 +120,14 @@ export function HealthDashboard({ data, onTrail }: { data: HealthData; onTrail: 
 type LoadResult = { kind: 'ok'; data: HealthData } | { kind: 'auth' } | { kind: 'fail' };
 
 /** GET /api/telemetry/health for one window. Never rejects. */
-async function loadHealth(w: HealthWindow): Promise<LoadResult> {
+async function loadHealth(w: HealthWindow, event: string): Promise<LoadResult> {
   try {
-    const res = await fetch(`/api/telemetry/health?window=${w}`, { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } });
+    const res = await fetch(`/api/telemetry/health?window=${w}`, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      // (Events) An event route refuses a call that does not say which event it is for (409 wrong_event).
+      headers: { Accept: 'application/json', 'X-LP-Event': event },
+    });
     if (res.status === 401) return { kind: 'auth' };
     if (!res.ok) return { kind: 'fail' };
     return { kind: 'ok', data: (await res.json()) as HealthData };
@@ -129,7 +136,7 @@ async function loadHealth(w: HealthWindow): Promise<LoadResult> {
   }
 }
 
-export function HealthView() {
+export function HealthView({ lead, event }: { lead: boolean; event: string }) {
   const desk = useSyncExternalStore(subscribeDesk, deskNow, deskServer);
   const [win, setWin] = useState<HealthWindow>('3h');
   const [data, setData] = useState<HealthData | null>(null);
@@ -154,7 +161,7 @@ export function HealthView() {
   const refresh = (w: HealthWindow = win) => {
     if (loading) return;
     setLoading(true);
-    void loadHealth(w).then(apply);
+    void loadHealth(w, event).then(apply);
   };
 
   useEffect(() => {
@@ -164,22 +171,22 @@ export function HealthView() {
       // the sidebar link is a convenience
     }
     let live = true;
-    void loadHealth('3h').then((r) => {
+    void loadHealth('3h', event).then((r) => {
       if (live) apply(r);
     });
     return () => {
       live = false;
     };
-  }, [apply]);
+  }, [apply, event]);
 
-  const turnOff = async () => {
+  const setEnabled = async (enabled: boolean) => {
     setSwitching(true);
     try {
       const res = await fetch('/api/telemetry/settings', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ enabled: false }),
+        body: JSON.stringify({ enabled }),
       });
       if (res.ok) {
         const config = (await res.json()) as HealthData['config'];
@@ -227,20 +234,22 @@ export function HealthView() {
             </span>
           ) : null}
         </span>
-        <span className={s.status} data-testid="health-status" role="img" aria-label={on ? `Collecting until ${cfg ? fmtUntil(cfg.until) : 'the auto-off'}` : 'Collection is off'}>
+        {/* (Events) Collection runs while an event is in practice or live: no off date any more. */}
+        <span className={s.status} data-testid="health-status" role="img" aria-label={on ? 'Collecting while an event is in practice or live' : 'Collection is off'}>
           <span className={s.dot} data-off={on ? undefined : ''} />
-          {on ? `Collecting · ${cfg ? fmtUntil(cfg.until) : DASH}` : 'Off'}
+          {on ? 'Collecting' : 'Off'}
         </span>
         <button
           type="button"
           role="switch"
           className={s.switch}
           aria-checked={!!cfg?.enabled}
-          aria-label={cfg && !cfg.enabled ? 'Collection is off. It is turned back on in SQL only' : 'Collection'}
-          disabled={!cfg?.enabled || switching}
+          aria-label={lead ? 'Collection' : 'Collection. Only a lead can switch it'}
+          disabled={!lead || !cfg || switching}
           data-testid="health-switch"
           onClick={() => {
             if (cfg?.enabled) setConfirmOff(true);
+            else void setEnabled(true).then(() => refresh());
           }}
         >
           <span className={s.thumb} />
@@ -248,7 +257,7 @@ export function HealthView() {
       </header>
       {data ? <HealthDashboard data={data} onTrail={setTrail} /> : <p className={s.empty}>{loading ? '' : DASH}</p>}
       <TrailDrawer problem={trail} examples={data?.examples ?? []} onClose={closeTrail} />
-      <ConfirmOff open={confirmOff} onClose={closeConfirm} onConfirm={() => void turnOff().then(() => refresh())} />
+      <ConfirmOff open={confirmOff} onClose={closeConfirm} onConfirm={() => void setEnabled(false).then(() => refresh())} />
     </main>
   );
 }

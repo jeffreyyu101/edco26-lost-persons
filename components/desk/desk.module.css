@@ -230,9 +230,10 @@
   opacity: 0.5;
 }
 
-/* The logo lockup (LiveMark): EDC Orlando (made white) | Ground Control on the brand card's dark gradient
-   (components/list/brand.module.css), the same in both themes; its corner dot is the live state (the phone
-   header's live dot). Tap to sync now. Collapsed: the EDC logo alone on a 32 px tile. */
+/* The logo lockup (LiveMark): (events) the event's logo (white when single-colour, components/ui/EventLogo.tsx) |
+   Ground Control on the brand card's dark gradient (components/list/brand.module.css), the same in both themes; its
+   corner dot is the live state (the phone header's live dot). Tap to sync now. Collapsed: the event's logo alone on a
+   32 px tile (Ground Control, small, when the event has none). */
 .lockup {
   position: relative;
   display: flex;
@@ -284,19 +285,12 @@
 
 .lockEdc {
   height: 24px;
-  filter: brightness(0) invert(1);
 }
 
-/* Easter egg: hovering the lockup with a mouse runs a rainbow left to right through the white EDC Orlando
-   logo. The layer sits exactly on the logo and is masked by the logo's own alpha, so only the white part
-   changes; Ground Control and the card stay as they are. Mouse / trackpad only (never touch screens); a still
-   rainbow under reduced motion. */
-.lockEdcWrap {
-  position: relative;
-  display: block;
-  flex: none;
-  line-height: 0;
-}
+/* Easter egg: hovering the lockup with a mouse runs a rainbow left to right through a white (single-colour) event
+   logo. The layer sits exactly on the logo and is masked by the logo's own alpha (EventLogo sets the mask image),
+   so only the white part changes; Ground Control and the card stay as they are. Mouse / trackpad only (never touch
+   screens); a still rainbow under reduced motion. */
 .lockRainbow {
   position: absolute;
   inset: 0;
@@ -304,8 +298,12 @@
   pointer-events: none;
   background: linear-gradient(90deg, #ff3cac, #ff8a3d, #ffe14d, #4dffa6, #2bd9fe, #6a7bff, #c86bff, #ff3cac);
   background-size: 200% 100%;
-  -webkit-mask: url('/logos/edc-orlando.png') center / contain no-repeat;
-  mask: url('/logos/edc-orlando.png') center / contain no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
   transition: opacity 0.25s ease;
 }
 @media (hover: hover) and (pointer: fine) {
@@ -313,7 +311,7 @@
     opacity: 1;
     animation: edcRainbow 2.4s linear infinite;
   }
-  .lockup:hover .lockEdcWrap {
+  .lockup:hover :global([data-logo-kind='mono']) {
     filter: drop-shadow(0 0 6px rgb(255 120 220 / 0.35));
   }
 }
@@ -523,11 +521,14 @@
 .sidebar[data-state='collapsed'] .lockArt {
   gap: 0;
 }
-.sidebar[data-state='collapsed'] :is(.lockDiv, .lockGc) {
+.sidebar[data-state='collapsed'] .lockArt[data-event-logo] :is(.lockDiv, .lockGc) {
   display: none;
 }
 .sidebar[data-state='collapsed'] .lockEdc {
-  height: 15px;
+  height: 15px !important;
+}
+.sidebar[data-state='collapsed'] .lockArt:not([data-event-logo]) .lockGc {
+  height: 9px;
 }
 .sidebar[data-state='collapsed'] .person {
   width: 32px;
@@ -976,4 +977,10 @@
     width: 44px !important;
     height: 44px !important;
   }
+}
+
+/* (Events) The event's stage chip after the view's title. */
+.stage {
+  flex: none;
+  margin-left: 10px;
 }

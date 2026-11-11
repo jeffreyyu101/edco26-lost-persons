@@ -30,6 +30,7 @@ import {
   type TeamKey,
 } from '../telemetry';
 import { parseStaff } from '../domain';
+import { loadEvent } from './events';
 import { ApiFailure } from './errors';
 import { assertSameOrigin, readBodyLimited } from './http';
 import { rpc } from './supabase';
@@ -41,11 +42,11 @@ export { teamKey };
 // ---------------------------------------------------------------------------------------------------
 
 export interface TelemetryConfig {
-  /** Collecting now: enabled and before `until`. */
+  /** Collecting now: enabled and (Events) some event is practice or live (lp_tel_config decides). */
   on: boolean;
   /** The kill switch (lp_tel_settings.enabled). */
   enabled: boolean;
-  /** Epoch ms of the auto-off (lp_tel_settings.off_at). */
+  /** Epoch ms of lp_tel_settings.off_at: (Events) informational only, it no longer switches collection off. */
   until: number;
   cap: number;
   capBytes: number;
@@ -63,7 +64,7 @@ export function parseTelemetryConfig(raw: unknown): TelemetryConfig {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const until = num(r.until, 0);
   return {
-    on: r.on === true && until > Date.now(),
+    on: r.on === true,
     enabled: r.enabled === true,
     until,
     cap: num(r.cap, 0),
@@ -87,8 +88,7 @@ let cached: { at: number; ttl: number; value: Promise<TelemetryConfig> } | null 
  */
 export function telemetryConfig(now = Date.now()): Promise<TelemetryConfig> {
   if (cached && now - cached.at < cached.ttl) {
-    // The auto-off passes on its own, cached or not.
-    return cached.value.then((c) => (c.on && Date.now() >= c.until ? { ...c, on: false } : c));
+    return cached.value;
   }
   const entry: { at: number; ttl: number; value: Promise<TelemetryConfig> } = { at: now, ttl: TELEMETRY_CONFIG_TTL_MS, value: Promise.resolve(TELEMETRY_OFF) };
   entry.value = rpc<unknown>('lp_tel_config', {}).then(parseTelemetryConfig, (error: unknown) => {
@@ -330,12 +330,12 @@ export interface ServerRow {
 }
 
 /** Writes server rows when collection is on. Never throws, never logs data. */
-export async function recordServerEvents(rows: readonly ServerRow[]): Promise<void> {
+export async function recordServerEvents(eventId: string, rows: readonly ServerRow[]): Promise<void> {
   try {
     if (rows.length === 0) return;
     const cfg = await telemetryConfig();
     if (!cfg.on) return;
-    await rpc('lp_tel_server_events', { p_rows: rows.slice(0, 20) });
+    await rpc('lp_tel_server_events', { p_event: eventId, p_rows: rows.slice(0, 20) });
   } catch {
     // telemetry never costs the caller anything
   }
@@ -347,6 +347,7 @@ export async function recordServerEvents(rows: readonly ServerRow[]): Promise<vo
  * is kept.
  */
 export async function recordPushSend(
+  eventId: string,
   kind: string,
   targets: ReadonlyArray<{ endpoint: string; staff: string }>,
   outcomes: ReadonlyArray<{ endpoint: string; result: 'ok' | 'gone' | 'failed' }>,
@@ -354,7 +355,11 @@ export async function recordPushSend(
 ): Promise<void> {
   try {
     const kindToken = ENUM_RE.test(kind) ? kind : 'other';
-    const teamByEndpoint = new Map(targets.map((t) => [t.endpoint, teamKey(parseStaff(t.staff).team)]));
+    // Off: nothing to write (and no event to read).
+    if (!(await telemetryConfig()).on) return;
+    // (Events) Team keys are the event's team ids.
+    const teams = (await loadEvent(eventId).catch(() => null))?.teams ?? [];
+    const teamByEndpoint = new Map(targets.map((t) => [t.endpoint, teamKey(parseStaff(t.staff).team, teams)]));
     const byTeam = new Map<TeamKey, { ok: number; gone: number; failed: number }>();
     for (const o of outcomes) {
       const team = teamByEndpoint.get(o.endpoint) ?? 'other';
@@ -364,7 +369,7 @@ export async function recordPushSend(
     }
     const ms = Math.max(0, Math.min(DAY_MS, Math.round(sendMs)));
     const rows: ServerRow[] = [...byTeam].map(([team, c]) => ({ n: 'push_send', team, ms, k: c.ok + c.gone + c.failed, p: { kind: kindToken, ...c } }));
-    await recordServerEvents(rows);
+    await recordServerEvents(eventId, rows);
   } catch {
     // never throws
   }

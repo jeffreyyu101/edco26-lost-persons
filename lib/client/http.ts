@@ -21,6 +21,8 @@ export interface RequestOptions {
   timeoutMs: number;
   /** Aborts the call (store stopped / logged out); reported as a network failure. */
   signal?: AbortSignal;
+  /** (Events) The event this tab works (X-LP-Event): the server refuses it for another event's session (409 wrong_event). */
+  event?: string;
 }
 
 function isApiError(value: unknown): value is ApiError {
@@ -42,6 +44,7 @@ export async function apiRequest<T>(fetchFn: FetchLike, path: string, opts: Requ
   }
   try {
     const headers: Record<string, string> = { Accept: 'application/json' };
+    if (opts.event) headers['X-LP-Event'] = opts.event;
     let body: BodyInit | undefined;
     if (opts.json !== undefined) {
       headers['Content-Type'] = 'application/json';

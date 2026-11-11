@@ -6,7 +6,6 @@
 // env and which must stay server-side.
 import 'server-only';
 import { z } from 'zod';
-import { DEFAULT_EVENT_TIMEZONE } from '../format';
 import { sessionSecretFromEnv } from './session-token';
 
 /**
@@ -31,16 +30,6 @@ export class EnvError extends Error {
   }
 }
 
-export type PasswordConfig = { kind: 'bcrypt'; hash: string } | { kind: 'plain'; value: string };
-
-/** The team join link (lib/server/invite.ts). Only its SHA-256 is configured; the code is never stored. */
-export interface InviteConfig {
-  /** INVITE_CODE_SHA256 as 32 bytes. */
-  sha256: Buffer;
-  /** INVITE_EXPIRES_AT in epoch ms: the link is refused from then on. */
-  expiresAt: number;
-}
-
 export interface ServerEnv {
   /** Normalised project URL, e.g. https://abc.supabase.co */
   supabaseUrl: string;
@@ -49,11 +38,9 @@ export interface ServerEnv {
   /** SUPABASE_SECRET_KEY, else SUPABASE_SERVICE_ROLE_KEY. */
   supabaseKey: string;
   sessionSecret: string;
-  /** APP_SHARED_PASSWORD_HASH_B64 wins when both are set. */
-  password: PasswordConfig;
-  eventTimezone: string;
-  /** Team join link, or null when off (INVITE_CODE_SHA256 or INVITE_EXPIRES_AT unset or unreadable). */
-  invite: InviteConfig | null;
+  // (Events) The staff password, the lead passcode and the join links live in the database (lib/server/events.ts).
+  // APP_SHARED_PASSWORD(_HASH_B64) / INVITE_* are read only by scripts/bootstrap-events.mjs, once. The display time zone
+  // is each event's (EventConfig.timezone): EVENT_TIMEZONE is no longer read.
 }
 
 export function isValidTimeZone(timeZone: string): boolean {
@@ -66,26 +53,6 @@ export function isValidTimeZone(timeZone: string): boolean {
 }
 
 const urlSchema = z.url({ protocol: /^https?$/ });
-const isoSchema = z.iso.datetime({ offset: true });
-
-/**
- * The team join link's variables. Both optional: unset means password only, as before the link existed. A
- * value that can't be read turns the link off and is reported by name (never its value) instead of
- * failing the whole server, so a typo never takes the app down during the event.
- */
-export function readInviteEnv(): { invite: InviteConfig | null; problem: string | null } {
-  const hex = readEnv('INVITE_CODE_SHA256');
-  if (!hex) return { invite: null, problem: null };
-  if (!/^[0-9a-fA-F]{64}$/.test(hex)) return { invite: null, problem: 'INVITE_CODE_SHA256 is not a 64-character hex SHA-256; team links are off' };
-  const expires = readEnv('INVITE_EXPIRES_AT');
-  if (!expires) return { invite: null, problem: 'INVITE_EXPIRES_AT is missing; team links are off' };
-  const expiresAt = Date.parse(expires);
-  if (!isoSchema.safeParse(expires).success || Number.isNaN(expiresAt)) {
-    return { invite: null, problem: 'INVITE_EXPIRES_AT is not an ISO date-time with Z or an offset; team links are off' };
-  }
-  return { invite: { sha256: Buffer.from(hex, 'hex'), expiresAt }, problem: null };
-}
-
 let cached: ServerEnv | null = null;
 
 /** The validated server environment. Throws EnvError listing every problem (names only). */
@@ -106,38 +73,15 @@ export function serverEnv(): ServerEnv {
   if (!sessionSecret) problems.push('SESSION_SECRET is missing');
   else if (sessionSecret.length < 32) problems.push('SESSION_SECRET must be at least 32 characters');
 
-  let password: PasswordConfig | null = null;
-  const hashB64 = readEnv('APP_SHARED_PASSWORD_HASH_B64');
-  const plain = process.env['APP_SHARED_PASSWORD'];
-  if (hashB64) {
-    const hash = Buffer.from(hashB64, 'base64').toString('utf8');
-    if (!/^\$2[abxy]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(hash)) problems.push('APP_SHARED_PASSWORD_HASH_B64 is not a base64-encoded bcrypt hash');
-    else password = { kind: 'bcrypt', hash };
-  } else if (plain !== undefined && plain !== '') {
-    password = { kind: 'plain', value: plain };
-  } else {
-    problems.push('APP_SHARED_PASSWORD_HASH_B64 or APP_SHARED_PASSWORD is required');
-  }
-
-  const eventTimezone = readEnv('EVENT_TIMEZONE') ?? DEFAULT_EVENT_TIMEZONE;
-  if (!isValidTimeZone(eventTimezone)) problems.push('EVENT_TIMEZONE is not a valid IANA time zone');
-
-  if (problems.length > 0 || !supabaseUrl || !supabaseKey || !sessionSecret || !password) {
+  if (problems.length > 0 || !supabaseUrl || !supabaseKey || !sessionSecret) {
     throw new EnvError(`Server environment is not configured: ${problems.join('; ')}.`);
   }
-
-  const invite = readInviteEnv();
-  // Once per server instance (the result is cached). Names only, never values.
-  if (invite.problem) console.error(JSON.stringify({ lp: 'env', message: invite.problem }));
 
   cached = {
     supabaseUrl,
     supabaseOrigin: new URL(supabaseUrl).origin,
     supabaseKey,
     sessionSecret,
-    password,
-    eventTimezone,
-    invite: invite.invite,
   };
   return cached;
 }
@@ -147,8 +91,3 @@ export function resetServerEnvCache(): void {
   cached = null;
 }
 
-/** Event timezone without requiring the rest of the environment (layout, page). */
-export function eventTimezone(): string {
-  const tz = readEnv('EVENT_TIMEZONE');
-  return tz && isValidTimeZone(tz) ? tz : DEFAULT_EVENT_TIMEZONE;
-}

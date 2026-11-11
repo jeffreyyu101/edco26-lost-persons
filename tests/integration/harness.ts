@@ -20,7 +20,10 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, expect } from 'vitest';
 import type { RequestSummary } from '@/lib/api-types';
 import { SESSION_COOKIE, signSessionToken } from '@/lib/server/session-token';
-import { ROOT, assertLocalUrl } from '../../scripts/test-env.mjs';
+import { ROOT, TEST_EVENT_ID, assertLocalUrl } from '../../scripts/test-env.mjs';
+
+/** (Events) The seed's live local event: every session and request of these tests is in it unless a test says otherwise. */
+export const EVENT_ID = TEST_EVENT_ID;
 
 export const PORT = process.env.PORT || '3100';
 export const BASE = `http://127.0.0.1:${PORT}`;
@@ -159,11 +162,18 @@ function sessionSecret(): string {
  * A Cookie header value for a session minted with the test secret. `issuedAgo` / `firstIssuedAgo`
  * (seconds) backdate the token's iat and its sid (first sign-in time).
  */
-export async function cookieFor(staff: Staff, opts: { issuedAgo?: number; firstIssuedAgo?: number } = {}): Promise<string> {
+export async function cookieFor(
+  staff: Staff,
+  opts: { issuedAgo?: number; firstIssuedAgo?: number; eventId?: string | null; role?: 'staff' | 'lead'; pv?: number } = {},
+): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const iat = now - (opts.issuedAgo ?? 0);
   const sid = opts.firstIssuedAgo !== undefined ? `${now - opts.firstIssuedAgo}.${randomBytes(12).toString('hex')}` : undefined;
-  const signed = await signSessionToken({ ...staff, sid }, sessionSecret(), iat);
+  const role = opts.role ?? 'staff';
+  const eventId = opts.eventId === undefined ? (role === 'lead' ? null : EVENT_ID) : opts.eventId;
+  // (Events) A lead token carries the current lead passcode version unless the test says otherwise.
+  const pv = role === 'lead' ? (opts.pv ?? leadPasscodeVersion()) : null;
+  const signed = await signSessionToken({ ...staff, sid, eventId, role, pv }, sessionSecret(), iat);
   if (!signed) throw new Error('could not sign a test session');
   return `${SESSION_COOKIE}=${signed.token}`;
 }
@@ -190,12 +200,37 @@ export interface ApiOptions {
   origin?: string | null;
   headers?: Record<string, string>;
   redirect?: RequestRedirect;
+  /**
+   * (Events) X-LP-Event. By default a call with a session cookie names the cookie's event (or 'none'), as the new
+   * client does; headers['x-lp-event'] wins. false: send none (the old build's app).
+   */
+  event?: string | false;
+}
+
+/** (Events) The event a session cookie names, 'none' for none; null when the cookie holds no readable session. */
+export function cookieEvent(cookie: string): string | null {
+  const token = cookie
+    .split(/;\s*/)
+    .find((c) => c.startsWith(`${SESSION_COOKIE}=`))
+    ?.slice(SESSION_COOKIE.length + 1);
+  const payload = token?.split('.')[1];
+  if (!payload) return null;
+  try {
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { eventId?: unknown };
+    return typeof claims.eventId === 'string' && claims.eventId ? claims.eventId : 'none';
+  } catch {
+    return null;
+  }
 }
 
 export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise<ApiResult<T>> { // eslint-disable-line @typescript-eslint/no-explicit-any
   const method = opts.method ?? (opts.json !== undefined || opts.body !== undefined ? 'POST' : 'GET');
   const headers: Record<string, string> = { ...(opts.headers ?? {}) };
   if (opts.cookie) headers.cookie = opts.cookie;
+  if (!Object.keys(headers).some((h) => h.toLowerCase() === 'x-lp-event') && opts.event !== false) {
+    const event = opts.event ?? (opts.cookie ? cookieEvent(opts.cookie) : null);
+    if (event) headers['x-lp-event'] = event;
+  }
   const origin = opts.origin === undefined ? (method === 'GET' ? null : ORIGIN) : opts.origin;
   if (origin) headers.origin = origin;
   let body = opts.body;
@@ -244,13 +279,19 @@ export async function closeCreatedRequests(): Promise<void> {
   const ids = [...createdIds];
   createdIds.clear();
   const closedAt = new Date().toISOString();
+  // (Events) An archived event's requests are frozen (the patients guard refuses any write): left as they are.
+  const { data: archived, error: archivedError } = await admin().from('events').select('id').eq('stage', 'archived');
+  if (archivedError) throw new Error(`could not read events: ${archivedError.code}`);
+  const frozen = (archived ?? []).map((e: { id: string }) => e.id);
   for (let i = 0; i < ids.length; i += 100) {
     const batch = ids.slice(i, i + 100);
     for (const [from, to] of [
       [OPEN_WAITING, 'Cancelled'],
       [OPEN_IN_MEDICAL, 'Reunited – Closed'],
     ] as const) {
-      const { error } = await admin().from('patients').update({ status: to, closed_at: closedAt }).in('id', batch).in('status', [...from]);
+      let q = admin().from('patients').update({ status: to, closed_at: closedAt }).in('id', batch).in('status', [...from]);
+      if (frozen.length > 0) q = q.not('event_id', 'in', `(${frozen.join(',')})`);
+      const { error } = await q;
       if (error) throw new Error(`could not close test requests: ${error.code}`);
     }
   }
@@ -288,6 +329,19 @@ export function dbUrl(): string {
   assertLocalUrl('database URL', url);
   cachedDbUrl = url;
   return url;
+}
+
+/**
+ * `text` with every UUID replaced: a check that a phone number ('555') never appears must not trip on a random request
+ * id that happens to contain those digits.
+ */
+export function withoutIds(text: string): string {
+  return text.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<id>');
+}
+
+/** (Events) lp_org.lead_passcode_version now (what a lead's token must carry). */
+export function leadPasscodeVersion(): number {
+  return Number(psql('select coalesce((select lead_passcode_version from public.lp_org where id), 0)'));
 }
 
 /**

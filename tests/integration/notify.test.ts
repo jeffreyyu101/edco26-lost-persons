@@ -5,7 +5,7 @@
 // logger and the answerer, whether or not lp_involved_staff (the Messages release) is there.
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RequestSummary } from '@/lib/api-types';
-import { admin, api, cookieFor, createRequest, newStaff, staffOf, withTestServer, type Staff } from './harness';
+import { EVENT_ID, admin, api, cookieFor, createRequest, newStaff, staffOf, withTestServer, withoutIds, type Staff } from './harness';
 
 interface Sent {
   endpoint: string;
@@ -80,8 +80,8 @@ describe('notifyStaff', () => {
     const dana = newStaff();
     const rae = newStaff('Medical');
     const r = await createRequest(dana, { name: 'Ana TEST-S Lima' });
-    await notifyStaff([staffOf(dana), staffOf(dana).toUpperCase(), staffOf(rae)], { requestId: r.id, kind: 'in_medical', actor: staffOf(rae), detail: 'Located' });
-    await notifyStaff([staffOf(dana), staffOf(rae)], { requestId: r.id, kind: 'moved', actor: staffOf(rae), detail: 'Chair 9 → Bed 3' });
+    await notifyStaff(EVENT_ID, [staffOf(dana), staffOf(dana).toUpperCase(), staffOf(rae)], { requestId: r.id, kind: 'in_medical', actor: staffOf(rae), detail: 'Located' });
+    await notifyStaff(EVENT_ID, [staffOf(dana), staffOf(rae)], { requestId: r.id, kind: 'moved', actor: staffOf(rae), detail: 'Chair 9 → Bed 3' });
     const got = await rows(r.id, [dana, rae]);
     expect(got).toHaveLength(1);
     expect(got[0]).toMatchObject({ staff: canon(dana), kind: 'moved', detail: 'Chair 9 → Bed 3', actor: staffOf(rae), read_at: null });
@@ -92,10 +92,10 @@ describe('notifyStaff', () => {
     const r1 = await createRequest(dana);
     const r2 = await createRequest(dana);
     const actor = staffOf(newStaff('Medical'));
-    await notifyStaff([staffOf(dana)], { requestId: r1.id, kind: 'in_medical', actor, detail: 'Located' });
-    await notifyStaff([staffOf(dana)], { requestId: r2.id, kind: 'in_medical', actor, detail: 'Located' });
+    await notifyStaff(EVENT_ID, [staffOf(dana)], { requestId: r1.id, kind: 'in_medical', actor, detail: 'Located' });
+    await notifyStaff(EVENT_ID, [staffOf(dana)], { requestId: r2.id, kind: 'in_medical', actor, detail: 'Located' });
     await api('/api/activity/read', { json: { all: true }, cookie: await cookieFor(dana) });
-    await notifyStaff([staffOf(dana)], { requestId: r1.id, kind: 'reunited', actor, detail: 'Reunited' });
+    await notifyStaff(EVENT_ID, [staffOf(dana)], { requestId: r1.id, kind: 'reunited', actor, detail: 'Reunited' });
     const list = (await api('/api/activity', { cookie: await cookieFor(dana) })).body.rows as Array<{ requestId: string; read: boolean; kind: string }>;
     expect(list.map((x) => [x.requestId, x.kind, x.read])).toEqual([
       [r1.id, 'reunited', false],
@@ -108,7 +108,7 @@ describe('notifyStaff', () => {
     const phone = await device(dana, 'a');
     const laptop = await device(dana, 'b');
     const r = await createRequest(dana, { name: 'Jordan TEST-S Diaz', contactPhone: '(407) 555-0142' });
-    await notifyStaff([staffOf(dana), staffOf(dana)], {
+    await notifyStaff(EVENT_ID, [staffOf(dana), staffOf(dana)], {
       requestId: r.id,
       kind: 'message',
       actor: staffOf(newStaff('Medical')),
@@ -124,7 +124,7 @@ describe('notifyStaff', () => {
       expect(typeof x.payload.sentAt).toBe('number');
       const text = JSON.stringify({ ...x.payload, sentAt: undefined });
       expect(text).not.toMatch(/LP-?\d/);
-      expect(text).not.toContain('555');
+      expect(withoutIds(text)).not.toContain('555');
       expect(Buffer.byteLength(text)).toBeLessThan(4_000);
       expect(x.options).toMatchObject({ TTL: 3_600, urgency: 'high' });
       expect((x.options.vapidDetails as { subject?: string }).subject).toBe(process.env.VAPID_SUBJECT);
@@ -140,7 +140,7 @@ describe('notifyStaff', () => {
     mock.status.set(gone, 410);
     mock.status.set(flaky, 500);
     const r = await createRequest(dana);
-    await notifyStaff([staffOf(dana)], { requestId: r.id, kind: 'edited', actor: 'Someone · Medical', detail: 'Details changed' });
+    await notifyStaff(EVENT_ID, [staffOf(dana)], { requestId: r.id, kind: 'edited', actor: 'Someone · Medical', detail: 'Details changed' });
     const { data } = await admin().from('lp_push_subscriptions').select('endpoint, failures').in('endpoint', [gone, flaky]);
     expect(data).toEqual([{ endpoint: flaky, failures: 1 }]);
   });
@@ -151,16 +151,16 @@ describe('notifyStaff', () => {
     mock.status.set(stuck, 'hang');
     const r = await createRequest(dana);
     const started = Date.now();
-    await notifyStaff([staffOf(dana)], { requestId: r.id, kind: 'edited', actor: 'Someone · Medical', detail: 'Details changed' });
+    await notifyStaff(EVENT_ID, [staffOf(dana)], { requestId: r.id, kind: 'edited', actor: 'Someone · Medical', detail: 'Details changed' });
     expect(Date.now() - started).toBeLessThan(NOTIFY_WAIT_MS + 300);
     // The row is written before the push goes out.
     expect(await rows(r.id, [dana])).toHaveLength(1);
   });
 
   it('never throws: an unknown request, a bad kind, nobody to tell', async () => {
-    await expect(notifyStaff(['A B · Medical'], { requestId: crypto.randomUUID(), kind: 'edited', actor: 'x', detail: 'x' })).resolves.toBeUndefined();
-    await expect(notifyStaff(['A B · Medical'], { requestId: 'nope', kind: 'edited', actor: 'x', detail: 'x' })).resolves.toBeUndefined();
-    await expect(notifyStaff([], { requestId: crypto.randomUUID(), kind: 'edited', actor: 'x', detail: 'x' })).resolves.toBeUndefined();
+    await expect(notifyStaff(EVENT_ID, ['A B · Medical'], { requestId: crypto.randomUUID(), kind: 'edited', actor: 'x', detail: 'x' })).resolves.toBeUndefined();
+    await expect(notifyStaff(EVENT_ID, ['A B · Medical'], { requestId: 'nope', kind: 'edited', actor: 'x', detail: 'x' })).resolves.toBeUndefined();
+    await expect(notifyStaff(EVENT_ID, [], { requestId: crypto.randomUUID(), kind: 'edited', actor: 'x', detail: 'x' })).resolves.toBeUndefined();
   });
 });
 
@@ -169,7 +169,7 @@ describe('involvedStaff (contract C)', () => {
     const dana = newStaff();
     const rae = newStaff('Medical');
     const r = await createRequest(dana);
-    const canonList = async () => (await involvedStaff(r.id)).map((s) => s.toLowerCase());
+    const canonList = async () => (await involvedStaff(EVENT_ID, r.id)).map((s) => s.toLowerCase());
     expect(await canonList()).toContain(canon(dana));
     const res = await api(`/api/requests/${r.id}/status`, {
       json: { status: 'Found – Awaiting Reunion', expectedVersion: (r as RequestSummary).rowVersion, kind: 'answer' },
@@ -179,7 +179,7 @@ describe('involvedStaff (contract C)', () => {
     const list = await canonList();
     expect(list).toContain(canon(dana));
     expect(list).toContain(canon(rae));
-    expect((await fallbackStaff(r.id)).map((s) => s.toLowerCase()).sort()).toEqual([canon(dana), canon(rae)].sort());
+    expect((await fallbackStaff(EVENT_ID, r.id)).map((s) => s.toLowerCase()).sort()).toEqual([canon(dana), canon(rae)].sort());
   });
 });
 

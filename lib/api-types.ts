@@ -337,6 +337,12 @@ export interface SyncResponse {
    */
   activityUnread?: number;
   activityKey?: string;
+  /**
+   * (Events, additive.) The session's event: its stage and a version that moves on every settings or stage change.
+   * Sent only when the request carries `ev` (the version the client holds, '' for none) and the version differs: the
+   * client then re-reads GET /api/session; `stage` 'archived' means the event ended (writes answer 410 event_ended).
+   */
+  event?: { id: string; stage: EventStage; version: IsoDateTime };
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -387,34 +393,23 @@ export interface Stats {
   inactive?: number;
   /** (Companion, additive) Requests 'Closed – Friend Informed' now. Absent on a database before the companion migration. */
   friendInformed?: number;
-  // ---- Dashboard v4 (GET /api/stats?range=…, lp_stats(p_range), 20261108000000_dashboard_v4.sql). Absent without a
-  // range or on a database before that migration (the dashboard then falls back to the fields above).
-  range?: { key: StatsRange; from: IsoDateTime; step: number; compare: boolean };
-  /** Open, split: no first check yet / on a re-check hold / Located, friend not here yet. */
-  live?: { waiting: number; pending: number; located: number };
-  attention?: { total: number; items: AttentionItem[] };
-  speed?: SpeedStat[];
-  calls?: { total: number; prevTotal: number | null; buckets: CallsBucket[] };
-  heat?: { step: number; cols: HeatCol[] };
-  recap?: {
-    reunited: number;
-    notLocated: number;
-    fastest: number | null;
-    prevReunited: number | null;
-    prevNotLocated: number | null;
-    prevFastest: number | null;
-    lastReunionAt: IsoDateTime | null;
-  };
-  /** People with activity in the last 10 minutes, per team (counts only). */
-  team?: Array<{ team: string; on: number }>;
 }
 
-export type StatsRange = '1h' | '2h' | '6h' | 'tonight' | 'event';
-export type TentCounts = { fa4: number; fa3: number; other: number };
+// ---- (Events) GET /api/stats?range=… → lp_stats(p_event, p_range): the base snapshot above plus the dashboard's fields,
+// in the event's time zone and show day. Post breakdowns are arrays ordered by count (the four busiest posts of the range
+// by short name, then 'Other'), never fixed post keys.
+/** '1h' | '2h' | '6h' | 'today' (since the current show day began) | 'event' | 'day:N' (show day N, from 1). */
+export type EventStatsRange = '1h' | '2h' | '6h' | 'today' | 'event' | `day:${number}`;
+/** One post of a breakdown: its short label, or 'Other' (everything past the four busiest, Other locations, legacy values). */
+export interface PostCount {
+  post: string;
+  n: number;
+}
 export interface AttentionItem {
   id: string;
   caseNumber: number;
-  tent: string;
+  /** The request's post (short), or 'Other'. */
+  post: string;
   kind: 'wait' | 'recheck' | 'located' | 'swap';
   /**
    * Logged (wait), the re-check due time (recheck), the Located answer (located) or (Companion) when the friend
@@ -431,20 +426,57 @@ export interface SpeedStat {
   median: number | null;
   p90: number | null;
   prevMedian: number | null;
-  byTent: Record<'FA 4' | 'FA 3' | 'Other', number | null>;
-  spark: Array<{ at: IsoDateTime; night: string | null; n: number; median: number | null; p90: number | null }>;
+  /** The range's posts, in EventStats.range.posts order. */
+  byPost: Array<{ post: string; n: number; median: number | null }>;
+  /** `day`: the show day (YYYY-MM-DD) of an 'event' bucket, else null. */
+  spark: Array<{ at: IsoDateTime; day: string | null; n: number; median: number | null; p90: number | null }>;
 }
-export interface CallsBucket extends TentCounts {
+export interface CallsBucket {
   at: IsoDateTime;
-  /** 'event' only: the night (ET date of its noon). */
-  night: string | null;
-  /** The same clock bucket the night before (null for 'event'). */
+  /** 'event' only: the show day (YYYY-MM-DD). */
+  day: string | null;
+  n: number;
+  posts: PostCount[];
+  /** The same clock bucket the show day before (null when not compared). */
   prev: number | null;
 }
-export interface HeatCol extends TentCounts {
-  /** A bucket start; for 'event' an ET clock hour (0–23) summed over every night instead. */
+export interface HeatCol {
+  /** A bucket start; for 'event' a local clock hour (0–23) summed over every show day instead. */
   at?: IsoDateTime;
   hour?: number;
+  n: number;
+  posts: PostCount[];
+}
+export interface EventStats extends Stats {
+  range?: {
+    key: EventStatsRange;
+    from: IsoDateTime;
+    /** The end of a 'day:N' range; null for the others (they run to now). */
+    to: IsoDateTime | null;
+    step: number;
+    compare: boolean;
+    /** N for 'day:N', else null. */
+    day: number | null;
+    /** The posts of this range, by count (the four busiest by name, then 'Other' when it has rows). Every breakdown below follows this order. */
+    posts: PostCount[];
+  };
+  /** Open, split: no first check yet / on a re-check hold / Located, friend not here yet. */
+  live?: { waiting: number; pending: number; located: number };
+  attention?: { total: number; items: AttentionItem[] };
+  speed?: SpeedStat[];
+  calls?: { total: number; prevTotal: number | null; buckets: CallsBucket[] };
+  heat?: { step: number; cols: HeatCol[] };
+  recap?: {
+    reunited: number;
+    notLocated: number;
+    fastest: number | null;
+    prevReunited: number | null;
+    prevNotLocated: number | null;
+    prevFastest: number | null;
+    lastReunionAt: IsoDateTime | null;
+  };
+  /** People with activity in the last 10 minutes, per team: the event's team ids in setup order, plus 'other'. */
+  team?: Array<{ team: string; on: number }>;
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -456,6 +488,12 @@ export interface HeatCol extends TentCounts {
  * computes expiresAt from the claims of the cookie it just issued (exp, in seconds → ISO).
  */
 export interface SessionInfo {
+  /** (Events) 'staff' works one event; 'lead' sees every event and sets them up. */
+  role: SessionRole;
+  /** (Events) The event this session works, or null for a lead who has not opened one. */
+  eventId: string | null;
+  /** (Events) That event's config, or null. */
+  event: EventConfig | null;
   staffName: string;
   /** Canonical team value (a card value, a canonicalised alias, or the custom "Other team" text). */
   team: string;
@@ -467,6 +505,103 @@ export interface SessionInfo {
 
 /** The POST /api/session response: the same SessionInfo as GET (expiresAt is required). */
 export type SignInResponse = SessionInfo;
+
+// ---------------------------------------------------------------------------------------------------
+// Events (multi-event foundation, phase 1)
+// ---------------------------------------------------------------------------------------------------
+
+export type SessionRole = 'staff' | 'lead';
+export type EventStage = 'practice' | 'live' | 'archived';
+
+/** A reporting post: `label` is what a request stores as its reporting location. */
+export interface EventPost {
+  id: string;
+  label: string;
+  short: string;
+}
+
+/** A sign-in team: `label` is the team the session (and every attribution string) stores. */
+export interface EventTeam {
+  id: string;
+  label: string;
+  short: string;
+  /** Exactly one team may be the medical team (needs-info, push defaults, isMedicalTeam). */
+  medical: boolean;
+  /**
+   * (Phase 2, additive) Labels this team had before it was renamed under the same id: what was stored, and sessions
+   * signed in, under them still belong to it. Kept by the server; never sent by a lead.
+   */
+  aliases?: string[];
+}
+
+/**
+ * The event config the client renders from (GET /api/session `event`, refreshed when sync's `event.version`
+ * moves). No secret, hash or join code is ever in it.
+ */
+export interface EventConfig {
+  id: string;
+  slug: string;
+  name: string;
+  /** YYYY-MM-DD, the first and last show day. */
+  startsOn: string;
+  endsOn: string;
+  /** IANA time zone of every displayed time and the show-day boundary. */
+  timezone: string;
+  /** A show day runs from this local hour to the same hour next day (default 6). */
+  dayStartHour: number;
+  stage: EventStage;
+  /** GET URL of the event logo, or null. */
+  logoUrl: string | null;
+  posts: EventPost[];
+  /** What a swap place 'mm' is called ("Main Med"). */
+  mainMedical: string;
+  teams: EventTeam[];
+  /** The "Last seen" chips, in order. */
+  lastSeen: string[];
+  wentLiveAt: IsoDateTime | null;
+  endedAt: IsoDateTime | null;
+  /** Bumped by every settings or stage change (compare with sync's `event.version`). */
+  updatedAt: IsoDateTime;
+}
+
+/** A lead's view of an event (GET /api/events, the setup routes): the config plus setup state and counts. */
+export interface EventAdmin extends EventConfig {
+  hasStaffPassword: boolean;
+  /** When the current join link stops working, or null when there is none. */
+  joinLinkExpiresAt: IsoDateTime | null;
+  /**
+   * (Grace period) Archived events only: until when a Reopen keeps the staff password and join link (24 h after the
+   * end); null outside that window (a Reopen then needs a new password and join link).
+   */
+  holdUntil: IsoDateTime | null;
+  /** The last LP number handed out (0 = none yet). */
+  caseSeq: number;
+  recordsDeleteAt: IsoDateTime | null;
+  recordsDeletedAt: IsoDateTime | null;
+  /** The report's lines (spec "Report"): the department it is written for, the staffing table, "Prepared by …". */
+  department: string | null;
+  staffing: EventStaffingRow[];
+  preparedBy: string | null;
+  createdAt: IsoDateTime;
+  /** GET /api/events only. */
+  requests?: number;
+  open?: number;
+}
+
+/** A row of the report's staffing table. */
+export interface EventStaffingRow {
+  role: string;
+  name: string;
+}
+
+/** What a staff member sees when their event has ended (410 event_ended from any call, or a sign-in with its old join link). */
+export interface EndedEvent {
+  /** (Phase 2, additive) The event's id: the client drops that event's local data (cache, outbox). */
+  id?: string;
+  name: string;
+  logoUrl: string | null;
+  stage: 'archived';
+}
 
 // ---------------------------------------------------------------------------------------------------
 // Errors
@@ -490,7 +625,17 @@ export type ApiErrorCode =
   | 'invalid'
   | 'photo_limit'
   | 'rate_limited'
-  | 'unavailable';
+  | 'unavailable'
+  /** (Events) 410: the event is archived. Staff are refused on every route (reads too); a lead only on writes. */
+  | 'event_ended'
+  /** (Events) 409: a lead session with no event open called an event route. */
+  | 'no_event'
+  /**
+   * (Phase 2) 409: the request says it is for another event (X-LP-Event) than the session's cookie: this tab's data,
+   * queued requests and messages are another event's, and nothing of them may reach this one. The client re-reads its
+   * session (GET /api/session) and switches to the cookie's event.
+   */
+  | 'wrong_event';
 
 export interface ApiError {
   error: {
@@ -501,10 +646,16 @@ export interface ApiError {
     id?: string;
     /** For `invalid`: the offending field (camelCase), when known. */
     field?: string;
+    /** (Events) For `invalid` in a list field (posts, teams, lastSeen): the item's position in the list sent. */
+    index?: number;
+    /** (Events) With `index`: which of the item's fields ('label' or 'short'). */
+    part?: 'label' | 'short';
     /** For `conflict`: the row's current status (from the P0409 HINT). */
     currentStatus?: string;
     /** For `rate_limited`: seconds until a retry is allowed (also sent as Retry-After). */
     retryAfterSeconds?: number;
+    /** (Events) For `event_ended`: the ended event, for the Ended screen. */
+    event?: EndedEvent;
   };
 }
 
@@ -562,6 +713,14 @@ export interface OutboxItem {
   createdAt: number;
   /** 'legacy' = imported from Jeffrey's localStorage['edc_pending_queue']. */
   source: 'app' | 'legacy';
+  /**
+   * (Events, additive) The event it was saved in: it only ever goes to that event (absent: before events). A job saved
+   * while that event was in practice (`wentLiveAt` then) is dropped once the event goes live: its request was a
+   * practice one.
+   */
+  eventId?: string;
+  /** (Events) The event's wentLiveAt when the job was saved (null: in practice). */
+  wentLiveAt?: string | null;
 }
 
 export type { CreateRequestBody, RequestPatch };

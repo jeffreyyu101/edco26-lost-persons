@@ -1,5 +1,6 @@
 // The desk request table's pure model (components/desk/table/table-model.ts): the columns, the Logged by
 // and Post cells, the times (F1's helpers), and the sentence a screen reader hears for each row. Synthetic.
+import { STUB_EVENT } from '@/lib/client/stub-data';
 import { describe, expect, it } from 'vitest';
 import {
   TABLE_COLUMNS,
@@ -64,23 +65,24 @@ describe('Logged by', () => {
     expect(compactStaffName('')).toBe('');
   });
 
-  it("uses the mockup's short team names, aliases included; any other team as typed", () => {
-    expect(compactTeam('GC/HX - Special Operations/Med Transpo')).toBe('Transpo');
-    expect(compactTeam('GC/HX - Base')).toBe('Base');
-    expect(compactTeam('GC/HX - Dispatch')).toBe('Dispatch');
-    expect(compactTeam('Medical')).toBe('Medical');
-    expect(compactTeam('med transpo')).toBe('Transpo');
-    expect(compactTeam('GCHX Base')).toBe('Base');
-    expect(compactTeam('Volunteer Desk')).toBe('Volunteer Desk');
+  it("(events) uses the event's short team names (case-insensitive); any other team as typed", () => {
+    const teams = STUB_EVENT.teams;
+    expect(compactTeam('GC/HX - Special Operations/Med Transpo', teams)).toBe('GCHX Med Transpo');
+    expect(compactTeam('GC/HX - Base', teams)).toBe('GCHX Base');
+    expect(compactTeam('gc/hx - dispatch', teams)).toBe('Dispatch');
+    expect(compactTeam('Medical', teams)).toBe('Medical');
+    expect(compactTeam('Volunteer Desk', teams)).toBe('Volunteer Desk');
+    expect(compactTeam('Gate Team', [{ label: 'Gate Team', short: 'Gate' }])).toBe('Gate');
   });
 
-  it('shows "Dana K. · Transpo" and says the whole attribution', () => {
-    expect(loggedByShort('Dana Kim · GC/HX - Special Operations/Med Transpo')).toBe('Dana K. · Transpo');
-    expect(loggedByShort('Lee Park • GC/HX - Base')).toBe('Lee P. · Base');
-    expect(loggedByShort('Legacy name only')).toBe('Legacy O.');
-    expect(loggedByShort('')).toBe('');
-    expect(loggedByPhrase('Dana Kim · GC/HX - Special Operations/Med Transpo')).toBe('Dana Kim, GCHX Med Transpo');
-    expect(loggedByPhrase('Sam Ortiz · Medical')).toBe('Sam Ortiz, Medical');
+  it('shows "Dana K. · GCHX Med Transpo" and says the whole attribution', () => {
+    const teams = STUB_EVENT.teams;
+    expect(loggedByShort('Dana Kim · GC/HX - Special Operations/Med Transpo', teams)).toBe('Dana K. · GCHX Med Transpo');
+    expect(loggedByShort('Lee Park • GC/HX - Base', teams)).toBe('Lee P. · GCHX Base');
+    expect(loggedByShort('Legacy name only', teams)).toBe('Legacy O.');
+    expect(loggedByShort('', teams)).toBe('');
+    expect(loggedByPhrase('Dana Kim · GC/HX - Special Operations/Med Transpo', teams)).toBe('Dana Kim, GCHX Med Transpo');
+    expect(loggedByPhrase('Sam Ortiz · Medical', teams)).toBe('Sam Ortiz, Medical');
     expect(loggedByPhrase('Legacy name only')).toBe('Legacy name only');
   });
 });
@@ -126,11 +128,11 @@ describe('sentences', () => {
   it('a row says number, name and age, status, both times, post and who logged it', () => {
     const row = byCase(1013);
     const times = rowTimes(row, NOW, TZ);
-    expect(tableRowLabel(row, times)).toBe(
+    expect(tableRowLabel(row, times, undefined, 0, STUB_EVENT.teams)).toBe(
       `LP-1013, T.R., 24 M, Waiting for check, created ${times.created}, not updated yet, FA 4 – Oasis, logged by Lee Park, GCHX Base`,
     );
     const inMedical = byCase(1004);
-    expect(tableRowLabel(inMedical, rowTimes(inMedical, NOW, TZ))).toMatch(
+    expect(tableRowLabel(inMedical, rowTimes(inMedical, NOW, TZ), undefined, 0, STUB_EVENT.teams)).toMatch(
       /^LP-1004, S\.L\., 20 F, Located, friend coming, created .+, updated 3 minutes ago, FA 3 – Kinetic, logged by Dana Kim, Dispatch$/,
     );
     const nameless = { ...row, name: '', age: null, gender: null };
@@ -147,8 +149,8 @@ describe('sentences', () => {
   it('an unsent request reads exactly as on the phone, with no number until the server gives one', () => {
     const item = outboxItem();
     const created = formatCreatedTime(item.createdAt, NOW, TZ);
-    const m = outboxRow(item, created);
-    expect(m.said).toBe(outboxRowLabel(outboxDisplay(item), created));
+    const m = outboxRow(item, created, STUB_EVENT.teams, STUB_EVENT.posts);
+    expect(m.said).toBe(outboxRowLabel(outboxDisplay(item, STUB_EVENT.posts), created));
     expect(m.said).toMatch(/^TEST-T Queued, 30 M, .+\. Waiting to send, FA 3, Not sent\.$/);
     expect(m).toMatchObject({ number: '', name: 'TEST-T Queued', ageGender: '30 M', post: 'FA 3 – Kinetic', by: 'Dana K. · Dispatch', needsAttention: false, label: 'Waiting to send' });
 

@@ -66,7 +66,7 @@ function targetsOf(value: unknown): PushTarget[] {
 }
 
 /** Records the event and pushes it. Resolves when everything is done; never rejects. */
-export async function deliver(recipients: readonly string[], event: ActivityEvent): Promise<void> {
+export async function deliver(eventId: string, recipients: readonly string[], event: ActivityEvent): Promise<void> {
   try {
     if (!isUuid(event.requestId) || !isActivityKind(event.kind)) {
       log('bad_event');
@@ -76,6 +76,7 @@ export async function deliver(recipients: readonly string[], event: ActivityEven
     if (list.length === 0) return;
     const detail = scrubDetail(event.detail ?? '');
     const data = await rpc<Recorded | null>('lp_activity_record', {
+      p_event: eventId,
       p_recipients: list,
       p_request: event.requestId,
       p_kind: event.kind,
@@ -96,7 +97,7 @@ export async function deliver(recipients: readonly string[], event: ActivityEven
     if (grouped.gone.length || grouped.failed.length) log('push_partial', { ok: grouped.ok.length, gone: grouped.gone.length, failed: grouped.failed.length });
     await rpc('lp_push_result', { p_ok: grouped.ok, p_gone: grouped.gone, p_failed: grouped.failed });
     // Telemetry (push_send per team: counts and the round's duration). Never throws, writes nothing when collection is off.
-    await recordPushSend(event.kind, targets, outcomes, performance.now() - sendStarted);
+    await recordPushSend(eventId, event.kind, targets, outcomes, performance.now() - sendStarted);
   } catch (error) {
     const code = (error as { code?: unknown })?.code;
     log(typeof code === 'string' ? `failed_${code.replace(/[^a-z_]/gi, '').slice(0, 30)}` : 'failed');
@@ -121,20 +122,24 @@ export async function afterResponse(task: () => Promise<void>): Promise<void> {
 }
 
 /** Contract A. Records the event for `recipients` (minus the actor) and pushes it. Never throws. */
-export async function notifyStaff(recipients: readonly string[], event: ActivityEvent): Promise<void> {
-  await afterResponse(() => deliver(recipients, event));
+export async function notifyStaff(eventId: string, recipients: readonly string[], event: ActivityEvent): Promise<void> {
+  await afterResponse(() => deliver(eventId, recipients, event));
 }
 
 /**
  * The same, with the recipients looked up after the response too (involvedStaff, newRequestStaff), so the
  * lookup never costs the caller time either.
  */
-export async function notifyLater(recipients: () => Promise<readonly string[]>, event: () => Promise<ActivityEvent | null> | ActivityEvent | null): Promise<void> {
+export async function notifyLater(
+  eventId: string,
+  recipients: () => Promise<readonly string[]>,
+  event: () => Promise<ActivityEvent | null> | ActivityEvent | null,
+): Promise<void> {
   await afterResponse(async () => {
     try {
       const e = await event();
       if (!e) return;
-      await deliver(await recipients(), e);
+      await deliver(eventId, await recipients(), e);
     } catch {
       log('failed_lookup');
     }
@@ -175,6 +180,7 @@ export function swapEvent(
   row: Pick<RequestSummary, 'id' | 'postShort' | 'swapPlace'>,
   actor: string,
   parties: SwapParties,
+  mainMedical = '',
 ): { recipients: string[] | null; event: ActivityEvent } | null {
   const base = { requestId: row.id, actor };
   const answerer = parties.answerer && !sameStaff(parties.answerer, actor) ? [parties.answerer] : null;
@@ -188,7 +194,7 @@ export function swapEvent(
   if (action === 'request') return { recipients: answerer, event: requested };
   if (action === 'approve') {
     const place = row.swapPlace === 'fa' ? 'fa' : 'mm';
-    return { recipients: null, event: { ...base, kind: 'swap_approved', detail: swapApprovedDetail(place, row.postShort) } };
+    return { recipients: null, event: { ...base, kind: 'swap_approved', detail: swapApprovedDetail(place, row.postShort, mainMedical) } };
   }
   if (action === 'decline') {
     const list = [parties.requester, parties.creator].filter((s): s is string => !!s);
@@ -205,13 +211,15 @@ export function swapEvent(
 
 /** (Companion) Records and pushes a friend swap change after the response. Never throws. */
 export async function swapNotice(
+  eventId: string,
   action: SwapNoticeAction,
   row: Pick<RequestSummary, 'id' | 'postShort' | 'swapPlace'>,
   actor: string,
+  mainMedical: string,
   parties: SwapParties,
 ): Promise<void> {
-  const plan = swapEvent(action, row, actor, parties);
+  const plan = swapEvent(action, row, actor, parties, mainMedical);
   if (!plan) return;
   const fixed = plan.recipients;
-  await notifyLater(() => (fixed ? Promise.resolve(fixed) : involvedStaff(row.id)), () => plan.event);
+  await notifyLater(eventId, () => (fixed ? Promise.resolve(fixed) : involvedStaff(eventId, row.id)), () => plan.event);
 }

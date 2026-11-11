@@ -13,7 +13,7 @@ import { HydrationMarker } from './hydration-marker';
 
 export const metadata: Metadata = {
   title: 'Is my friend in medical?',
-  description: 'EDC Orlando 2026 · Ground Control / Headliner Experience',
+  description: 'Ground Control / Headliner Experience',
   applicationName: 'Is my friend in medical?',
   manifest: '/manifest.webmanifest',
   appleWebApp: { capable: true, title: 'In medical?', statusBarStyle: 'default' },
@@ -45,6 +45,8 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        {/* This build's pages are told apart from the pre-events build's stored page (lib/client/enter-app.ts). */}
+        <meta name="lp-shell" content="events" />
         {/* Applies the saved Light / Dark / Auto theme, a brand row hidden on this device and the desk sidebar's
             width chosen on it, before first paint (no flash), and takes a team join link's code out of the address
             bar (lib/join-link.ts). */}

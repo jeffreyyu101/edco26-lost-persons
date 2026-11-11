@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, describe, expect, it } from 'vitest';
-import { ROOT } from '../../scripts/test-env.mjs';
+import { ROOT, TEST_EVENT_ID, TEST_EVENT_SQL } from '../../scripts/test-env.mjs';
 import { admin, dbUrl, psql, reapplyAfterRework } from './harness';
 
 const run = promisify(execFile);
@@ -21,7 +21,7 @@ const run = promisify(execFile);
 async function waitForSchema(): Promise<void> {
   const started = Date.now();
   while (Date.now() - started < 20_000) {
-    const { error } = await admin().rpc('lp_stats');
+    const { error } = await admin().rpc('lp_stats', { p_event: TEST_EVENT_ID });
     if (!error) return;
     await new Promise((r) => setTimeout(r, 250));
   }
@@ -123,6 +123,10 @@ describe('20261106000000_rework.sql: age smallint → text on a database that al
     psql(`drop database if exists ${FIXTURE}`);
     psql(`create database ${FIXTURE}`);
     for (const file of readdirSync(join(ROOT, 'supabase/migrations')).filter((f) => f.endsWith('.sql')).sort()) applyFile(file);
+    // (Events) The fixture's rows belong to a live event and are numbered from the old sequence (fixture only).
+    sqlIn(`${TEST_EVENT_SQL}
+           alter table public.patients alter column event_id set default '${TEST_EVENT_ID}';
+           alter table public.patients alter column case_number set default nextval('public.patient_case_number_seq');`);
     sqlIn(`alter table public.patients alter column age type smallint using age::smallint;
            alter table public.patients add constraint patients_age_check check (age is null or (age between 0 and 120));
            insert into public.patients (client_mutation_id, first_name, last_name, age, gender, reporting_location, status, created_by, updated_by)

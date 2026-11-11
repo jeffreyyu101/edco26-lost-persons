@@ -33,6 +33,8 @@ export interface AlertContext {
   seen: Set<string>;
   /** (F5) The event timezone, for a hold's recheck time. */
   timeZone?: string;
+  /** (Events) What a swap place 'mm' is called at this event (EventConfig.mainMedical). */
+  mainMedical?: string;
 }
 
 export const alertKey = (row: Pick<RequestSummary, 'id' | 'rowVersion'>) => `${row.id}:${row.rowVersion}`;
@@ -76,7 +78,7 @@ export function swapAlert(before: RequestSummary, row: RequestSummary): AlertEve
   return null;
 }
 
-export function statusAlert(row: RequestSummary, timeZone?: string): AlertEvent {
+export function statusAlert(row: RequestSummary, timeZone?: string, mainMedical = ''): AlertEvent {
   // (F5) An Undo of the final Not found, or of In medical, can put the hold back: it reads "Not located yet".
   if (isHeld(row)) return holdAlert(row, timeZone);
   const s = subject(row);
@@ -86,7 +88,7 @@ export function statusAlert(row: RequestSummary, timeZone?: string): AlertEvent 
   }
   if (row.status === STATUS.friendInformed) return { kind: 'friend_informed', requestId: row.id, title: `${s} · ${statusMeta(STATUS.friendInformed).label}`, count: 1 };
   if (isSwapApproved(row) && row.swapPlace) {
-    return { kind: 'swap_approved', requestId: row.id, title: `${s} · ${swapApprovedLabel(row.swapPlace, row)}`, count: 1 };
+    return { kind: 'swap_approved', requestId: row.id, title: `${s} · ${swapApprovedLabel(row.swapPlace, row, mainMedical)}`, count: 1 };
   }
   if (isInMedical(row.status)) {
     return { kind: 'in_medical', requestId: row.id, title: `${s} ${statusMeta(STATUS.inMedical).shortLabel.toLowerCase()}`, subtitle: LOCATED_SUBTITLE, count: 1 };
@@ -155,7 +157,7 @@ export function diffAlerts(
         continue;
       }
       ctx.seen.add(key);
-      out.push(statusAlert(row, ctx.timeZone));
+      out.push(statusAlert(row, ctx.timeZone, ctx.mainMedical));
     } else {
       if (!ctx.bell || mine || byMe) continue;
       if (row.clientMutationId && ctx.ownMutationIds.has(row.clientMutationId)) continue;

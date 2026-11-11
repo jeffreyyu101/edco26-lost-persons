@@ -29,17 +29,26 @@ beforeEach(() => {
 });
 
 describe('teamKey', () => {
-  it('the four canonical teams, their aliases, and anything else as other', () => {
-    expect(teamKey('Medical')).toBe('medical');
-    expect(teamKey('GC/HX - Dispatch')).toBe('dispatch');
-    expect(teamKey('GC/HX - Base')).toBe('base');
-    expect(teamKey('GC/HX - Special Operations/Med Transpo')).toBe('transpo');
-    expect(teamKey('gchx dispatch')).toBe('dispatch');
-    expect(teamKey('Med Transpo')).toBe('transpo');
-    expect(teamKey('Prevent')).toBe('other');
-    expect(teamKey('TEST-S Custom Team Name')).toBe('other');
-    expect(teamKey('')).toBe('other');
-    expect(teamKey(null)).toBe('other');
+  // (Events) The event's teams: telemetry keys a team by its id.
+  const TEAMS = [
+    { id: 'transpo', label: 'GC/HX - Special Operations/Med Transpo', short: 'GCHX Med Transpo' },
+    { id: 'dispatch', label: 'GC/HX - Dispatch', short: 'Dispatch' },
+    { id: 'medical', label: 'Medical', short: 'Medical' },
+  ];
+  it("the event's team ids (by label or short name, any case), anything else as other", () => {
+    expect(teamKey('Medical', TEAMS)).toBe('medical');
+    expect(teamKey('GC/HX - Dispatch', TEAMS)).toBe('dispatch');
+    expect(teamKey('gc/hx - special operations/med transpo', TEAMS)).toBe('transpo');
+    expect(teamKey('GCHX Med Transpo', TEAMS)).toBe('transpo');
+    expect(teamKey('Prevent', TEAMS)).toBe('other');
+    expect(teamKey('TEST-S Custom Team Name', TEAMS)).toBe('other');
+    expect(teamKey('', TEAMS)).toBe('other');
+    expect(teamKey(null, TEAMS)).toBe('other');
+    // Another event's teams: their own ids. Without any: other.
+    expect(teamKey('Gate Crew', [{ id: 'gate', label: 'Gate Crew', short: 'Gate' }])).toBe('gate');
+    expect(teamKey('Medical')).toBe('other');
+    // An id the telemetry CHECK would refuse is never used.
+    expect(teamKey('Bad', [{ id: 'Bad Id!', label: 'Bad', short: 'Bad' }])).toBe('other');
   });
 });
 
@@ -143,7 +152,7 @@ describe('readTelemetryBody', () => {
 });
 
 describe('the config cache', () => {
-  it('one RPC per 30 s; the auto-off passes on its own', async () => {
+  it('one RPC per 30 s; (events) the database decides "on", a past off_at no longer turns it off', async () => {
     expect((await telemetryConfig(1_000)).on).toBe(true);
     await telemetryConfig(20_000);
     expect(rpcMock.calls.filter(([fn]) => fn === 'lp_tel_config')).toHaveLength(1);
@@ -151,6 +160,9 @@ describe('the config cache', () => {
     expect(rpcMock.calls.filter(([fn]) => fn === 'lp_tel_config')).toHaveLength(2);
     resetTelemetryConfigCache();
     rpcMock.answer = () => ({ on: true, enabled: true, until: Date.now() - 1, flushSeconds: 60, sample: 1 });
+    expect((await telemetryConfig()).on).toBe(true);
+    resetTelemetryConfigCache();
+    rpcMock.answer = () => ({ on: false, enabled: true, until: Date.now() + 3_600_000, flushSeconds: 60, sample: 1 });
     expect((await telemetryConfig()).on).toBe(false);
   });
 
@@ -190,11 +202,16 @@ describe('quotaKey', () => {
   });
 });
 
+const EVENT = '10ca1000-0000-4000-8000-000000000001';
+
 describe('push_send rows', () => {
   it('one row per team of the devices pushed to, with ok / gone / failed counts; nothing when off', async () => {
     resetTelemetryConfigCache();
-    rpcMock.answer = (fn) => (fn === 'lp_tel_config' ? { on: true, enabled: true, until: Date.now() + 3_600_000, flushSeconds: 60, sample: 1 } : 2);
+    // (Events) The event's teams give the keys (lp_event_get).
+    const event = { id: EVENT, teams: [{ id: 'medical', label: 'Medical', short: 'Medical' }, { id: 'dispatch', label: 'GC/HX - Dispatch', short: 'Dispatch' }] };
+    rpcMock.answer = (fn) => (fn === 'lp_tel_config' ? { on: true, enabled: true, until: Date.now() + 3_600_000, flushSeconds: 60, sample: 1 } : fn === 'lp_event_get' ? event : 2);
     await recordPushSend(
+      EVENT,
       'new_request',
       [
         { endpoint: 'e1', staff: 'test-s ana · medical' },
@@ -210,6 +227,7 @@ describe('push_send rows', () => {
     );
     const call = rpcMock.calls.find(([fn]) => fn === 'lp_tel_server_events');
     expect(call?.[1]).toEqual({
+      p_event: EVENT,
       p_rows: [
         { n: 'push_send', team: 'medical', ms: 123, k: 2, p: { kind: 'new_request', ok: 1, gone: 1, failed: 0 } },
         { n: 'push_send', team: 'dispatch', ms: 123, k: 1, p: { kind: 'new_request', ok: 0, gone: 0, failed: 1 } },
@@ -219,7 +237,7 @@ describe('push_send rows', () => {
     rpcMock.calls = [];
     resetTelemetryConfigCache();
     rpcMock.answer = (fn) => (fn === 'lp_tel_config' ? { on: false } : 0);
-    await recordPushSend('message', [{ endpoint: 'e1', staff: 'x · medical' }], [{ endpoint: 'e1', result: 'ok' }], 1);
+    await recordPushSend(EVENT, 'message', [{ endpoint: 'e1', staff: 'x · medical' }], [{ endpoint: 'e1', result: 'ok' }], 1);
     expect(rpcMock.calls.map(([fn]) => fn)).toEqual(['lp_tel_config']);
   });
 });

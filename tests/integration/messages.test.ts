@@ -11,7 +11,7 @@ import { syncPath } from '@/lib/client/api-paths';
 import { STATUS, canonStaff } from '@/lib/domain';
 import { shortStaffName } from '@/lib/messaging';
 import { ROOT } from '../../scripts/test-env.mjs';
-import { api, cookieFor, createRequest, dbUrl, newStaff, pii, psql, randomUUID, reapplyAfterRework, staffOf, uniq, withTestServer, type Staff } from './harness';
+import { EVENT_ID, api, cookieFor, createRequest, dbUrl, newStaff, pii, psql, randomUUID, reapplyAfterRework, staffOf, uniq, withTestServer, type Staff } from './harness';
 
 withTestServer();
 
@@ -235,7 +235,7 @@ describe('sync and the detail carry the activity', () => {
     // My read on another phone (same staff) comes back the same way: lp_messages_sync adds the row.
     const since = psql('select clock_timestamp()::text');
     await api(`/api/requests/${r.id}/messages/read`, { json: {}, cookie: await cookieFor(p.foh) });
-    const changed = psql(`select string_agg(x ->> 'id', ',') from jsonb_array_elements(lp_messages_sync('${staffOf(p.foh)}', '{}'::uuid[], '${since}'::timestamptz + interval '30 seconds', true) -> 'threads') x where x ->> 'id' = '${r.id}'`);
+    const changed = psql(`select string_agg(x ->> 'id', ',') from jsonb_array_elements(lp_messages_sync('${EVENT_ID}', '${staffOf(p.foh)}', '{}'::uuid[], '${since}'::timestamptz + interval '30 seconds', true) -> 'threads') x where x ->> 'id' = '${r.id}'`);
     expect(changed).toBe(r.id);
     expect((await rowFor(r.id, p.fohCookie)).unread).toBe(0);
   }, 60_000);
@@ -383,11 +383,21 @@ describe('lp_involved_staff and permissions', () => {
 
   it('only service_role may execute the functions; the tables have RLS on', () => {
     const fns = ['lp_post_message', 'lp_mark_read', 'lp_set_enroute', 'lp_unsend_message', 'lp_involved_staff', 'lp_messages_thread', 'lp_messages_sync', 'lp_enroute_stats', 'lp_messages_activity', 'lp_enroute_summary', 'lp_messages_json'];
-    const out = psql(`select string_agg(distinct has_function_privilege('service_role', p.oid, 'execute')::text || '/' ||
-                         has_function_privilege('anon', p.oid, 'execute')::text || '/' || has_function_privilege('authenticated', p.oid, 'execute')::text, ',')
-                      from pg_proc p where p.proname in (${fns.map((f) => `'${f}'`).join(', ')})`);
-    expect(out).toBe('true/false/false');
-    expect(psql(`select count(*) from pg_proc where proname in (${fns.map((f) => `'${f}'`).join(', ')})`)).toBe(String(fns.length));
+    // (Events) Every RPC the app server calls takes the event (p_event first); the old request-only signatures of the
+    // write / read wrappers are internal (not even service_role), while the helpers they share stay service_role only.
+    const rows = psql(`select string_agg(p.proname || '(' || split_part(pg_get_function_identity_arguments(p.oid), ' ', 1) || '):' ||
+                         has_function_privilege('service_role', p.oid, 'execute')::text || '/' || has_function_privilege('anon', p.oid, 'execute')::text || '/' ||
+                         has_function_privilege('authenticated', p.oid, 'execute')::text, ',' order by 1)
+                      from pg_proc p where p.proname in (${fns.map((f) => `'${f}'`).join(', ')})`).split(',');
+    // (Events review) The per-request helpers with no event (lp_involved_staff(uuid), lp_messages_activity,
+    // lp_enroute_summary) are internal too: only functions that already filter by the event call them.
+    const internal = new Set(['lp_post_message', 'lp_mark_read', 'lp_set_enroute', 'lp_unsend_message', 'lp_messages_thread', 'lp_involved_staff', 'lp_messages_activity', 'lp_enroute_summary']);
+    for (const row of rows) {
+      const [, name, first, rights] = /^(\w+)\((\w*)\):(.*)$/.exec(row) ?? [];
+      const expected = first === 'p_event' || !internal.has(name ?? '') ? 'true/false/false' : 'false/false/false';
+      expect(rights, row).toBe(expected);
+    }
+    for (const f of fns) expect(rows.some((r) => r.startsWith(`${f}(p_event)`) || ['lp_messages_activity', 'lp_enroute_summary', 'lp_messages_json'].includes(f)), f).toBe(true);
     expect(psql(`select string_agg(relname || ':' || relrowsecurity::text, ',' order by relname) from pg_class where relname in ('lp_messages', 'lp_message_reads', 'lp_enroute')`))
       .toBe('lp_enroute:true,lp_message_reads:true,lp_messages:true');
     expect(psql(`select has_table_privilege('anon', 'public.lp_messages', 'select')::text`)).toBe('false');
@@ -418,16 +428,16 @@ describe('dashboard stats', () => {
     const walker = newStaff('GC/HX - Base');
     const r = await createRequest(p.foh);
     await setStatus(r, STATUS.inMedical, 'answer', p.medCookie);
-    const base = Number(psql(`select lp_enroute_stats() ->> 'friendsEnRoute'`));
+    const base = Number(psql(`select lp_enroute_stats('${EVENT_ID}') ->> 'friendsEnRoute'`));
     await enroute(r.id, { action: 'set', etaMinutes: 5 }, p.fohCookie);
     await enroute(r.id, { action: 'set', etaMinutes: 10 }, await cookieFor(walker));
-    expect(Number(psql(`select lp_enroute_stats() ->> 'friendsEnRoute'`))).toBe(base + 1);
+    expect(Number(psql(`select lp_enroute_stats('${EVENT_ID}') ->> 'friendsEnRoute'`))).toBe(base + 1);
     await enroute(r.id, { action: 'arrive' }, p.fohCookie);
-    expect(Number(psql(`select lp_enroute_stats() ->> 'friendsEnRoute'`))).toBe(base);
+    expect(Number(psql(`select lp_enroute_stats('${EVENT_ID}') ->> 'friendsEnRoute'`))).toBe(base);
     // A late tap (queued offline) puts someone back to 'enroute' after the friend arrived: still not counted.
     await enroute(r.id, { action: 'set', etaMinutes: 5 }, await cookieFor(walker));
     expect(psql(`select string_agg(state, ',' order by state) from lp_enroute where request_id = '${r.id}'`)).toBe('arrived,enroute');
-    expect(Number(psql(`select lp_enroute_stats() ->> 'friendsEnRoute'`))).toBe(base);
+    expect(Number(psql(`select lp_enroute_stats('${EVENT_ID}') ->> 'friendsEnRoute'`))).toBe(base);
   });
 });
 

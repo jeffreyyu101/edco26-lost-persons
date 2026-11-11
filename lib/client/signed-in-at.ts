@@ -14,6 +14,23 @@ export function markSignedIn(): void {
   }
 }
 
+/**
+ * (Events) localStorage: the event the sign-in (or a lead opening an event, POST /api/session/event) just opened. The
+ * app's store reads it at start, before GET /api/session answers, so it never shows the previous event's cached rows
+ * in the meantime; it is removed once the session is confirmed.
+ */
+export const SIGNED_IN_EVENT_KEY = 'lp-signin-event';
+
+/** Call right after a sign-in (or opening another event) succeeded, before opening `/`. Best effort. */
+export function markSignedInEvent(eventId: string | null | undefined): void {
+  try {
+    if (eventId) window.localStorage.setItem(SIGNED_IN_EVENT_KEY, eventId);
+    else window.localStorage.removeItem(SIGNED_IN_EVENT_KEY);
+  } catch {
+    // The app then shows the last event's cache until GET /api/session answers.
+  }
+}
+
 /** When this tab signed in (epoch ms), read once; null when it did not or it can't be read. */
 export function takeSignedInAt(): number | null {
   try {

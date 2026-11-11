@@ -35,6 +35,8 @@ export interface MessageJob {
   attempts: number;
   nextAttemptAt: number | null;
   error: { code: string; message: string } | null;
+  /** (Events) The event it was queued in: it is only ever sent to that event (absent: before events, 'none'). */
+  eventId?: string;
 }
 
 /** Network / timeout / 5xx failures while online before a message shows "Not delivered · Retry". */
@@ -46,8 +48,8 @@ export function jobBackoffMs(attempts: number): number {
   return JOB_BACKOFF_MS[Math.min(Math.max(attempts, 1) - 1, JOB_BACKOFF_MS.length - 1)] ?? 60_000;
 }
 
-/** Rejections that will never succeed as they are (the bubble shows "Not delivered · Retry"). */
-export const JOB_DEFINITIVE: ReadonlySet<number> = new Set([400, 403, 404, 413, 422]);
+/** Rejections that will never succeed as they are (the bubble shows "Not delivered · Retry"). 410: the event ended. */
+export const JOB_DEFINITIVE: ReadonlySet<number> = new Set([400, 403, 404, 410, 413, 422]);
 
 export type JobOutcome =
   | { type: 'done' }

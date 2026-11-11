@@ -1,7 +1,8 @@
 // The durable outbox (spec §7 Outbox, A6, A13): every create is a job persisted in IndexedDB before it is
 // sent; offline / lie-fi queueing; flush after a reload; needs-attention and resend with the same
 // mutationId; photos (checkpoints, definitive rejection, retry); dedupe against confirmed rows; 401 pause;
-// the operator prompt; the legacy edc_pending_queue import; no IndexedDB → nothing kept in memory.
+// the operator prompt; (events) the legacy edc_pending_queue is no longer imported; no IndexedDB → nothing kept in memory.
+import { STUB_EVENT } from '@/lib/client/stub-data';
 import { describe, expect, it } from 'vitest';
 import { openKv, K } from '@/lib/client/persist';
 import { COPY } from '@/lib/client/store-core';
@@ -291,7 +292,7 @@ describe('operator prompt (A13)', () => {
     await finish(first.a.create({ values: values(), clientMutationId: CMID(16), photos: [], photoTiming: 'today' }));
     first.stop();
     await settle();
-    server.session = { ...STAFF.sam, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
+    server.session = { ...STAFF.sam, role: 'staff', eventId: STUB_EVENT.id, event: STUB_EVENT, expiresAt: '2026-11-07T15:00:00.000000+00:00' };
     const second = boot(server, { dbName: first.fe.dbName });
     await ready();
     await advance(100);
@@ -320,32 +321,19 @@ describe('operator prompt (A13)', () => {
   });
 });
 
-describe('legacy queue import', () => {
-  it("imports Jeffrey's edc_pending_queue keeping client_mutation_id, removes the key, and sends", async () => {
+describe('legacy queue (events: no longer imported)', () => {
+  it("leaves Jeffrey's edc_pending_queue as it is: it predates events, so it belongs to no event and is never imported or sent", async () => {
     const server = new FakeServer([]);
-    const legacy = [
-      { client_mutation_id: CMID(17), first_name: 'Lena', last_name: 'O.', age: 18, gender: 'Female', reporting_location: 'FA 3 – Kinetic', clothing: 'Pink hat' },
-      { first_name: 'No', last_name: 'Id', reporting_location: 'Base' },
-      'garbage',
-    ];
+    const legacy = [{ client_mutation_id: CMID(17), first_name: 'Lena', last_name: 'O.', age: 18, gender: 'Female', reporting_location: 'FA 3 – Kinetic', clothing: 'Pink hat' }];
     const { s, fe } = boot(server, {}, (env) => {
       env.localStorage()?.setItem(LEGACY_QUEUE_KEY, JSON.stringify(legacy));
     });
     await ready();
     await advance(100);
-    expect(fe.local.getItem(LEGACY_QUEUE_KEY)).toBeNull();
-    const kept = rowsWith(server, CMID(17));
-    expect(kept).toHaveLength(1);
-    expect(kept[0]?.row).toMatchObject({ firstName: 'Lena', lastName: 'O.', clothing: 'Pink hat' });
-    expect(creates(server)).toHaveLength(2);
+    expect(fe.local.getItem(LEGACY_QUEUE_KEY)).toBe(JSON.stringify(legacy));
+    expect(rowsWith(server, CMID(17))).toHaveLength(0);
+    expect(creates(server)).toHaveLength(0);
     expect(s().outbox).toHaveLength(0);
-  });
-
-  it('leaves an unreadable queue untouched', async () => {
-    const server = new FakeServer([]);
-    const { fe } = boot(server, {}, (env) => env.localStorage()?.setItem(LEGACY_QUEUE_KEY, '{not json'));
-    await ready();
-    expect(fe.local.getItem(LEGACY_QUEUE_KEY)).toBe('{not json');
   });
 });
 

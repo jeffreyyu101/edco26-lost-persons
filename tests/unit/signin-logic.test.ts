@@ -2,6 +2,7 @@
 // remembered identity, and how every POST /api/session response is shown. Synthetic names only.
 import { describe, expect, it } from 'vitest';
 import {
+  cardsFor,
   DEFAULT_RETRY_SECONDS,
   EMPTY_DRAFT,
   FORBIDDEN_CHAR_MESSAGE,
@@ -9,16 +10,19 @@ import {
   checkWho,
   draftFromIdentity,
   interpretSignInResponse,
+  linkDraftFromIdentity,
   parseRetryAfter,
   rememberedIdentity,
   retryMinutes,
   signInBody,
   type WhoDraft,
 } from '@/components/signin/logic';
-import { TEAMS } from '@/lib/domain';
+import { STUB_EVENT } from '@/lib/client/stub-data';
 import { signInSchema } from '@/lib/validation';
 
 const MED = 'GC/HX - Special Operations/Med Transpo';
+/** (Events) The sign-in cards: the running events' teams (here the local test event's). */
+const TEAMS = STUB_EVENT.teams.map((t) => ({ label: t.label, short: t.short, medical: t.medical }));
 const NOW = Date.parse('2026-11-06T23:00:00Z');
 
 const draft = (over: Partial<WhoDraft>): WhoDraft => ({ ...EMPTY_DRAFT, ...over });
@@ -38,9 +42,14 @@ describe('checkWho (step 1, Continue)', () => {
     expect(checkWho(draft({ name: 'Dana Kim', otherTeam: '  Site   Ops ' })).identity).toEqual({ name: 'Dana Kim', team: 'Site Ops' });
   });
 
-  it('maps a known alias typed as Other team to its canonical team (A28)', () => {
-    expect(checkWho(draft({ name: 'Dana Kim', otherTeam: 'dispatch' })).identity?.team).toBe('GC/HX - Dispatch');
-    expect(checkWho(draft({ name: 'Dana Kim', otherTeam: 'PREVENT' })).identity?.team).toBe('Prevent');
+  it("(events) Other text naming a card (its label or short name, any case) is that card; no event-specific alias list", () => {
+    expect(checkWho(draft({ name: 'Dana Kim', otherTeam: 'dispatch' }), TEAMS).identity?.team).toBe('GC/HX - Dispatch');
+    expect(checkWho(draft({ name: 'Dana Kim', otherTeam: ' gchx   base ' }), TEAMS).identity?.team).toBe('GC/HX - Base');
+    expect(checkWho(draft({ name: 'Dana Kim', otherTeam: 'PREVENT' }), TEAMS).identity?.team).toBe('PREVENT');
+    // EDC's old aliases ("transport", "med transpo") are not built in any more.
+    expect(checkWho(draft({ name: 'Dana Kim', otherTeam: 'transport' }), TEAMS).identity?.team).toBe('transport');
+    // Without cards (no running event known): as typed.
+    expect(checkWho(draft({ name: 'Dana Kim', otherTeam: 'dispatch' })).identity?.team).toBe('dispatch');
   });
 
   it('enforces the 60 / 80 code point limits', () => {
@@ -65,7 +74,7 @@ describe('checkWho (step 1, Continue)', () => {
   it('never enables Continue for something signInSchema refuses, and agrees on the stored identity', () => {
     const cases: WhoDraft[] = [
       draft({ name: 'Dana Kim', team: MED }),
-      ...TEAMS.map((t) => draft({ name: 'Sam Ortiz', team: t.value })),
+      ...TEAMS.map((t) => draft({ name: 'Sam Ortiz', team: t.label })),
       draft({ name: 'Rae', otherTeam: 'Site Ops' }),
       draft({ name: 'Rae', otherTeam: 'gchx base' }),
       draft({ name: 'Rae', otherTeam: 'Other' }),
@@ -76,9 +85,9 @@ describe('checkWho (step 1, Continue)', () => {
       draft({ name: 'x'.repeat(61), team: MED }),
     ];
     for (const d of cases) {
-      const { identity } = checkWho(d);
+      const { identity } = checkWho(d, TEAMS);
       if (!identity) continue;
-      const parsed = signInSchema.safeParse(signInBody(identity, 'pw'));
+      const parsed = signInSchema.safeParse(signInBody(identity, 'pw', TEAMS));
       expect(parsed.success, JSON.stringify(d)).toBe(true);
       if (parsed.success) {
         expect(parsed.data.staffName).toBe(identity.name);
@@ -90,10 +99,13 @@ describe('checkWho (step 1, Continue)', () => {
 
 describe('signInBody', () => {
   it('sends a card as the team', () => {
-    expect(signInBody({ name: 'Dana Kim', team: MED }, 'secret')).toEqual({ staffName: 'Dana Kim', team: MED, password: 'secret' });
+    expect(signInBody({ name: 'Dana Kim', team: MED }, 'secret', TEAMS)).toEqual({ staffName: 'Dana Kim', team: MED, password: 'secret' });
+    // A card is matched case-insensitively and sent as the card spells it.
+    expect(signInBody({ name: 'Dana Kim', team: 'medical' }, 'secret', TEAMS)).toEqual({ staffName: 'Dana Kim', team: 'Medical', password: 'secret' });
   });
-  it('sends anything else as Other + otherTeam', () => {
-    expect(signInBody({ name: 'Dana Kim', team: 'Prevent' }, 'secret')).toEqual({
+  it('sends anything else as Other + otherTeam (and every team when no card is known)', () => {
+    expect(signInBody({ name: 'Dana Kim', team: MED }, 'secret')).toEqual({ staffName: 'Dana Kim', team: 'Other', otherTeam: MED, password: 'secret' });
+    expect(signInBody({ name: 'Dana Kim', team: 'Prevent' }, 'secret', TEAMS)).toEqual({
       staffName: 'Dana Kim',
       team: 'Other',
       otherTeam: 'Prevent',
@@ -109,8 +121,10 @@ describe('remembered identity and Change', () => {
     expect(rememberedIdentity({ rememberedName: null, rememberedTeam: MED })).toBeNull();
   });
   it('prefills step 1 with the card, or the Other text', () => {
-    expect(draftFromIdentity({ name: 'Dana Kim', team: MED })).toEqual({ name: 'Dana Kim', team: MED, otherTeam: '' });
-    expect(draftFromIdentity({ name: 'Dana Kim', team: 'Site Ops' })).toEqual({ name: 'Dana Kim', team: null, otherTeam: 'Site Ops' });
+    expect(draftFromIdentity({ name: 'Dana Kim', team: MED }, TEAMS)).toEqual({ name: 'Dana Kim', team: MED, otherTeam: '' });
+    expect(draftFromIdentity({ name: 'Dana Kim', team: 'Site Ops' }, TEAMS)).toEqual({ name: 'Dana Kim', team: null, otherTeam: 'Site Ops' });
+    // (Events) A remembered team that is not one of the running events' cards is Other text.
+    expect(draftFromIdentity({ name: 'Dana Kim', team: MED }, [])).toEqual({ name: 'Dana Kim', team: null, otherTeam: MED });
     expect(draftFromIdentity(null)).toEqual(EMPTY_DRAFT);
   });
 });
@@ -119,7 +133,8 @@ describe('interpretSignInResponse', () => {
   const session = { staffName: 'Dana Kim', team: MED, staff: `Dana Kim · ${MED}`, expiresAt: '2026-11-07T11:00:00.000Z' };
 
   it('200 → signed in with the SessionInfo', () => {
-    expect(interpretSignInResponse(200, session, null, NOW)).toEqual({ kind: 'ok', session });
+    // (Events) A body without role / event reads as staff with no event config.
+    expect(interpretSignInResponse(200, session, null, NOW)).toEqual({ kind: 'ok', session: { ...session, role: 'staff', eventId: null, event: null } });
   });
   it('200 with an unreadable body is still signed in (the cookie is set)', () => {
     expect(interpretSignInResponse(200, null, null, NOW)).toEqual({ kind: 'ok', session: null });
@@ -172,5 +187,30 @@ describe('retry timing', () => {
     expect(retryMinutes(61)).toBe(2);
     expect(retryMinutes(899)).toBe(15);
     expect(MESSAGES.rateLimited(retryMinutes(540))).toBe('Too many attempts. Try again in 9 min');
+  });
+});
+
+describe('(events) cardsFor: a join link shows only its event\'s teams', () => {
+  const teams = [
+    { label: 'Medical', short: 'Med', medical: true, event: 'warped' },
+    { label: 'Dispatch', short: 'Dispatch', medical: false, event: 'warped' },
+    { label: 'Medics', short: 'Medics', medical: true, event: 'release-check' },
+    { label: 'Rovers', short: 'Rovers', medical: false, event: 'release-check' },
+    { label: 'dispatch', short: 'Disp', medical: false, event: 'release-check' },
+  ];
+  it('with a link: its event only', () => {
+    expect(cardsFor(teams, 'warped').map((t) => t.label)).toEqual(['Medical', 'Dispatch']);
+    expect(cardsFor(teams, 'release-check').map((t) => t.label)).toEqual(['Medics', 'Rovers', 'dispatch']);
+  });
+  it('a join link keeps the remembered name, and the remembered team only when it is one of the link\'s cards', () => {
+    const warped = cardsFor(teams, 'warped');
+    // "Rovers" was remembered from another event: not carried into Warped as Other.
+    expect(linkDraftFromIdentity({ name: 'Rita Rover', team: 'Rovers' }, warped)).toEqual({ name: 'Rita Rover', team: null, otherTeam: '' });
+    expect(linkDraftFromIdentity({ name: 'Rita Rover', team: 'med' }, warped)).toEqual({ name: 'Rita Rover', team: 'Medical', otherTeam: '' });
+    expect(linkDraftFromIdentity(null, warped)).toEqual(EMPTY_DRAFT);
+  });
+  it('without a link, or a link whose event is not running: every running event\'s, each label once', () => {
+    expect(cardsFor(teams, null).map((t) => t.label)).toEqual(['Medical', 'Dispatch', 'Medics', 'Rovers']);
+    expect(cardsFor(teams, 'gone').map((t) => t.label)).toEqual(['Medical', 'Dispatch', 'Medics', 'Rovers']);
   });
 });

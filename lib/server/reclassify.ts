@@ -4,7 +4,8 @@
 //   lp_set_status:    version mismatch → P0409, else (transition not allowed) → P0422 illegal_transition
 //   lp_update_fields: version mismatch → P0409
 //   lp_cancel:        status not Added → P0422 illegal_transition (checked first), else version → P0409
-// Anything that does not fit stays a 503 (the client retries). Server only.
+// Anything that does not fit stays a 503 (the client retries). (Events) The row is read within the caller's event only:
+// another event's request reads as missing. Server only.
 import 'server-only';
 import { STATUS, canTransition, isInMedical, type StatusKind } from '../domain';
 import { ApiFailure } from './errors';
@@ -18,9 +19,9 @@ export type MutationKind =
   // cancel and restore also start from an approved swap (In medical + swap_place): left a 503 there.
   | { fn: 'swap'; expectedVersion: number; action: string };
 
-async function currentRow(id: string): Promise<{ status: string; row_version: number; swap_place: unknown } | null | 'error'> {
+async function currentRow(eventId: string, id: string): Promise<{ status: string; row_version: number; swap_place: unknown } | null | 'error'> {
   try {
-    const { data, error } = await db().from('patients').select('status, row_version, swap_place').eq('id', id).maybeSingle();
+    const { data, error } = await db().from('patients').select('status, row_version, swap_place').eq('id', id).eq('event_id', eventId).maybeSingle();
     if (error) return 'error';
     if (!data) return null;
     const row = data as { status: unknown; row_version: unknown; swap_place?: unknown };
@@ -35,9 +36,9 @@ const illegal = (status: string) =>
   new ApiFailure('invalid', "That change isn't allowed from the current status", { dbCode: 'P0422_reclassified', extra: { currentStatus: status.slice(0, 60) } });
 
 /** Returns `failure` unchanged unless it is an opaque database error that the row explains. */
-export async function reclassify(failure: unknown, id: string, kind: MutationKind): Promise<unknown> {
+export async function reclassify(failure: unknown, eventId: string, id: string, kind: MutationKind): Promise<unknown> {
   if (!(failure instanceof ApiFailure) || failure.dbCode !== OPAQUE_DB_ERROR) return failure;
-  const row = await currentRow(id);
+  const row = await currentRow(eventId, id);
   if (row === 'error') return failure;
   if (row === null) return new ApiFailure('not_found', undefined, { dbCode: 'P0002_reclassified' });
   switch (kind.fn) {
@@ -63,10 +64,10 @@ export async function reclassify(failure: unknown, id: string, kind: MutationKin
 }
 
 /** Runs a mutation RPC call, reclassifying an opaque failure from the row. */
-export async function withReclassify<T>(id: string, kind: MutationKind, call: () => Promise<T>): Promise<T> {
+export async function withReclassify<T>(eventId: string, id: string, kind: MutationKind, call: () => Promise<T>): Promise<T> {
   try {
     return await call();
   } catch (error) {
-    throw await reclassify(error, id, kind);
+    throw await reclassify(error, eventId, id, kind);
   }
 }

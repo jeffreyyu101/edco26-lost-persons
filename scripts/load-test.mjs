@@ -75,7 +75,8 @@ async function signIn(n) {
   if (res.status !== 200) throw new Error(`sign-in for client ${n} failed: HTTP ${res.status}`);
   const cookie = res.headers.getSetCookie().find((c) => c.startsWith('lp_session='));
   if (!cookie) throw new Error('no session cookie');
-  return cookie.split(';')[0];
+  // The session's cookie and event (X-LP-Event: every event route refuses a call without it).
+  return { cookie: cookie.split(';')[0], 'x-lp-event': (await res.json()).eventId };
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -84,8 +85,7 @@ const sleepUntil = (ms, deadline) => sleep(Math.max(0, Math.min(ms, deadline - p
 
 /** One simulated phone: full fetch (paged), then delta polls until the deadline. */
 async function client(n, deadline) {
-  const cookie = await signIn(n);
-  const headers = { cookie };
+  const headers = await signIn(n);
   await sleep(Math.random() * POLL_MS);
   let cursor = null;
   let polls = 0;
@@ -122,8 +122,7 @@ async function client(n, deadline) {
 
 /** Optional writer: a synthetic request every 10 s, answered "Not in medical" right after. */
 async function writer(deadline) {
-  const cookie = await signIn(CLIENTS + 1);
-  const headers = { cookie, origin: BASE, 'content-type': 'application/json' };
+  const headers = { ...(await signIn(CLIENTS + 1)), origin: BASE, 'content-type': 'application/json' };
   let i = 0;
   while (performance.now() < deadline) {
     i += 1;

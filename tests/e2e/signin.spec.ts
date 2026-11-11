@@ -8,6 +8,7 @@
 //     locally per A17) and a unique synthetic name, so login limits never leak between tests or runs.
 //     The in-app 401 test also exercises the real store's redirect (lib/client/store-core.ts).
 // Run one group with `--grep @api` or `--grep-invert @api`. Synthetic data only.
+import './helpers/api-event';
 import { expect, test, type BrowserContext, type Page, type Request, type Route } from '@playwright/test';
 import { loadTestEnv } from '../../scripts/test-env.mjs';
 
@@ -101,8 +102,9 @@ test.describe('sign-in UI', () => {
     await openSignIn(page);
     await expect(page.getByRole('heading', { name: 'Staff sign-in' })).toBeVisible();
     await expect(page.getByText('Is my friend in medical?', { exact: true })).toBeVisible();
-    await expect(page.getByRole('img', { name: 'EDC Orlando' })).toBeVisible();
+    // (Events) A password does not say which event it is until it signs in: Ground Control alone.
     await expect(page.getByRole('img', { name: 'Ground Control' })).toBeVisible();
+    await expect(page.getByRole('img', { name: 'EDC Orlando' })).toHaveCount(0);
     await expect(page.getByText('Built by Jeffrey & Brian for Ground Control / Headliner Experience')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Switch to dark mode' })).toBeVisible();
     await expect(page.getByText('Your team', { exact: true })).toBeVisible();
@@ -196,7 +198,7 @@ test.describe('sign-in UI', () => {
     await expect(alertLine(page)).toHaveText('Too many attempts. Try again in 10 min');
   });
 
-  test('success: an alias typed as Other team is sent canonical, the response is remembered, ?next= opens', async ({ page }) => {
+  test("success: a card's short name typed as Other team is sent as that card, the response is remembered, ?next= opens", async ({ page }) => {
     const bodies = await mockSession(page, (route, body) => json(route, 200, sessionInfo(String(body.staffName), DISPATCH)));
     await openSignIn(page, `/signin?next=${encodeURIComponent('/?view=mine')}`);
     await fillStepOne(page, '  Dana   Kim ', { other: 'dispatch' });
@@ -280,15 +282,14 @@ test.describe('sign-in UI', () => {
     await expect(signInButton(page)).toBeEnabled();
   });
 
-  test('theme toggle: dark persists across a reload with no flash; the EDC logo inverts', async ({ page }) => {
+  test('theme toggle: dark persists across a reload with no flash; the Ground Control logo keeps its colours', async ({ page }) => {
     await openSignIn(page);
     await expect(page.locator('html')).toHaveClass(/\blight\b/);
     await page.getByRole('button', { name: 'Switch to dark mode' }).click();
     await expect(page.locator('html')).toHaveClass(/\bdark\b/);
     expect(await page.evaluate(() => localStorage.getItem('lp-theme'))).toBe('dark');
     await expect(page.getByRole('button', { name: 'Switch to light mode' })).toBeVisible();
-    await expect(page.getByRole('img', { name: 'EDC Orlando' })).toHaveCSS('filter', 'invert(1)');
-    await expect(page.getByRole('img', { name: 'Ground Control' })).toHaveCSS('filter', 'none');
+    await expect(page.getByRole('img', { name: 'Ground Control' }).locator('img')).toHaveCSS('filter', 'none');
 
     // The class must already be on <html> when the document is parsed (pre-paint script), not after hydration.
     await page.addInitScript(() => {

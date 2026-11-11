@@ -2,7 +2,7 @@
 // row per team of the devices it pushed to, with ok / gone / failed counts and the round's duration, and nothing
 // else of them; with collection off it writes nothing and still delivers. Synthetic staff only.
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { admin, api, cookieFor, createRequest, newStaff, psql, staffOf, withTestServer, type Staff } from './harness';
+import { EVENT_ID, admin, api, cookieFor, createRequest, newStaff, psql, staffOf, withTestServer, type Staff } from './harness';
 
 const mock = vi.hoisted(() => ({ sent: [] as string[], status: new Map<string, number>() }));
 
@@ -68,7 +68,7 @@ describe('push_send', () => {
     const medic = await device(rae, 'medic');
     mock.status.set(gone, 410);
     const r = await createRequest(dana);
-    await notifyStaff([staffOf(dana), staffOf(rae)], { requestId: r.id, kind: 'in_medical', actor: staffOf(newStaff('Medical')), detail: 'Located' });
+    await notifyStaff(EVENT_ID, [staffOf(dana), staffOf(rae)], { requestId: r.id, kind: 'in_medical', actor: staffOf(newStaff('Medical')), detail: 'Located' });
     expect(await eventuallyRows(since, 'dispatch:in_medical:1/1/0:2,medical:in_medical:1/0/0:1')).toBe('dispatch:in_medical:1/1/0:2,medical:in_medical:1/0/0:1');
     expect(mock.sent).toEqual(expect.arrayContaining([ok, gone, medic]));
     const text = psql(`select string_agg(props::text, ' ') from public.lp_tel_events where name = 'push_send' and received_at > '${since}'`);
@@ -83,7 +83,7 @@ describe('push_send', () => {
       const dana = newStaff('GC/HX - Dispatch');
       const ep = await device(dana, 'off');
       const r = await createRequest(dana);
-      await notifyStaff([staffOf(dana)], { requestId: r.id, kind: 'in_medical', actor: staffOf(newStaff('Medical')), detail: 'Located' });
+      await notifyStaff(EVENT_ID, [staffOf(dana)], { requestId: r.id, kind: 'in_medical', actor: staffOf(newStaff('Medical')), detail: 'Located' });
       for (let i = 0; i < 20 && !mock.sent.includes(ep); i += 1) await new Promise((r) => setTimeout(r, 250));
       expect(mock.sent).toContain(ep);
       await new Promise((r) => setTimeout(r, 500));

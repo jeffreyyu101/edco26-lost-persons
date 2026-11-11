@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_EVENT_TIMEZONE,
+  FALLBACK_TIMEZONE,
   NOT_UPDATED,
   agoPhrase,
   eventDate,
@@ -21,7 +21,9 @@ import {
   wasUpdated,
 } from '@/lib/format';
 
-// 2026-11-07T04:10:00Z is Fri Nov 6, 11:10 PM in America/New_York (EST, UTC−5 after Nov 1).
+// 2026-11-07T04:10:00Z is Fri Nov 6, 11:10 PM in America/New_York (EST, UTC−5 after Nov 1). (Events) The event's zone
+// is passed in, as every screen passes its event's (EventConfig.timezone).
+const ET = 'America/New_York';
 const FRI_2310 = '2026-11-07T04:10:00.123456+00:00';
 const FRI_0958 = '2026-11-06T14:58:00Z';
 const THU_2350 = '2026-11-06T04:50:00Z';
@@ -45,34 +47,34 @@ describe('case numbers', () => {
 });
 
 describe('event timezone', () => {
-  it('defaults to America/New_York', () => {
-    expect(DEFAULT_EVENT_TIMEZONE).toBe('America/New_York');
+  it("(events) no event's zone is built in: the fallback is UTC; every screen passes its event's", () => {
+    expect(FALLBACK_TIMEZONE).toBe('UTC');
   });
 
   it('uses the event day, not UTC', () => {
-    expect(eventDate(FRI_2310)).toBe('2026-11-06');
-    expect(isSameEventDay(FRI_2310, FRI_0958)).toBe(true);
-    expect(isSameEventDay(FRI_2310, SAT_0015)).toBe(false);
+    expect(eventDate(FRI_2310, ET)).toBe('2026-11-06');
+    expect(isSameEventDay(FRI_2310, FRI_0958, ET)).toBe(true);
+    expect(isSameEventDay(FRI_2310, SAT_0015, ET)).toBe(false);
     expect(eventDate(FRI_2310, 'UTC')).toBe('2026-11-07');
   });
 
   it('shows h:mm for today and a weekday prefix otherwise', () => {
-    expect(formatClock(FRI_2310)).toBe('11:10');
-    expect(formatListTime(FRI_0958, FRI_2310)).toBe('9:58');
-    expect(formatListTime(THU_2350, FRI_2310)).toBe('Thu 11:50');
-    expect(formatListTime(FRI_2310, SAT_0015)).toBe('Fri 11:10');
-    expect(formatListTime(new Date(FRI_0958), new Date(FRI_2310).getTime())).toBe('9:58');
+    expect(formatClock(FRI_2310, ET)).toBe('11:10');
+    expect(formatListTime(FRI_0958, FRI_2310, ET)).toBe('9:58');
+    expect(formatListTime(THU_2350, FRI_2310, ET)).toBe('Thu 11:50');
+    expect(formatListTime(FRI_2310, SAT_0015, ET)).toBe('Fri 11:10');
+    expect(formatListTime(new Date(FRI_0958), new Date(FRI_2310).getTime(), ET)).toBe('9:58');
   });
 
   it('formats audit times like "Nov 6, 11:10 PM"', () => {
-    expect(formatAuditTime(FRI_2310)).toBe('Nov 6, 11:10 PM');
-    expect(formatAuditTime(FRI_0958)).toBe('Nov 6, 9:58 AM');
+    expect(formatAuditTime(FRI_2310, ET)).toBe('Nov 6, 11:10 PM');
+    expect(formatAuditTime(FRI_0958, ET)).toBe('Nov 6, 9:58 AM');
   });
 
   it('handles the DST change (Nov 1 2026) correctly', () => {
     // Oct 31 is EDT (UTC−4); Nov 2 is EST (UTC−5).
-    expect(formatClock('2026-10-31T16:00:00Z')).toBe('12:00');
-    expect(formatClock('2026-11-02T17:00:00Z')).toBe('12:00');
+    expect(formatClock('2026-10-31T16:00:00Z', ET)).toBe('12:00');
+    expect(formatClock('2026-11-02T17:00:00Z', ET)).toBe('12:00');
   });
 });
 
@@ -112,31 +114,31 @@ describe('log times', () => {
   const SAT_1300 = '2026-11-07T18:00:00Z';
 
   it('formats a clock with AM/PM, including 12 AM and 12 PM', () => {
-    expect(formatClockAmPm(FRI_2310)).toBe('11:10 PM');
-    expect(formatClockAmPm(FRI_0958)).toBe('9:58 AM');
-    expect(formatClockAmPm(SAT_0000)).toBe('12:00 AM');
-    expect(formatClockAmPm(SAT_0005)).toBe('12:05 AM');
-    expect(formatClockAmPm(SAT_1200)).toBe('12:00 PM');
-    expect(formatClockAmPm(SAT_1259)).toBe('12:59 PM');
-    expect(formatClockAmPm(SAT_1300)).toBe('1:00 PM');
+    expect(formatClockAmPm(FRI_2310, ET)).toBe('11:10 PM');
+    expect(formatClockAmPm(FRI_0958, ET)).toBe('9:58 AM');
+    expect(formatClockAmPm(SAT_0000, ET)).toBe('12:00 AM');
+    expect(formatClockAmPm(SAT_0005, ET)).toBe('12:05 AM');
+    expect(formatClockAmPm(SAT_1200, ET)).toBe('12:00 PM');
+    expect(formatClockAmPm(SAT_1259, ET)).toBe('12:59 PM');
+    expect(formatClockAmPm(SAT_1300, ET)).toBe('1:00 PM');
     // In the event timezone, not the machine's or UTC.
     expect(formatClockAmPm(FRI_2310, 'UTC')).toBe('4:10 AM');
-    expect(formatClockAmPm('2026-10-31T16:00:00Z')).toBe('12:00 PM'); // EDT before the Nov 1 change
+    expect(formatClockAmPm('2026-10-31T16:00:00Z', ET)).toBe('12:00 PM'); // EDT before the Nov 1 change
   });
 
   it('Created: the clock on the same event day, the weekday for an earlier day, the date beyond a week', () => {
-    expect(formatCreatedTime(FRI_0958, FRI_2310)).toBe('9:58 AM');
-    expect(formatCreatedTime(FRI_2310, FRI_2310)).toBe('11:10 PM');
-    expect(formatCreatedTime(THU_2350, FRI_2310)).toBe('Thu 11:50 PM');
+    expect(formatCreatedTime(FRI_0958, FRI_2310, ET)).toBe('9:58 AM');
+    expect(formatCreatedTime(FRI_2310, FRI_2310, ET)).toBe('11:10 PM');
+    expect(formatCreatedTime(THU_2350, FRI_2310, ET)).toBe('Thu 11:50 PM');
     // Across midnight: logged at 11:10 PM Friday, seen at 12:15 AM Saturday.
-    expect(formatCreatedTime(FRI_2310, SAT_0015)).toBe('Fri 11:10 PM');
+    expect(formatCreatedTime(FRI_2310, SAT_0015, ET)).toBe('Fri 11:10 PM');
     // Logged at 12:05 AM Saturday, seen the same night: no weekday.
-    expect(formatCreatedTime(SAT_0005, SAT_0015)).toBe('12:05 AM');
+    expect(formatCreatedTime(SAT_0005, SAT_0015, ET)).toBe('12:05 AM');
     // The midnight boundary in the event timezone (Friday 11:10 PM NY is already Saturday in UTC).
-    expect(formatCreatedTime(FRI_2310, '2026-11-07T04:59:00Z')).toBe('11:10 PM');
-    expect(formatCreatedTime(FRI_2310, SAT_0000)).toBe('Fri 11:10 PM');
-    expect(formatCreatedTime('2026-10-30T01:41:00Z', SAT_0015)).toBe('Oct 29 9:41 PM');
-    expect(formatCreatedTime(new Date(FRI_0958), new Date(FRI_2310).getTime())).toBe('9:58 AM');
+    expect(formatCreatedTime(FRI_2310, '2026-11-07T04:59:00Z', ET)).toBe('11:10 PM');
+    expect(formatCreatedTime(FRI_2310, SAT_0000, ET)).toBe('Fri 11:10 PM');
+    expect(formatCreatedTime('2026-10-30T01:41:00Z', SAT_0015, ET)).toBe('Oct 29 9:41 PM');
+    expect(formatCreatedTime(new Date(FRI_0958), new Date(FRI_2310).getTime(), ET)).toBe('9:58 AM');
     // Another event timezone.
     expect(formatCreatedTime(FRI_2310, FRI_2310, 'UTC')).toBe('4:10 AM');
   });

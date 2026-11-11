@@ -12,6 +12,7 @@ import {
   splitName,
   type EditableField,
   type PhotoTimingAny,
+  type PostName,
   type StatusKind,
 } from '../domain';
 import type { CreateRequestInput, RequestPatchInput } from '../validation';
@@ -35,8 +36,11 @@ const id = (v: unknown): string => (typeof v === 'string' ? v : typeof v === 'nu
 // Rows
 // ---------------------------------------------------------------------------------------------------
 
-/** lp_row JSON → RequestSummary (every known column, camelCased, plus the derived name / postShort). */
-export function mapRow(raw: unknown): RequestSummary {
+/**
+ * lp_row JSON → RequestSummary (every known column, camelCased, plus the derived name / postShort). `posts`: the
+ * event's (EventConfig.posts), for postShort ("FA 3 – Kinetic" → "FA 3"); without them a post reads as its label.
+ */
+export function mapRow(raw: unknown, posts: readonly PostName[] = []): RequestSummary {
   const r = isObject(raw) ? raw : {};
   const firstName = str(r.first_name);
   const lastName = str(r.last_name);
@@ -75,7 +79,7 @@ export function mapRow(raw: unknown): RequestSummary {
     firstPhotoId: str(r.first_photo_id),
     photoCount: reqNum(r.photo_count),
     name: joinName(firstName, lastName),
-    postShort: postShort(reportingLocation, otherLocation),
+    postShort: postShort(reportingLocation, otherLocation, posts),
     medicalLocation: str(r.medical_location),
     // (F5) The "Not found yet" hold. A database without step 1d sends neither: not held, no checks.
     recheckAt: str(r.recheck_at),
@@ -275,20 +279,20 @@ export function mapAudit(raw: unknown): AuditEvent {
 export const THREAD_AUDIT_ACTIONS: ReadonlySet<string> = new Set(['message_posted', 'message_unsent', 'enroute']);
 
 /** lp_detail JSON {row, photos, events} → RequestDetail (photos and audit oldest first). */
-export function mapDetail(raw: unknown): RequestDetail {
+export function mapDetail(raw: unknown, posts: readonly PostName[] = []): RequestDetail {
   const d = isObject(raw) ? raw : {};
   const photos = Array.isArray(d.photos) ? d.photos.map(mapPhoto) : [];
   const events = Array.isArray(d.events) ? d.events.filter((e) => !(isObject(e) && THREAD_AUDIT_ACTIONS.has(reqStr(e.action_type)))) : [];
   const audit = events.map(mapAudit);
-  return { ...mapRow(d.row), photos, audit };
+  return { ...mapRow(d.row, posts), photos, audit };
 }
 
 /** lp_sync JSON → SyncResponse. serverTime / next.at are passed through VERBATIM (microseconds kept). */
-export function mapSync(raw: unknown): SyncResponse {
+export function mapSync(raw: unknown, posts: readonly PostName[] = []): SyncResponse {
   const s = isObject(raw) ? raw : {};
   const out: SyncResponse = {
     serverTime: reqStr(s.serverTime),
-    rows: Array.isArray(s.rows) ? s.rows.map(mapRow) : [],
+    rows: Array.isArray(s.rows) ? s.rows.map((r) => mapRow(r, posts)) : [],
     hasMore: s.hasMore === true,
     next: isObject(s.next) ? { at: reqStr(s.next.at), id: id(s.next.id) } : null,
   };
@@ -296,6 +300,11 @@ export function mapSync(raw: unknown): SyncResponse {
     out.versions = s.versions
       .filter((v): v is [unknown, unknown] => Array.isArray(v) && v.length === 2)
       .map(([vid, version]) => [id(vid), reqNum(version)] as [string, number]);
+  }
+  // (Events) The session's event stage and config version.
+  if (isObject(s.event) && typeof s.event.id === 'string' && typeof s.event.version === 'string'
+      && (s.event.stage === 'practice' || s.event.stage === 'live' || s.event.stage === 'archived')) {
+    out.event = { id: s.event.id, stage: s.event.stage, version: s.event.version };
   }
   return out;
 }

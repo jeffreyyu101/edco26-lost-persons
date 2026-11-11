@@ -9,12 +9,13 @@ import { Avatar, Button, Flex, IconButton, Text, TextField } from '@radix-ui/the
 import { Eye, EyeOff } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { forgetBellForOtherStaff, writeRememberedIdentity } from '@/lib/client/prefs';
+import { afterSignInPath, enterApp } from '@/lib/client/enter-app';
 import { announceSignIn } from '@/lib/client/session-signals';
-import { markSignedIn } from '@/lib/client/signed-in-at';
+import { markSignedIn, markSignedInEvent } from '@/lib/client/signed-in-at';
 import { avatarInitials, teamShort } from '@/lib/domain';
-import { safeNextPath } from '@/lib/safe-next';
 import { isEnterControl, isTextEntry, useStepKeys, useWide } from './desktop';
-import { MESSAGES, retryMinutes, signInBody, type Identity } from './logic';
+import type { EndedEvent } from '@/lib/api-types';
+import { MESSAGES, retryMinutes, signInBody, type Identity, type SignInTeam } from './logic';
 import { ErrorLine, Kbd, StepCard } from './parts';
 import { postSession } from './session-api';
 import styles from './signin.module.css';
@@ -32,9 +33,13 @@ export interface PasswordStepProps {
   next: string | null;
   /** Focus the password on mount (after Continue). */
   autoFocus: boolean;
+  /** (Events) The team cards (a card team is sent as itself, anything else as Other). */
+  teams?: readonly SignInTeam[];
+  /** (Events) The password is an archived event's: the Ended screen. */
+  onEnded?: (event: EndedEvent | null) => void;
 }
 
-export function PasswordStep({ identity, onChange, next, autoFocus }: PasswordStepProps) {
+export function PasswordStep({ identity, onChange, next, autoFocus, teams = [], onEnded }: PasswordStepProps) {
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
   const [error, setError] = useState<StepError | null>(null);
@@ -92,7 +97,7 @@ export function PasswordStep({ identity, onChange, next, autoFocus }: PasswordSt
     busy.current = true;
     setSubmitting(true);
     setError(null);
-    const outcome = await postSession(signInBody(identity, password));
+    const outcome = await postSession(signInBody(identity, password, teams));
     if (!alive.current) return;
 
     if (outcome.kind === 'ok') {
@@ -102,12 +107,20 @@ export function PasswordStep({ identity, onChange, next, autoFocus }: PasswordSt
       writeRememberedIdentity(outcome.session?.staffName ?? identity.name, outcome.session?.team ?? identity.team);
       // A sign-out left pending must not end this new session; open tabs re-check who is signed in.
       announceSignIn();
-      // The app page opens a notification tapped before this sign-in (lib/client/signed-in-at.ts).
+      // The app page opens a notification tapped before this sign-in (lib/client/signed-in-at.ts), and starts from this
+      // event's cache, never the previous event's.
       markSignedIn();
-      window.location.replace(safeNextPath(next) ?? '/');
+      markSignedInEvent(outcome.session?.eventId);
+      // (Events) The Ground Control lead passcode signs in with no event open: the Events list (even for next=/). The
+      // app opens from the network, never from a page a service worker stored (lib/client/enter-app.ts).
+      void enterApp(afterSignInPath(next, outcome.session));
       return; // Stay busy while the app loads.
     }
 
+    if (outcome.kind === 'ended') {
+      onEnded?.(outcome.event);
+      return;
+    }
     busy.current = false;
     setSubmitting(false);
     switch (outcome.kind) {
@@ -169,7 +182,7 @@ export function PasswordStep({ identity, onChange, next, autoFocus }: PasswordSt
                 {identity.name}
               </Text>
               <Text size="1" color="gray" truncate>
-                {teamShort(identity.team)}
+                {teamShort(identity.team, teams)}
               </Text>
             </div>
             <Button

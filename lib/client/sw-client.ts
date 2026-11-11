@@ -35,6 +35,15 @@ function pathOf(url: string): string {
   }
 }
 
+/** The build id a worker was registered with (`/sw.js?v=<id>`), or null. */
+export function scriptBuild(scriptURL: string): string | null {
+  try {
+    return new URL(scriptURL, 'https://lp.invalid').searchParams.get('v');
+  } catch {
+    return null;
+  }
+}
+
 /** `<script src>` URLs in an HTML document's text. */
 export function scriptSrcsFromHtml(html: string): string[] {
   return [...html.matchAll(/<script\b[^>]*\ssrc="([^"]+)"/g)].map((m) => (m[1] ?? '').replace(/&amp;/g, '&'));
@@ -127,8 +136,10 @@ export function startServiceWorker(hooks: SwHooks): SwController | null {
     const controller = sw.controller;
     if (stopped || !waiting || !controller) return;
     // The same build id (same ?v=) is not an update the user has to load: a second install of the same
-    // worker (seen when two tabs install at once) takes over quietly, without "Update ready".
-    if (waiting.scriptURL === controller.scriptURL) {
+    // worker (seen when two tabs install at once) takes over quietly, without "Update ready". (Cut-over fix A3) So
+    // does a worker of the build this page already runs: the page came from the network under an older worker (a
+    // sign-in on a phone that held the old build, lib/client/enter-app.ts). No reload: the page is that build.
+    if (waiting.scriptURL === controller.scriptURL || scriptBuild(waiting.scriptURL) === buildId) {
       waiting.postMessage({ type: 'skip-waiting' });
       return;
     }

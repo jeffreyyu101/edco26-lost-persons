@@ -16,6 +16,7 @@ import {
   isUuid,
   joinName,
   type Gender,
+  type PostName,
   type PostValue,
   type TextField,
 } from '../domain';
@@ -65,15 +66,15 @@ export const EMPTY_FORM_VALUES: Readonly<RequestFormValues> = Object.freeze({
   contactNotes: '',
 });
 
-/** Prefill for edit mode. */
-export function formValuesFromRequest(row: RequestSummary): RequestFormValues {
+/** Prefill for edit mode. `posts`: the event's (a post it no longer has reads as '', so one must be chosen). */
+export function formValuesFromRequest(row: RequestSummary, posts: readonly PostName[] = []): RequestFormValues {
   const values: RequestFormValues = {
     ...EMPTY_FORM_VALUES,
     name: row.name,
     // String(): a row cached on the phone before age became text can still hold a number.
     age: row.age === null || row.age === undefined ? '' : String(row.age),
     gender: row.gender ?? '',
-    reportingLocation: isPostValue(row.reportingLocation) ? row.reportingLocation : '',
+    reportingLocation: isPostValue(row.reportingLocation, posts) ? row.reportingLocation : '',
     otherLocation: row.otherLocation ?? '',
   };
   for (const key of TEXT_FIELDS) values[key] = row[key] ?? '';
@@ -186,10 +187,10 @@ const legacyText = (v: unknown): string | null => (typeof v === 'string' && v.tr
  * last_name, they are joined into name (same rule as joinName). A reportingLocation that is not a valid
  * post reads as '' so the user has to choose one; otherLocation is kept only for Other.
  */
-export function formValuesFromCreateBody(payload: CreateRequestBody): RequestFormValues {
+export function formValuesFromCreateBody(payload: CreateRequestBody, posts: readonly PostName[] = []): RequestFormValues {
   const legacy = payload as CreateRequestBody & LegacyNameFields;
   const name = payload.name ?? (joinName(legacyText(legacy.first_name), legacyText(legacy.last_name)) || null);
-  const post = isPostValue(payload.reportingLocation) ? payload.reportingLocation : '';
+  const post = isPostValue(payload.reportingLocation, posts) ? payload.reportingLocation : '';
   const values: RequestFormValues = {
     ...EMPTY_FORM_VALUES,
     name: name ?? '',

@@ -6,7 +6,7 @@
 // where an expanded sidebar would squeeze the list and an open request it opens over them instead, with a scrim
 // (./sidebar-model.ts, ./sidebar-state.ts).
 //
-// Header: the logo lockup (EDC Orlando | Ground Control, the brand card's colours) with the live dot; tap syncs.
+// Header: the logo lockup (the event's logo | Ground Control, the brand card's colours) with the live dot; tap syncs.
 // Content: the views with live counts (hidden while loading), Pending's unread-messages bubble, F4's Activity (it
 // opens the top bar's Activity popover), a separator, Dashboard, and Health (the in-house telemetry's page, its own
 // route) only on a device that has opened /health once (localStorage lp-health): floor staff never see it.
@@ -16,6 +16,7 @@ import { Activity, ChartColumn, ChevronsUpDown, Inbox, List, UserRound, type Luc
 import { useEffect, useSyncExternalStore } from 'react';
 import { AccountMenu } from '@/components/account/AccountMenu';
 import { DeskAlertsRowSlot } from '@/components/activity/slots';
+import { DeskEventLink, EventSwitcher, useIsLeadInEvent } from '@/components/events/LeadNav';
 import { PendingDot } from '@/components/messages/CardActivity';
 import { useActions, usePrefs, useCounts, useIsLoading, useSession } from '@/lib/client/store-contract';
 import { teamShort } from '@/lib/domain';
@@ -25,6 +26,7 @@ import { SIDEBAR_ID } from './sidebar-model';
 import { closeSidebarOverlay, toggleSidebar, useSidebar } from './sidebar-state';
 import type { MainView } from './views';
 import d from './desk.module.css';
+import { useEventConfig } from '@/lib/client/event-config';
 
 const ICONS: Readonly<Record<NavKey, LucideIcon>> = {
   all: List,
@@ -76,6 +78,7 @@ export function DeskNav({ main, pane = false }: DeskNavProps) {
   const counts = useCounts();
   const loading = useIsLoading();
   const showHeader = useShowHeader(main);
+  const lead = useIsLeadInEvent();
 
   // Open over the content until the address changes (a view chosen, a request or a form opened) or the sidebar
   // docks (a wider window, the request closed): then it is closed for good, not waiting to come back.
@@ -115,6 +118,7 @@ export function DeskNav({ main, pane = false }: DeskNavProps) {
       >
         <div className={d.sideHead}>
           <LiveMark />
+          {lead ? <EventSwitcher /> : null}
         </div>
         <nav className={d.sideContent} aria-label="Views">
           <div className={d.group}>
@@ -126,6 +130,8 @@ export function DeskNav({ main, pane = false }: DeskNavProps) {
           <div className={`${d.group} ${d.groupNext}`}>
             <div className={d.menu}>
               {item('dashboard')}
+              {/* (Events) A lead's setup of the open event (its own route). */}
+              <DeskEventLink className={d.item} labelClassName={d.label} tip={<Tip>Event</Tip>} />
               {health ? (
                 // A plain link: /health is its own route.
                 <a href="/health" className={d.item} data-testid="desk-health">
@@ -158,12 +164,13 @@ function Person({ onShowHeader }: { onShowHeader: (() => void) | undefined }) {
   const prefs = usePrefs();
   const name = session.staffName ?? prefs.rememberedName ?? '';
   const team = session.team ?? prefs.rememberedTeam ?? '';
+  const event = useEventConfig();
   return (
     <div className={d.person}>
       <AccountMenu size="2" onShowHeader={onShowHeader} />
       <span className={d.personText} aria-hidden>
         <span className={d.personName}>{name || 'Signed in'}</span>
-        {team ? <span className={d.personTeam}>{teamShort(team)}</span> : null}
+        {team ? <span className={d.personTeam}>{teamShort(team, event?.teams)}</span> : null}
       </span>
       <ChevronsUpDown size={16} strokeWidth={1.75} className={d.personEnd} aria-hidden />
       <Tip>{name || 'Account'}</Tip>

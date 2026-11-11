@@ -17,6 +17,7 @@ import { Sheet, SheetTitle } from '@/components/ui/Sheet';
 import { StatusGlyph } from '@/components/ui/StatusGlyph';
 import { WALK } from '@/components/ui/StageGlyph';
 import s from './companion.module.css';
+import { mainMedicalLabel, useEventConfig } from '@/lib/client/event-config';
 
 function Walk({ size = 22 }: { size?: number }) {
   return (
@@ -129,7 +130,7 @@ export function LocatedSheet({ row, open, offline, onClose, onChoose }: LocatedS
             title="Already accompanied"
             icon={<Users size={22} strokeWidth={2} />}
             tone="amber"
-            said={`Someone with them: already accompanied. The friend does not walk over.${hinted ? ' The tent said a friend may be with them.' : ''}`}
+            said={`Someone with them: already accompanied. The friend does not walk over.${hinted ? ' The post said a friend may be with them.' : ''}`}
             hint={hinted}
             disabled={offline}
             testId="located-yes"
@@ -154,8 +155,10 @@ export interface SwapSheetProps {
 
 /** Screen 4: the answerer decides where the swap happens, or declines it. No default. */
 export function SwapSheet({ row, open, offline, sub, onClose, onApprove, onDecline }: SwapSheetProps) {
+  const mainMedical = mainMedicalLabel(useEventConfig());
   if (!row) return null;
-  const post = swapPlaceLabel('fa', row);
+  const post = swapPlaceLabel('fa', row, mainMedical);
+  const mm = swapPlaceLabel('mm', row, mainMedical);
   return (
     <Sheet open={open} onOpenChange={(o) => (o ? undefined : onClose())} titleInContent>
       <div data-testid="swap-sheet">
@@ -169,7 +172,7 @@ export function SwapSheet({ row, open, offline, sub, onClose, onApprove, onDecli
         </div>
         <div className={s.opts} role="group" aria-label="Where the swap happens">
           <Option
-            title={swapApprovedLabel('fa', row)}
+            title={swapApprovedLabel('fa', row, mainMedical)}
             icon={<Tent size={22} strokeWidth={2} />}
             tone="green"
             said={`Swap at ${post}. The companion meets the friend there.`}
@@ -178,10 +181,10 @@ export function SwapSheet({ row, open, offline, sub, onClose, onApprove, onDecli
             onClick={() => onApprove('fa')}
           />
           <Option
-            title={swapApprovedLabel('mm', row)}
+            title={swapApprovedLabel('mm', row, mainMedical)}
             icon={<Cross size={22} strokeWidth={2} />}
             tone="green"
-            said="Swap at Main Med. The friend comes to Main Med; the companion stays until they arrive."
+            said={`Swap at ${mm}. The friend comes to ${mm}; the companion stays until they arrive.`}
             disabled={offline}
             testId="swap-mm"
             onClick={() => onApprove('mm')}
@@ -227,7 +230,7 @@ export function FriendMayBeRow({ row }: { row: RequestSummary }) {
 
 /** Screen 5 (FA swap): "Companion coming · FA 4" in place of the friend's en route row. */
 export function CompanionComingRow({ row }: { row: RequestSummary }) {
-  const where = swapPlaceLabel('fa', row);
+  const where = swapPlaceLabel('fa', row, mainMedicalLabel(useEventConfig()));
   return (
     <div className={s.comp} role="note" aria-label={`The companion is coming to ${where} for the swap.`} data-testid="companion-coming">
       <span className={s.ic} aria-hidden>
