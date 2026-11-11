@@ -7,9 +7,13 @@ import {
   changedPayload,
   emptyForm,
   fieldKeyOf,
+  flagFromServer,
   formFromEvent,
   isDirty,
   itemError,
+  itemFlags,
+  itemProblem,
+  shortOf,
   lpNumber,
   moveItem,
   payloadFromForm,
@@ -181,6 +185,58 @@ describe('itemError', () => {
     expect(itemError('post', list, { key: 'new', label: 'FA 1', short: '' })).toBe('Already there');
     expect(itemError('post', list, { key: 'new', label: 'FA 9', short: 'x'.repeat(17) })).toMatch(/Short/);
     expect(itemError('lastSeen', [], { key: 'n', label: 'Other', short: '' })).toBeNull();
+  });
+});
+
+describe('Short left empty (derived from the label)', () => {
+  const ok = (): SetupForm => ({ ...formFromEvent(event()) });
+  const warped = (): SetupForm => {
+    let f: SetupForm = { ...ok(), posts: [], teams: [] };
+    for (const label of ['FA 1 – Main Stage', 'FA 2 – Vans Stage', 'Main Medical', 'Command', 'Roaming', 'Gate A']) f = { ...f, posts: addItem(f.posts, { label, short: '' }) };
+    f = { ...f, teams: addItem(f.teams, { label: 'Ground Control Dispatch Team', short: '' }) };
+    return f;
+  };
+  it('a realistic post or team name with no Short passes', () => {
+    expect(validateForm(warped())).toEqual({});
+    const f = warped();
+    expect(f.posts.map((p) => shortOf('post', p))).toEqual(['FA 1', 'FA 2', 'Main Medical', 'Command', 'Roaming', 'Gate A']);
+    expect(shortOf('team', f.teams[0]!)).toBe('Ground Control Dispatch');
+    // Short stays out of the payload: the server derives the same one.
+    expect((payloadFromForm(f)['posts'] as Array<Record<string, unknown>>)[0]).toEqual({ label: 'FA 1 – Main Stage' });
+  });
+  it('a derived short shows as an empty Short field when the event is read back', () => {
+    const f = formFromEvent(event({ posts: [{ id: 'fa1', label: 'FA 1 – Main Stage', short: 'FA 1' }, { id: 'fa2', label: 'FA 2 – Vans Stage', short: 'Vans' }] }));
+    expect(f.posts.map((p) => p.short)).toEqual(['', 'Vans']);
+  });
+  it('two posts with the same Short, typed or derived, any case: the second one, on its Short', () => {
+    const f = ok();
+    const typed = { ...f, posts: addItem(f.posts, { label: 'Command tent', short: 'cmd' }) };
+    expect(itemFlags(typed).posts).toMatchObject({ key: typed.posts[2]!.key, part: 'short', message: 'Short already used' });
+    expect(validateForm(typed).posts).toBe('Command tent: Short already used');
+    const derived = { ...f, posts: addItem(addItem([], { label: 'Gate A – North Side', short: '' }), { label: 'Gate A – South Side', short: '' }) };
+    expect(itemFlags(derived).posts).toMatchObject({ key: derived.posts[1]!.key, part: 'short' });
+    const teams = { ...f, teams: addItem(f.teams, { label: 'Medical Ops', short: 'MED' }) };
+    expect(itemFlags(teams).teams).toMatchObject({ key: teams.teams[2]!.key, part: 'short' });
+    expect(validateForm({ ...f, posts: addItem(f.posts, { label: 'Command 2', short: 'Cmd 2' }) })).toEqual({});
+  });
+  it('marks the Label or the Short of the item', () => {
+    const list = formFromEvent(event()).posts;
+    expect(itemProblem('post', list, { key: 'n', label: '', short: '' })).toEqual({ part: 'label', message: 'Required' });
+    expect(itemProblem('post', list, { key: 'n', label: 'FA 1', short: '' })).toEqual({ part: 'label', message: 'Already there' });
+    expect(itemProblem('post', list, { key: 'n', label: 'FA 9', short: 'x'.repeat(17) })).toEqual({ part: 'short', message: 'Short: at most 16 characters' });
+    expect(itemProblem('post', list, { key: 'n', label: 'Command post 2', short: 'CMD' })).toEqual({ part: 'short', message: 'Short already used' });
+    expect(itemProblem('post', list, { key: 'n', label: 'FA 1 – Main Stage', short: '' })).toEqual({ part: 'short', message: 'Short already used' });
+  });
+  it('a server refusal that names an item marks that item', () => {
+    const f = warped();
+    expect(flagFromServer(f, { field: 'posts', index: 3, part: 'short', message: 'Short already used' })).toEqual({
+      field: 'posts',
+      flag: { key: f.posts[3]!.key, part: 'short', message: 'Short already used' },
+    });
+    expect(flagFromServer(f, { field: 'teams', index: 0, message: 'Each team once' })?.flag.part).toBe('label');
+    expect(flagFromServer(f, { field: 'posts', message: 'x' })).toBeNull();
+    expect(flagFromServer(f, { field: 'posts', index: 9, message: 'x' })).toBeNull();
+    expect(flagFromServer(f, { field: 'name', index: 0, message: 'x' })).toBeNull();
   });
 });
 

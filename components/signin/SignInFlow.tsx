@@ -22,7 +22,7 @@
 // reload): the `hashchange` listener below picks the code up (JOIN_LINK_SCRIPT already kept it and cleared
 // the address bar) and opens step 1, from step 2 too.
 import { VisuallyHidden } from '@radix-ui/themes';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { EndedEvent, SessionInfo } from '@/lib/api-types';
 import { ENDED_PATH, endedAtSignIn, readEnded } from '@/lib/client/ended';
 import { clearRememberedIdentity, forgetBellForOtherStaff, readPrefs, writeRememberedIdentity } from '@/lib/client/prefs';
@@ -32,7 +32,7 @@ import { markSignedIn, markSignedInEvent } from '@/lib/client/signed-in-at';
 import { captureJoinCode, forgetJoinCode } from '@/lib/join-link';
 import { isWide } from './desktop';
 import { EndedScreen } from './Ended';
-import { MESSAGES, draftFromIdentity, inviteSignInBody, rememberedIdentity, retryMinutes, type Identity, type SignInTeam, type WhoDraft } from './logic';
+import { MESSAGES, cardsFor, draftFromIdentity, inviteSignInBody, rememberedIdentity, retryMinutes, type Identity, type SignInTeam, type WhoDraft } from './logic';
 import { Credit, ThemeToggle } from './parts';
 import { PasswordStep } from './PasswordStep';
 import { postSession } from './session-api';
@@ -48,7 +48,7 @@ const LOCK_TICK_MS = 5_000;
 export interface SignInFlowProps {
   /** Safe same-origin path to return to after sign-in (lib/safe-next), or null for "/". */
   next: string | null;
-  /** (Events) The team cards: every running event's teams (the server page reads them). */
+  /** (Events) Every running event's teams, each with its event (the server page reads them; a join link shows its own). */
   teams?: readonly SignInTeam[];
   /** (Events) /signin?ended=1: the Ended screen (lib/client/ended.ts keeps what it shows). */
   ended?: boolean;
@@ -119,12 +119,14 @@ function openApp(session: SessionInfo | null, identity: Identity, next: string |
   void enterApp(afterSignInPath(next, session));
 }
 
-function Steps({ next, teams, onEnded }: { next: string | null; teams: readonly SignInTeam[]; onEnded: (event: EndedEvent | null) => void }) {
+function Steps({ next, teams: allTeams, onEnded }: { next: string | null; teams: readonly SignInTeam[]; onEnded: (event: EndedEvent | null) => void }) {
   // The code a team join link left for this tab (and out of the address bar), or null.
   const [joinCode, setJoinCode] = useState<string | null>(() => captureJoinCode());
-  const [state, setState] = useState<StepState>(() => initialState(joinCode !== null, teams));
-  // (Events) A join link names its event: its logo beside Ground Control's (a password: Ground Control alone).
+  // (Events) A join link names its event: its logo beside Ground Control's (a password: Ground Control alone), and only
+  // its teams' cards (without a link: every running event's).
   const slug = linkSlug(joinCode);
+  const teams = useMemo(() => cardsFor(allTeams, slug), [allTeams, slug]);
+  const [state, setState] = useState<StepState>(() => initialState(joinCode !== null, teams));
   const eventLogo = slug ? `/api/events/logo/${slug}` : null;
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -149,11 +151,12 @@ function Steps({ next, teams, onEnded }: { next: string | null; teams: readonly 
       if (!code || busy.current) return;
       setJoinCode(code);
       setMessage(null);
-      setState((s) => (s.step === 1 ? s : { step: 1, draft: draftFromIdentity(s.identity, teams), focus: isWide() }));
+      const cards = cardsFor(allTeams, linkSlug(code));
+      setState((s) => (s.step === 1 ? s : { step: 1, draft: draftFromIdentity(s.identity, cards), focus: isWide() }));
     };
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
-  }, [teams]);
+  }, [allTeams]);
 
   // Count the rate-limit lock down; when it passes, Continue comes back.
   useEffect(() => {

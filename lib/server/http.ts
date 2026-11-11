@@ -117,12 +117,24 @@ function issueField(path: ReadonlyArray<PropertyKey>): string | undefined {
   return field && /^[A-Za-z][A-Za-z0-9]{0,59}$/.test(field) ? field : undefined;
 }
 
-/** Turns a zod failure into a 422 invalid with the first offending field. */
+/**
+ * (Events) Which item of a list field the issue is about: posts.3.short → {index: 3, part: 'short'}, so the form marks
+ * that post's chip and its Short field, not the whole list.
+ */
+function issueItem(path: ReadonlyArray<PropertyKey>): { index?: number; part?: 'label' | 'short' } {
+  const rest = path[0] === 'patch' ? path.slice(2) : path.slice(1);
+  const index = rest[0];
+  if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index > 99) return {};
+  const part = rest[1];
+  return { index, ...(part === 'label' || part === 'short' ? { part } : {}) };
+}
+
+/** Turns a zod failure into a 422 invalid with the first offending field (and, in a list, the item). */
 export function invalidFromZod(error: z.ZodError): ApiFailure {
   const issue = error.issues[0];
   const field = issue ? issueField(issue.path) : undefined;
   const message = issue?.message ? issue.message.slice(0, 160) : undefined;
-  return new ApiFailure('invalid', message, { extra: field ? { field } : {} });
+  return new ApiFailure('invalid', message, { extra: field ? { field, ...issueItem(issue!.path) } : {} });
 }
 
 /**

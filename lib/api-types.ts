@@ -646,6 +646,10 @@ export interface ApiError {
     id?: string;
     /** For `invalid`: the offending field (camelCase), when known. */
     field?: string;
+    /** (Events) For `invalid` in a list field (posts, teams, lastSeen): the item's position in the list sent. */
+    index?: number;
+    /** (Events) With `index`: which of the item's fields ('label' or 'short'). */
+    part?: 'label' | 'short';
     /** For `conflict`: the row's current status (from the P0409 HINT). */
     currentStatus?: string;
     /** For `rate_limited`: seconds until a retry is allowed (also sent as Retry-After). */

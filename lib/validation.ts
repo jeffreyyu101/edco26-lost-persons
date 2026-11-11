@@ -5,6 +5,7 @@
 // "unchanged" and an explicit null means "clear". Lengths count Unicode code points, like SQL char_length.
 // Age and gender are free text (Jeffrey, 2026-11-06 10:31; design/DECISIONS.md "New request: free text").
 import { z } from 'zod';
+import { deriveShort } from './short-label';
 import {
   FRIEND_IN_MEDICAL,
   LIMITS,
@@ -470,20 +471,51 @@ function withIds<T extends { id?: string; label: string }>(items: T[]): Array<T 
   });
 }
 
-const uniqueBy = <T>(items: T[], key: (t: T) => string) => new Set(items.map(key)).size === items.length;
+/** A typed short (blank is none: the server derives one from the label, lib/short-label.ts). */
+const listShort = (max: number) =>
+  z
+    .string()
+    .transform((v) => v.trim().replace(/\s+/g, ' '))
+    .refine((v) => v.length <= max, { message: `Short: at most ${max} characters` })
+    .refine(storable, { message: UNSTORABLE })
+    .optional()
+    .transform((v) => v || undefined);
+
+/**
+ * Each label, id and (derived) short once, case-insensitively: two posts with the same short would be one series on
+ * the dashboard. The issue names the item (path [index, 'label' | 'short']), so the form marks that chip.
+ */
+function uniqueItems(items: ReadonlyArray<{ id: string; label: string; short: string }>, ctx: z.RefinementCtx, noun: 'post' | 'team') {
+  const labels = new Set<string>();
+  const shorts = new Set<string>();
+  const ids = new Set<string>();
+  items.forEach((item, i) => {
+    const label = item.label.toLowerCase();
+    const short = item.short.toLowerCase();
+    if (labels.has(label)) ctx.addIssue({ code: 'custom', message: `Each ${noun} once`, path: [i, 'label'] });
+    else if (shorts.has(short)) ctx.addIssue({ code: 'custom', message: 'Short already used', path: [i, 'short'] });
+    else if (ids.has(item.id)) ctx.addIssue({ code: 'custom', message: `Each ${noun} once`, path: [i, 'label'] });
+    labels.add(label);
+    shorts.add(short);
+    ids.add(item.id);
+  });
+}
+
+export const POST_SHORT_MAX = 16;
+export const TEAM_SHORT_MAX = 24;
 
 export const eventPostsSchema = z
-  .array(z.strictObject({ id: listId.optional(), label: listLabel(40), short: z.string().trim().min(1).max(16).optional() }))
+  .array(z.strictObject({ id: listId.optional(), label: listLabel(40), short: listShort(POST_SHORT_MAX) }))
   .max(12)
-  .transform((items) => withIds(items).map((p) => ({ id: p.id, label: p.label, short: p.short ?? p.label })))
-  .refine((items) => uniqueBy(items, (p) => p.label.toLowerCase()) && uniqueBy(items, (p) => p.id), { message: 'Each post once' });
+  .transform((items) => withIds(items).map((p) => ({ id: p.id, label: p.label, short: p.short ?? deriveShort(p.label, POST_SHORT_MAX) })))
+  .superRefine((items, ctx) => uniqueItems(items, ctx, 'post'));
 
 export const eventTeamsSchema = z
   .array(
     z.strictObject({
       id: listId.optional(),
       label: listLabel(80).refine((v) => v.length >= 2 && !STAFF_FORBIDDEN_CHARS.test(v), { message: 'Team: 2–80 characters, no "·"' }),
-      short: z.string().trim().min(1).max(24).optional(),
+      short: listShort(TEAM_SHORT_MAX),
       medical: z.boolean().optional(),
       // (Phase 2) A team's earlier labels (EventTeam.aliases): the server keeps them on a rename; what a lead sends back
       // with the teams it read is accepted and ignored.
@@ -491,8 +523,10 @@ export const eventTeamsSchema = z
     }),
   )
   .max(12)
-  .transform((items) => withIds(items).map((t) => ({ id: t.id, label: t.label, short: t.short ?? t.label, medical: t.medical === true })))
-  .refine((items) => uniqueBy(items, (t) => t.label.toLowerCase()) && uniqueBy(items, (t) => t.id), { message: 'Each team once' })
+  .transform((items) =>
+    withIds(items).map((t) => ({ id: t.id, label: t.label, short: t.short ?? deriveShort(t.label, TEAM_SHORT_MAX), medical: t.medical === true })),
+  )
+  .superRefine((items, ctx) => uniqueItems(items, ctx, 'team'))
   .refine((items) => items.filter((t) => t.medical).length <= 1, { message: 'Only one medical team' });
 
 const eventFields = {

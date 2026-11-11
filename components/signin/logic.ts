@@ -27,6 +27,27 @@ export interface SignInTeam {
   label: string;
   short: string;
   medical: boolean;
+  /** The slug of the event the team belongs to. */
+  event?: string;
+}
+
+/**
+ * The cards to show. A join link (its event's slug): that event's teams only, so nobody signs in to one event under
+ * another's team. Without one (a password, or a link whose event is not running): every running event's teams, each
+ * label once (oldest event first). Known follow-up: the password path still offers every running event's teams.
+ */
+export function cardsFor(teams: readonly SignInTeam[], linkSlug: string | null): readonly SignInTeam[] {
+  if (linkSlug) {
+    const own = teams.filter((t) => t.event === linkSlug);
+    if (own.length > 0) return own;
+  }
+  const seen = new Set<string>();
+  return teams.filter((t) => {
+    const key = t.label.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /** Step 1 as typed. `team` is the chosen card's label; `otherTeam` the free text (they are mutually exclusive). */

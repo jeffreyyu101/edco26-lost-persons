@@ -299,9 +299,14 @@
   letter-spacing: -0.02em;
 }
 
+.tile > span {
+  max-width: 100%;
+}
+
 .tile img {
   width: 100%;
   height: 100%;
+  max-width: 100%;
   object-fit: contain;
 }
 
@@ -371,6 +376,15 @@
 
 .chipShort {
   margin-left: 6px;
+}
+
+/* A chip with a problem: the invalid outline of the fields, and the error glyph before its label. */
+.chip[data-invalid] {
+  box-shadow: inset 0 0 0 1px var(--red-8);
+}
+
+.chipLabel > .chipAlert {
+  color: var(--red-11);
 }
 
 /* A row whose value opens a sheet (Dates): the whole row is the button. */
@@ -779,6 +793,13 @@
 .tileK {
   font-size: 14px;
   color: var(--gray-11);
+}
+
+.tileRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
 }
 
 .tileV {
