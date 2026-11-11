@@ -185,5 +185,17 @@ describe('the wrapper (lib/server/route.ts)', () => {
     session = { eventId: null, role: 'lead' };
     const r = await routes();
     expect(await call(r.sync, 'GET')).toEqual({ status: 409, code: 'no_event' });
+    // Its header-carrying create too ('none': the new build's lead with no event open).
+    expect(await call(r.write, 'POST', 'none')).toEqual({ status: 409, code: 'no_event' });
+  });
+
+  it("…but the old app's headerless create from a lead with no event open is refused out loud (422 with the message)", async () => {
+    // A lead signed in on the old stored sign-in page lands on the old screen with no event: a 409 no_event there
+    // is retried quietly ("Waiting to send" for good), so the create's 422 comes before the no_event check.
+    session = { eventId: null, role: 'lead' };
+    const r = await routes();
+    expect(await call(r.write, 'POST')).toEqual({ status: 422, code: 'invalid' });
+    expect(lastError).toEqual({ code: 'invalid', message: 'Not sent. This screen is out of date. Close the app, open it again, sign in, then log the request again.' });
+    expect(await call(r.message, 'POST')).toEqual({ status: 409, code: 'no_event' });
   });
 });

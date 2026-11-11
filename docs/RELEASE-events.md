@@ -149,8 +149,9 @@ right after signing in: on a slow or no signal the old app shows its own stored 
 opens the old EDC screen. If a check above shows the old screen (EDC banner, New request on EDC, no event switcher):
 close the app completely and open it again on good signal (a second time if needed). Staff can also tap
 **Update ready** → **Reload**; the old app refuses that while something is waiting to send or a new request is open.
-A lead with no event open gets a stuck screen there and no **Update ready**: account menu → **Sign out**, then sign in
-again on good signal. On a lead's computer, close every other tab of the app before signing in; if a tab then hangs,
+A lead with no event open gets a stuck screen there and no **Update ready**, however often the app is reopened:
+account menu → **Sign out** (if it shows "request not sent", tap **Discard & sign out**), then sign in again on good
+signal. On a lead's computer, close every other tab of the app before signing in; if a tab then hangs,
 close it and open a new one.
 
 ## 5. Setting up Warped Tour (no developer needed)
@@ -198,7 +199,7 @@ Lines a lead can paste into the briefing:
   until it has loaded once.
 - If the old EDC screen shows after signing in, close the app completely and open it again (a second time if needed).
 - Nothing typed into the old EDC screen is sent. A request logged there shows **Not sent · needs attention**: close
-  the app, open it again, sign in, and log it again.
+  the app, open it again, sign in, and log it again. **Update ready** may not work there: close the app instead.
 
 ## 6. Roll back
 
@@ -302,9 +303,11 @@ two rows in the step 2 events check).
   sign-in page loaded: the old worker serves its own stored sign-in page when the network takes over 4 s or the phone is
   offline at that moment. That old page signs in to the new event (same body) and opens the old EDC screen, with the
   new cookie; it heals within one or two full relaunches on good signal. For a lead the old page goes to `/`, which the
-  proxy redirects, so the old worker never offers an update: account menu → Sign out, then sign in on good signal. The
+  proxy redirects, so the old worker never offers an update, across any number of relaunches: account menu → Sign out
+  (Discard & sign out if it lists a request not sent), then sign in on good signal. The
   old app refuses Update ready → Reload while anything waits to send or a draft is open. Nothing from the old screen
   lands: its create (`POST /api/requests` with no `X-LP-Event`) gets `422` "Not sent. This screen is out of date…",
+  for a lead with no event open too (checked before `409 no_event`),
   which the old app shows on the item as Not sent · needs attention; every other call with no header gets
   `409 wrong_event`, retried quietly. After the cut-over sign-in, open the app once on good signal until it has
   reloaded or Update ready is gone: until the new worker has installed, the old worker's cache holds the new page but

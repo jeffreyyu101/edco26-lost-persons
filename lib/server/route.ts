@@ -128,6 +128,13 @@ function wrap<P extends Params>(
             throw eventEndedFailure(event);
           }
         }
+        const claimed = request.headers.get('x-lp-event');
+        // The old app retries a 409 forever and later loses the item: its create gets a final 422 instead, which it
+        // shows on the item as "Not sent · needs attention" with this message (no field, so no form error). Checked
+        // before no_event, so a lead with no event open on the old screen is told too (not a quiet 409 no_event).
+        if (name === OLD_APP_CREATE && claimed === null && !options.headerless && (options.event ?? 'required') === 'required') {
+          throw new ApiFailure('invalid', OLD_APP_CREATE_MESSAGE, { dbCode: 'no_header' });
+        }
         if ((options.event ?? 'required') === 'required' && !session.eventId) throw new ApiFailure('no_event');
         // (Phase 2) The tab says which event its request is for (X-LP-Event): another than the cookie's (signed in to
         // another event in another tab) is refused, so a queued write of event A never lands in event B.
@@ -135,15 +142,9 @@ function wrap<P extends Params>(
         // No header at all is refused the same way: only the old build's app (cached by its service worker) sends none,
         // and it must neither write into nor read a new event. It retries 409 quietly, so it stays inert. 'none' (a tab
         // that knows no event yet) still goes through.
-        const claimed = request.headers.get('x-lp-event');
         if ((options.event ?? 'required') === 'required') {
-          // The log line tells the two apart: dbCode 'no_header' is the old build's app.
-          if (claimed === null && !options.headerless) {
-            // The old app retries a 409 forever and later loses the item: its create gets a final 422 instead, which it
-            // shows on the item as "Not sent · needs attention" with this message (no field, so no form error).
-            if (name === OLD_APP_CREATE) throw new ApiFailure('invalid', OLD_APP_CREATE_MESSAGE, { dbCode: 'no_header' });
-            throw new ApiFailure('wrong_event', undefined, { dbCode: 'no_header' });
-          }
+          // The log line tells the two apart: dbCode 'no_header' is the old build's app (its create: above).
+          if (claimed === null && !options.headerless) throw new ApiFailure('wrong_event', undefined, { dbCode: 'no_header' });
           if (claimed !== null && claimed !== 'none' && claimed !== session.eventId) throw new ApiFailure('wrong_event');
         }
       }

@@ -1047,6 +1047,12 @@ describe('(phase 2) X-LP-Event: a tab never writes into another event than the o
     expect(poll.status).toBe(409);
     expect(poll.body.error.code).toBe('wrong_event');
     expect(psql(`select count(*) from public.patients where event_id = '${e.event.id}'`)).toBe('0');
+    // A lead with no event open (signed in on the old stored sign-in page): the same 422, not a quiet 409 no_event.
+    const lead = await leadCookie();
+    const leadWrite = await api('/api/requests', { json: createBody({ reportingLocation: 'Main Stage Tent' }), cookie: lead, event: false as const });
+    expect([leadWrite.status, leadWrite.body.error.code, leadWrite.body.error.message]).toEqual([422, 'invalid', write.body.error.message]);
+    const leadPoll = await api('/api/sync', { cookie: lead, event: false as const });
+    expect([leadPoll.status, leadPoll.body.error.code]).toEqual([409, 'no_event']);
     // The session check needs no event: the old app still learns who is signed in (and the new app which event).
     expect((await api<SessionInfo>('/api/session', bare)).body.eventId).toBe(e.event.id);
     // With the cookie's event, as the new client sends it: as before.

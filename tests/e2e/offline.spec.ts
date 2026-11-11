@@ -231,17 +231,19 @@ test.describe('lie-fi', () => {
 // ---- Service worker update ---------------------------------------------------------------------------
 
 test('a new service worker waiting shows "Update ready · Reload"; Reload hands the page to it', async ({ page }) => {
-  await loadOfflineReady(page);
-  expect(await controllerUrl(page)).toMatch(/\/sw\.js\?v=/);
-
-  const next = `e2e-update-${RUN}`;
-  await deployNewWorker(page, next);
-  await expect(updateToast(page)).toBeVisible({ timeout: 30_000 });
-
-  await updateToast(page).getByRole('button', { name: 'Reload' }).click();
-  await expect.poll(() => controllerUrl(page), { timeout: 30_000 }).toContain(`v=${next}`);
-  await expect(page.locator('html')).toHaveAttribute('data-hydrated', 'true');
+  test.setTimeout(120_000);
+  // The page runs an earlier build under that build's worker; this build's worker is deployed and waits (toast shown).
+  // (Not this build under another version name: after Reload the page would register its own build's worker again,
+  // which takes over quietly (A3), so the controller would not stay on the deployed one.)
+  const older = (await loadOnOlderWorker(page)).id;
+  const current = await currentBuildId(page);
+  await reloadIntoUpdate(page, older);
+  await expect.poll(() => controllerUrl(page), { timeout: 30_000 }).toContain(`v=${current}`);
   await expect(page.getByTestId('request-list')).toBeVisible();
+  // It stays on the deployed worker, with no further toast.
+  await page.waitForTimeout(3_000);
+  expect(await controllerUrl(page)).toContain(`v=${current}`);
+  await expect(updateToast(page)).toHaveCount(0);
 });
 
 /** An earlier build's app page: its build id, and the text and headers stored under `/`. */
