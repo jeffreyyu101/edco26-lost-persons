@@ -43,9 +43,11 @@ function KeepRow({ label, kept, testId, spoken }: { label: string; kept: boolean
 /** A row of the sheet's rows card: the label, then the value (text or a chip). */
 function FactRow({ label, children, testId }: { label: string; children: ReactNode; testId?: string }) {
   return (
-    <div className={s.r} data-testid={testId}>
+    <div className={s.r}>
       <span className={s.k}>{label}</span>
-      <span className={`${s.v} ${s.left}`}>{children}</span>
+      <span className={`${s.v} ${s.left}`} data-testid={testId}>
+        {children}
+      </span>
     </div>
   );
 }

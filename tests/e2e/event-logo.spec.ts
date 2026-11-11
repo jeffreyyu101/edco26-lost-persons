@@ -79,7 +79,10 @@ test('a lead uploads the logo; it shows on the join-link sign-in, in the desk lo
 
   // A single-colour transparent logo.
   await uploadOnSetup(setup, event, { name: 'mono.png', mimeType: 'image/png', buffer: MONO });
-  await expect(eventLogo(setup.getByTestId('event-setup')).or(setup.locator('[data-field="logo"] img'))).toBeVisible({ timeout: 15_000 });
+  // The Logo tile shows it, tinted with the theme like the sign-in page (a white logo on a light tile would vanish).
+  await expect(setup.locator('[data-field="logo"] img')).toBeVisible({ timeout: 15_000 });
+  await expect(eventLogo(setup.locator('[data-field="logo"]'))).toHaveAttribute('data-logo-kind', 'mono');
+  await expect(eventLogo(setup.locator('[data-field="logo"]')).locator('img')).toHaveClass(/lp-logo-ink/);
   await expect.poll(async () => (await config(event)).logoUrl).toMatch(new RegExp(`^/api/events/logo/${event.slug}\\?v=`));
   const monoUrl = (await config(event)).logoUrl!;
   // Served from this origin, as uploaded.
