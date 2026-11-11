@@ -1,14 +1,28 @@
 // (Cut-over fix A2) A successful sign-in enters the app from the network: lib/client/enter-app.ts deletes the stored
-// `/` from every `lp-` cache (the old build's worker serves it before the network), bounded, and never fails the
-// sign-in. A lead with no event open goes to the Events list even for next=/ (the old app's 401 redirect).
+// `/` of the pre-events build (no lp-shell marker) from every `lp-` cache (the old build's worker serves it before the
+// network), bounded, and never fails the sign-in; this build's own stored page is kept. A lead with no event open goes to the Events list even for next=/ (the old app's 401 redirect).
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DROP_SHELL_TIMEOUT_MS, afterSignInPath, dropStoredShell, enterApp, type CachesLike } from '@/lib/client/enter-app';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { DROP_SHELL_TIMEOUT_MS, SHELL_MARKER, afterSignInPath, dropStoredShell, enterApp, type CachesLike } from '@/lib/client/enter-app';
 
-function fakeCaches(names: string[], entries: string[] = ['/', '/signin', '/_next/static/chunks/a.js']) {
+const OLD_SHELL = '<!DOCTYPE html><html><head><script src="/_next/static/chunks/old.js"></script></head><body></body></html>';
+const NEW_SHELL = '<!DOCTYPE html><html lang="en"><head><meta name="lp-shell" content="events"/></head><body></body></html>';
+
+/** Caches holding `entries`; the stored `/` is `shell` (null: unreadable, its text() rejects). */
+function fakeCaches(names: string[], entries: string[] = ['/', '/signin', '/_next/static/chunks/a.js'], shell: string | null | Record<string, string | null> = OLD_SHELL) {
   const stores = new Map(names.map((n) => [n, new Set(entries)]));
+  const shellOf = (name: string) => (shell !== null && typeof shell === 'object' ? (shell[name] ?? null) : shell);
   const caches: CachesLike = {
     keys: async () => [...stores.keys()],
-    open: async (name) => ({ delete: async (request: string) => stores.get(name)?.delete(request) ?? false }),
+    open: async (name) => ({
+      match: async (request: string) => {
+        if (!stores.get(name)?.has(request)) return undefined;
+        const text = shellOf(name);
+        return { text: async () => (text === null ? Promise.reject(new TypeError('body used')) : text) };
+      },
+      delete: async (request: string) => stores.get(name)?.delete(request) ?? false,
+    }),
   };
   return { caches, stores };
 }
@@ -24,6 +38,37 @@ describe('dropStoredShell', () => {
     await dropStoredShell(caches);
     for (const name of ['lp-25chuyc', 'lp-new1', 'lp-meta-other']) expect([...(stores.get(name) ?? [])]).toEqual(['/signin', '/_next/static/chunks/a.js']);
     expect([...(stores.get('other-cache') ?? [])]).toEqual(['/', '/signin', '/_next/static/chunks/a.js']);
+  });
+
+  it("keeps a stored `/` of this build (it carries the lp-shell marker): no instant or offline open is lost", async () => {
+    const { caches, stores } = fakeCaches(['lp-new1'], undefined, NEW_SHELL);
+    await dropStoredShell(caches);
+    expect(stores.get('lp-new1')?.has('/')).toBe(true);
+  });
+
+  it('with an old-build cache and a marked one at once, only the old one loses `/`', async () => {
+    const { caches, stores } = fakeCaches(['lp-25chuyc', 'lp-new1'], undefined, { 'lp-25chuyc': OLD_SHELL, 'lp-new1': NEW_SHELL });
+    await dropStoredShell(caches);
+    expect(stores.get('lp-25chuyc')?.has('/')).toBe(false);
+    expect(stores.get('lp-new1')?.has('/')).toBe(true);
+    expect(stores.get('lp-25chuyc')?.has('/signin')).toBe(true);
+  });
+
+  it('a stored `/` that cannot be read (text() rejects, or match() rejects) counts as old and goes', async () => {
+    const { caches, stores } = fakeCaches(['lp-a'], undefined, null);
+    await dropStoredShell(caches);
+    expect(stores.get('lp-a')?.has('/')).toBe(false);
+    const deleted: string[] = [];
+    await dropStoredShell({
+      keys: async () => ['lp-b'],
+      open: async () => ({ match: () => Promise.reject(new Error('quota')), delete: async (r: string) => (deleted.push(r), true) }),
+    });
+    expect(deleted).toEqual(['/']);
+  });
+
+  it('the app layout renders the marker the check looks for', () => {
+    const layout = readFileSync(join(__dirname, '..', '..', '..', 'app', 'layout.tsx'), 'utf8');
+    expect(layout).toContain(`<meta ${SHELL_MARKER} content="events" />`);
   });
 
   it('a browser with no Cache API (or one that refuses it) resolves at once', async () => {
@@ -47,7 +92,7 @@ describe('dropStoredShell', () => {
     const reject = () => Promise.reject(new Error('quota'));
     await expect(dropStoredShell({ keys: reject, open: reject })).resolves.toBeUndefined();
     await expect(dropStoredShell({ keys: async () => ['lp-a'], open: reject })).resolves.toBeUndefined();
-    await expect(dropStoredShell({ keys: async () => ['lp-a'], open: async () => ({ delete: reject }) })).resolves.toBeUndefined();
+    await expect(dropStoredShell({ keys: async () => ['lp-a'], open: async () => ({ match: reject, delete: reject }) })).resolves.toBeUndefined();
     await expect(dropStoredShell({ keys: () => { throw new Error('sync'); }, open: reject })).resolves.toBeUndefined(); // prettier-ignore
   });
 
@@ -72,7 +117,7 @@ describe('enterApp', () => {
       keys: caches.keys,
       open: async (name: string) => {
         const c = await caches.open(name);
-        return { delete: async (r: string) => (order.push(`delete ${r}`), c.delete(r)) };
+        return { match: c.match, delete: async (r: string) => (order.push(`delete ${r}`), c.delete(r)) };
       },
     });
     vi.stubGlobal('window', { location: { replace: (url: string) => order.push(`replace ${url}`) } });
