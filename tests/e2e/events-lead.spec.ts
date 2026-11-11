@@ -220,7 +220,8 @@ test('the whole journey with no developer: create, set up, practice, go live, en
   await expect(end).toHaveAccessibleDescription('Staff are signed out and nothing is deleted; within 24 hours it can be reopened with the same password and join link.');
   await expect(end.getByTestId('end-staff')).toContainText('Signed out');
   await expect(end.getByTestId('end-records')).toContainText('Kept');
-  await expect(end.getByTestId('end-hold')).toContainText('Kept 24 h');
+  await expect(end.getByTestId('end-password')).toContainText('Kept 24 h');
+  await expect(end.getByTestId('end-join-link')).toContainText('Kept 24 h');
   await end.getByTestId('stage-confirm').click();
   await expect(end).toHaveCount(0);
   await expect(page.getByTestId('event-stage')).toHaveText('Archived');

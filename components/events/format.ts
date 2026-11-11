@@ -134,3 +134,25 @@ export function reopenKeeps(
   const linkUntil = event.joinLinkExpiresAt ? Date.parse(event.joinLinkExpiresAt) : Number.NaN;
   return { held, leftMs, password: held && event.hasStaffPassword, joinLink: held && Number.isFinite(linkUntil) && linkUntil > nowMs };
 }
+
+/** The 24 h an End keeps the staff password and join link for a Reopen (the server's hold). */
+export const END_HOLD_MS = 24 * 3_600_000;
+
+/**
+ * (Grace period) What an End of a live event keeps for a Reopen, at `nowMs`: the staff password if it has one, and
+ * the join link if it has one that still works, for the 24 h hold or until the link expires, whichever is first.
+ */
+export function endKeeps(
+  event: { hasStaffPassword: boolean; joinLinkExpiresAt: string | null },
+  nowMs: number,
+): { password: boolean; joinLinkMs: number } {
+  const linkUntil = event.joinLinkExpiresAt ? Date.parse(event.joinLinkExpiresAt) : Number.NaN;
+  const joinLinkMs = Number.isFinite(linkUntil) ? Math.min(END_HOLD_MS, Math.max(0, linkUntil - nowMs)) : 0;
+  return { password: event.hasStaffPassword, joinLinkMs };
+}
+
+/** The End sheet's sentence (its screen-reader description), true to what the event has. */
+export function endFact(k: { password: boolean; joinLinkMs: number }): string {
+  const kept = [k.password ? 'password' : '', k.joinLinkMs > 0 ? 'join link' : ''].filter(Boolean).join(' and ');
+  return `Staff are signed out and nothing is deleted; within 24 hours it can be reopened${kept ? ` with the same ${kept}` : ''}.`;
+}

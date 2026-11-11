@@ -97,7 +97,8 @@ test('End by mistake, Reopen inside 24 h: staff see Ended, then sign back in wit
   await expect(end).toHaveAccessibleDescription('Staff are signed out and nothing is deleted; within 24 hours it can be reopened with the same password and join link.');
   await expect(end.getByTestId('end-staff')).toContainText('Signed out');
   await expect(end.getByTestId('end-records')).toContainText('Kept');
-  await expect(end.getByTestId('end-hold')).toContainText('Kept 24 h');
+  await expect(end.getByTestId('end-password')).toContainText('Kept 24 h');
+  await expect(end.getByTestId('end-join-link')).toContainText('Kept 24 h');
   await end.getByTestId('stage-confirm').click();
   await expect(end).toHaveCount(0);
   await expect(leadPage.getByTestId('event-stage')).toHaveText('Archived');
@@ -137,6 +138,20 @@ test('End by mistake, Reopen inside 24 h: staff see Ended, then sign back in wit
   await expect(viaLink).toHaveURL(`${BASE}/`, { timeout: 20_000 });
   await expect(rowNamed(viaLink, row.name)).toBeVisible({ timeout: 20_000 });
   await other.close();
+  await leadCtx.close();
+});
+
+test('End sheet of an event with no join link: Password Kept 24 h, Join link a dash, and the description matches', async ({ browser }) => {
+  const event = await makeEvent({ name: uniq('No link'), posts: POSTS, teams: TEAMS });
+  const leadCtx = await leadContext(browser);
+  const leadPage = await leadCtx.newPage();
+  await openSetup(leadPage, event);
+  await leadPage.getByTestId('stage-end').click();
+  const end = leadPage.getByRole('dialog', { name: 'End event' });
+  await expect(end).toHaveAccessibleDescription('Staff are signed out and nothing is deleted; within 24 hours it can be reopened with the same password.');
+  await expect(end.getByTestId('end-password')).toContainText('Kept 24 h');
+  await expect(end.getByTestId('end-join-link')).toHaveText('—This event has no working join link.');
+  await expect(end.getByTestId('end-join-link')).not.toContainText('Kept');
   await leadCtx.close();
 });
 

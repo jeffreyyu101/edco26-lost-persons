@@ -10,7 +10,7 @@ import { Archive, ArrowRight, Check, RefreshCw, RotateCcw, Trash2 } from 'lucide
 import { useEffect, useState, type ReactNode } from 'react';
 import type { EventAdmin, EventStage } from '@/lib/api-types';
 import { Sheet, SheetDescription, SheetTitle } from '@/components/ui/Sheet';
-import { formatLeft, reopenKeeps, spokenLeft } from './format';
+import { END_HOLD_MS, endFact, endKeeps, formatLeft, reopenKeeps, spokenLeft } from './format';
 import { EventLogo, FieldError, STAGE_LABEL, StageChip } from './parts';
 import { canGoLive, lpNumber } from './setup-model';
 import s from './events.module.css';
@@ -52,8 +52,30 @@ function FactRow({ label, children, testId }: { label: string; children: ReactNo
   );
 }
 
-/** End: what happens to staff, records, and the password and join link. */
-function EndFacts() {
+/** One row of what an End keeps for 24 h: a ✓ chip with how long, or a dash when the event has none. */
+function HoldRow({ label, keptMs, testId, spoken }: { label: string; keptMs: number; testId: string; spoken: string }) {
+  if (keptMs <= 0) {
+    return (
+      <FactRow label={label} testId={testId}>
+        <span aria-hidden>—</span>
+        <VisuallyHidden>{spoken}</VisuallyHidden>
+      </FactRow>
+    );
+  }
+  return (
+    <div className={s.r}>
+      <span className={s.k}>{label}</span>
+      <span className={s.keep} data-kept="true" data-testid={testId}>
+        <Check size={13} strokeWidth={2.25} aria-hidden />
+        <span aria-hidden>Kept {keptMs >= END_HOLD_MS ? '24 h' : formatLeft(keptMs)}</span>
+        <VisuallyHidden>{spoken}</VisuallyHidden>
+      </span>
+    </div>
+  );
+}
+
+/** End: what happens to staff, records, and the password and join link (each only if the event has it). */
+function EndFacts({ keeps }: { keeps: { password: boolean; joinLinkMs: number } }) {
   return (
     <div className={`${s.grp} ${s.keeps}`} data-testid="end-facts">
       <FactRow label="Staff" testId="end-staff">
@@ -66,9 +88,24 @@ function EndFacts() {
           Kept
         </span>
       </div>
-      <FactRow label="Password and link" testId="end-hold">
-        Kept 24 h
-      </FactRow>
+      <HoldRow
+        label="Password"
+        keptMs={keeps.password ? END_HOLD_MS : 0}
+        testId="end-password"
+        spoken={keeps.password ? 'The staff password is kept for 24 hours.' : 'This event has no staff password.'}
+      />
+      <HoldRow
+        label="Join link"
+        keptMs={keeps.joinLinkMs}
+        testId="end-join-link"
+        spoken={
+          keeps.joinLinkMs >= END_HOLD_MS
+            ? 'The join link is kept for 24 hours.'
+            : keeps.joinLinkMs > 0
+              ? `The join link is kept until it expires, in ${spokenLeft(keeps.joinLinkMs)}.`
+              : 'This event has no working join link.'
+        }
+      />
     </div>
   );
 }
@@ -136,6 +173,8 @@ export function StageSheet({ action, event, counts, onClose, onConfirm }: StageS
     if (problem) setError(problem);
   };
   const n = (v: number | undefined) => (counts && v !== undefined ? String(v) : '—');
+  // Judged when the sheet opens (the server decides again at End).
+  const [endKeepsNow] = useState(() => endKeeps(event, Date.now()));
   return (
     <Sheet open onOpenChange={(open) => (open || busy ? undefined : onClose())} titleInContent dismissOnOutside={!busy}>
       <div className={s.sheetHead}>
@@ -188,13 +227,13 @@ export function StageSheet({ action, event, counts, onClose, onConfirm }: StageS
           </>
         )}
       </div>
-      {action === 'end' ? <EndFacts /> : null}
+      {action === 'end' ? <EndFacts keeps={endKeepsNow} /> : null}
       {action === 'reopen' ? <ReopenKeeps event={event} open={n(counts?.open)} /> : null}
       {blocked ? (
         <SheetDescription className={s.fact}>Add at least one post and one team first.</SheetDescription>
       ) : (
         <VisuallyHidden>
-          <SheetDescription>{FACT[action]}</SheetDescription>
+          <SheetDescription>{action === 'end' ? endFact(endKeepsNow) : FACT[action]}</SheetDescription>
         </VisuallyHidden>
       )}
       {error ? <FieldError id="stage-error">{error}</FieldError> : null}

@@ -6,7 +6,7 @@
 //     lock: a write refused with secrets_changed checks again (three rounds at most). The database is mocked.
 import bcrypt from 'bcryptjs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { formatLeft, reopenKeeps, spokenLeft } from '@/components/events/format';
+import { endFact, endKeeps, formatLeft, reopenKeeps, spokenLeft } from '@/components/events/format';
 import { FACT } from '@/components/events/StageSheets';
 
 const db = vi.hoisted(() => ({
@@ -72,6 +72,21 @@ describe('the sheets\' line of fact', () => {
     expect(FACT.end).toMatch(/signed out/);
     expect(FACT.end).toMatch(/nothing is deleted/);
     expect(FACT.end).toMatch(/within 24 hours it can be reopened with the same password/);
+  });
+  it('End: the rows and the sentence keep only what the event has (no password, no link, a link that expires sooner)', () => {
+    const now = Date.parse('2026-11-14T20:00:00Z');
+    const H = 3_600_000;
+    const soon = new Date(now + 5 * H).toISOString();
+    const later = new Date(now + 48 * H).toISOString();
+    const past = new Date(now - H).toISOString();
+    expect(endKeeps({ hasStaffPassword: true, joinLinkExpiresAt: later }, now)).toEqual({ password: true, joinLinkMs: 24 * H });
+    expect(endKeeps({ hasStaffPassword: true, joinLinkExpiresAt: soon }, now)).toEqual({ password: true, joinLinkMs: 5 * H });
+    expect(endKeeps({ hasStaffPassword: false, joinLinkExpiresAt: past }, now)).toEqual({ password: false, joinLinkMs: 0 });
+    expect(endKeeps({ hasStaffPassword: true, joinLinkExpiresAt: null }, now)).toEqual({ password: true, joinLinkMs: 0 });
+    expect(endFact({ password: true, joinLinkMs: 24 * H })).toBe(FACT.end);
+    expect(endFact({ password: true, joinLinkMs: 0 })).toBe('Staff are signed out and nothing is deleted; within 24 hours it can be reopened with the same password.');
+    expect(endFact({ password: false, joinLinkMs: H })).toBe('Staff are signed out and nothing is deleted; within 24 hours it can be reopened with the same join link.');
+    expect(endFact({ password: false, joinLinkMs: 0 })).toBe('Staff are signed out and nothing is deleted; within 24 hours it can be reopened.');
   });
   it('Reopen: true whether or not the password is kept (the rows say which)', () => {
     expect(FACT.reopen).toBe('Open requests resume as they were; staff sign in again.');
