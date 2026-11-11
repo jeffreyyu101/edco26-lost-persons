@@ -144,9 +144,14 @@ Lead (computer, 1024 px or wider), with a throwaway practice event:
 - [ ] The test event's request now belongs to an archived event: it never shows to any other event. Leave it, or
       remove it with section 6, step 1 (Reopen, delete, End). A rollback needs it gone.
 
-A phone or computer that last ran the old build shows the old EDC screen until it signs in. If a check above shows
-the old screen (EDC banner, New request on EDC, no event switcher), sign in again, or tap **Update ready** → **Reload**,
-and check again.
+A phone or computer that last ran the old build shows the old EDC screen until it signs in, and can show it again
+right after signing in: on a slow or no signal the old app shows its own stored sign-in page, which signs in but then
+opens the old EDC screen. If a check above shows the old screen (EDC banner, New request on EDC, no event switcher):
+close the app completely and open it again on good signal (a second time if needed). Staff can also tap
+**Update ready** → **Reload**; the old app refuses that while something is waiting to send or a new request is open.
+A lead with no event open gets a stuck screen there and no **Update ready**: account menu → **Sign out**, then sign in
+again on good signal. On a lead's computer, close every other tab of the app before signing in; if a tab then hangs,
+close it and open a new one.
 
 ## 5. Setting up Warped Tour (no developer needed)
 
@@ -187,11 +192,13 @@ Password and Join link, each **Kept** or **New one needed**, **Time left** (with
 
 ## Tell staff before the first show
 
-Three lines a lead can paste into the briefing:
+Lines a lead can paste into the briefing:
 
-- Before the show, open the app once on signal or Wi-Fi and sign in with the new link.
-- If the old EDC screen shows, sign in again, or tap Update ready → Reload.
-- Nothing typed into the old EDC screen is sent.
+- Before the practice, sign in for the first time on good signal or Wi-Fi with the new link, and keep the app open
+  until it has loaded once.
+- If the old EDC screen shows after signing in, close the app completely and open it again (a second time if needed).
+- Nothing typed into the old EDC screen is sent. A request logged there shows **Not sent · needs attention**: close
+  the app, open it again, sign in, and log it again.
 
 ## 6. Roll back
 
@@ -289,15 +296,25 @@ two rows in the step 2 events check).
   event) and holds its place from the first paint, so a second cold load no longer moves the list. A first-ever visit
   still shifts once.
 - **Old phones (2a, cut-over fixes):** a phone that holds the old build shows the old EDC screen until it signs in.
-  Signing in loads the new build from the network (the sign-in deletes the stored app page `/`, so the old service
-  worker cannot serve the old app), and the new build's worker takes over without "Update ready". A request left unsent
-  in the old app is not sent and not shown: the new app keeps caches and queued items under the event's id, and the
-  server refuses any event call without `X-LP-Event` (`409 wrong_event`), which the old app never sends, so it cannot
-  write into a new event either. Nobody should keep unsent EDC requests. Jeffrey's pre-rework queue
-  (`localStorage edc_pending_queue`) is no longer imported.
+  The NEW sign-in page deletes the old build's stored app page `/` (only a page without
+  `<meta name="lp-shell" content="events">`; this build's own stored page is kept), so the next open loads the new
+  build from the network, and the new build's worker takes over without "Update ready". This holds only when the new
+  sign-in page loaded: the old worker serves its own stored sign-in page when the network takes over 4 s or the phone is
+  offline at that moment. That old page signs in to the new event (same body) and opens the old EDC screen, with the
+  new cookie; it heals within one or two full relaunches on good signal. For a lead the old page goes to `/`, which the
+  proxy redirects, so the old worker never offers an update: account menu → Sign out, then sign in on good signal. The
+  old app refuses Update ready → Reload while anything waits to send or a draft is open. Nothing from the old screen
+  lands: its create (`POST /api/requests` with no `X-LP-Event`) gets `422` "Not sent. This screen is out of date…",
+  which the old app shows on the item as Not sent · needs attention; every other call with no header gets
+  `409 wrong_event`, retried quietly. After the cut-over sign-in, open the app once on good signal until it has
+  reloaded or Update ready is gone: until the new worker has installed, the old worker's cache holds the new page but
+  not all its view chunks. A request left unsent in the old app is not shown by the new one (the new app keeps caches
+  and queued items under the event's id). Jeffrey's pre-rework queue (`localStorage edc_pending_queue`) is no longer
+  imported.
 - **`X-LP-Event` (2a):** every client call names the event the tab works; a cookie of another event (signed in in
   another tab) answers `409 wrong_event` on event routes and the tab re-reads its session. No header at all answers the
-  same (the log line has `dbCode: no_header`: the old build's app), except on the three routes whose calls cannot carry
+  same (the log line has `dbCode: no_header`: the old build's app), except the create (`POST /api/requests`: `422`
+  with the out-of-date message, so the old app stops retrying it) and the three routes whose calls cannot carry
   one, marked `headerless` (photo images, telemetry beacons, the service worker's push re-subscribe).
 - **Telemetry (2a):** on while any event is in practice or live (the kill switch on `/health` still applies); no fixed
   off date.
