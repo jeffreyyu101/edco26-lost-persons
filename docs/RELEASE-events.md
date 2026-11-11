@@ -135,7 +135,7 @@ Lead (computer, 1024 px or wider), with a throwaway practice event:
       **Practice** chip, its one post, no rows. Log a request: **LP-0001**.
 - [ ] Back as lead: the sidebar's event switcher lists EDC Orlando and Release check; switching shows each event's rows
       only.
-- [ ] Go live (the sheet shows "1" practice request) → the second browser loses the practice request within a few
+- [ ] Go live (the sheet's Practice requests tile shows 1 with the **Deleted** chip) → the second browser loses the practice request within a few
       seconds and the Practice chip goes away (a phone shows the green **Live** chip; the desk shows none); a new
       request there is **LP-0001** again.
 - [ ] End event → the second browser shows the **Ended** screen: Ground Control (and the event's logo, if one was uploaded), the event name,
@@ -154,24 +154,36 @@ Lead, on a phone or computer: Events → **New event**, in the screen's order: N
 Day starts, Posts, Main medical, Teams (mark the medical team), Last seen, Report (Department, Prepared by, Staffing) →
 **Create**.
 
-- Names: a post up to 40 characters, a team up to 80. Give a post longer than 16 characters a **Short** of 16 or fewer,
-  and a team longer than 24 a Short of 24 or fewer (the Short is what charts and chips show).
+- Names: a post up to 40 characters, a team up to 80. **Short** (what charts and chips show; at most 16 for a post,
+  24 for a team) is optional. Left empty, it is made from the label: the label itself if it fits, otherwise the part
+  before a dash, colon, slash or bracket ("FA 1" from "FA 1 – Main Stage"), otherwise the label cut at a word. The
+  empty Short field shows that value greyed out, and each chip shows the Short it will be stored with. Type a Short
+  only to choose another one.
+- Each Short is used once among the posts and once among the teams. Two labels that make the same Short ("Gate A –
+  North Side" and "Gate A – South Side" both make "Gate A") are refused: the second chip gets a red outline and the
+  alert glyph, the line under the list reads "<label>: Short already used", and tapping the chip opens it on Short.
 - After Create the event's screen shows **Logo** → **Upload** (PNG, WebP or JPEG up to 1 MB; a single-colour logo on a
-  transparent background is tinted on the staff, desk and sign-in screens, anything else is shown as uploaded).
+  transparent background is tinted on the staff, desk, sign-in and lead screens, anything else is shown as uploaded).
 - Password → Staff → **Set** the staff password. Join link → **Create**, then **Copy** it at once: it is shown once.
-  **New link** replaces the link already sent; the old one stops working.
+  **New link** replaces the link already sent; the old one stops working. A link stops working two full days after
+  the event's last day. "Event dates have passed" or "Event is more than 90 days away" under the Join link row: fix
+  the Dates first.
 
 The event starts in practice: every screen shows the amber Practice chip. **Go live** on the morning of the show deletes
 every practice request (rows, messages, photos) and restarts numbering at LP-0001; phones already open drop the practice
-rows at their next sync. Practice requests in any new event close the rollback path (section 6).
+rows at their next sync. Its sheet shows Practice → Live, the **Practice requests** count (with a **Deleted** chip when
+there are any) and **Starts at** LP-0001. Practice requests in any new event close the rollback path (section 6).
 
-**End event** signs staff out to the Ended screen; nothing on the server is deleted. End only after the last request is
-in: a request a phone still holds as "Waiting to send" is dropped when the event ends, and Reopen does not bring it back.
+**End event** signs staff out to the Ended screen; nothing on the server is deleted. Its sheet shows the **Open** and
+**Logged** counts, then Staff **Signed out**, Records **✓ Kept**, Password and link **Kept 24 h**. End only after the
+last request is in: a request a phone still holds as "Waiting to send" is dropped when the event ends, and Reopen does
+not bring it back.
 
 **Reopen** (on the event's screen: Events → the event → account menu **Event**, or the desk sidebar's **Event** →
 Reopen) brings an archived event back to live. Within 24 hours of the end it keeps the same staff password and join link
 (staff sign in again with what they have); after that, set a new password and link. The Reopen sheet shows which:
-Password and Join link, each **Kept** or **New one needed**, and the time left.
+Password and Join link, each **Kept** or **New one needed**, **Time left** (within the 24 hours), the **Open requests** count, and Staff
+**Sign in again**.
 
 ## Tell staff before the first show
 
