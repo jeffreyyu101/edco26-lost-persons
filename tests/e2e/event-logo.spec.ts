@@ -1,4 +1,5 @@
 import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
+import './helpers/api-event';
 import type { EventAdmin } from '@/lib/api-types';
 import { BASE, endAll, endEvent, joinToken, lead, makeEvent, signInContext, type TestEvent } from './helpers/events';
 import { rgbaPng } from './helpers/png';

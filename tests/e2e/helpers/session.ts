@@ -9,6 +9,7 @@
 //
 // Synthetic identities only.
 import { randomInt } from 'node:crypto';
+import './api-event';
 import { request, test, type Browser, type BrowserContext, type BrowserContextOptions } from '@playwright/test';
 import { TEST_EVENT_ID, loadTestEnv, testBaseUrl } from '../../../scripts/test-env.mjs';
 

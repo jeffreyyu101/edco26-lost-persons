@@ -8,6 +8,7 @@
 //     locally per A17) and a unique synthetic name, so login limits never leak between tests or runs.
 //     The in-app 401 test also exercises the real store's redirect (lib/client/store-core.ts).
 // Run one group with `--grep @api` or `--grep-invert @api`. Synthetic data only.
+import './helpers/api-event';
 import { expect, test, type BrowserContext, type Page, type Request, type Route } from '@playwright/test';
 import { loadTestEnv } from '../../scripts/test-env.mjs';
 

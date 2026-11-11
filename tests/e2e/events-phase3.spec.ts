@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import './helpers/api-event';
 import { randomInt, randomUUID } from 'node:crypto';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import type { EventAdmin, RequestSummary } from '@/lib/api-types';

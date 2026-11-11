@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import './helpers/api-event';
 import { BASE, apiCreate, endAll, endEvent, goLive, joinToken, makeEvent, moveEndBack, rowNames, signInContext, staffCookie, type TestEvent } from './helpers/events';
 
 // (Events, phase 2) The client across events, against real events made through the lead routes:

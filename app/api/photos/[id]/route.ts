@@ -11,7 +11,10 @@ import { photoQuerySchema } from '@/lib/validation';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export const GET = authedRoute<{ id: string }>('GET /api/photos/[id]', { refresh: false }, async ({ request, params, eventId }) => {
+export const GET = authedRoute<{ id: string }>('GET /api/photos/[id]', {
+  refresh: false,
+  headerless: 'an <img src> sends no header; the photo is served only when its request is in the session event',
+}, async ({ request, params, eventId }) => {
   const id = idParam(params);
   const { size } = parseQuery(new URL(request.url).searchParams, photoQuerySchema);
 

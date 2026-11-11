@@ -33,7 +33,11 @@ export const dynamic = 'force-dynamic';
 
 const off = () => new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
 
-export const POST = authedRoute('POST /api/telemetry', { refresh: false, sameOrigin: false }, async ({ request, session, eventId, event }) => {
+export const POST = authedRoute('POST /api/telemetry', {
+  refresh: false,
+  sameOrigin: false,
+  headerless: 'a hidden page sends its batch with sendBeacon (no headers); diagnostics only, no request data',
+}, async ({ request, session, eventId, event }) => {
   assertTelemetryOrigin(request);
   const cfg = await telemetryConfig();
   if (!cfg.on) return off();

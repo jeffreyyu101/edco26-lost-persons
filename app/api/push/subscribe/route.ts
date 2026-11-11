@@ -19,7 +19,9 @@ import { pushEndpointSchema, pushSubscribeSchema } from '@/lib/validation';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export const POST = authedRoute('POST /api/push/subscribe', {}, async ({ request, session, eventId }) => {
+export const POST = authedRoute('POST /api/push/subscribe', {
+  headerless: "the service worker re-subscribes on pushsubscriptionchange (it knows no event); binds this device to the session's own staff and event",
+}, async ({ request, session, eventId }) => {
   const body = await readJson(request, pushSubscribeSchema);
   const vapid = vapidConfig();
   if (!vapid) {

@@ -200,12 +200,37 @@ export interface ApiOptions {
   origin?: string | null;
   headers?: Record<string, string>;
   redirect?: RequestRedirect;
+  /**
+   * (Events) X-LP-Event. By default a call with a session cookie names the cookie's event (or 'none'), as the new
+   * client does; headers['x-lp-event'] wins. false: send none (the old build's app).
+   */
+  event?: string | false;
+}
+
+/** (Events) The event a session cookie names, 'none' for none; null when the cookie holds no readable session. */
+export function cookieEvent(cookie: string): string | null {
+  const token = cookie
+    .split(/;\s*/)
+    .find((c) => c.startsWith(`${SESSION_COOKIE}=`))
+    ?.slice(SESSION_COOKIE.length + 1);
+  const payload = token?.split('.')[1];
+  if (!payload) return null;
+  try {
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { eventId?: unknown };
+    return typeof claims.eventId === 'string' && claims.eventId ? claims.eventId : 'none';
+  } catch {
+    return null;
+  }
 }
 
 export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise<ApiResult<T>> { // eslint-disable-line @typescript-eslint/no-explicit-any
   const method = opts.method ?? (opts.json !== undefined || opts.body !== undefined ? 'POST' : 'GET');
   const headers: Record<string, string> = { ...(opts.headers ?? {}) };
   if (opts.cookie) headers.cookie = opts.cookie;
+  if (!Object.keys(headers).some((h) => h.toLowerCase() === 'x-lp-event') && opts.event !== false) {
+    const event = opts.event ?? (opts.cookie ? cookieEvent(opts.cookie) : null);
+    if (event) headers['x-lp-event'] = event;
+  }
   const origin = opts.origin === undefined ? (method === 'GET' ? null : ORIGIN) : opts.origin;
   if (origin) headers.origin = origin;
   let body = opts.body;
