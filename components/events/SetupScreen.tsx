@@ -6,7 +6,7 @@
 // would refuse them: bad_stage) and offers Reopen instead of the password and join link (an archived event takes
 // neither; End holds both for 24 h, so a Reopen inside them keeps them, and the Reopen sheet says which).
 import { Button, IconButton, TextField, VisuallyHidden } from '@radix-ui/themes';
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Link2, Plus, Trash2, Upload, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Cross, Link2, Plus, Trash2, Upload, X } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import type { EventAdmin } from '@/lib/api-types';
 import { followSystemTheme } from '@/lib/theme';
@@ -67,7 +67,10 @@ export function SetupScreen({ id, fromApp }: SetupScreenProps) {
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState<'logo' | 'link' | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const ids = { event: useId(), posts: useId(), teams: useId(), lastSeen: useId(), name: useId(), slug: useId(), tz: useId(), day: useId(), mm: useId(), dept: useId(), prep: useId(), staffing: useId() };
+  const ids = { event: useId(), posts: useId(), teams: useId(), lastSeen: useId(), name: useId(), slug: useId(), tz: useId(), day: useId(), mm: useId(), dept: useId(), prep: useId(), staffing: useId(), report: useId() };
+  // The sections' hints (what goes in each, with examples). The settings' hints show while they can be edited; Report and
+  // Staffing stay editable on an archived event, so theirs always show.
+  const hint = { posts: useId(), mm: useId(), teams: useId(), lastSeen: useId(), report: useId(), staffing: useId() };
 
   const apply = useCallback((e: EventAdmin) => {
     setEvent(e);
@@ -250,6 +253,10 @@ export function SetupScreen({ id, fromApp }: SetupScreenProps) {
   const err = (k: FieldKey) => errors[k];
   const errId = (k: FieldKey) => `setup-err-${k}`;
   const described = (k: FieldKey) => (err(k) ? { 'aria-invalid': true as const, 'aria-describedby': errId(k) } : {});
+  const hints = !archived;
+  /** described(), plus the section's hint while it shows. */
+  const describedWith = (k: FieldKey, hintId: string) =>
+    err(k) ? { 'aria-invalid': true as const, 'aria-describedby': hints ? `${errId(k)} ${hintId}` : errId(k) } : hints ? { 'aria-describedby': hintId } : {};
 
   return (
     <main className={s.screen} data-testid="event-setup" data-stage={event?.stage ?? 'new'}>
@@ -268,6 +275,7 @@ export function SetupScreen({ id, fromApp }: SetupScreenProps) {
               className={s.input}
               value={form.name}
               maxLength={LIMITS.name}
+              placeholder={creating ? 'Warped Tour Orlando' : undefined}
               autoComplete="off"
               onChange={(e) => set('name', e.target.value)}
               {...described('name')}
@@ -380,16 +388,16 @@ export function SetupScreen({ id, fromApp }: SetupScreenProps) {
           </>
         ) : null}
 
-        <h2 className={s.lbl} id={ids.posts}>
+        <SectionHead id={ids.posts} hintId={hint.posts} hint={hints ? 'Where staff log requests · first aid tents, info booths' : null}>
           Posts
-        </h2>
+        </SectionHead>
         <div data-field="posts">
-          <ListEditor kind="post" items={form.posts} onChange={(v) => set('posts', v)} readOnly={archived} labelId={ids.posts} error={err('posts')} errorId={errId('posts')} flag={flags.posts} testId="setup-posts" />
+          <ListEditor kind="post" hintId={hints ? hint.posts : undefined} items={form.posts} onChange={(v) => set('posts', v)} readOnly={archived} labelId={ids.posts} error={err('posts')} errorId={errId('posts')} flag={flags.posts} testId="setup-posts" />
         </div>
 
-        <h2 className={s.lbl}>
+        <SectionHead hintId={hint.mm} hint={hints ? 'Name of the main medical tent' : null}>
           <label htmlFor={ids.mm}>Main medical</label>
-        </h2>
+        </SectionHead>
         <div className={s.grp} data-invalid={err('mainMedical') ? '' : undefined}>
           <div className={s.r} data-field="mainMedical">
             <input
@@ -400,25 +408,36 @@ export function SetupScreen({ id, fromApp }: SetupScreenProps) {
               readOnly={archived}
               autoComplete="off"
               onChange={(e) => set('mainMedical', e.target.value)}
-              {...described('mainMedical')}
+              {...describedWith('mainMedical', hint.mm)}
               data-testid="setup-main-medical"
             />
           </div>
         </div>
         {err('mainMedical') ? <FieldError id={errId('mainMedical')}>{err('mainMedical')}</FieldError> : null}
 
-        <h2 className={s.lbl} id={ids.teams}>
+        <SectionHead
+          id={ids.teams}
+          hintId={hint.teams}
+          hint={
+            hints ? (
+              <>
+                Groups staff sign in as · <Cross size={12} strokeWidth={2.25} className={s.medical} aria-hidden />
+                <VisuallyHidden>a red cross marks</VisuallyHidden> the medical team
+              </>
+            ) : null
+          }
+        >
           Teams
-        </h2>
+        </SectionHead>
         <div data-field="teams">
-          <ListEditor kind="team" items={form.teams} onChange={(v) => set('teams', v)} readOnly={archived} labelId={ids.teams} error={err('teams')} errorId={errId('teams')} flag={flags.teams} testId="setup-teams" />
+          <ListEditor kind="team" hintId={hints ? hint.teams : undefined} items={form.teams} onChange={(v) => set('teams', v)} readOnly={archived} labelId={ids.teams} error={err('teams')} errorId={errId('teams')} flag={flags.teams} testId="setup-teams" />
         </div>
 
-        <h2 className={s.lbl} id={ids.lastSeen}>
+        <SectionHead id={ids.lastSeen} hintId={hint.lastSeen} hint={hints ? 'Tap-to-fill places on the form · stages, landmarks' : null}>
           Last seen
-        </h2>
+        </SectionHead>
         <div data-field="lastSeen">
-          <ListEditor kind="lastSeen" items={form.lastSeen} onChange={(v) => set('lastSeen', v)} readOnly={archived} labelId={ids.lastSeen} error={err('lastSeen')} errorId={errId('lastSeen')} flag={flags.lastSeen} testId="setup-last-seen" />
+          <ListEditor kind="lastSeen" hintId={hints ? hint.lastSeen : undefined} items={form.lastSeen} onChange={(v) => set('lastSeen', v)} readOnly={archived} labelId={ids.lastSeen} error={err('lastSeen')} errorId={errId('lastSeen')} flag={flags.lastSeen} testId="setup-last-seen" />
         </div>
 
         {event && !archived ? (
@@ -471,14 +490,17 @@ export function SetupScreen({ id, fromApp }: SetupScreenProps) {
           </>
         ) : null}
 
-        <h2 className={s.lbl}>Report</h2>
-        <div className={s.grp}>
+        <SectionHead id={ids.report} hintId={hint.report} hint="Optional · for the after-event report">
+          Report
+        </SectionHead>
+        <div className={s.grp} role="group" aria-labelledby={ids.report} aria-describedby={hint.report}>
           <Row label="Department" htmlFor={ids.dept} field="department">
             <input
               id={ids.dept}
               className={s.input}
               value={form.department}
               maxLength={LIMITS.department}
+              placeholder="Guest Experience"
               autoComplete="organization"
               onChange={(e) => set('department', e.target.value)}
               {...described('department')}
@@ -491,6 +513,7 @@ export function SetupScreen({ id, fromApp }: SetupScreenProps) {
               className={s.input}
               value={form.preparedBy}
               maxLength={LIMITS.preparedBy}
+              placeholder="Name, role"
               autoComplete="off"
               onChange={(e) => set('preparedBy', e.target.value)}
               {...described('preparedBy')}
@@ -500,10 +523,10 @@ export function SetupScreen({ id, fromApp }: SetupScreenProps) {
         </div>
         {(['department', 'preparedBy'] as const).map((k) => (err(k) ? <FieldError key={k} id={errId(k)}>{err(k)}</FieldError> : null))}
 
-        <h2 className={s.lbl} id={ids.staffing}>
+        <SectionHead id={ids.staffing} hintId={hint.staffing} hint="Optional · who ran it, for the report">
           Staffing
-        </h2>
-        <div className={s.grp} role="group" aria-labelledby={ids.staffing} data-field="staffing" data-invalid={err('staffing') ? '' : undefined} data-testid="setup-staffing">
+        </SectionHead>
+        <div className={s.grp} role="group" aria-labelledby={ids.staffing} aria-describedby={hint.staffing} data-field="staffing" data-invalid={err('staffing') ? '' : undefined} data-testid="setup-staffing">
           {form.staffing.map((row, i) => (
             <div key={row.key} className={s.staffRow}>
               <input
@@ -533,7 +556,7 @@ export function SetupScreen({ id, fromApp }: SetupScreenProps) {
             <div className={s.addRow}>
               <Button size="2" variant="ghost" color="gray" onClick={() => set('staffing', [...form.staffing, { key: newKey('s'), role: '', name: '' }])} data-testid="staffing-add">
                 <Plus size={15} aria-hidden />
-                Row
+                Person
               </Button>
             </div>
           ) : null}
@@ -658,6 +681,22 @@ function Header({ title, backHref, end }: { title: string; backHref: string; end
         {end}
       </div>
     </header>
+  );
+}
+
+/** A section's label, with its hint under it (what goes in the section, with examples) when there is one. */
+function SectionHead({ id, hintId, hint, children }: { id?: string; hintId?: string; hint?: ReactNode; children: ReactNode }) {
+  return (
+    <>
+      <h2 className={hint ? `${s.lbl} ${s.lblTight}` : s.lbl} id={id}>
+        {children}
+      </h2>
+      {hint ? (
+        <p className={s.hint} id={hintId}>
+          {hint}
+        </p>
+      ) : null}
+    </>
   );
 }
 
