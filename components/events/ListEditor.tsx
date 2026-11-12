@@ -18,6 +18,9 @@ export type ListKind = 'post' | 'team' | 'lastSeen';
 
 const NOUN: Readonly<Record<ListKind, string>> = { post: 'post', team: 'team', lastSeen: 'Last seen chip' };
 const TITLE: Readonly<Record<ListKind, string>> = { post: 'Post', team: 'Team', lastSeen: 'Last seen' };
+/** The add button's visible word, and an example label in the new item's sheet. */
+const ADD: Readonly<Record<ListKind, string>> = { post: 'Post', team: 'Team', lastSeen: 'Place' };
+const EXAMPLE: Readonly<Record<ListKind, string>> = { post: 'FA 1 – Main Stage', team: 'Medical', lastSeen: 'Main Stage' };
 
 interface ListEditorProps {
   kind: ListKind;
@@ -26,6 +29,8 @@ interface ListEditorProps {
   readOnly?: boolean;
   /** The group's visible label (its id names the list). */
   labelId: string;
+  /** The section's hint (what goes in the list), when it shows. */
+  hintId?: string;
   error?: string;
   /** The error line's id (the form focuses and tests find it). */
   errorId?: string;
@@ -34,7 +39,7 @@ interface ListEditorProps {
   testId?: string;
 }
 
-export function ListEditor({ kind, items, onChange, readOnly = false, labelId, error, errorId, flag, testId }: ListEditorProps) {
+export function ListEditor({ kind, items, onChange, readOnly = false, labelId, hintId, error, errorId, flag, testId }: ListEditorProps) {
   const [editing, setEditing] = useState<{ key: string | null } | null>(null);
   const ownErrId = useId();
   const errId = errorId ?? ownErrId;
@@ -49,7 +54,7 @@ export function ListEditor({ kind, items, onChange, readOnly = false, labelId, e
         role="group"
         aria-labelledby={labelId}
         data-invalid={error && !flag ? '' : undefined}
-        aria-describedby={error ? errId : undefined}
+        aria-describedby={[error ? errId : null, hintId ?? null].filter(Boolean).join(' ') || undefined}
         data-testid={testId}
       >
         <ul className={s.chips} style={{ margin: 0, listStyle: 'none' }}>
@@ -93,8 +98,9 @@ export function ListEditor({ kind, items, onChange, readOnly = false, labelId, e
           })}
           {readOnly || full ? null : (
             <li>
-              <button type="button" className={s.addChip} aria-label={`Add a ${noun}`} onClick={() => setEditing({ key: null })} data-testid={`${testId}-add`}>
+              <button type="button" className={s.addChip} aria-label={kind === 'lastSeen' ? 'Add a Last seen place' : `Add a ${noun}`} onClick={() => setEditing({ key: null })} data-testid={`${testId}-add`}>
                 <Plus size={16} strokeWidth={2} aria-hidden />
+                <span aria-hidden>{ADD[kind]}</span>
               </button>
             </li>
           )}
@@ -177,6 +183,7 @@ function ItemSheet({
             size="3"
             value={label}
             maxLength={kind === 'post' ? LIMITS.post : kind === 'team' ? LIMITS.team : LIMITS.lastSeen}
+            placeholder={item ? undefined : EXAMPLE[kind]}
             onChange={(e) => {
               setLabel(e.target.value);
               setError(null);
@@ -191,7 +198,7 @@ function ItemSheet({
         {hasShort ? (
           <div className={s.sheetField}>
             <label className={s.fieldLabel} htmlFor={ids.short}>
-              Short
+              Short <span className={s.fieldHint}>· on charts and lists</span>
             </label>
             <TextField.Root
               id={ids.short}

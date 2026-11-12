@@ -117,6 +117,25 @@
   color: var(--gray-11);
 }
 
+/* A label with a hint under it: the hint takes the gap above the group. */
+.lblTight {
+  padding-bottom: 2px;
+}
+
+/* A section's hint: what goes in it, with examples (fragments, never sentences). */
+.hint {
+  margin: 0;
+  padding: 0 4px 8px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--gray-11);
+}
+
+.hint svg {
+  display: inline-block;
+  vertical-align: -1px;
+}
+
 .grp {
   border-radius: var(--radius-4);
   background: var(--gray-a2);
@@ -450,10 +469,14 @@
 
 .addChip {
   position: relative;
-  display: grid;
-  place-items: center;
-  width: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   height: 34px;
+  padding: 0 12px 0 9px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
   border: 1px solid var(--gray-a7);
   border-radius: 8px;
   background: none;
@@ -876,6 +899,10 @@
   font-size: 14px;
   font-weight: 500;
   color: var(--gray-11);
+}
+
+.fieldHint {
+  font-weight: 400;
 }
 
 .inlineRow {
